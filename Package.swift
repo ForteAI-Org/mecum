@@ -58,9 +58,12 @@ let package = Package(
         driver("SeatCore", settings: pure),
         // Build identity, private symbol table, record layouts, ledger, TCC preflight.
         driver("PrivateSymbols", ["SeatCore"], resources: [.copy("Ledger/validated-builds.json")]),
+        // The virtual display: create it, attach it to the topology, put the topology back.
+        driver("VirtualScreens", ["SeatCore", "PrivateSymbols"]),
 
         // MARK: Driver tests
         driverTests("SeatCore", ["SeatCore"]),
         driverTests("PrivateSymbols", ["PrivateSymbols", "SeatCore"]),
+        driverTests("VirtualScreens", ["VirtualScreens", "PrivateSymbols"]),
     ]
 )
