@@ -56,8 +56,11 @@ let package = Package(
         // MARK: Driver
         // Pure types and role protocols. No OS call, no facility import.
         driver("SeatCore", settings: pure),
+        // Build identity, private symbol table, record layouts, ledger, TCC preflight.
+        driver("PrivateSymbols", ["SeatCore"], resources: [.copy("Ledger/validated-builds.json")]),
 
         // MARK: Driver tests
         driverTests("SeatCore", ["SeatCore"]),
+        driverTests("PrivateSymbols", ["PrivateSymbols", "SeatCore"]),
     ]
 )
