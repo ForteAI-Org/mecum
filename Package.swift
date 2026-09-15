@@ -62,11 +62,14 @@ let package = Package(
         driver("VirtualScreens", ["SeatCore", "PrivateSymbols"]),
         // Where a window is, its front to back order, and how it is moved.
         driver("WindowPlacement", ["SeatCore", "PrivateSymbols", "VirtualScreens"]),
+        // Input posting, preparation and platform policies.
+        driver("SeatInput", ["SeatCore", "PrivateSymbols", "WindowPlacement"]),
 
         // MARK: Driver tests
         driverTests("SeatCore", ["SeatCore"]),
         driverTests("PrivateSymbols", ["PrivateSymbols", "SeatCore"]),
         driverTests("VirtualScreens", ["VirtualScreens", "PrivateSymbols"]),
         driverTests("WindowPlacement", ["WindowPlacement", "VirtualScreens", "PrivateSymbols", "SeatCore"]),
+        driverTests("SeatInput", ["SeatInput", "SeatCore", "PrivateSymbols"]),
     ]
 )
