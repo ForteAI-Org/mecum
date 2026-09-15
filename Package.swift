@@ -60,10 +60,13 @@ let package = Package(
         driver("PrivateSymbols", ["SeatCore"], resources: [.copy("Ledger/validated-builds.json")]),
         // The virtual display: create it, attach it to the topology, put the topology back.
         driver("VirtualScreens", ["SeatCore", "PrivateSymbols"]),
+        // Where a window is, its front to back order, and how it is moved.
+        driver("WindowPlacement", ["SeatCore", "PrivateSymbols", "VirtualScreens"]),
 
         // MARK: Driver tests
         driverTests("SeatCore", ["SeatCore"]),
         driverTests("PrivateSymbols", ["PrivateSymbols", "SeatCore"]),
         driverTests("VirtualScreens", ["VirtualScreens", "PrivateSymbols"]),
+        driverTests("WindowPlacement", ["WindowPlacement", "VirtualScreens", "PrivateSymbols", "SeatCore"]),
     ]
 )
