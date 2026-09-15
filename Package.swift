@@ -64,6 +64,8 @@ let package = Package(
         driver("WindowPlacement", ["SeatCore", "PrivateSymbols", "VirtualScreens"]),
         // Input posting, preparation and platform policies.
         driver("SeatInput", ["SeatCore", "PrivateSymbols", "WindowPlacement"]),
+        // The HID cursor fence.
+        driver("CursorGuard", ["SeatCore", "PrivateSymbols"]),
 
         // MARK: Driver tests
         driverTests("SeatCore", ["SeatCore"]),
@@ -71,5 +73,6 @@ let package = Package(
         driverTests("VirtualScreens", ["VirtualScreens", "PrivateSymbols"]),
         driverTests("WindowPlacement", ["WindowPlacement", "VirtualScreens", "PrivateSymbols", "SeatCore"]),
         driverTests("SeatInput", ["SeatInput", "SeatCore", "PrivateSymbols"]),
+        driverTests("CursorGuard", ["CursorGuard", "SeatCore"]),
     ]
 )
