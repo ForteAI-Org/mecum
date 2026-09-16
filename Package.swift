@@ -68,6 +68,8 @@ let package = Package(
         driver("CursorGuard", ["SeatCore", "PrivateSymbols"]),
         // Window and display capture, frames and the monitor layer.
         driver("SeatCapture", ["SeatCore", "WindowPlacement"]),
+        // The host and the seat: turns, adoption, recovery, watchdog.
+        driver("SeatSession", ["SeatCore", "PrivateSymbols", "VirtualScreens", "WindowPlacement", "SeatInput", "CursorGuard", "SeatCapture"]),
 
         // MARK: Driver tests
         driverTests("SeatCore", ["SeatCore"]),
@@ -77,5 +79,6 @@ let package = Package(
         driverTests("SeatInput", ["SeatInput", "SeatCore", "PrivateSymbols"]),
         driverTests("CursorGuard", ["CursorGuard", "SeatCore"]),
         driverTests("SeatCapture", ["SeatCapture", "SeatCore"]),
+        driverTests("SeatSession", ["SeatSession", "SeatCore", "CursorGuard", "SeatInput"]),
     ]
 )
