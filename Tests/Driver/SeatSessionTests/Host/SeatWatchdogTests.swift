@@ -112,7 +112,10 @@ struct SeatWatchdogTests {
     /// displays and deliberately knows nothing about the virtual one, so only
     /// the watchdog can resolve a latched escape against the virtual display's
     /// bounds.
-    @Test("check six from the latch: the escape point was inside the virtual display")
+    /// AgentLab change: a latched escape the fence already corrected is not a
+    /// violation while the live reading is intact. It stays visible through
+    /// `fenceSignals`; only a live cursor outside the region fails closed.
+    @Test("a corrected escape into the virtual display is not a violation on an intact live reading")
     func latchedPointInVirtual() {
 
         let signals = FenceSignals(
@@ -122,11 +125,10 @@ struct SeatWatchdogTests {
             lastOutOfRegionPoint: CGPoint(x: 2000, y: 700)
         )
 
-        #expect(SeatWatchdog.violations(readings: Self.intact(), signals: signals)
-            == [.pointerEnteredVirtualDisplay])
+        #expect(SeatWatchdog.violations(readings: Self.intact(), signals: signals).isEmpty)
     }
 
-    @Test("check seven from the latch: the escape point was outside every display")
+    @Test("a corrected escape past the physical edge is not a violation on an intact live reading")
     func latchedPointOutsideEverything() {
 
         let signals = FenceSignals(
@@ -136,8 +138,7 @@ struct SeatWatchdogTests {
             lastOutOfRegionPoint: CGPoint(x: -400, y: -400)
         )
 
-        #expect(SeatWatchdog.violations(readings: Self.intact(), signals: signals)
-            == [.pointerLeftPhysicalRegion])
+        #expect(SeatWatchdog.violations(readings: Self.intact(), signals: signals).isEmpty)
     }
 
     @Test("check six live: the cursor is in the virtual display right now")

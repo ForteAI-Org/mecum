@@ -126,16 +126,14 @@ nonisolated public enum SeatWatchdog {
             violations.append(.fenceTapDisabled)
         }
 
-        // The latched escape first: it is evidence of an instant that has
-        // already passed, and the fence corrected it, so the live reading below
-        // will not show it.
-        if let latched = signals.lastOutOfRegionPoint {
-            if readings.virtualDisplayBounds.contains(latched) {
-                violations.append(.pointerEnteredVirtualDisplay)
-            } else {
-                violations.append(.pointerLeftPhysicalRegion)
-            }
-        }
+        // ponytail: a latched escape the fence already corrected is no longer a
+        // violation. Pushing the pointer against the edge the virtual display
+        // is attached to produced one HID event past the region per gesture,
+        // the fence warped it back inside that same event, and this check then
+        // tore the whole seat down. The escape stays visible through
+        // `fenceSignals`; only a live reading outside the region fails closed.
+        // Ceiling: an escape corrected within one event is invisible to the
+        // heartbeat, which is the fence doing its job.
 
         guard let cursor = readings.cursorLocation else {
             violations.append(.pointerPositionUnavailable)
