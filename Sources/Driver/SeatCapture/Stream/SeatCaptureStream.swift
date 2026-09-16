@@ -230,13 +230,19 @@ nonisolated final class FrameReceiver:
     /// would make a still desktop look like a stream running at full rate
     /// (research note 05, section 12).
     static func isComplete(_ sampleBuffer: CMSampleBuffer) -> Bool {
-        guard
-            let attachments = CMSampleBufferGetSampleAttachmentsArray(
-                sampleBuffer,
-                createIfNecessary: false
-            ) as? [[SCStreamFrameInfo: Any]],
-            let raw = attachments.first?[.status] as? Int
-        else { return false }
+        let attachments = CMSampleBufferGetSampleAttachmentsArray(
+            sampleBuffer,
+            createIfNecessary: false
+        ) as? [[SCStreamFrameInfo: Any]]
+        // ponytail: on macOS 27 (26A428) ScreenCaptureKit delivers the frames
+        // of some windows (Slack, an Electron app) with no attachments at all,
+        // while still carrying a real image. A buffer with an image and no
+        // status is treated as complete; SeatFrame then derives the geometry.
+        // Ceiling: an idle/blank frame of such a window is counted as produced.
+        if attachments == nil || attachments?.isEmpty == true {
+            return sampleBuffer.imageBuffer != nil
+        }
+        guard let raw = attachments?.first?[.status] as? Int else { return false }
         return SCFrameStatus(rawValue: raw) == .complete
     }
 }

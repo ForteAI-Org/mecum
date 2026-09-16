@@ -12,6 +12,7 @@ import Darwin
 import IOSurface
 import SeatCore
 import ScreenCaptureKit
+import WindowPlacement
 
 /// SeatFrame is one captured image of the Virtual Display or of an Adopted
 /// Window, handed over **without a copy**: the `IOSurface` behind it is the
@@ -113,16 +114,33 @@ nonisolated public struct SeatFrame: @unchecked Sendable {
             width : CVPixelBufferGetWidth(pixelBuffer),
             height: CVPixelBufferGetHeight(pixelBuffer)
         )
-        guard let attachment = Self.frameAttachment(of: sampleBuffer),
-              let geometry = Self.geometry(
-                  from             : attachment,
-                  source           : source,
-                  pixelSize        : pixelSize,
-                  displayGeneration: displayGeneration,
-                  captureGeneration: captureGeneration,
-                  observedRevision : observedRevision,
-                  capturesFullWindow: capturesFullWindow
-              )
+        let attachment = Self.frameAttachment(of: sampleBuffer)
+        let version = GeometryObservationVersion(
+            observerGeneration: captureGeneration,
+            sequence          : observedRevision
+        )
+        // ponytail: ScreenCaptureKit on 26A428 hands over some windows' frames
+        // (Slack) with no attachments, so the documented geometry is missing.
+        // The frame is then certified from what the capture already knows:
+        // the whole surface is the window, and the window server says where
+        // the window is. Ceiling: a partially covered or cropped capture would
+        // be mapped as if it were the full window; full-window filters only.
+        guard let geometry = attachment.flatMap({
+            Self.geometry(
+                from             : $0,
+                source           : source,
+                pixelSize        : pixelSize,
+                displayGeneration: displayGeneration,
+                captureGeneration: captureGeneration,
+                observedRevision : observedRevision,
+                capturesFullWindow: capturesFullWindow
+            )
+        }) ?? Self.fallbackGeometry(
+            source            : source,
+            pixelSize         : pixelSize,
+            version           : version,
+            capturesFullWindow: capturesFullWindow
+        )
         else { return nil }
 
         self.init(
@@ -130,7 +148,7 @@ nonisolated public struct SeatFrame: @unchecked Sendable {
             pixelBuffer      : pixelBuffer,
             presentationTime : sampleBuffer.presentationTimeStamp,
             receivedAt       : receivedAt,
-            displayTime      : Self.displayTime(in: attachment),
+            displayTime      : attachment.flatMap(Self.displayTime),
             displayGeneration: displayGeneration,
             source           : source,
             geometry         : geometry
@@ -212,6 +230,44 @@ nonisolated public struct SeatFrame: @unchecked Sendable {
                 observerGeneration: captureGeneration,
                 sequence          : observedRevision
             ),
+            capturesFullWindow  : capturesFullWindow
+        )
+        return geometry.isValid ? geometry : nil
+    }
+
+    /// Geometry for a frame that arrived without attachments: the surface is
+    /// the whole source, whose screen rectangle the window server reports.
+    /// Refuses when the pixel aspect does not match the source, because then
+    /// the surface is not simply the source scaled.
+    private static func fallbackGeometry(
+        source            : FrameSourceIdentity,
+        pixelSize         : CGSize,
+        version           : GeometryObservationVersion,
+        capturesFullWindow: Bool
+    ) -> FrameGeometryObservation? {
+        let screenRect: CGRect?
+        switch source {
+        case .display(let displayID):
+            screenRect = CGDisplayBounds(displayID)
+        case .window(let identity):
+            screenRect = WindowServerProbe.geometry(of: identity.windowNumber)?.frame
+        case .unverifiedWindow(let windowNumber):
+            screenRect = WindowServerProbe.geometry(of: windowNumber)?.frame
+        }
+        guard let screenRect, screenRect.width > 0, screenRect.height > 0,
+              pixelSize.width > 0, pixelSize.height > 0
+        else { return nil }
+        let scaleX = pixelSize.width / screenRect.width
+        let scaleY = pixelSize.height / screenRect.height
+        guard abs(scaleX - scaleY) <= max(0.02, 1 / screenRect.width) else { return nil }
+        let geometry = FrameGeometryObservation(
+            source              : source,
+            screenRect          : screenRect,
+            contentRectInSurface: CGRect(origin: .zero, size: screenRect.size),
+            scaleFactor         : scaleX,
+            contentScale        : 1,
+            pixelSize           : pixelSize,
+            version             : version,
             capturesFullWindow  : capturesFullWindow
         )
         return geometry.isValid ? geometry : nil
