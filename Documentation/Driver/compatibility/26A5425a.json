@@ -1,0 +1,294 @@
+{
+  "26A5425a": {
+    "productVersion": "27.0",
+    "hardware": [
+      "Mac16,1"
+    ],
+    "validatedAt": "2026-09-10T08:12:56Z",
+    "validatedBy": "compat-suite + Eliomar",
+    "primitives": {
+      "SLSMainConnectionID": {
+        "kind": "symbol",
+        "image": "SkyLight",
+        "state": "verified",
+        "checks": {
+          "resolves": true,
+          "effect": "ticket 07: equals the owner connection of our own window, 2675939"
+        },
+        "notes": "Root of the identity chain. dyld_info -exports confirms SkyLight, not CoreGraphics."
+      },
+      "SLSGetWindowOwner": {
+        "kind": "symbol",
+        "image": "SkyLight",
+        "state": "verified",
+        "checks": {
+          "resolves": true,
+          "effect": "ticket 07: result 0 on window 23066, owner 2675939 == SLSMainConnectionID"
+        },
+        "notes": "Ties the process serial number to the window, not to the process: on a process with several windows GetProcessForPID proves nothing."
+      },
+      "SLSGetConnectionPSN": {
+        "kind": "symbol",
+        "image": "SkyLight",
+        "state": "verified",
+        "checks": {
+          "resolves": true,
+          "effect": "ticket 02: result 0, PSN accepted by SLPSPostEventRecordTo"
+        },
+        "notes": ""
+      },
+      "SLEventRecordPointer": {
+        "kind": "symbol",
+        "image": "SkyLight",
+        "state": "verified",
+        "checks": {
+          "resolves": true,
+          "recordLength": 248,
+          "allocatedLength": 256,
+          "offsets": {
+            "0x3C": {
+              "field": 51,
+              "roundTrip": true
+            },
+            "0x40": {
+              "field": 52,
+              "roundTrip": true
+            },
+            "0x20": {
+              "setter": "CGEventSetWindowLocation",
+              "roundTrip": true
+            },
+            "0x28": {
+              "setter": "CGEventSetWindowLocation",
+              "roundTrip": true
+            }
+          },
+          "effect": "ticket 02: fixture click PASS on AppKit and Chromium"
+        },
+        "notes": "The kit uses it for the declared length check and the round trip only: the routed fields go through the public setIntegerValueField with 51 and 52."
+      },
+      "SLPSPostEventRecordTo": {
+        "kind": "symbol",
+        "image": "SkyLight",
+        "state": "verified",
+        "checks": {
+          "resolves": true,
+          "effect": "tickets 02 and 16: Preparation returns 0 twice, fixture reports active and key, state restored"
+        },
+        "notes": ""
+      },
+      "CGEventSetWindowLocation": {
+        "kind": "symbol",
+        "image": "SkyLight",
+        "state": "verified",
+        "checks": {
+          "resolves": true,
+          "offsets": {
+            "0x20": {
+              "setter": "CGEventSetWindowLocation",
+              "roundTrip": true
+            },
+            "0x28": {
+              "setter": "CGEventSetWindowLocation",
+              "roundTrip": true
+            }
+          }
+        },
+        "notes": "dyld_info -exports lists it under CoreGraphics and not under SkyLight, but dladdr on the resolved address reports SkyLight: CoreGraphics re-exports it. The image recorded here is the one the runtime resolves, which is the one that matters."
+      },
+      "CGEvent.integerValueField.51": {
+        "kind": "field",
+        "state": "verified",
+        "checks": {
+          "offsets": {
+            "0x3C": {
+              "field": 51,
+              "roundTrip": true
+            }
+          }
+        },
+        "notes": "Target window number. Outside the public enumeration, written and read by the public setIntegerValueField."
+      },
+      "CGEvent.integerValueField.52": {
+        "kind": "field",
+        "state": "verified",
+        "checks": {
+          "offsets": {
+            "0x40": {
+              "field": 52,
+              "roundTrip": true
+            }
+          }
+        },
+        "notes": "Owning WindowServer connection."
+      },
+      "SLPSPostEventRecordTo.activationRecord": {
+        "kind": "record",
+        "state": "verified",
+        "checks": {
+          "recordLength": 248,
+          "allocatedLength": 256,
+          "effect": "ticket 02: return code 0, target process activated inside its own process only"
+        },
+        "notes": "Type 0x0D built from zero. No public setter writes this record, so cross-validation does not apply and the effect is the only oracle."
+      },
+      "SLPSPostEventRecordTo.keyWindowRecord": {
+        "kind": "record",
+        "state": "verified",
+        "checks": {
+          "recordLength": 248,
+          "allocatedLength": 256,
+          "effect": "tickets 02 and 16: return code 0 on both phases, fixture reports key then restored"
+        },
+        "notes": "Types 0x01 and 0x02, window id at 0x3C, 0x20..0x2F filled with 0xFF. Same blind spot as the activation record."
+      },
+      "objc_msgSend": {
+        "kind": "symbol",
+        "image": "libobjcMsgSend.dylib",
+        "state": "verified",
+        "checks": {
+          "resolves": true
+        },
+        "notes": "Needed because the CGVirtualDisplay classes have no header. It lives in /usr/lib/objc/libobjcMsgSend.dylib, split out of libobjc.A.dylib, not in libobjc itself."
+      },
+      "CGVirtualDisplay": {
+        "kind": "class",
+        "image": "CoreGraphics",
+        "state": "verified",
+        "checks": {
+          "resolves": true,
+          "effect": "display created and removed, seen by CGGetOnlineDisplayList"
+        },
+        "notes": ""
+      },
+      "CGVirtualDisplayDescriptor": {
+        "kind": "class",
+        "image": "CoreGraphics",
+        "state": "verified",
+        "checks": {
+          "resolves": true
+        },
+        "notes": "Configured through KVC keys, not through typed setters."
+      },
+      "CGVirtualDisplayMode": {
+        "kind": "class",
+        "image": "CoreGraphics",
+        "state": "verified",
+        "checks": {
+          "resolves": true
+        },
+        "notes": ""
+      },
+      "CGVirtualDisplaySettings": {
+        "kind": "class",
+        "image": "CoreGraphics",
+        "state": "verified",
+        "checks": {
+          "resolves": true
+        },
+        "notes": ""
+      },
+      "CGVirtualDisplay.initWithDescriptor:": {
+        "kind": "selector",
+        "image": "CoreGraphics",
+        "state": "verified",
+        "checks": {
+          "resolves": true
+        },
+        "notes": ""
+      },
+      "CGVirtualDisplay.applySettings:": {
+        "kind": "selector",
+        "image": "CoreGraphics",
+        "state": "verified",
+        "checks": {
+          "resolves": true
+        },
+        "notes": ""
+      },
+      "CGVirtualDisplayMode.initWithWidth:height:refreshRate:": {
+        "kind": "selector",
+        "image": "CoreGraphics",
+        "state": "verified",
+        "checks": {
+          "resolves": true
+        },
+        "notes": "The Seat Host's refreshRate, 60 or 120, is this argument."
+      },
+      "_AXUIElementGetWindow": {
+        "kind": "symbol",
+        "image": "HIServices",
+        "state": "verified",
+        "checks": {
+          "resolves": true,
+          "effect": "maps the fixture's AX window element to its Window ID"
+        },
+        "notes": "The only accessibility primitive the kit uses, and only to place a window."
+      },
+      "CGDisplayIsOnline.removedDisplayReturns0xFFFFFFFF": {
+        "kind": "behavior",
+        "state": "verified",
+        "checks": {
+          "observed": true
+        },
+        "notes": "CGDisplayIsOnline and CGDisplayIsActive answer 0xFFFFFFFF, not 0, for a display id that no longer exists: membership of CGGetOnlineDisplayList is the only honest check."
+      },
+      "CGVirtualDisplay.releaseRemovesDisplay": {
+        "kind": "behavior",
+        "state": "verified",
+        "checks": {
+          "observed": true
+        },
+        "notes": "Releasing the object removes the display within about 100 ms. There is no removal selector, so teardown is an ownership question."
+      },
+      "NSWindow.globalFrameOnOtherScreenLandsOnMain": {
+        "kind": "behavior",
+        "state": "verified",
+        "checks": {
+          "observed": true
+        },
+        "notes": "AppKit re-places a window created with a global frame on another screen onto the main screen: the screen: initialiser is required."
+      },
+      "StageManager.doesNotReachAVirtualDisplay": {
+        "kind": "behavior",
+        "state": "verified",
+        "checks": {
+          "observed": true
+        },
+        "notes": "A window adopted onto a virtual display keeps its whole frame: no window has ever been observed thumbnailed there, on any run, while five applications were thumbnailed at once on the physical display in the same session. This is a property the seat depends on rather than one it arranges, and every Command rests on it: a point is computed from the window server's frame, so a thumbnail would put the point outside the control. The oracle is the Live input matrix, which refuses to post anything unless the adopted window reads full size inside the display's bounds, so a build where this stopped holding would fail every row instead of landing events in the wrong place."
+      },
+      "StageManager.stashesInactiveWindowsToThumbnail": {
+        "kind": "behavior",
+        "state": "verified",
+        "checks": {
+          "observed": true
+        },
+        "notes": "Stage Manager stashes inactive windows down to a thumbnail in its strip, so a routed event reaches the process but lands outside the control. This is why a window is staged before a Command. Observed on 09/09/2026 with Stage Manager on: five inactive applications thumbnailed at once on the physical display, 136x187 and the like, in the strip at x=15, each paired with a WindowManager window. Two things it does NOT do, both measured: it does not stash on a schedule or by policy, only as a consequence of another application being activated, which is why a driver that never activates anything cannot cause a stash and cannot time the un-stashing; and no window has ever been observed stashed on a virtual display, which is where an adopted window sits."
+      },
+      "CALayer.contentsAcceptsIOSurface": {
+        "kind": "behavior",
+        "state": "verified",
+        "checks": {
+          "observed": true
+        },
+        "notes": "The zero-copy Monitor stands on it: CALayer.h says contents may be an IOSurfaceRef, the web documentation lists only CGImage and NSImage. Both the ObjC IOSurface and the CF IOSurfaceRef are accepted, and the round trip through CVPixelBufferGetIOSurface is the form ScreenCaptureKit delivers. A unit test in SeatCaptureTests assigns a real surface to a MonitorLayer, so the day the header stops being true a test says so."
+      },
+      "SCStreamConfiguration.defaultsDifferFromDocumentation": {
+        "kind": "behavior",
+        "state": "verified",
+        "checks": {
+          "observed": true
+        },
+        "notes": "Real defaults are minimumFrameInterval 1/60, queueDepth 8, pixelFormat 420v, all different from the public documentation: the kit sets all three explicitly."
+      },
+      "AXRaiseAction.stagesWithoutActivating": {
+        "kind": "behavior",
+        "state": "verified",
+        "checks": {
+          "effect": "ticket 16: kAXRaiseAction on a window Stage Manager had stashed brought it back full size on the virtual display in 532 ms on Chrome and 19 ms on the fixture, with NSApp.isActive and isKeyWindow both still false and the User Seat frontmost unchanged"
+        },
+        "notes": "The primitive behind AgentSeat.stage. Public API, tracked here because what is relied on is the behaviour and not the call: a build where AXRaise activates the application would break the isolation invariant, not the call site."
+      }
+    }
+  }
+}

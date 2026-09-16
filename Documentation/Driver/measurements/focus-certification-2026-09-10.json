@@ -1,0 +1,2431 @@
+{
+  "environment": {
+    "machine": "Mac16,1",
+    "logical_cpus": 10,
+    "memory_bytes": 17179869184,
+    "macos_build": "26A5425a",
+    "chrome_version": "153.0.8010.36",
+    "user_app_executable": "/Applications/ChatGPT.app/Contents/MacOS/ChatGPT",
+    "user_window_id": 89708,
+    "configuration": "Swift 6.4 Debug"
+  },
+  "initial_incomplete": {
+    "completed_trials": 0,
+    "build": "26A5425a",
+    "plan": [
+      {
+        "scenario": "cold",
+        "key_records": false,
+        "sample_us": 100
+      },
+      {
+        "scenario": "cold",
+        "key_records": true,
+        "sample_us": 100
+      },
+      {
+        "scenario": "warm-menu",
+        "key_records": false,
+        "sample_us": 100
+      },
+      {
+        "scenario": "warm-menu",
+        "key_records": true,
+        "sample_us": 100
+      },
+      {
+        "scenario": "cpu-load",
+        "key_records": false,
+        "sample_us": 100
+      },
+      {
+        "scenario": "cpu-load",
+        "key_records": true,
+        "sample_us": 100
+      },
+      {
+        "scenario": "cold",
+        "key_records": true,
+        "sample_us": 100
+      },
+      {
+        "scenario": "cold",
+        "key_records": false,
+        "sample_us": 100
+      },
+      {
+        "scenario": "warm-menu",
+        "key_records": true,
+        "sample_us": 100
+      },
+      {
+        "scenario": "warm-menu",
+        "key_records": false,
+        "sample_us": 100
+      },
+      {
+        "scenario": "cpu-load",
+        "key_records": true,
+        "sample_us": 100
+      },
+      {
+        "scenario": "cpu-load",
+        "key_records": false,
+        "sample_us": 100
+      }
+    ],
+    "planned_trials": 12,
+    "attempted_trials": 1,
+    "incomplete": [
+      {
+        "cell": {
+          "scenario": "cold",
+          "key_records": false,
+          "sample_us": 100
+        },
+        "reason": "The sampler did not observe exactly user, target, user",
+        "log": "/private/tmp/agentseat-focus-certification-matrix.trial-1.log"
+      }
+    ],
+    "protocol": "diagnostic, not a statistical qualification",
+    "status": "not_qualified",
+    "raw_log": "\n== focus-latency\n\u25c7 Test run started.\n\u21b3 Testing Library Version: 2077\n\u21b3 Target Platform: arm64e-apple-macos14.0\n\u25c7 Suite UserFocusRecoveryLiveTests started.\n\u25c7 Test \"Chrome Print restores the same user window without pointer input\" started.\nFOCUS_CLOCK_CONTROL_NS 44\nTrying to load the allocator multiple times. This is *not* supported.\n[27481:9278362:0910/155144.807180:ERROR:google_apis/gcm/engine/registration_request.cc:291] Registration response error message: PHONE_REGISTRATION_ERROR\n[27481:9278362:0910/155144.807220:ERROR:google_apis/gcm/engine/registration_request.cc:291] Registration response error message: PHONE_REGISTRATION_ERROR\n[27481:9278362:0910/155144.808910:ERROR:google_apis/gcm/engine/registration_request.cc:291] Registration response error message: PHONE_REGISTRATION_ERROR\n[27481:9278362:0910/155144.873670:ERROR:google_apis/gcm/engine/mcs_client.cc:702]   Error code: 401  Error message: Authentication Failed: wrong_secret\n[27481:9278362:0910/155144.873679:ERROR:google_apis/gcm/engine/mcs_client.cc:704] Failed to log in to GCM, resetting connection.\nCreated TensorFlow Lite XNNPACK delegate for CPU.\n\u2718 Test \"Chrome Print restores the same user window without pointer input\" recorded an issue at UserFocusRecoveryLiveTests.swift:123:17: Expectation failed: sampler.terminationStatus == 0\n\u21b3 The independent focus sampler did not complete\n\u21b3 sampler.terminationStatus == 0 \u2192 false\n\u21b3   sampler.terminationStatus \u2192 7\nFOCUS_SERVER {\"sample_period_us\":100,\"samples\":30316,\"cpu_ns\":138216000,\"wall_ns\":4000054084,\"max_read_ns\":224208,\"p99_sample_gap_ns\":164416,\"max_sample_gap_ns\":1656708,\"transitions\":[{\"identity\":0,\"at_ns\":332105893057083,\"read_ns\":13000,\"lower_ns\":0}]}\n\nFOCUS_AX [{\"valueKind\":\"AXUIElement\",\"timeoutCode\":0,\"windowNumber\":89708,\"phase\":\"before\",\"durationNanoseconds\":205000,\"startedAtUptimeNanoseconds\":332105386136333,\"mappingCode\":0,\"attributeCode\":0,\"processID\":55735},{\"valueKind\":\"AXUIElement\",\"timeoutCode\":0,\"windowNumber\":89708,\"phase\":\"after\",\"durationNanoseconds\":296083,\"startedAtUptimeNanoseconds\":332120855618833,\"mappingCode\":0,\"attributeCode\":0,\"processID\":55735},{\"valueKind\":\"AXUIElement\",\"timeoutCode\":0,\"windowNumber\":89708,\"phase\":\"stability-0\",\"durationNanoseconds\":268334,\"startedAtUptimeNanoseconds\":332120906290791,\"mappingCode\":0,\"attributeCode\":0,\"processID\":55735},{\"valueKind\":\"AXUIElement\",\"timeoutCode\":0,\"windowNumber\":89708,\"phase\":\"stability-1\",\"durationNanoseconds\":442750,\"startedAtUptimeNanoseconds\":332120958526166,\"mappingCode\":0,\"attributeCode\":0,\"processID\":55735},{\"valueKind\":\"AXUIElement\",\"timeoutCode\":0,\"windowNumber\":89708,\"phase\":\"stability-2\",\"durationNanoseconds\":356125,\"startedAtUptimeNanoseconds\":332121009949458,\"mappingCode\":0,\"attributeCode\":0,\"processID\":55735},{\"valueKind\":\"AXUIElement\",\"timeoutCode\":0,\"windowNumber\":89708,\"phase\":\"stability-3\",\"durationNanoseconds\":358250,\"startedAtUptimeNanoseconds\":332121060878166,\"mappingCode\":0,\"attributeCode\":0,\"processID\":55735}]\nFOCUS_VALIDATION {\"cursor_unchanged\":true,\"recovered\":true,\"no_uncertain_commands\":true,\"same_user_app\":true,\"no_physical_input\":true,\"target_virtual\":true,\"same_user_window\":true}\nFOCUS_TIMING {\"preparedIdentityNanoseconds\":47875,\"destinationPreparationNanoseconds\":1740500,\"secondKeyNanoseconds\":0,\"detectedAtUptimeNanoseconds\":332120051499083,\"notificationReceivedAtUptimeNanoseconds\":332120051416291,\"environmentNanoseconds\":20916,\"psnLookupNanoseconds\":0,\"actionPreparationNanoseconds\":4232375,\"firstKeyNanoseconds\":0,\"pauseAndPublicationNanoseconds\":48292,\"activationNanoseconds\":4980125,\"adoptedWindowsNanoseconds\":2458,\"requestFinishedNanoseconds\":5070333,\"finalGuardsNanoseconds\":5500,\"destinationNanoseconds\":3708,\"preparedSnapshotAgeNanoseconds\":413036167,\"preparedWindowsNanoseconds\":370291,\"visibleWindowsNanoseconds\":7208,\"activationSource\":\"workspaceNotification\",\"ownerLookupNanoseconds\":0}\nFOCUS recovery=restored frontmost=6.524875 ms detection-to-verification=18.088833 ms request=0 cursor=(1101.671875, 834.58203125)->(1101.671875, 834.58203125) HID=0\n[27481:9278243:0910/155159.785452:ERROR:content/browser/gpu/gpu_process_host.cc:1054] GPU process exited unexpectedly: exit_code=15\n\u2718 Test \"Chrome Print restores the same user window without pointer input\" failed after 23.058 seconds with 1 issue.\n\u2718 Suite UserFocusRecoveryLiveTests failed after 23.058 seconds with 1 issue.\n\u2718 Test run with 1 test in 1 suite failed after 23.058 seconds with 1 issue.\nNote: Some test targets reported failures:\n  - LiveTests (Swift Testing)\nTIER_RESULT {\"executed\": 1, \"problems\": [\"the runner exited 1\", \"the runner reported a failed test run\"], \"reported\": 1, \"runs\": 1, \"skip_details\": [], \"skipped\": 0, \"status\": \"failed\"}\nFAIL focus-latency: 1 executed, 0 skipped, 1 reported in 1 run(s), log at /var/folders/ck/wcxt_1bs5nz3yxxq5hrdn_1m0000gn/T//agentseat-tier-focus-latency.log\n     the runner exited 1\n     the runner reported a failed test run\n"
+  },
+  "campaign": {
+    "budget_ms": 8.0,
+    "completed_trials": 12,
+    "functional_passed_trials": 12,
+    "qualified_trials": 11,
+    "all_trials_qualify": false,
+    "precision_passed_trials": 9,
+    "budget_failed_trials": 1,
+    "budget_inconclusive_trials": 0,
+    "all_success_95pct_probability_lower_bound": null,
+    "budget_passed_trials": 11,
+    "all_trials_within_budget": false,
+    "server_upper_bound_ms": {
+      "min": 3.2885,
+      "median": 4.177813,
+      "max": 9.701333
+    },
+    "control_adjusted_phases": {
+      "destinationPreparationNanoseconds": {
+        "min_ms": 0.786647,
+        "median_ms": 1.480855,
+        "max_ms": 5.079772
+      },
+      "adoptedWindowsNanoseconds": {
+        "min_ms": 0.001847,
+        "median_ms": 0.0023724999999999996,
+        "max_ms": 0.004126
+      },
+      "ownerLookupNanoseconds": {
+        "min_ms": 0.0,
+        "median_ms": 0.0,
+        "max_ms": 0.0
+      },
+      "actionPreparationNanoseconds": {
+        "min_ms": 1.418848,
+        "median_ms": 1.9720635,
+        "max_ms": 5.204377
+      },
+      "pauseAndPublicationNanoseconds": {
+        "min_ms": 0.045251,
+        "median_ms": 0.056706,
+        "max_ms": 0.092292
+      },
+      "activationNanoseconds": {
+        "min_ms": 3.97894,
+        "median_ms": 5.293792,
+        "max_ms": 8.656773
+      },
+      "preparedWindowsNanoseconds": {
+        "min_ms": 0.37318,
+        "median_ms": 0.425304,
+        "max_ms": 0.845125
+      },
+      "preparedSnapshotAgeNanoseconds": {
+        "min_ms": 375.607501,
+        "median_ms": 387.13363649999997,
+        "max_ms": 400.647854
+      },
+      "destinationNanoseconds": {
+        "min_ms": 0.00298,
+        "median_ms": 0.0037235,
+        "max_ms": 0.008501
+      },
+      "psnLookupNanoseconds": {
+        "min_ms": 0.0,
+        "median_ms": 0.0,
+        "max_ms": 0.0
+      },
+      "secondKeyNanoseconds": {
+        "min_ms": 0.0,
+        "median_ms": 0.0411255,
+        "max_ms": 1.751605
+      },
+      "finalGuardsNanoseconds": {
+        "min_ms": 0.004377,
+        "median_ms": 0.005435499999999999,
+        "max_ms": 0.013252
+      },
+      "visibleWindowsNanoseconds": {
+        "min_ms": 0.005896,
+        "median_ms": 0.006971,
+        "max_ms": 0.016896
+      },
+      "environmentNanoseconds": {
+        "min_ms": 0.019002,
+        "median_ms": 0.029644,
+        "max_ms": 0.044729
+      },
+      "preparedIdentityNanoseconds": {
+        "min_ms": 0.046305,
+        "median_ms": 0.0529795,
+        "max_ms": 3.327104
+      },
+      "firstKeyNanoseconds": {
+        "min_ms": 0.0,
+        "median_ms": 0.555261,
+        "max_ms": 5.339918
+      }
+    },
+    "trials": [
+      {
+        "functional": "passed",
+        "tier": {
+          "executed": 1,
+          "problems": [],
+          "reported": 1,
+          "runs": 1,
+          "skip_details": [],
+          "skipped": 0,
+          "status": "passed"
+        },
+        "validation": {
+          "cursor_unchanged": true,
+          "same_user_app": true,
+          "no_uncertain_commands": true,
+          "target_virtual": true,
+          "recovered": true,
+          "same_user_window": true,
+          "no_physical_input": true
+        },
+        "physical_evidence": "structured",
+        "ax": [
+          {
+            "durationNanoseconds": 213708,
+            "phase": "before",
+            "windowNumber": 89708,
+            "attributeCode": 0,
+            "timeoutCode": 0,
+            "startedAtUptimeNanoseconds": 332183661730583,
+            "processID": 55735,
+            "valueKind": "AXUIElement",
+            "mappingCode": 0
+          },
+          {
+            "durationNanoseconds": 137542,
+            "phase": "after",
+            "windowNumber": 89708,
+            "attributeCode": 0,
+            "timeoutCode": 0,
+            "startedAtUptimeNanoseconds": 332185276242541,
+            "processID": 55735,
+            "valueKind": "AXUIElement",
+            "mappingCode": 0
+          },
+          {
+            "durationNanoseconds": 386792,
+            "phase": "stability-0",
+            "windowNumber": 89708,
+            "attributeCode": 0,
+            "timeoutCode": 0,
+            "startedAtUptimeNanoseconds": 332185327553958,
+            "processID": 55735,
+            "valueKind": "AXUIElement",
+            "mappingCode": 0
+          },
+          {
+            "durationNanoseconds": 261292,
+            "phase": "stability-1",
+            "windowNumber": 89708,
+            "attributeCode": 0,
+            "timeoutCode": 0,
+            "startedAtUptimeNanoseconds": 332185379081041,
+            "processID": 55735,
+            "valueKind": "AXUIElement",
+            "mappingCode": 0
+          },
+          {
+            "durationNanoseconds": 333125,
+            "phase": "stability-2",
+            "windowNumber": 89708,
+            "attributeCode": 0,
+            "timeoutCode": 0,
+            "startedAtUptimeNanoseconds": 332185430474291,
+            "processID": 55735,
+            "valueKind": "AXUIElement",
+            "mappingCode": 0
+          },
+          {
+            "durationNanoseconds": 136208,
+            "phase": "stability-3",
+            "windowNumber": 89708,
+            "attributeCode": 0,
+            "timeoutCode": 0,
+            "startedAtUptimeNanoseconds": 332185482680708,
+            "processID": 55735,
+            "valueKind": "AXUIElement",
+            "mappingCode": 0
+          }
+        ],
+        "activation_source": "workspaceNotification",
+        "notification_delivery_lower_ns": 1311083,
+        "notification_delivery_upper_ns": 1552875,
+        "observer_to_handler_ns": 133583,
+        "measurement_uncertainty_ns": 382959,
+        "precision": "passed",
+        "qualifies": true,
+        "server_interval_lower_ns": 3279833,
+        "server_interval_upper_ns": 3662792,
+        "detection_delay_lower_ns": 1444666,
+        "detection_delay_upper_ns": 1686458,
+        "budget": "passed",
+        "clock_control_ns": 27,
+        "raw_timing": {
+          "activationSource": "workspaceNotification",
+          "destinationPreparationNanoseconds": 1679416,
+          "adoptedWindowsNanoseconds": 2375,
+          "ownerLookupNanoseconds": 0,
+          "requestFinishedNanoseconds": 4589667,
+          "actionPreparationNanoseconds": 1418875,
+          "pauseAndPublicationNanoseconds": 53250,
+          "activationNanoseconds": 4489500,
+          "preparedWindowsNanoseconds": 386959,
+          "preparedSnapshotAgeNanoseconds": 392730833,
+          "detectedAtUptimeNanoseconds": 332184453972416,
+          "destinationNanoseconds": 3708,
+          "psnLookupNanoseconds": 0,
+          "secondKeyNanoseconds": 0,
+          "finalGuardsNanoseconds": 5208,
+          "notificationReceivedAtUptimeNanoseconds": 332184453838833,
+          "visibleWindowsNanoseconds": 6250,
+          "environmentNanoseconds": 27250,
+          "preparedIdentityNanoseconds": 47125,
+          "firstKeyNanoseconds": 0
+        },
+        "control_adjusted_phases": {
+          "destinationPreparationNanoseconds": 1679389,
+          "adoptedWindowsNanoseconds": 2348,
+          "ownerLookupNanoseconds": 0,
+          "actionPreparationNanoseconds": 1418848,
+          "pauseAndPublicationNanoseconds": 53223,
+          "activationNanoseconds": 4489473,
+          "preparedWindowsNanoseconds": 386932,
+          "preparedSnapshotAgeNanoseconds": 392730806,
+          "destinationNanoseconds": 3681,
+          "psnLookupNanoseconds": 0,
+          "secondKeyNanoseconds": 0,
+          "finalGuardsNanoseconds": 5181,
+          "visibleWindowsNanoseconds": 6223,
+          "environmentNanoseconds": 27223,
+          "preparedIdentityNanoseconds": 47098,
+          "firstKeyNanoseconds": 0
+        },
+        "server": {
+          "sample_period_us": 100,
+          "samples": 2261,
+          "cpu_ns": 14833000,
+          "wall_ns": 317560042,
+          "max_read_ns": 279667,
+          "p99_sample_gap_ns": 257166,
+          "max_sample_gap_ns": 1440375,
+          "transitions": [
+            {
+              "identity": 0,
+              "at_ns": 332184138394666,
+              "read_ns": 3166,
+              "lower_ns": 0
+            },
+            {
+              "identity": 1,
+              "at_ns": 332184452527750,
+              "read_ns": 7042,
+              "lower_ns": 332184452285958
+            },
+            {
+              "identity": 0,
+              "at_ns": 332184455948750,
+              "read_ns": 5959,
+              "lower_ns": 332184455807583
+            }
+          ]
+        },
+        "cell": {
+          "scenario": "cold",
+          "key_records": false,
+          "sample_us": 100
+        },
+        "log": "/private/tmp/agentseat-focus-certification-matrix-v2.trial-1.log",
+        "runner_exit": 0,
+        "raw_log": "\n== focus-latency\n\u25c7 Test run started.\n\u21b3 Testing Library Version: 2077\n\u21b3 Target Platform: arm64e-apple-macos14.0\n\u25c7 Suite UserFocusRecoveryLiveTests started.\n\u25c7 Test \"Chrome Print restores the same user window without pointer input\" started.\nFOCUS_CLOCK_CONTROL_NS 27\nTrying to load the allocator multiple times. This is *not* supported.\n[28150:9281793:0910/155303.222870:ERROR:google_apis/gcm/engine/registration_request.cc:291] Registration response error message: PHONE_REGISTRATION_ERROR\n[28150:9281793:0910/155303.223199:ERROR:google_apis/gcm/engine/registration_request.cc:291] Registration response error message: PHONE_REGISTRATION_ERROR\n[28150:9281793:0910/155303.223290:ERROR:google_apis/gcm/engine/registration_request.cc:291] Registration response error message: PHONE_REGISTRATION_ERROR\nFOCUS_SERVER {\"sample_period_us\":100,\"samples\":2261,\"cpu_ns\":14833000,\"wall_ns\":317560042,\"max_read_ns\":279667,\"p99_sample_gap_ns\":257166,\"max_sample_gap_ns\":1440375,\"transitions\":[{\"identity\":0,\"at_ns\":332184138394666,\"read_ns\":3166,\"lower_ns\":0},{\"identity\":1,\"at_ns\":332184452527750,\"read_ns\":7042,\"lower_ns\":332184452285958},{\"identity\":0,\"at_ns\":332184455948750,\"read_ns\":5959,\"lower_ns\":332184455807583}]}\n\nFOCUS_AX [{\"durationNanoseconds\":213708,\"phase\":\"before\",\"windowNumber\":89708,\"attributeCode\":0,\"timeoutCode\":0,\"startedAtUptimeNanoseconds\":332183661730583,\"processID\":55735,\"valueKind\":\"AXUIElement\",\"mappingCode\":0},{\"durationNanoseconds\":137542,\"phase\":\"after\",\"windowNumber\":89708,\"attributeCode\":0,\"timeoutCode\":0,\"startedAtUptimeNanoseconds\":332185276242541,\"processID\":55735,\"valueKind\":\"AXUIElement\",\"mappingCode\":0},{\"durationNanoseconds\":386792,\"phase\":\"stability-0\",\"windowNumber\":89708,\"attributeCode\":0,\"timeoutCode\":0,\"startedAtUptimeNanoseconds\":332185327553958,\"processID\":55735,\"valueKind\":\"AXUIElement\",\"mappingCode\":0},{\"durationNanoseconds\":261292,\"phase\":\"stability-1\",\"windowNumber\":89708,\"attributeCode\":0,\"timeoutCode\":0,\"startedAtUptimeNanoseconds\":332185379081041,\"processID\":55735,\"valueKind\":\"AXUIElement\",\"mappingCode\":0},{\"durationNanoseconds\":333125,\"phase\":\"stability-2\",\"windowNumber\":89708,\"attributeCode\":0,\"timeoutCode\":0,\"startedAtUptimeNanoseconds\":332185430474291,\"processID\":55735,\"valueKind\":\"AXUIElement\",\"mappingCode\":0},{\"durationNanoseconds\":136208,\"phase\":\"stability-3\",\"windowNumber\":89708,\"attributeCode\":0,\"timeoutCode\":0,\"startedAtUptimeNanoseconds\":332185482680708,\"processID\":55735,\"valueKind\":\"AXUIElement\",\"mappingCode\":0}]\nFOCUS_VALIDATION {\"cursor_unchanged\":true,\"same_user_app\":true,\"no_uncertain_commands\":true,\"target_virtual\":true,\"recovered\":true,\"same_user_window\":true,\"no_physical_input\":true}\nFOCUS_TIMING {\"activationSource\":\"workspaceNotification\",\"destinationPreparationNanoseconds\":1679416,\"adoptedWindowsNanoseconds\":2375,\"ownerLookupNanoseconds\":0,\"requestFinishedNanoseconds\":4589667,\"actionPreparationNanoseconds\":1418875,\"pauseAndPublicationNanoseconds\":53250,\"activationNanoseconds\":4489500,\"preparedWindowsNanoseconds\":386959,\"preparedSnapshotAgeNanoseconds\":392730833,\"detectedAtUptimeNanoseconds\":332184453972416,\"destinationNanoseconds\":3708,\"psnLookupNanoseconds\":0,\"secondKeyNanoseconds\":0,\"finalGuardsNanoseconds\":5208,\"notificationReceivedAtUptimeNanoseconds\":332184453838833,\"visibleWindowsNanoseconds\":6250,\"environmentNanoseconds\":27250,\"preparedIdentityNanoseconds\":47125,\"firstKeyNanoseconds\":0}\nFOCUS recovery=restored frontmost=11.067459 ms detection-to-verification=16.011125 ms request=0 cursor=(1219.16015625, 523.56640625)->(1219.16015625, 523.56640625) HID=0\n[28150:9281793:0910/155304.179443:ERROR:google_apis/gcm/engine/connection_factory_impl.cc:484] ConnectionHandler failed with net error: -2\n[28150:9281807:0910/155304.182759:ERROR:base/process/process_mac.cc:53] task_policy_set TASK_CATEGORY_POLICY: (os/kern) invalid argument (4)\n[28150:9281807:0910/155304.182769:ERROR:base/process/process_mac.cc:98] task_policy_set TASK_SUPPRESSION_POLICY: (os/kern) invalid argument (4)\n[28150:9281807:0910/155304.182774:ERROR:base/process/process_mac.cc:53] task_policy_set TASK_CATEGORY_POLICY: (os/kern) invalid argument (4)\n[28150:9281807:0910/155304.182776:ERROR:base/process/process_mac.cc:98] task_policy_set TASK_SUPPRESSION_POLICY: (os/kern) invalid argument (4)\n[28150:9281807:0910/155304.182780:ERROR:base/process/process_mac.cc:53] task_policy_set TASK_CATEGORY_POLICY: (os/kern) invalid argument (4)\n[28150:9281807:0910/155304.182782:ERROR:base/process/process_mac.cc:98] task_policy_set TASK_SUPPRESSION_POLICY: (os/kern) invalid argument (4)\n[28150:9281731:0910/155304.197946:ERROR:content/browser/gpu/gpu_process_host.cc:1054] GPU process exited unexpectedly: exit_code=15\n\u2714 Test \"Chrome Print restores the same user window without pointer input\" passed after 4.810 seconds.\n\u2714 Suite UserFocusRecoveryLiveTests passed after 4.810 seconds.\n\u2714 Test run with 1 test in 1 suite passed after 4.811 seconds.\nTIER_RESULT {\"executed\": 1, \"problems\": [], \"reported\": 1, \"runs\": 1, \"skip_details\": [], \"skipped\": 0, \"status\": \"passed\"}\nOK   focus-latency: 1 executed, 0 skipped, 1 reported in 1 run(s), log at /var/folders/ck/wcxt_1bs5nz3yxxq5hrdn_1m0000gn/T//agentseat-tier-focus-latency.log\n"
+      },
+      {
+        "functional": "passed",
+        "tier": {
+          "executed": 1,
+          "problems": [],
+          "reported": 1,
+          "runs": 1,
+          "skip_details": [],
+          "skipped": 0,
+          "status": "passed"
+        },
+        "validation": {
+          "target_virtual": true,
+          "cursor_unchanged": true,
+          "recovered": true,
+          "same_user_window": true,
+          "no_uncertain_commands": true,
+          "same_user_app": true,
+          "no_physical_input": true
+        },
+        "physical_evidence": "structured",
+        "ax": [
+          {
+            "valueKind": "AXUIElement",
+            "phase": "before",
+            "timeoutCode": 0,
+            "attributeCode": 0,
+            "startedAtUptimeNanoseconds": 332190680409583,
+            "durationNanoseconds": 166708,
+            "windowNumber": 89708,
+            "processID": 55735,
+            "mappingCode": 0
+          },
+          {
+            "valueKind": "AXUIElement",
+            "phase": "after",
+            "timeoutCode": 0,
+            "attributeCode": 0,
+            "startedAtUptimeNanoseconds": 332192262051625,
+            "durationNanoseconds": 374125,
+            "windowNumber": 89708,
+            "processID": 55735,
+            "mappingCode": 0
+          },
+          {
+            "valueKind": "AXUIElement",
+            "phase": "stability-0",
+            "timeoutCode": 0,
+            "attributeCode": 0,
+            "startedAtUptimeNanoseconds": 332192313294833,
+            "durationNanoseconds": 306917,
+            "windowNumber": 89708,
+            "processID": 55735,
+            "mappingCode": 0
+          },
+          {
+            "valueKind": "AXUIElement",
+            "phase": "stability-1",
+            "timeoutCode": 0,
+            "attributeCode": 0,
+            "startedAtUptimeNanoseconds": 332192364672416,
+            "durationNanoseconds": 344334,
+            "windowNumber": 89708,
+            "processID": 55735,
+            "mappingCode": 0
+          },
+          {
+            "valueKind": "AXUIElement",
+            "phase": "stability-2",
+            "timeoutCode": 0,
+            "attributeCode": 0,
+            "startedAtUptimeNanoseconds": 332192415524333,
+            "durationNanoseconds": 199833,
+            "windowNumber": 89708,
+            "processID": 55735,
+            "mappingCode": 0
+          },
+          {
+            "valueKind": "AXUIElement",
+            "phase": "stability-3",
+            "timeoutCode": 0,
+            "attributeCode": 0,
+            "startedAtUptimeNanoseconds": 332192466826666,
+            "durationNanoseconds": 192917,
+            "windowNumber": 89708,
+            "processID": 55735,
+            "mappingCode": 0
+          }
+        ],
+        "activation_source": "workspaceNotification",
+        "notification_delivery_lower_ns": 672417,
+        "notification_delivery_upper_ns": 806417,
+        "observer_to_handler_ns": 84541,
+        "measurement_uncertainty_ns": 278708,
+        "precision": "passed",
+        "qualifies": true,
+        "server_interval_lower_ns": 3270375,
+        "server_interval_upper_ns": 3549083,
+        "detection_delay_lower_ns": 756958,
+        "detection_delay_upper_ns": 890958,
+        "budget": "passed",
+        "clock_control_ns": 28,
+        "raw_timing": {
+          "psnLookupNanoseconds": 0,
+          "activationSource": "workspaceNotification",
+          "environmentNanoseconds": 30292,
+          "finalGuardsNanoseconds": 5334,
+          "secondKeyNanoseconds": 88541,
+          "preparedSnapshotAgeNanoseconds": 384448291,
+          "pauseAndPublicationNanoseconds": 56417,
+          "detectedAtUptimeNanoseconds": 332191439153166,
+          "preparedWindowsNanoseconds": 373208,
+          "actionPreparationNanoseconds": 1448708,
+          "notificationReceivedAtUptimeNanoseconds": 332191439068625,
+          "visibleWindowsNanoseconds": 6125,
+          "destinationNanoseconds": 3292,
+          "firstKeyNanoseconds": 3774875,
+          "activationNanoseconds": 6902958,
+          "ownerLookupNanoseconds": 0,
+          "destinationPreparationNanoseconds": 1052500,
+          "requestFinishedNanoseconds": 10877917,
+          "preparedIdentityNanoseconds": 46333,
+          "adoptedWindowsNanoseconds": 1875
+        },
+        "control_adjusted_phases": {
+          "psnLookupNanoseconds": 0,
+          "environmentNanoseconds": 30264,
+          "finalGuardsNanoseconds": 5306,
+          "secondKeyNanoseconds": 88513,
+          "preparedSnapshotAgeNanoseconds": 384448263,
+          "pauseAndPublicationNanoseconds": 56389,
+          "preparedWindowsNanoseconds": 373180,
+          "actionPreparationNanoseconds": 1448680,
+          "visibleWindowsNanoseconds": 6097,
+          "destinationNanoseconds": 3264,
+          "firstKeyNanoseconds": 3774847,
+          "activationNanoseconds": 6902930,
+          "ownerLookupNanoseconds": 0,
+          "destinationPreparationNanoseconds": 1052472,
+          "preparedIdentityNanoseconds": 46305,
+          "adoptedWindowsNanoseconds": 1847
+        },
+        "server": {
+          "sample_period_us": 100,
+          "samples": 2698,
+          "cpu_ns": 13639000,
+          "wall_ns": 358475208,
+          "max_read_ns": 60791,
+          "p99_sample_gap_ns": 180791,
+          "max_sample_gap_ns": 505000,
+          "transitions": [
+            {
+              "identity": 0,
+              "at_ns": 332191083342666,
+              "read_ns": 4541,
+              "lower_ns": 0
+            },
+            {
+              "identity": 1,
+              "at_ns": 332191438396208,
+              "read_ns": 5250,
+              "lower_ns": 332191438262208
+            },
+            {
+              "identity": 0,
+              "at_ns": 332191441811291,
+              "read_ns": 3416,
+              "lower_ns": 332191441666583
+            }
+          ]
+        },
+        "cell": {
+          "scenario": "cold",
+          "key_records": true,
+          "sample_us": 100
+        },
+        "log": "/private/tmp/agentseat-focus-certification-matrix-v2.trial-2.log",
+        "runner_exit": 0,
+        "raw_log": "\n== focus-latency\n\u25c7 Test run started.\n\u21b3 Testing Library Version: 2077\n\u21b3 Target Platform: arm64e-apple-macos14.0\n\u25c7 Suite UserFocusRecoveryLiveTests started.\n\u25c7 Test \"Chrome Print restores the same user window without pointer input\" started.\nFOCUS_CLOCK_CONTROL_NS 28\nTrying to load the allocator multiple times. This is *not* supported.\n[28299:9282964:0910/155310.334215:ERROR:google_apis/gcm/engine/registration_request.cc:291] Registration response error message: PHONE_REGISTRATION_ERROR\n[28299:9282964:0910/155310.337555:ERROR:google_apis/gcm/engine/registration_request.cc:291] Registration response error message: PHONE_REGISTRATION_ERROR\n[28299:9282964:0910/155310.337804:ERROR:google_apis/gcm/engine/registration_request.cc:291] Registration response error message: PHONE_REGISTRATION_ERROR\n[28299:9282964:0910/155310.371524:ERROR:google_apis/gcm/engine/mcs_client.cc:702]   Error code: 401  Error message: Authentication Failed: wrong_secret\n[28299:9282964:0910/155310.371534:ERROR:google_apis/gcm/engine/mcs_client.cc:704] Failed to log in to GCM, resetting connection.\nFOCUS_SERVER {\"sample_period_us\":100,\"samples\":2698,\"cpu_ns\":13639000,\"wall_ns\":358475208,\"max_read_ns\":60791,\"p99_sample_gap_ns\":180791,\"max_sample_gap_ns\":505000,\"transitions\":[{\"identity\":0,\"at_ns\":332191083342666,\"read_ns\":4541,\"lower_ns\":0},{\"identity\":1,\"at_ns\":332191438396208,\"read_ns\":5250,\"lower_ns\":332191438262208},{\"identity\":0,\"at_ns\":332191441811291,\"read_ns\":3416,\"lower_ns\":332191441666583}]}\n\nFOCUS_AX [{\"valueKind\":\"AXUIElement\",\"phase\":\"before\",\"timeoutCode\":0,\"attributeCode\":0,\"startedAtUptimeNanoseconds\":332190680409583,\"durationNanoseconds\":166708,\"windowNumber\":89708,\"processID\":55735,\"mappingCode\":0},{\"valueKind\":\"AXUIElement\",\"phase\":\"after\",\"timeoutCode\":0,\"attributeCode\":0,\"startedAtUptimeNanoseconds\":332192262051625,\"durationNanoseconds\":374125,\"windowNumber\":89708,\"processID\":55735,\"mappingCode\":0},{\"valueKind\":\"AXUIElement\",\"phase\":\"stability-0\",\"timeoutCode\":0,\"attributeCode\":0,\"startedAtUptimeNanoseconds\":332192313294833,\"durationNanoseconds\":306917,\"windowNumber\":89708,\"processID\":55735,\"mappingCode\":0},{\"valueKind\":\"AXUIElement\",\"phase\":\"stability-1\",\"timeoutCode\":0,\"attributeCode\":0,\"startedAtUptimeNanoseconds\":332192364672416,\"durationNanoseconds\":344334,\"windowNumber\":89708,\"processID\":55735,\"mappingCode\":0},{\"valueKind\":\"AXUIElement\",\"phase\":\"stability-2\",\"timeoutCode\":0,\"attributeCode\":0,\"startedAtUptimeNanoseconds\":332192415524333,\"durationNanoseconds\":199833,\"windowNumber\":89708,\"processID\":55735,\"mappingCode\":0},{\"valueKind\":\"AXUIElement\",\"phase\":\"stability-3\",\"timeoutCode\":0,\"attributeCode\":0,\"startedAtUptimeNanoseconds\":332192466826666,\"durationNanoseconds\":192917,\"windowNumber\":89708,\"processID\":55735,\"mappingCode\":0}]\nFOCUS_VALIDATION {\"target_virtual\":true,\"cursor_unchanged\":true,\"recovered\":true,\"same_user_window\":true,\"no_uncertain_commands\":true,\"same_user_app\":true,\"no_physical_input\":true}\nFOCUS_TIMING {\"psnLookupNanoseconds\":0,\"activationSource\":\"workspaceNotification\",\"environmentNanoseconds\":30292,\"finalGuardsNanoseconds\":5334,\"secondKeyNanoseconds\":88541,\"preparedSnapshotAgeNanoseconds\":384448291,\"pauseAndPublicationNanoseconds\":56417,\"detectedAtUptimeNanoseconds\":332191439153166,\"preparedWindowsNanoseconds\":373208,\"actionPreparationNanoseconds\":1448708,\"notificationReceivedAtUptimeNanoseconds\":332191439068625,\"visibleWindowsNanoseconds\":6125,\"destinationNanoseconds\":3292,\"firstKeyNanoseconds\":3774875,\"activationNanoseconds\":6902958,\"ownerLookupNanoseconds\":0,\"destinationPreparationNanoseconds\":1052500,\"requestFinishedNanoseconds\":10877917,\"preparedIdentityNanoseconds\":46333,\"adoptedWindowsNanoseconds\":1875}\nFOCUS recovery=restored frontmost=12.273417 ms detection-to-verification=19.764709 ms request=0 cursor=(1219.16015625, 523.56640625)->(1219.16015625, 523.56640625) HID=0\n[28299:9282975:0910/155311.167651:ERROR:base/process/process_mac.cc:53] task_policy_set TASK_CATEGORY_POLICY: (os/kern) invalid argument (4)\n[28299:9282975:0910/155311.167665:ERROR:base/process/process_mac.cc:98] task_policy_set TASK_SUPPRESSION_POLICY: (os/kern) invalid argument (4)\n[28299:9282975:0910/155311.168037:ERROR:base/process/process_mac.cc:53] task_policy_set TASK_CATEGORY_POLICY: (os/kern) invalid argument (4)\n[28299:9282975:0910/155311.168060:ERROR:base/process/process_mac.cc:98] task_policy_set TASK_SUPPRESSION_POLICY: (os/kern) invalid argument (4)\n[28299:9282975:0910/155311.168072:ERROR:base/process/process_mac.cc:53] task_policy_set TASK_CATEGORY_POLICY: (os/kern) invalid argument (4)\n[28299:9282975:0910/155311.168077:ERROR:base/process/process_mac.cc:98] task_policy_set TASK_SUPPRESSION_POLICY: (os/kern) invalid argument (4)\n[28299:9282934:0910/155311.185830:ERROR:content/browser/gpu/gpu_process_host.cc:1054] GPU process exited unexpectedly: exit_code=15\n\u2714 Test \"Chrome Print restores the same user window without pointer input\" passed after 4.673 seconds.\n\u2714 Suite UserFocusRecoveryLiveTests passed after 4.673 seconds.\n\u2714 Test run with 1 test in 1 suite passed after 4.674 seconds.\nTIER_RESULT {\"executed\": 1, \"problems\": [], \"reported\": 1, \"runs\": 1, \"skip_details\": [], \"skipped\": 0, \"status\": \"passed\"}\nOK   focus-latency: 1 executed, 0 skipped, 1 reported in 1 run(s), log at /var/folders/ck/wcxt_1bs5nz3yxxq5hrdn_1m0000gn/T//agentseat-tier-focus-latency.log\n"
+      },
+      {
+        "functional": "passed",
+        "tier": {
+          "executed": 1,
+          "problems": [],
+          "reported": 1,
+          "runs": 1,
+          "skip_details": [],
+          "skipped": 0,
+          "status": "passed"
+        },
+        "validation": {
+          "same_user_window": true,
+          "recovered": true,
+          "no_physical_input": true,
+          "no_uncertain_commands": true,
+          "same_user_app": true,
+          "cursor_unchanged": true,
+          "target_virtual": true
+        },
+        "physical_evidence": "structured",
+        "ax": [
+          {
+            "valueKind": "AXUIElement",
+            "attributeCode": 0,
+            "phase": "before",
+            "windowNumber": 89708,
+            "processID": 55735,
+            "durationNanoseconds": 270125,
+            "timeoutCode": 0,
+            "startedAtUptimeNanoseconds": 332197738694791,
+            "mappingCode": 0
+          },
+          {
+            "valueKind": "AXUIElement",
+            "attributeCode": 0,
+            "phase": "after",
+            "windowNumber": 89708,
+            "processID": 55735,
+            "durationNanoseconds": 248042,
+            "timeoutCode": 0,
+            "startedAtUptimeNanoseconds": 332199736997416,
+            "mappingCode": 0
+          },
+          {
+            "valueKind": "AXUIElement",
+            "attributeCode": 0,
+            "phase": "stability-0",
+            "windowNumber": 89708,
+            "processID": 55735,
+            "durationNanoseconds": 2269292,
+            "timeoutCode": 0,
+            "startedAtUptimeNanoseconds": 332199788454708,
+            "mappingCode": 0
+          },
+          {
+            "valueKind": "AXUIElement",
+            "attributeCode": 0,
+            "phase": "stability-1",
+            "windowNumber": 89708,
+            "processID": 55735,
+            "durationNanoseconds": 374875,
+            "timeoutCode": 0,
+            "startedAtUptimeNanoseconds": 332199841467083,
+            "mappingCode": 0
+          },
+          {
+            "valueKind": "AXUIElement",
+            "attributeCode": 0,
+            "phase": "stability-2",
+            "windowNumber": 89708,
+            "processID": 55735,
+            "durationNanoseconds": 368833,
+            "timeoutCode": 0,
+            "startedAtUptimeNanoseconds": 332199892912583,
+            "mappingCode": 0
+          },
+          {
+            "valueKind": "AXUIElement",
+            "attributeCode": 0,
+            "phase": "stability-3",
+            "windowNumber": 89708,
+            "processID": 55735,
+            "durationNanoseconds": 208667,
+            "timeoutCode": 0,
+            "startedAtUptimeNanoseconds": 332199943852833,
+            "mappingCode": 0
+          }
+        ],
+        "activation_source": "workspaceNotification",
+        "notification_delivery_lower_ns": 729750,
+        "notification_delivery_upper_ns": 871667,
+        "observer_to_handler_ns": 136833,
+        "measurement_uncertainty_ns": 288458,
+        "precision": "passed",
+        "qualifies": true,
+        "server_interval_lower_ns": 4889375,
+        "server_interval_upper_ns": 5177833,
+        "detection_delay_lower_ns": 866583,
+        "detection_delay_upper_ns": 1008500,
+        "budget": "passed",
+        "clock_control_ns": 21,
+        "raw_timing": {
+          "preparedIdentityNanoseconds": 3327125,
+          "destinationNanoseconds": 7084,
+          "finalGuardsNanoseconds": 9083,
+          "psnLookupNanoseconds": 0,
+          "preparedWindowsNanoseconds": 596208,
+          "firstKeyNanoseconds": 0,
+          "destinationPreparationNanoseconds": 1541458,
+          "actionPreparationNanoseconds": 5110042,
+          "preparedSnapshotAgeNanoseconds": 379765000,
+          "detectedAtUptimeNanoseconds": 332198934845583,
+          "notificationReceivedAtUptimeNanoseconds": 332198934708750,
+          "ownerLookupNanoseconds": 0,
+          "activationNanoseconds": 6706541,
+          "requestFinishedNanoseconds": 6849667,
+          "activationSource": "workspaceNotification",
+          "secondKeyNanoseconds": 0,
+          "adoptedWindowsNanoseconds": 3959,
+          "environmentNanoseconds": 31625,
+          "visibleWindowsNanoseconds": 12042,
+          "pauseAndPublicationNanoseconds": 77042
+        },
+        "control_adjusted_phases": {
+          "preparedIdentityNanoseconds": 3327104,
+          "destinationNanoseconds": 7063,
+          "finalGuardsNanoseconds": 9062,
+          "psnLookupNanoseconds": 0,
+          "preparedWindowsNanoseconds": 596187,
+          "firstKeyNanoseconds": 0,
+          "destinationPreparationNanoseconds": 1541437,
+          "actionPreparationNanoseconds": 5110021,
+          "preparedSnapshotAgeNanoseconds": 379764979,
+          "ownerLookupNanoseconds": 0,
+          "activationNanoseconds": 6706520,
+          "secondKeyNanoseconds": 0,
+          "adoptedWindowsNanoseconds": 3938,
+          "environmentNanoseconds": 31604,
+          "visibleWindowsNanoseconds": 12021,
+          "pauseAndPublicationNanoseconds": 77021
+        },
+        "server": {
+          "sample_period_us": 100,
+          "samples": 2437,
+          "cpu_ns": 18582000,
+          "wall_ns": 346251292,
+          "max_read_ns": 139833,
+          "p99_sample_gap_ns": 247125,
+          "max_sample_gap_ns": 1146916,
+          "transitions": [
+            {
+              "identity": 0,
+              "at_ns": 332198592786708,
+              "read_ns": 20375,
+              "lower_ns": 0
+            },
+            {
+              "identity": 1,
+              "at_ns": 332198933979000,
+              "read_ns": 5834,
+              "lower_ns": 332198933837083
+            },
+            {
+              "identity": 0,
+              "at_ns": 332198939014916,
+              "read_ns": 6458,
+              "lower_ns": 332198938868375
+            }
+          ]
+        },
+        "cell": {
+          "scenario": "warm-menu",
+          "key_records": false,
+          "sample_us": 100
+        },
+        "log": "/private/tmp/agentseat-focus-certification-matrix-v2.trial-3.log",
+        "runner_exit": 0,
+        "raw_log": "\n== focus-latency\n\u25c7 Test run started.\n\u21b3 Testing Library Version: 2077\n\u21b3 Target Platform: arm64e-apple-macos14.0\n\u25c7 Suite UserFocusRecoveryLiveTests started.\n\u25c7 Test \"Chrome Print restores the same user window without pointer input\" started.\nFOCUS_CLOCK_CONTROL_NS 21\nTrying to load the allocator multiple times. This is *not* supported.\n[28389:9283934:0910/155317.446230:ERROR:google_apis/gcm/engine/registration_request.cc:291] Registration response error message: PHONE_REGISTRATION_ERROR\n[28389:9283934:0910/155317.446295:ERROR:google_apis/gcm/engine/registration_request.cc:291] Registration response error message: PHONE_REGISTRATION_ERROR\n[28389:9283934:0910/155317.502075:ERROR:google_apis/gcm/engine/registration_request.cc:291] Registration response error message: DEPRECATED_ENDPOINT\nFOCUS_SERVER {\"sample_period_us\":100,\"samples\":2437,\"cpu_ns\":18582000,\"wall_ns\":346251292,\"max_read_ns\":139833,\"p99_sample_gap_ns\":247125,\"max_sample_gap_ns\":1146916,\"transitions\":[{\"identity\":0,\"at_ns\":332198592786708,\"read_ns\":20375,\"lower_ns\":0},{\"identity\":1,\"at_ns\":332198933979000,\"read_ns\":5834,\"lower_ns\":332198933837083},{\"identity\":0,\"at_ns\":332198939014916,\"read_ns\":6458,\"lower_ns\":332198938868375}]}\n\nFOCUS_AX [{\"valueKind\":\"AXUIElement\",\"attributeCode\":0,\"phase\":\"before\",\"windowNumber\":89708,\"processID\":55735,\"durationNanoseconds\":270125,\"timeoutCode\":0,\"startedAtUptimeNanoseconds\":332197738694791,\"mappingCode\":0},{\"valueKind\":\"AXUIElement\",\"attributeCode\":0,\"phase\":\"after\",\"windowNumber\":89708,\"processID\":55735,\"durationNanoseconds\":248042,\"timeoutCode\":0,\"startedAtUptimeNanoseconds\":332199736997416,\"mappingCode\":0},{\"valueKind\":\"AXUIElement\",\"attributeCode\":0,\"phase\":\"stability-0\",\"windowNumber\":89708,\"processID\":55735,\"durationNanoseconds\":2269292,\"timeoutCode\":0,\"startedAtUptimeNanoseconds\":332199788454708,\"mappingCode\":0},{\"valueKind\":\"AXUIElement\",\"attributeCode\":0,\"phase\":\"stability-1\",\"windowNumber\":89708,\"processID\":55735,\"durationNanoseconds\":374875,\"timeoutCode\":0,\"startedAtUptimeNanoseconds\":332199841467083,\"mappingCode\":0},{\"valueKind\":\"AXUIElement\",\"attributeCode\":0,\"phase\":\"stability-2\",\"windowNumber\":89708,\"processID\":55735,\"durationNanoseconds\":368833,\"timeoutCode\":0,\"startedAtUptimeNanoseconds\":332199892912583,\"mappingCode\":0},{\"valueKind\":\"AXUIElement\",\"attributeCode\":0,\"phase\":\"stability-3\",\"windowNumber\":89708,\"processID\":55735,\"durationNanoseconds\":208667,\"timeoutCode\":0,\"startedAtUptimeNanoseconds\":332199943852833,\"mappingCode\":0}]\nFOCUS_VALIDATION {\"same_user_window\":true,\"recovered\":true,\"no_physical_input\":true,\"no_uncertain_commands\":true,\"same_user_app\":true,\"cursor_unchanged\":true,\"target_virtual\":true}\nFOCUS_TIMING {\"preparedIdentityNanoseconds\":3327125,\"destinationNanoseconds\":7084,\"finalGuardsNanoseconds\":9083,\"psnLookupNanoseconds\":0,\"preparedWindowsNanoseconds\":596208,\"firstKeyNanoseconds\":0,\"destinationPreparationNanoseconds\":1541458,\"actionPreparationNanoseconds\":5110042,\"preparedSnapshotAgeNanoseconds\":379765000,\"detectedAtUptimeNanoseconds\":332198934845583,\"notificationReceivedAtUptimeNanoseconds\":332198934708750,\"ownerLookupNanoseconds\":0,\"activationNanoseconds\":6706541,\"requestFinishedNanoseconds\":6849667,\"activationSource\":\"workspaceNotification\",\"secondKeyNanoseconds\":0,\"adoptedWindowsNanoseconds\":3959,\"environmentNanoseconds\":31625,\"visibleWindowsNanoseconds\":12042,\"pauseAndPublicationNanoseconds\":77042}\nFOCUS recovery=restored frontmost=7.861958 ms detection-to-verification=19.225375 ms request=0 cursor=(1219.16015625, 523.56640625)->(1219.16015625, 523.56640625) HID=0\n[28389:9283934:0910/155318.630096:ERROR:google_apis/gcm/engine/connection_factory_impl.cc:484] ConnectionHandler failed with net error: -2\n[28389:9283945:0910/155318.640477:ERROR:base/process/process_mac.cc:53] task_policy_set TASK_CATEGORY_POLICY: (os/kern) invalid argument (4)\n[28389:9283945:0910/155318.640496:ERROR:base/process/process_mac.cc:98] task_policy_set TASK_SUPPRESSION_POLICY: (os/kern) invalid argument (4)\n[28389:9283945:0910/155318.640503:ERROR:base/process/process_mac.cc:53] task_policy_set TASK_CATEGORY_POLICY: (os/kern) invalid argument (4)\n[28389:9283945:0910/155318.640508:ERROR:base/process/process_mac.cc:98] task_policy_set TASK_SUPPRESSION_POLICY: (os/kern) invalid argument (4)\n[28389:9283945:0910/155318.642095:ERROR:base/process/process_mac.cc:53] task_policy_set TASK_CATEGORY_POLICY: (os/kern) invalid argument (4)\n[28389:9283945:0910/155318.642110:ERROR:base/process/process_mac.cc:98] task_policy_set TASK_SUPPRESSION_POLICY: (os/kern) invalid argument (4)\n[28389:9283907:0910/155318.656352:ERROR:content/browser/gpu/gpu_process_host.cc:1054] GPU process exited unexpectedly: exit_code=15\n\u2714 Test \"Chrome Print restores the same user window without pointer input\" passed after 5.135 seconds.\n\u2714 Suite UserFocusRecoveryLiveTests passed after 5.135 seconds.\n\u2714 Test run with 1 test in 1 suite passed after 5.135 seconds.\nTIER_RESULT {\"executed\": 1, \"problems\": [], \"reported\": 1, \"runs\": 1, \"skip_details\": [], \"skipped\": 0, \"status\": \"passed\"}\nOK   focus-latency: 1 executed, 0 skipped, 1 reported in 1 run(s), log at /var/folders/ck/wcxt_1bs5nz3yxxq5hrdn_1m0000gn/T//agentseat-tier-focus-latency.log\n"
+      },
+      {
+        "functional": "passed",
+        "tier": {
+          "executed": 1,
+          "problems": [],
+          "reported": 1,
+          "runs": 1,
+          "skip_details": [],
+          "skipped": 0,
+          "status": "passed"
+        },
+        "validation": {
+          "recovered": true,
+          "target_virtual": true,
+          "same_user_app": true,
+          "same_user_window": true,
+          "no_physical_input": true,
+          "cursor_unchanged": true,
+          "no_uncertain_commands": true
+        },
+        "physical_evidence": "structured",
+        "ax": [
+          {
+            "mappingCode": 0,
+            "startedAtUptimeNanoseconds": 332205191504500,
+            "attributeCode": 0,
+            "durationNanoseconds": 151291,
+            "windowNumber": 89708,
+            "valueKind": "AXUIElement",
+            "timeoutCode": 0,
+            "processID": 55735,
+            "phase": "before"
+          },
+          {
+            "mappingCode": 0,
+            "startedAtUptimeNanoseconds": 332207182562708,
+            "attributeCode": 0,
+            "durationNanoseconds": 395292,
+            "windowNumber": 89708,
+            "valueKind": "AXUIElement",
+            "timeoutCode": 0,
+            "processID": 55735,
+            "phase": "after"
+          },
+          {
+            "mappingCode": 0,
+            "startedAtUptimeNanoseconds": 332207234162875,
+            "attributeCode": 0,
+            "durationNanoseconds": 292958,
+            "windowNumber": 89708,
+            "valueKind": "AXUIElement",
+            "timeoutCode": 0,
+            "processID": 55735,
+            "phase": "stability-0"
+          },
+          {
+            "mappingCode": 0,
+            "startedAtUptimeNanoseconds": 332207284982958,
+            "attributeCode": 0,
+            "durationNanoseconds": 162167,
+            "windowNumber": 89708,
+            "valueKind": "AXUIElement",
+            "timeoutCode": 0,
+            "processID": 55735,
+            "phase": "stability-1"
+          },
+          {
+            "mappingCode": 0,
+            "startedAtUptimeNanoseconds": 332207336256333,
+            "attributeCode": 0,
+            "durationNanoseconds": 237708,
+            "windowNumber": 89708,
+            "valueKind": "AXUIElement",
+            "timeoutCode": 0,
+            "processID": 55735,
+            "phase": "stability-2"
+          },
+          {
+            "mappingCode": 0,
+            "startedAtUptimeNanoseconds": 332207387601500,
+            "attributeCode": 0,
+            "durationNanoseconds": 193291,
+            "windowNumber": 89708,
+            "valueKind": "AXUIElement",
+            "timeoutCode": 0,
+            "processID": 55735,
+            "phase": "stability-3"
+          }
+        ],
+        "activation_source": "workspaceNotification",
+        "notification_delivery_lower_ns": 432417,
+        "notification_delivery_upper_ns": 579709,
+        "observer_to_handler_ns": 138458,
+        "measurement_uncertainty_ns": 286042,
+        "precision": "passed",
+        "qualifies": true,
+        "server_interval_lower_ns": 4406792,
+        "server_interval_upper_ns": 4692834,
+        "detection_delay_lower_ns": 570875,
+        "detection_delay_upper_ns": 718167,
+        "budget": "passed",
+        "clock_control_ns": 41,
+        "raw_timing": {
+          "requestFinishedNanoseconds": 11644417,
+          "preparedIdentityNanoseconds": 60875,
+          "destinationPreparationNanoseconds": 1502541,
+          "preparedSnapshotAgeNanoseconds": 375607542,
+          "visibleWindowsNanoseconds": 12542,
+          "actionPreparationNanoseconds": 2187625,
+          "preparedWindowsNanoseconds": 845166,
+          "activationSource": "workspaceNotification",
+          "destinationNanoseconds": 8542,
+          "finalGuardsNanoseconds": 9542,
+          "pauseAndPublicationNanoseconds": 92333,
+          "secondKeyNanoseconds": 82292,
+          "detectedAtUptimeNanoseconds": 332206355481708,
+          "ownerLookupNanoseconds": 0,
+          "adoptedWindowsNanoseconds": 4167,
+          "firstKeyNanoseconds": 4843917,
+          "environmentNanoseconds": 36417,
+          "notificationReceivedAtUptimeNanoseconds": 332206355343250,
+          "activationNanoseconds": 6548250,
+          "psnLookupNanoseconds": 0
+        },
+        "control_adjusted_phases": {
+          "preparedIdentityNanoseconds": 60834,
+          "destinationPreparationNanoseconds": 1502500,
+          "preparedSnapshotAgeNanoseconds": 375607501,
+          "visibleWindowsNanoseconds": 12501,
+          "actionPreparationNanoseconds": 2187584,
+          "preparedWindowsNanoseconds": 845125,
+          "destinationNanoseconds": 8501,
+          "finalGuardsNanoseconds": 9501,
+          "pauseAndPublicationNanoseconds": 92292,
+          "secondKeyNanoseconds": 82251,
+          "ownerLookupNanoseconds": 0,
+          "adoptedWindowsNanoseconds": 4126,
+          "firstKeyNanoseconds": 4843876,
+          "environmentNanoseconds": 36376,
+          "activationNanoseconds": 6548209,
+          "psnLookupNanoseconds": 0
+        },
+        "server": {
+          "sample_period_us": 100,
+          "samples": 2268,
+          "cpu_ns": 18305000,
+          "wall_ns": 329611458,
+          "max_read_ns": 97334,
+          "p99_sample_gap_ns": 316916,
+          "max_sample_gap_ns": 930208,
+          "transitions": [
+            {
+              "identity": 0,
+              "at_ns": 332206029891833,
+              "read_ns": 44792,
+              "lower_ns": 0
+            },
+            {
+              "identity": 1,
+              "at_ns": 332206354910833,
+              "read_ns": 10208,
+              "lower_ns": 332206354763541
+            },
+            {
+              "identity": 0,
+              "at_ns": 332206359456375,
+              "read_ns": 4667,
+              "lower_ns": 332206359317625
+            }
+          ]
+        },
+        "cell": {
+          "scenario": "warm-menu",
+          "key_records": true,
+          "sample_us": 100
+        },
+        "log": "/private/tmp/agentseat-focus-certification-matrix-v2.trial-4.log",
+        "runner_exit": 0,
+        "raw_log": "\n== focus-latency\n\u25c7 Test run started.\n\u21b3 Testing Library Version: 2077\n\u21b3 Target Platform: arm64e-apple-macos14.0\n\u25c7 Suite UserFocusRecoveryLiveTests started.\n\u25c7 Test \"Chrome Print restores the same user window without pointer input\" started.\nFOCUS_CLOCK_CONTROL_NS 41\nTrying to load the allocator multiple times. This is *not* supported.\n[28534:9284996:0910/155324.884658:ERROR:google_apis/gcm/engine/registration_request.cc:291] Registration response error message: PHONE_REGISTRATION_ERROR\n[28534:9284996:0910/155324.884928:ERROR:google_apis/gcm/engine/registration_request.cc:291] Registration response error message: PHONE_REGISTRATION_ERROR\n[28534:9284996:0910/155324.952346:ERROR:google_apis/gcm/engine/registration_request.cc:291] Registration response error message: PHONE_REGISTRATION_ERROR\n[28534:9284996:0910/155325.034024:ERROR:google_apis/gcm/engine/mcs_client.cc:702]   Error code: 401  Error message: Authentication Failed: wrong_secret\n[28534:9284996:0910/155325.034037:ERROR:google_apis/gcm/engine/mcs_client.cc:704] Failed to log in to GCM, resetting connection.\nFOCUS_SERVER {\"sample_period_us\":100,\"samples\":2268,\"cpu_ns\":18305000,\"wall_ns\":329611458,\"max_read_ns\":97334,\"p99_sample_gap_ns\":316916,\"max_sample_gap_ns\":930208,\"transitions\":[{\"identity\":0,\"at_ns\":332206029891833,\"read_ns\":44792,\"lower_ns\":0},{\"identity\":1,\"at_ns\":332206354910833,\"read_ns\":10208,\"lower_ns\":332206354763541},{\"identity\":0,\"at_ns\":332206359456375,\"read_ns\":4667,\"lower_ns\":332206359317625}]}\n\nFOCUS_AX [{\"mappingCode\":0,\"startedAtUptimeNanoseconds\":332205191504500,\"attributeCode\":0,\"durationNanoseconds\":151291,\"windowNumber\":89708,\"valueKind\":\"AXUIElement\",\"timeoutCode\":0,\"processID\":55735,\"phase\":\"before\"},{\"mappingCode\":0,\"startedAtUptimeNanoseconds\":332207182562708,\"attributeCode\":0,\"durationNanoseconds\":395292,\"windowNumber\":89708,\"valueKind\":\"AXUIElement\",\"timeoutCode\":0,\"processID\":55735,\"phase\":\"after\"},{\"mappingCode\":0,\"startedAtUptimeNanoseconds\":332207234162875,\"attributeCode\":0,\"durationNanoseconds\":292958,\"windowNumber\":89708,\"valueKind\":\"AXUIElement\",\"timeoutCode\":0,\"processID\":55735,\"phase\":\"stability-0\"},{\"mappingCode\":0,\"startedAtUptimeNanoseconds\":332207284982958,\"attributeCode\":0,\"durationNanoseconds\":162167,\"windowNumber\":89708,\"valueKind\":\"AXUIElement\",\"timeoutCode\":0,\"processID\":55735,\"phase\":\"stability-1\"},{\"mappingCode\":0,\"startedAtUptimeNanoseconds\":332207336256333,\"attributeCode\":0,\"durationNanoseconds\":237708,\"windowNumber\":89708,\"valueKind\":\"AXUIElement\",\"timeoutCode\":0,\"processID\":55735,\"phase\":\"stability-2\"},{\"mappingCode\":0,\"startedAtUptimeNanoseconds\":332207387601500,\"attributeCode\":0,\"durationNanoseconds\":193291,\"windowNumber\":89708,\"valueKind\":\"AXUIElement\",\"timeoutCode\":0,\"processID\":55735,\"phase\":\"stability-3\"}]\nFOCUS_VALIDATION {\"recovered\":true,\"target_virtual\":true,\"same_user_app\":true,\"same_user_window\":true,\"no_physical_input\":true,\"cursor_unchanged\":true,\"no_uncertain_commands\":true}\nFOCUS_TIMING {\"requestFinishedNanoseconds\":11644417,\"preparedIdentityNanoseconds\":60875,\"destinationPreparationNanoseconds\":1502541,\"preparedSnapshotAgeNanoseconds\":375607542,\"visibleWindowsNanoseconds\":12542,\"actionPreparationNanoseconds\":2187625,\"preparedWindowsNanoseconds\":845166,\"activationSource\":\"workspaceNotification\",\"destinationNanoseconds\":8542,\"finalGuardsNanoseconds\":9542,\"pauseAndPublicationNanoseconds\":92333,\"secondKeyNanoseconds\":82292,\"detectedAtUptimeNanoseconds\":332206355481708,\"ownerLookupNanoseconds\":0,\"adoptedWindowsNanoseconds\":4167,\"firstKeyNanoseconds\":4843917,\"environmentNanoseconds\":36417,\"notificationReceivedAtUptimeNanoseconds\":332206355343250,\"activationNanoseconds\":6548250,\"psnLookupNanoseconds\":0}\nFOCUS recovery=restored frontmost=18.693542 ms detection-to-verification=20.774667 ms request=0 cursor=(1219.16015625, 523.56640625)->(1219.16015625, 523.56640625) HID=0\n[28534:9285007:0910/155326.093876:ERROR:base/process/process_mac.cc:53] task_policy_set TASK_CATEGORY_POLICY: (os/kern) invalid argument (4)\n[28534:9285007:0910/155326.093918:ERROR:base/process/process_mac.cc:98] task_policy_set TASK_SUPPRESSION_POLICY: (os/kern) invalid argument (4)\n[28534:9285007:0910/155326.093925:ERROR:base/process/process_mac.cc:53] task_policy_set TASK_CATEGORY_POLICY: (os/kern) invalid argument (4)\n[28534:9285007:0910/155326.093927:ERROR:base/process/process_mac.cc:98] task_policy_set TASK_SUPPRESSION_POLICY: (os/kern) invalid argument (4)\n[28534:9284971:0910/155326.109794:ERROR:content/browser/gpu/gpu_process_host.cc:1054] GPU process exited unexpectedly: exit_code=15\n\u2714 Test \"Chrome Print restores the same user window without pointer input\" passed after 5.093 seconds.\n\u2714 Suite UserFocusRecoveryLiveTests passed after 5.093 seconds.\n\u2714 Test run with 1 test in 1 suite passed after 5.093 seconds.\nTIER_RESULT {\"executed\": 1, \"problems\": [], \"reported\": 1, \"runs\": 1, \"skip_details\": [], \"skipped\": 0, \"status\": \"passed\"}\nOK   focus-latency: 1 executed, 0 skipped, 1 reported in 1 run(s), log at /var/folders/ck/wcxt_1bs5nz3yxxq5hrdn_1m0000gn/T//agentseat-tier-focus-latency.log\n"
+      },
+      {
+        "functional": "passed",
+        "tier": {
+          "executed": 1,
+          "problems": [],
+          "reported": 1,
+          "runs": 1,
+          "skip_details": [],
+          "skipped": 0,
+          "status": "passed"
+        },
+        "validation": {
+          "recovered": true,
+          "no_uncertain_commands": true,
+          "no_physical_input": true,
+          "same_user_app": true,
+          "cursor_unchanged": true,
+          "target_virtual": true,
+          "same_user_window": true
+        },
+        "physical_evidence": "structured",
+        "ax": [
+          {
+            "valueKind": "AXUIElement",
+            "startedAtUptimeNanoseconds": 332212954163833,
+            "durationNanoseconds": 157583,
+            "processID": 55735,
+            "attributeCode": 0,
+            "mappingCode": 0,
+            "windowNumber": 89708,
+            "timeoutCode": 0,
+            "phase": "before"
+          },
+          {
+            "valueKind": "AXUIElement",
+            "startedAtUptimeNanoseconds": 332214524122750,
+            "durationNanoseconds": 116291,
+            "processID": 55735,
+            "attributeCode": 0,
+            "mappingCode": 0,
+            "windowNumber": 89708,
+            "timeoutCode": 0,
+            "phase": "after"
+          },
+          {
+            "valueKind": "AXUIElement",
+            "startedAtUptimeNanoseconds": 332214575317208,
+            "durationNanoseconds": 124417,
+            "processID": 55735,
+            "attributeCode": 0,
+            "mappingCode": 0,
+            "windowNumber": 89708,
+            "timeoutCode": 0,
+            "phase": "stability-0"
+          },
+          {
+            "valueKind": "AXUIElement",
+            "startedAtUptimeNanoseconds": 332214626097458,
+            "durationNanoseconds": 108875,
+            "processID": 55735,
+            "attributeCode": 0,
+            "mappingCode": 0,
+            "windowNumber": 89708,
+            "timeoutCode": 0,
+            "phase": "stability-1"
+          },
+          {
+            "valueKind": "AXUIElement",
+            "startedAtUptimeNanoseconds": 332214677276833,
+            "durationNanoseconds": 109375,
+            "processID": 55735,
+            "attributeCode": 0,
+            "mappingCode": 0,
+            "windowNumber": 89708,
+            "timeoutCode": 0,
+            "phase": "stability-2"
+          },
+          {
+            "valueKind": "AXUIElement",
+            "startedAtUptimeNanoseconds": 332214727916791,
+            "durationNanoseconds": 99667,
+            "processID": 55735,
+            "attributeCode": 0,
+            "mappingCode": 0,
+            "windowNumber": 89708,
+            "timeoutCode": 0,
+            "phase": "stability-3"
+          }
+        ],
+        "activation_source": "workspaceNotification",
+        "notification_delivery_lower_ns": 530250,
+        "notification_delivery_upper_ns": 670250,
+        "observer_to_handler_ns": 104792,
+        "measurement_uncertainty_ns": 292875,
+        "precision": "passed",
+        "qualifies": true,
+        "server_interval_lower_ns": 6404333,
+        "server_interval_upper_ns": 6697208,
+        "detection_delay_lower_ns": 635042,
+        "detection_delay_upper_ns": 775042,
+        "budget": "passed",
+        "clock_control_ns": 18,
+        "raw_timing": {
+          "visibleWindowsNanoseconds": 7375,
+          "notificationReceivedAtUptimeNanoseconds": 332213723187583,
+          "detectedAtUptimeNanoseconds": 332213723292375,
+          "firstKeyNanoseconds": 0,
+          "activationSource": "workspaceNotification",
+          "preparedIdentityNanoseconds": 3059834,
+          "secondKeyNanoseconds": 0,
+          "ownerLookupNanoseconds": 0,
+          "psnLookupNanoseconds": 0,
+          "preparedSnapshotAgeNanoseconds": 393426334,
+          "preparedWindowsNanoseconds": 589209,
+          "environmentNanoseconds": 29042,
+          "adoptedWindowsNanoseconds": 1958,
+          "pauseAndPublicationNanoseconds": 57041,
+          "actionPreparationNanoseconds": 4764042,
+          "destinationPreparationNanoseconds": 1059209,
+          "finalGuardsNanoseconds": 5583,
+          "activationNanoseconds": 8656791,
+          "destinationNanoseconds": 3583,
+          "requestFinishedNanoseconds": 8763375
+        },
+        "control_adjusted_phases": {
+          "visibleWindowsNanoseconds": 7357,
+          "firstKeyNanoseconds": 0,
+          "preparedIdentityNanoseconds": 3059816,
+          "secondKeyNanoseconds": 0,
+          "ownerLookupNanoseconds": 0,
+          "psnLookupNanoseconds": 0,
+          "preparedSnapshotAgeNanoseconds": 393426316,
+          "preparedWindowsNanoseconds": 589191,
+          "environmentNanoseconds": 29024,
+          "adoptedWindowsNanoseconds": 1940,
+          "pauseAndPublicationNanoseconds": 57023,
+          "actionPreparationNanoseconds": 4764024,
+          "destinationPreparationNanoseconds": 1059191,
+          "finalGuardsNanoseconds": 5565,
+          "activationNanoseconds": 8656773,
+          "destinationNanoseconds": 3565
+        },
+        "server": {
+          "sample_period_us": 100,
+          "samples": 2347,
+          "cpu_ns": 18644000,
+          "wall_ns": 367312333,
+          "max_read_ns": 1709166,
+          "p99_sample_gap_ns": 617750,
+          "max_sample_gap_ns": 2802250,
+          "transitions": [
+            {
+              "identity": 0,
+              "at_ns": 332213361914416,
+              "read_ns": 7916,
+              "lower_ns": 0
+            },
+            {
+              "identity": 1,
+              "at_ns": 332213722657333,
+              "read_ns": 6500,
+              "lower_ns": 332213722517333
+            },
+            {
+              "identity": 0,
+              "at_ns": 332213729214541,
+              "read_ns": 6416,
+              "lower_ns": 332213729061666
+            }
+          ]
+        },
+        "cell": {
+          "scenario": "cpu-load",
+          "key_records": false,
+          "sample_us": 100
+        },
+        "log": "/private/tmp/agentseat-focus-certification-matrix-v2.trial-5.log",
+        "runner_exit": 0,
+        "raw_log": "\n== focus-latency\n\u25c7 Test run started.\n\u21b3 Testing Library Version: 2077\n\u21b3 Target Platform: arm64e-apple-macos14.0\n\u25c7 Suite UserFocusRecoveryLiveTests started.\n\u25c7 Test \"Chrome Print restores the same user window without pointer input\" started.\nFOCUS_CLOCK_CONTROL_NS 18\nTrying to load the allocator multiple times. This is *not* supported.\n[28682:9286087:0910/155332.527270:ERROR:google_apis/gcm/engine/registration_request.cc:291] Registration response error message: PHONE_REGISTRATION_ERROR\n[28682:9286087:0910/155332.527350:ERROR:google_apis/gcm/engine/registration_request.cc:291] Registration response error message: PHONE_REGISTRATION_ERROR\n[28682:9286087:0910/155332.527412:ERROR:google_apis/gcm/engine/registration_request.cc:291] Registration response error message: PHONE_REGISTRATION_ERROR\n[28682:9286087:0910/155332.653420:ERROR:google_apis/gcm/engine/mcs_client.cc:702]   Error code: 401  Error message: Authentication Failed: wrong_secret\n[28682:9286087:0910/155332.653428:ERROR:google_apis/gcm/engine/mcs_client.cc:704] Failed to log in to GCM, resetting connection.\nFOCUS_SERVER {\"sample_period_us\":100,\"samples\":2347,\"cpu_ns\":18644000,\"wall_ns\":367312333,\"max_read_ns\":1709166,\"p99_sample_gap_ns\":617750,\"max_sample_gap_ns\":2802250,\"transitions\":[{\"identity\":0,\"at_ns\":332213361914416,\"read_ns\":7916,\"lower_ns\":0},{\"identity\":1,\"at_ns\":332213722657333,\"read_ns\":6500,\"lower_ns\":332213722517333},{\"identity\":0,\"at_ns\":332213729214541,\"read_ns\":6416,\"lower_ns\":332213729061666}]}\n\nFOCUS_AX [{\"valueKind\":\"AXUIElement\",\"startedAtUptimeNanoseconds\":332212954163833,\"durationNanoseconds\":157583,\"processID\":55735,\"attributeCode\":0,\"mappingCode\":0,\"windowNumber\":89708,\"timeoutCode\":0,\"phase\":\"before\"},{\"valueKind\":\"AXUIElement\",\"startedAtUptimeNanoseconds\":332214524122750,\"durationNanoseconds\":116291,\"processID\":55735,\"attributeCode\":0,\"mappingCode\":0,\"windowNumber\":89708,\"timeoutCode\":0,\"phase\":\"after\"},{\"valueKind\":\"AXUIElement\",\"startedAtUptimeNanoseconds\":332214575317208,\"durationNanoseconds\":124417,\"processID\":55735,\"attributeCode\":0,\"mappingCode\":0,\"windowNumber\":89708,\"timeoutCode\":0,\"phase\":\"stability-0\"},{\"valueKind\":\"AXUIElement\",\"startedAtUptimeNanoseconds\":332214626097458,\"durationNanoseconds\":108875,\"processID\":55735,\"attributeCode\":0,\"mappingCode\":0,\"windowNumber\":89708,\"timeoutCode\":0,\"phase\":\"stability-1\"},{\"valueKind\":\"AXUIElement\",\"startedAtUptimeNanoseconds\":332214677276833,\"durationNanoseconds\":109375,\"processID\":55735,\"attributeCode\":0,\"mappingCode\":0,\"windowNumber\":89708,\"timeoutCode\":0,\"phase\":\"stability-2\"},{\"valueKind\":\"AXUIElement\",\"startedAtUptimeNanoseconds\":332214727916791,\"durationNanoseconds\":99667,\"processID\":55735,\"attributeCode\":0,\"mappingCode\":0,\"windowNumber\":89708,\"timeoutCode\":0,\"phase\":\"stability-3\"}]\nFOCUS_VALIDATION {\"recovered\":true,\"no_uncertain_commands\":true,\"no_physical_input\":true,\"same_user_app\":true,\"cursor_unchanged\":true,\"target_virtual\":true,\"same_user_window\":true}\nFOCUS_TIMING {\"visibleWindowsNanoseconds\":7375,\"notificationReceivedAtUptimeNanoseconds\":332213723187583,\"detectedAtUptimeNanoseconds\":332213723292375,\"firstKeyNanoseconds\":0,\"activationSource\":\"workspaceNotification\",\"preparedIdentityNanoseconds\":3059834,\"secondKeyNanoseconds\":0,\"ownerLookupNanoseconds\":0,\"psnLookupNanoseconds\":0,\"preparedSnapshotAgeNanoseconds\":393426334,\"preparedWindowsNanoseconds\":589209,\"environmentNanoseconds\":29042,\"adoptedWindowsNanoseconds\":1958,\"pauseAndPublicationNanoseconds\":57041,\"actionPreparationNanoseconds\":4764042,\"destinationPreparationNanoseconds\":1059209,\"finalGuardsNanoseconds\":5583,\"activationNanoseconds\":8656791,\"destinationNanoseconds\":3583,\"requestFinishedNanoseconds\":8763375}\nFOCUS recovery=restored frontmost=9.861375 ms detection-to-verification=28.38975 ms request=0 cursor=(1219.16015625, 523.56640625)->(1219.16015625, 523.56640625) HID=0\n[28682:9286098:0910/155333.424981:ERROR:base/process/process_mac.cc:53] task_policy_set TASK_CATEGORY_POLICY: (os/kern) invalid argument (4)\n[28682:9286098:0910/155333.424995:ERROR:base/process/process_mac.cc:98] task_policy_set TASK_SUPPRESSION_POLICY: (os/kern) invalid argument (4)\n[28682:9286098:0910/155333.424999:ERROR:base/process/process_mac.cc:53] task_policy_set TASK_CATEGORY_POLICY: (os/kern) invalid argument (4)\n[28682:9286098:0910/155333.425001:ERROR:base/process/process_mac.cc:98] task_policy_set TASK_SUPPRESSION_POLICY: (os/kern) invalid argument (4)\n[28682:9286098:0910/155333.425372:ERROR:base/process/process_mac.cc:53] task_policy_set TASK_CATEGORY_POLICY: (os/kern) invalid argument (4)\n[28682:9286098:0910/155333.425377:ERROR:base/process/process_mac.cc:98] task_policy_set TASK_SUPPRESSION_POLICY: (os/kern) invalid argument (4)\n[28682:9286056:0910/155333.454919:ERROR:content/browser/gpu/gpu_process_host.cc:1054] GPU process exited unexpectedly: exit_code=15\n\u2714 Test \"Chrome Print restores the same user window without pointer input\" passed after 4.954 seconds.\n\u2714 Suite UserFocusRecoveryLiveTests passed after 4.954 seconds.\n\u2714 Test run with 1 test in 1 suite passed after 4.954 seconds.\nTIER_RESULT {\"executed\": 1, \"problems\": [], \"reported\": 1, \"runs\": 1, \"skip_details\": [], \"skipped\": 0, \"status\": \"passed\"}\nOK   focus-latency: 1 executed, 0 skipped, 1 reported in 1 run(s), log at /var/folders/ck/wcxt_1bs5nz3yxxq5hrdn_1m0000gn/T//agentseat-tier-focus-latency.log\n"
+      },
+      {
+        "functional": "passed",
+        "tier": {
+          "executed": 1,
+          "problems": [],
+          "reported": 1,
+          "runs": 1,
+          "skip_details": [],
+          "skipped": 0,
+          "status": "passed"
+        },
+        "validation": {
+          "no_uncertain_commands": true,
+          "same_user_window": true,
+          "no_physical_input": true,
+          "recovered": true,
+          "target_virtual": true,
+          "same_user_app": true,
+          "cursor_unchanged": true
+        },
+        "physical_evidence": "structured",
+        "ax": [
+          {
+            "windowNumber": 89708,
+            "attributeCode": 0,
+            "timeoutCode": 0,
+            "processID": 55735,
+            "valueKind": "AXUIElement",
+            "mappingCode": 0,
+            "startedAtUptimeNanoseconds": 332220141850125,
+            "phase": "before",
+            "durationNanoseconds": 148041
+          },
+          {
+            "windowNumber": 89708,
+            "attributeCode": 0,
+            "timeoutCode": 0,
+            "processID": 55735,
+            "valueKind": "AXUIElement",
+            "mappingCode": 0,
+            "startedAtUptimeNanoseconds": 332221772551250,
+            "phase": "after",
+            "durationNanoseconds": 106250
+          },
+          {
+            "windowNumber": 89708,
+            "attributeCode": 0,
+            "timeoutCode": 0,
+            "processID": 55735,
+            "valueKind": "AXUIElement",
+            "mappingCode": 0,
+            "startedAtUptimeNanoseconds": 332221823138625,
+            "phase": "stability-0",
+            "durationNanoseconds": 106916
+          },
+          {
+            "windowNumber": 89708,
+            "attributeCode": 0,
+            "timeoutCode": 0,
+            "processID": 55735,
+            "valueKind": "AXUIElement",
+            "mappingCode": 0,
+            "startedAtUptimeNanoseconds": 332221873660791,
+            "phase": "stability-1",
+            "durationNanoseconds": 95667
+          },
+          {
+            "windowNumber": 89708,
+            "attributeCode": 0,
+            "timeoutCode": 0,
+            "processID": 55735,
+            "valueKind": "AXUIElement",
+            "mappingCode": 0,
+            "startedAtUptimeNanoseconds": 332221924502916,
+            "phase": "stability-2",
+            "durationNanoseconds": 154750
+          },
+          {
+            "windowNumber": 89708,
+            "attributeCode": 0,
+            "timeoutCode": 0,
+            "processID": 55735,
+            "valueKind": "AXUIElement",
+            "mappingCode": 0,
+            "startedAtUptimeNanoseconds": 332221975747541,
+            "phase": "stability-3",
+            "durationNanoseconds": 109959
+          }
+        ],
+        "activation_source": "workspaceNotification",
+        "notification_delivery_lower_ns": 8769458,
+        "notification_delivery_upper_ns": 8914041,
+        "observer_to_handler_ns": 199125,
+        "measurement_uncertainty_ns": 690291,
+        "precision": "inconclusive",
+        "qualifies": false,
+        "server_interval_lower_ns": 9011042,
+        "server_interval_upper_ns": 9701333,
+        "detection_delay_lower_ns": 8968583,
+        "detection_delay_upper_ns": 9113166,
+        "budget": "failed",
+        "clock_control_ns": 18,
+        "raw_timing": {
+          "psnLookupNanoseconds": 0,
+          "destinationPreparationNanoseconds": 810417,
+          "activationSource": "workspaceNotification",
+          "environmentNanoseconds": 41917,
+          "preparedWindowsNanoseconds": 436041,
+          "notificationReceivedAtUptimeNanoseconds": 332220894123416,
+          "activationNanoseconds": 3978958,
+          "destinationNanoseconds": 6458,
+          "firstKeyNanoseconds": 3076541,
+          "preparedSnapshotAgeNanoseconds": 380346000,
+          "requestFinishedNanoseconds": 7405542,
+          "adoptedWindowsNanoseconds": 3750,
+          "finalGuardsNanoseconds": 8916,
+          "pauseAndPublicationNanoseconds": 66250,
+          "secondKeyNanoseconds": 206125,
+          "ownerLookupNanoseconds": 0,
+          "preparedIdentityNanoseconds": 57167,
+          "actionPreparationNanoseconds": 3876625,
+          "visibleWindowsNanoseconds": 10708,
+          "detectedAtUptimeNanoseconds": 332220894322541
+        },
+        "control_adjusted_phases": {
+          "psnLookupNanoseconds": 0,
+          "destinationPreparationNanoseconds": 810399,
+          "environmentNanoseconds": 41899,
+          "preparedWindowsNanoseconds": 436023,
+          "activationNanoseconds": 3978940,
+          "destinationNanoseconds": 6440,
+          "firstKeyNanoseconds": 3076523,
+          "preparedSnapshotAgeNanoseconds": 380345982,
+          "adoptedWindowsNanoseconds": 3732,
+          "finalGuardsNanoseconds": 8898,
+          "pauseAndPublicationNanoseconds": 66232,
+          "secondKeyNanoseconds": 206107,
+          "ownerLookupNanoseconds": 0,
+          "preparedIdentityNanoseconds": 57149,
+          "actionPreparationNanoseconds": 3876607,
+          "visibleWindowsNanoseconds": 10690
+        },
+        "server": {
+          "sample_period_us": 100,
+          "samples": 2554,
+          "cpu_ns": 14912000,
+          "wall_ns": 349817417,
+          "max_read_ns": 130375,
+          "p99_sample_gap_ns": 204833,
+          "max_sample_gap_ns": 1476375,
+          "transitions": [
+            {
+              "identity": 0,
+              "at_ns": 332220545100541,
+              "read_ns": 4583,
+              "lower_ns": 0
+            },
+            {
+              "identity": 1,
+              "at_ns": 332220885353958,
+              "read_ns": 7667,
+              "lower_ns": 332220885209375
+            },
+            {
+              "identity": 0,
+              "at_ns": 332220894910708,
+              "read_ns": 15958,
+              "lower_ns": 332220894365000
+            }
+          ]
+        },
+        "cell": {
+          "scenario": "cpu-load",
+          "key_records": true,
+          "sample_us": 100
+        },
+        "log": "/private/tmp/agentseat-focus-certification-matrix-v2.trial-6.log",
+        "runner_exit": 0,
+        "raw_log": "\n== focus-latency\n\u25c7 Test run started.\n\u21b3 Testing Library Version: 2077\n\u21b3 Target Platform: arm64e-apple-macos14.0\n\u25c7 Suite UserFocusRecoveryLiveTests started.\n\u25c7 Test \"Chrome Print restores the same user window without pointer input\" started.\nFOCUS_CLOCK_CONTROL_NS 18\nTrying to load the allocator multiple times. This is *not* supported.\n[28829:9287222:0910/155340.160872:ERROR:base/process/process_mac.cc:53] task_policy_set TASK_CATEGORY_POLICY: (os/kern) invalid argument (4)\n[28829:9287222:0910/155340.160883:ERROR:base/process/process_mac.cc:98] task_policy_set TASK_SUPPRESSION_POLICY: (os/kern) invalid argument (4)\n[28829:9287222:0910/155340.256236:ERROR:base/process/process_mac.cc:53] task_policy_set TASK_CATEGORY_POLICY: (os/kern) invalid argument (4)\n[28829:9287222:0910/155340.256246:ERROR:base/process/process_mac.cc:98] task_policy_set TASK_SUPPRESSION_POLICY: (os/kern) invalid argument (4)\n[28829:9287211:0910/155340.472920:ERROR:google_apis/gcm/engine/registration_request.cc:291] Registration response error message: PHONE_REGISTRATION_ERROR\n[28829:9287211:0910/155340.483762:ERROR:google_apis/gcm/engine/registration_request.cc:291] Registration response error message: PHONE_REGISTRATION_ERROR\n[28829:9287211:0910/155340.483821:ERROR:google_apis/gcm/engine/registration_request.cc:291] Registration response error message: PHONE_REGISTRATION_ERROR\nFOCUS_SERVER {\"sample_period_us\":100,\"samples\":2554,\"cpu_ns\":14912000,\"wall_ns\":349817417,\"max_read_ns\":130375,\"p99_sample_gap_ns\":204833,\"max_sample_gap_ns\":1476375,\"transitions\":[{\"identity\":0,\"at_ns\":332220545100541,\"read_ns\":4583,\"lower_ns\":0},{\"identity\":1,\"at_ns\":332220885353958,\"read_ns\":7667,\"lower_ns\":332220885209375},{\"identity\":0,\"at_ns\":332220894910708,\"read_ns\":15958,\"lower_ns\":332220894365000}]}\n\nFOCUS_AX [{\"windowNumber\":89708,\"attributeCode\":0,\"timeoutCode\":0,\"processID\":55735,\"valueKind\":\"AXUIElement\",\"mappingCode\":0,\"startedAtUptimeNanoseconds\":332220141850125,\"phase\":\"before\",\"durationNanoseconds\":148041},{\"windowNumber\":89708,\"attributeCode\":0,\"timeoutCode\":0,\"processID\":55735,\"valueKind\":\"AXUIElement\",\"mappingCode\":0,\"startedAtUptimeNanoseconds\":332221772551250,\"phase\":\"after\",\"durationNanoseconds\":106250},{\"windowNumber\":89708,\"attributeCode\":0,\"timeoutCode\":0,\"processID\":55735,\"valueKind\":\"AXUIElement\",\"mappingCode\":0,\"startedAtUptimeNanoseconds\":332221823138625,\"phase\":\"stability-0\",\"durationNanoseconds\":106916},{\"windowNumber\":89708,\"attributeCode\":0,\"timeoutCode\":0,\"processID\":55735,\"valueKind\":\"AXUIElement\",\"mappingCode\":0,\"startedAtUptimeNanoseconds\":332221873660791,\"phase\":\"stability-1\",\"durationNanoseconds\":95667},{\"windowNumber\":89708,\"attributeCode\":0,\"timeoutCode\":0,\"processID\":55735,\"valueKind\":\"AXUIElement\",\"mappingCode\":0,\"startedAtUptimeNanoseconds\":332221924502916,\"phase\":\"stability-2\",\"durationNanoseconds\":154750},{\"windowNumber\":89708,\"attributeCode\":0,\"timeoutCode\":0,\"processID\":55735,\"valueKind\":\"AXUIElement\",\"mappingCode\":0,\"startedAtUptimeNanoseconds\":332221975747541,\"phase\":\"stability-3\",\"durationNanoseconds\":109959}]\nFOCUS_VALIDATION {\"no_uncertain_commands\":true,\"same_user_window\":true,\"no_physical_input\":true,\"recovered\":true,\"target_virtual\":true,\"same_user_app\":true,\"cursor_unchanged\":true}\nFOCUS_TIMING {\"psnLookupNanoseconds\":0,\"destinationPreparationNanoseconds\":810417,\"activationSource\":\"workspaceNotification\",\"environmentNanoseconds\":41917,\"preparedWindowsNanoseconds\":436041,\"notificationReceivedAtUptimeNanoseconds\":332220894123416,\"activationNanoseconds\":3978958,\"destinationNanoseconds\":6458,\"firstKeyNanoseconds\":3076541,\"preparedSnapshotAgeNanoseconds\":380346000,\"requestFinishedNanoseconds\":7405542,\"adoptedWindowsNanoseconds\":3750,\"finalGuardsNanoseconds\":8916,\"pauseAndPublicationNanoseconds\":66250,\"secondKeyNanoseconds\":206125,\"ownerLookupNanoseconds\":0,\"preparedIdentityNanoseconds\":57167,\"actionPreparationNanoseconds\":3876625,\"visibleWindowsNanoseconds\":10708,\"detectedAtUptimeNanoseconds\":332220894322541}\nFOCUS recovery=restored frontmost=7.860125 ms detection-to-verification=491.06 ms request=0 cursor=(1219.16015625, 523.56640625)->(1219.16015625, 523.56640625) HID=0\n[28829:9287211:0910/155340.664420:ERROR:google_apis/gcm/engine/connection_factory_impl.cc:484] ConnectionHandler failed with net error: -2\n[28829:9287222:0910/155340.679357:ERROR:base/process/process_mac.cc:53] task_policy_set TASK_CATEGORY_POLICY: (os/kern) invalid argument (4)\n[28829:9287222:0910/155340.679368:ERROR:base/process/process_mac.cc:98] task_policy_set TASK_SUPPRESSION_POLICY: (os/kern) invalid argument (4)\n[28829:9287222:0910/155340.679372:ERROR:base/process/process_mac.cc:53] task_policy_set TASK_CATEGORY_POLICY: (os/kern) invalid argument (4)\n[28829:9287222:0910/155340.679374:ERROR:base/process/process_mac.cc:98] task_policy_set TASK_SUPPRESSION_POLICY: (os/kern) invalid argument (4)\n[28829:9287222:0910/155340.679512:ERROR:base/process/process_mac.cc:53] task_policy_set TASK_CATEGORY_POLICY: (os/kern) invalid argument (4)\n[28829:9287222:0910/155340.679515:ERROR:base/process/process_mac.cc:98] task_policy_set TASK_SUPPRESSION_POLICY: (os/kern) invalid argument (4)\n[28829:9287184:0910/155340.696992:ERROR:content/browser/gpu/gpu_process_host.cc:1054] GPU process exited unexpectedly: exit_code=15\n\u2714 Test \"Chrome Print restores the same user window without pointer input\" passed after 4.751 seconds.\n\u2714 Suite UserFocusRecoveryLiveTests passed after 4.751 seconds.\n\u2714 Test run with 1 test in 1 suite passed after 4.751 seconds.\nTIER_RESULT {\"executed\": 1, \"problems\": [], \"reported\": 1, \"runs\": 1, \"skip_details\": [], \"skipped\": 0, \"status\": \"passed\"}\nOK   focus-latency: 1 executed, 0 skipped, 1 reported in 1 run(s), log at /var/folders/ck/wcxt_1bs5nz3yxxq5hrdn_1m0000gn/T//agentseat-tier-focus-latency.log\n"
+      },
+      {
+        "functional": "passed",
+        "tier": {
+          "executed": 1,
+          "problems": [],
+          "reported": 1,
+          "runs": 1,
+          "skip_details": [],
+          "skipped": 0,
+          "status": "passed"
+        },
+        "validation": {
+          "no_physical_input": true,
+          "same_user_app": true,
+          "no_uncertain_commands": true,
+          "target_virtual": true,
+          "recovered": true,
+          "same_user_window": true,
+          "cursor_unchanged": true
+        },
+        "physical_evidence": "structured",
+        "ax": [
+          {
+            "startedAtUptimeNanoseconds": 332226961446333,
+            "durationNanoseconds": 223667,
+            "processID": 55735,
+            "windowNumber": 89708,
+            "phase": "before",
+            "timeoutCode": 0,
+            "valueKind": "AXUIElement",
+            "mappingCode": 0,
+            "attributeCode": 0
+          },
+          {
+            "startedAtUptimeNanoseconds": 332228547921333,
+            "durationNanoseconds": 237625,
+            "processID": 55735,
+            "windowNumber": 89708,
+            "phase": "after",
+            "timeoutCode": 0,
+            "valueKind": "AXUIElement",
+            "mappingCode": 0,
+            "attributeCode": 0
+          },
+          {
+            "startedAtUptimeNanoseconds": 332228599359041,
+            "durationNanoseconds": 389292,
+            "processID": 55735,
+            "windowNumber": 89708,
+            "phase": "stability-0",
+            "timeoutCode": 0,
+            "valueKind": "AXUIElement",
+            "mappingCode": 0,
+            "attributeCode": 0
+          },
+          {
+            "startedAtUptimeNanoseconds": 332228650953750,
+            "durationNanoseconds": 343125,
+            "processID": 55735,
+            "windowNumber": 89708,
+            "phase": "stability-1",
+            "timeoutCode": 0,
+            "valueKind": "AXUIElement",
+            "mappingCode": 0,
+            "attributeCode": 0
+          },
+          {
+            "startedAtUptimeNanoseconds": 332228703239583,
+            "durationNanoseconds": 353333,
+            "processID": 55735,
+            "windowNumber": 89708,
+            "phase": "stability-2",
+            "timeoutCode": 0,
+            "valueKind": "AXUIElement",
+            "mappingCode": 0,
+            "attributeCode": 0
+          },
+          {
+            "startedAtUptimeNanoseconds": 332228754728333,
+            "durationNanoseconds": 247500,
+            "processID": 55735,
+            "windowNumber": 89708,
+            "phase": "stability-3",
+            "timeoutCode": 0,
+            "valueKind": "AXUIElement",
+            "mappingCode": 0,
+            "attributeCode": 0
+          }
+        ],
+        "activation_source": "workspaceNotification",
+        "notification_delivery_lower_ns": 553875,
+        "notification_delivery_upper_ns": 690542,
+        "observer_to_handler_ns": 150458,
+        "measurement_uncertainty_ns": 329376,
+        "precision": "passed",
+        "qualifies": true,
+        "server_interval_lower_ns": 3114791,
+        "server_interval_upper_ns": 3444167,
+        "detection_delay_lower_ns": 704333,
+        "detection_delay_upper_ns": 841000,
+        "budget": "passed",
+        "clock_control_ns": 21,
+        "raw_timing": {
+          "destinationNanoseconds": 6917,
+          "environmentNanoseconds": 44750,
+          "requestFinishedNanoseconds": 10108750,
+          "preparedSnapshotAgeNanoseconds": 400647875,
+          "adoptedWindowsNanoseconds": 3708,
+          "psnLookupNanoseconds": 0,
+          "pauseAndPublicationNanoseconds": 82208,
+          "preparedWindowsNanoseconds": 384083,
+          "secondKeyNanoseconds": 118667,
+          "ownerLookupNanoseconds": 0,
+          "visibleWindowsNanoseconds": 16917,
+          "preparedIdentityNanoseconds": 52667,
+          "detectedAtUptimeNanoseconds": 332227744277208,
+          "actionPreparationNanoseconds": 1515875,
+          "finalGuardsNanoseconds": 10250,
+          "notificationReceivedAtUptimeNanoseconds": 332227744126750,
+          "activationNanoseconds": 5182292,
+          "destinationPreparationNanoseconds": 1505875,
+          "firstKeyNanoseconds": 4637250,
+          "activationSource": "workspaceNotification"
+        },
+        "control_adjusted_phases": {
+          "destinationNanoseconds": 6896,
+          "environmentNanoseconds": 44729,
+          "preparedSnapshotAgeNanoseconds": 400647854,
+          "adoptedWindowsNanoseconds": 3687,
+          "psnLookupNanoseconds": 0,
+          "pauseAndPublicationNanoseconds": 82187,
+          "preparedWindowsNanoseconds": 384062,
+          "secondKeyNanoseconds": 118646,
+          "ownerLookupNanoseconds": 0,
+          "visibleWindowsNanoseconds": 16896,
+          "preparedIdentityNanoseconds": 52646,
+          "actionPreparationNanoseconds": 1515854,
+          "finalGuardsNanoseconds": 10229,
+          "activationNanoseconds": 5182271,
+          "destinationPreparationNanoseconds": 1505854,
+          "firstKeyNanoseconds": 4637229
+        },
+        "server": {
+          "sample_period_us": 100,
+          "samples": 2812,
+          "cpu_ns": 15066000,
+          "wall_ns": 375114292,
+          "max_read_ns": 54084,
+          "p99_sample_gap_ns": 170625,
+          "max_sample_gap_ns": 672958,
+          "transitions": [
+            {
+              "identity": 0,
+              "at_ns": 332227371772541,
+              "read_ns": 3750,
+              "lower_ns": 0
+            },
+            {
+              "identity": 1,
+              "at_ns": 332227743572875,
+              "read_ns": 6417,
+              "lower_ns": 332227743436208
+            },
+            {
+              "identity": 0,
+              "at_ns": 332227746880375,
+              "read_ns": 44125,
+              "lower_ns": 332227746687666
+            }
+          ]
+        },
+        "cell": {
+          "scenario": "cold",
+          "key_records": true,
+          "sample_us": 100
+        },
+        "log": "/private/tmp/agentseat-focus-certification-matrix-v2.trial-7.log",
+        "runner_exit": 0,
+        "raw_log": "\n== focus-latency\n\u25c7 Test run started.\n\u21b3 Testing Library Version: 2077\n\u21b3 Target Platform: arm64e-apple-macos14.0\n\u25c7 Suite UserFocusRecoveryLiveTests started.\n\u25c7 Test \"Chrome Print restores the same user window without pointer input\" started.\nFOCUS_CLOCK_CONTROL_NS 21\nTrying to load the allocator multiple times. This is *not* supported.\n[28912:9288104:0910/155346.730111:ERROR:google_apis/gcm/engine/registration_request.cc:291] Registration response error message: PHONE_REGISTRATION_ERROR\n[28912:9288104:0910/155346.730206:ERROR:google_apis/gcm/engine/registration_request.cc:291] Registration response error message: PHONE_REGISTRATION_ERROR\n[28912:9288104:0910/155346.730355:ERROR:google_apis/gcm/engine/registration_request.cc:291] Registration response error message: PHONE_REGISTRATION_ERROR\nFOCUS_SERVER {\"sample_period_us\":100,\"samples\":2812,\"cpu_ns\":15066000,\"wall_ns\":375114292,\"max_read_ns\":54084,\"p99_sample_gap_ns\":170625,\"max_sample_gap_ns\":672958,\"transitions\":[{\"identity\":0,\"at_ns\":332227371772541,\"read_ns\":3750,\"lower_ns\":0},{\"identity\":1,\"at_ns\":332227743572875,\"read_ns\":6417,\"lower_ns\":332227743436208},{\"identity\":0,\"at_ns\":332227746880375,\"read_ns\":44125,\"lower_ns\":332227746687666}]}\n\nFOCUS_AX [{\"startedAtUptimeNanoseconds\":332226961446333,\"durationNanoseconds\":223667,\"processID\":55735,\"windowNumber\":89708,\"phase\":\"before\",\"timeoutCode\":0,\"valueKind\":\"AXUIElement\",\"mappingCode\":0,\"attributeCode\":0},{\"startedAtUptimeNanoseconds\":332228547921333,\"durationNanoseconds\":237625,\"processID\":55735,\"windowNumber\":89708,\"phase\":\"after\",\"timeoutCode\":0,\"valueKind\":\"AXUIElement\",\"mappingCode\":0,\"attributeCode\":0},{\"startedAtUptimeNanoseconds\":332228599359041,\"durationNanoseconds\":389292,\"processID\":55735,\"windowNumber\":89708,\"phase\":\"stability-0\",\"timeoutCode\":0,\"valueKind\":\"AXUIElement\",\"mappingCode\":0,\"attributeCode\":0},{\"startedAtUptimeNanoseconds\":332228650953750,\"durationNanoseconds\":343125,\"processID\":55735,\"windowNumber\":89708,\"phase\":\"stability-1\",\"timeoutCode\":0,\"valueKind\":\"AXUIElement\",\"mappingCode\":0,\"attributeCode\":0},{\"startedAtUptimeNanoseconds\":332228703239583,\"durationNanoseconds\":353333,\"processID\":55735,\"windowNumber\":89708,\"phase\":\"stability-2\",\"timeoutCode\":0,\"valueKind\":\"AXUIElement\",\"mappingCode\":0,\"attributeCode\":0},{\"startedAtUptimeNanoseconds\":332228754728333,\"durationNanoseconds\":247500,\"processID\":55735,\"windowNumber\":89708,\"phase\":\"stability-3\",\"timeoutCode\":0,\"valueKind\":\"AXUIElement\",\"mappingCode\":0,\"attributeCode\":0}]\nFOCUS_VALIDATION {\"no_physical_input\":true,\"same_user_app\":true,\"no_uncertain_commands\":true,\"target_virtual\":true,\"recovered\":true,\"same_user_window\":true,\"cursor_unchanged\":true}\nFOCUS_TIMING {\"destinationNanoseconds\":6917,\"environmentNanoseconds\":44750,\"requestFinishedNanoseconds\":10108750,\"preparedSnapshotAgeNanoseconds\":400647875,\"adoptedWindowsNanoseconds\":3708,\"psnLookupNanoseconds\":0,\"pauseAndPublicationNanoseconds\":82208,\"preparedWindowsNanoseconds\":384083,\"secondKeyNanoseconds\":118667,\"ownerLookupNanoseconds\":0,\"visibleWindowsNanoseconds\":16917,\"preparedIdentityNanoseconds\":52667,\"detectedAtUptimeNanoseconds\":332227744277208,\"actionPreparationNanoseconds\":1515875,\"finalGuardsNanoseconds\":10250,\"notificationReceivedAtUptimeNanoseconds\":332227744126750,\"activationNanoseconds\":5182292,\"destinationPreparationNanoseconds\":1505875,\"firstKeyNanoseconds\":4637250,\"activationSource\":\"workspaceNotification\"}\nFOCUS recovery=restored frontmost=10.4085 ms detection-to-verification=19.418958 ms request=0 cursor=(1219.16015625, 523.56640625)->(1219.16015625, 523.56640625) HID=0\n[28912:9288104:0910/155347.454679:ERROR:google_apis/gcm/engine/connection_factory_impl.cc:484] ConnectionHandler failed with net error: -2\n[28912:9288115:0910/155347.458347:ERROR:base/process/process_mac.cc:53] task_policy_set TASK_CATEGORY_POLICY: (os/kern) invalid argument (4)\n[28912:9288115:0910/155347.458430:ERROR:base/process/process_mac.cc:98] task_policy_set TASK_SUPPRESSION_POLICY: (os/kern) invalid argument (4)\n[28912:9288115:0910/155347.458441:ERROR:base/process/process_mac.cc:53] task_policy_set TASK_CATEGORY_POLICY: (os/kern) invalid argument (4)\n[28912:9288115:0910/155347.458446:ERROR:base/process/process_mac.cc:98] task_policy_set TASK_SUPPRESSION_POLICY: (os/kern) invalid argument (4)\n[28912:9288115:0910/155347.458453:ERROR:base/process/process_mac.cc:53] task_policy_set TASK_CATEGORY_POLICY: (os/kern) invalid argument (4)\n[28912:9288115:0910/155347.458456:ERROR:base/process/process_mac.cc:98] task_policy_set TASK_SUPPRESSION_POLICY: (os/kern) invalid argument (4)\n[28912:9288079:0910/155347.476750:ERROR:content/browser/gpu/gpu_process_host.cc:1054] GPU process exited unexpectedly: exit_code=15\n\u2714 Test \"Chrome Print restores the same user window without pointer input\" passed after 4.796 seconds.\n\u2714 Suite UserFocusRecoveryLiveTests passed after 4.796 seconds.\n\u2714 Test run with 1 test in 1 suite passed after 4.796 seconds.\nTIER_RESULT {\"executed\": 1, \"problems\": [], \"reported\": 1, \"runs\": 1, \"skip_details\": [], \"skipped\": 0, \"status\": \"passed\"}\nOK   focus-latency: 1 executed, 0 skipped, 1 reported in 1 run(s), log at /var/folders/ck/wcxt_1bs5nz3yxxq5hrdn_1m0000gn/T//agentseat-tier-focus-latency.log\n"
+      },
+      {
+        "functional": "passed",
+        "tier": {
+          "executed": 1,
+          "problems": [],
+          "reported": 1,
+          "runs": 1,
+          "skip_details": [],
+          "skipped": 0,
+          "status": "passed"
+        },
+        "validation": {
+          "recovered": true,
+          "same_user_window": true,
+          "same_user_app": true,
+          "cursor_unchanged": true,
+          "no_physical_input": true,
+          "no_uncertain_commands": true,
+          "target_virtual": true
+        },
+        "physical_evidence": "structured",
+        "ax": [
+          {
+            "processID": 55735,
+            "startedAtUptimeNanoseconds": 332233781940750,
+            "mappingCode": 0,
+            "timeoutCode": 0,
+            "attributeCode": 0,
+            "windowNumber": 89708,
+            "durationNanoseconds": 195875,
+            "phase": "before",
+            "valueKind": "AXUIElement"
+          },
+          {
+            "windowNumber": 89708,
+            "mappingCode": 0,
+            "processID": 55735,
+            "timeoutCode": 0,
+            "valueKind": "AXUIElement",
+            "phase": "after",
+            "attributeCode": 0,
+            "startedAtUptimeNanoseconds": 332235371824291,
+            "durationNanoseconds": 321209
+          },
+          {
+            "windowNumber": 89708,
+            "mappingCode": 0,
+            "processID": 55735,
+            "timeoutCode": 0,
+            "valueKind": "AXUIElement",
+            "phase": "stability-0",
+            "attributeCode": 0,
+            "startedAtUptimeNanoseconds": 332235426054458,
+            "durationNanoseconds": 351333
+          },
+          {
+            "windowNumber": 89708,
+            "mappingCode": 0,
+            "processID": 55735,
+            "timeoutCode": 0,
+            "valueKind": "AXUIElement",
+            "phase": "stability-1",
+            "attributeCode": 0,
+            "startedAtUptimeNanoseconds": 332235477569500,
+            "durationNanoseconds": 281125
+          },
+          {
+            "windowNumber": 89708,
+            "mappingCode": 0,
+            "processID": 55735,
+            "timeoutCode": 0,
+            "valueKind": "AXUIElement",
+            "phase": "stability-2",
+            "attributeCode": 0,
+            "startedAtUptimeNanoseconds": 332235529046833,
+            "durationNanoseconds": 424458
+          },
+          {
+            "windowNumber": 89708,
+            "mappingCode": 0,
+            "processID": 55735,
+            "timeoutCode": 0,
+            "valueKind": "AXUIElement",
+            "phase": "stability-3",
+            "attributeCode": 0,
+            "startedAtUptimeNanoseconds": 332235580213625,
+            "durationNanoseconds": 361000
+          }
+        ],
+        "activation_source": "workspaceNotification",
+        "notification_delivery_lower_ns": 861708,
+        "notification_delivery_upper_ns": 1028166,
+        "observer_to_handler_ns": 86084,
+        "measurement_uncertainty_ns": 310417,
+        "precision": "passed",
+        "qualifies": true,
+        "server_interval_lower_ns": 3094708,
+        "server_interval_upper_ns": 3405125,
+        "detection_delay_lower_ns": 947792,
+        "detection_delay_upper_ns": 1114250,
+        "budget": "passed",
+        "clock_control_ns": 26,
+        "raw_timing": {
+          "environmentNanoseconds": 24000,
+          "destinationPreparationNanoseconds": 1638958,
+          "preparedWindowsNanoseconds": 403000,
+          "ownerLookupNanoseconds": 0,
+          "secondKeyNanoseconds": 0,
+          "adoptedWindowsNanoseconds": 2250,
+          "actionPreparationNanoseconds": 1547916,
+          "detectedAtUptimeNanoseconds": 332234549174125,
+          "destinationNanoseconds": 3792,
+          "requestFinishedNanoseconds": 5028583,
+          "pauseAndPublicationNanoseconds": 55708,
+          "notificationReceivedAtUptimeNanoseconds": 332234549088041,
+          "finalGuardsNanoseconds": 5042,
+          "visibleWindowsNanoseconds": 6166,
+          "preparedSnapshotAgeNanoseconds": 385382125,
+          "psnLookupNanoseconds": 0,
+          "activationNanoseconds": 4929750,
+          "firstKeyNanoseconds": 0,
+          "preparedIdentityNanoseconds": 50334,
+          "activationSource": "workspaceNotification"
+        },
+        "control_adjusted_phases": {
+          "environmentNanoseconds": 23974,
+          "destinationPreparationNanoseconds": 1638932,
+          "preparedWindowsNanoseconds": 402974,
+          "ownerLookupNanoseconds": 0,
+          "secondKeyNanoseconds": 0,
+          "adoptedWindowsNanoseconds": 2224,
+          "actionPreparationNanoseconds": 1547890,
+          "destinationNanoseconds": 3766,
+          "pauseAndPublicationNanoseconds": 55682,
+          "finalGuardsNanoseconds": 5016,
+          "visibleWindowsNanoseconds": 6140,
+          "preparedSnapshotAgeNanoseconds": 385382099,
+          "psnLookupNanoseconds": 0,
+          "activationNanoseconds": 4929724,
+          "firstKeyNanoseconds": 0,
+          "preparedIdentityNanoseconds": 50308
+        },
+        "server": {
+          "sample_period_us": 100,
+          "samples": 2538,
+          "cpu_ns": 14928000,
+          "wall_ns": 359375875,
+          "max_read_ns": 1105500,
+          "p99_sample_gap_ns": 335667,
+          "max_sample_gap_ns": 1540750,
+          "transitions": [
+            {
+              "identity": 0,
+              "at_ns": 332234192096291,
+              "read_ns": 3125,
+              "lower_ns": 0
+            },
+            {
+              "identity": 1,
+              "at_ns": 332234548226333,
+              "read_ns": 9333,
+              "lower_ns": 332234548059875
+            },
+            {
+              "identity": 0,
+              "at_ns": 332234551465000,
+              "read_ns": 6875,
+              "lower_ns": 332234551321041
+            }
+          ]
+        },
+        "cell": {
+          "scenario": "cold",
+          "key_records": false,
+          "sample_us": 100
+        },
+        "log": "/private/tmp/agentseat-focus-certification-matrix-v2.trial-8.log",
+        "runner_exit": 0,
+        "raw_log": "\n== focus-latency\n\u25c7 Test run started.\n\u21b3 Testing Library Version: 2077\n\u21b3 Target Platform: arm64e-apple-macos14.0\n\u25c7 Suite UserFocusRecoveryLiveTests started.\n\u25c7 Test \"Chrome Print restores the same user window without pointer input\" started.\nFOCUS_CLOCK_CONTROL_NS 26\nTrying to load the allocator multiple times. This is *not* supported.\n[29048:9289117:0910/155353.504695:ERROR:google_apis/gcm/engine/registration_request.cc:291] Registration response error message: PHONE_REGISTRATION_ERROR\n[29048:9289117:0910/155353.505175:ERROR:google_apis/gcm/engine/registration_request.cc:291] Registration response error message: PHONE_REGISTRATION_ERROR\n[29048:9289117:0910/155353.505564:ERROR:google_apis/gcm/engine/registration_request.cc:291] Registration response error message: PHONE_REGISTRATION_ERROR\nFOCUS_SERVER {\"sample_period_us\":100,\"samples\":2538,\"cpu_ns\":14928000,\"wall_ns\":359375875,\"max_read_ns\":1105500,\"p99_sample_gap_ns\":335667,\"max_sample_gap_ns\":1540750,\"transitions\":[{\"identity\":0,\"at_ns\":332234192096291,\"read_ns\":3125,\"lower_ns\":0},{\"identity\":1,\"at_ns\":332234548226333,\"read_ns\":9333,\"lower_ns\":332234548059875},{\"identity\":0,\"at_ns\":332234551465000,\"read_ns\":6875,\"lower_ns\":332234551321041}]}\n\nFOCUS_AX [{\"processID\":55735,\"startedAtUptimeNanoseconds\":332233781940750,\"mappingCode\":0,\"timeoutCode\":0,\"attributeCode\":0,\"windowNumber\":89708,\"durationNanoseconds\":195875,\"phase\":\"before\",\"valueKind\":\"AXUIElement\"},{\"windowNumber\":89708,\"mappingCode\":0,\"processID\":55735,\"timeoutCode\":0,\"valueKind\":\"AXUIElement\",\"phase\":\"after\",\"attributeCode\":0,\"startedAtUptimeNanoseconds\":332235371824291,\"durationNanoseconds\":321209},{\"windowNumber\":89708,\"mappingCode\":0,\"processID\":55735,\"timeoutCode\":0,\"valueKind\":\"AXUIElement\",\"phase\":\"stability-0\",\"attributeCode\":0,\"startedAtUptimeNanoseconds\":332235426054458,\"durationNanoseconds\":351333},{\"windowNumber\":89708,\"mappingCode\":0,\"processID\":55735,\"timeoutCode\":0,\"valueKind\":\"AXUIElement\",\"phase\":\"stability-1\",\"attributeCode\":0,\"startedAtUptimeNanoseconds\":332235477569500,\"durationNanoseconds\":281125},{\"windowNumber\":89708,\"mappingCode\":0,\"processID\":55735,\"timeoutCode\":0,\"valueKind\":\"AXUIElement\",\"phase\":\"stability-2\",\"attributeCode\":0,\"startedAtUptimeNanoseconds\":332235529046833,\"durationNanoseconds\":424458},{\"windowNumber\":89708,\"mappingCode\":0,\"processID\":55735,\"timeoutCode\":0,\"valueKind\":\"AXUIElement\",\"phase\":\"stability-3\",\"attributeCode\":0,\"startedAtUptimeNanoseconds\":332235580213625,\"durationNanoseconds\":361000}]\nFOCUS_VALIDATION {\"recovered\":true,\"same_user_window\":true,\"same_user_app\":true,\"cursor_unchanged\":true,\"no_physical_input\":true,\"no_uncertain_commands\":true,\"target_virtual\":true}\nFOCUS_TIMING {\"environmentNanoseconds\":24000,\"destinationPreparationNanoseconds\":1638958,\"preparedWindowsNanoseconds\":403000,\"ownerLookupNanoseconds\":0,\"secondKeyNanoseconds\":0,\"adoptedWindowsNanoseconds\":2250,\"actionPreparationNanoseconds\":1547916,\"detectedAtUptimeNanoseconds\":332234549174125,\"destinationNanoseconds\":3792,\"requestFinishedNanoseconds\":5028583,\"pauseAndPublicationNanoseconds\":55708,\"notificationReceivedAtUptimeNanoseconds\":332234549088041,\"finalGuardsNanoseconds\":5042,\"visibleWindowsNanoseconds\":6166,\"preparedSnapshotAgeNanoseconds\":385382125,\"psnLookupNanoseconds\":0,\"activationNanoseconds\":4929750,\"firstKeyNanoseconds\":0,\"preparedIdentityNanoseconds\":50334,\"activationSource\":\"workspaceNotification\"}\nFOCUS recovery=restored frontmost=10.521375 ms detection-to-verification=17.37275 ms request=0 cursor=(1219.16015625, 523.56640625)->(1219.16015625, 523.56640625) HID=0\n[29048:9289117:0910/155354.279848:ERROR:google_apis/gcm/engine/connection_factory_impl.cc:484] ConnectionHandler failed with net error: -2\n[29048:9289092:0910/155354.300503:ERROR:content/browser/gpu/gpu_process_host.cc:1054] GPU process exited unexpectedly: exit_code=15\n\u2714 Test \"Chrome Print restores the same user window without pointer input\" passed after 4.733 seconds.\n\u2714 Suite UserFocusRecoveryLiveTests passed after 4.733 seconds.\n\u2714 Test run with 1 test in 1 suite passed after 4.734 seconds.\nTIER_RESULT {\"executed\": 1, \"problems\": [], \"reported\": 1, \"runs\": 1, \"skip_details\": [], \"skipped\": 0, \"status\": \"passed\"}\nOK   focus-latency: 1 executed, 0 skipped, 1 reported in 1 run(s), log at /var/folders/ck/wcxt_1bs5nz3yxxq5hrdn_1m0000gn/T//agentseat-tier-focus-latency.log\n"
+      },
+      {
+        "functional": "passed",
+        "tier": {
+          "executed": 1,
+          "problems": [],
+          "reported": 1,
+          "runs": 1,
+          "skip_details": [],
+          "skipped": 0,
+          "status": "passed"
+        },
+        "validation": {
+          "no_uncertain_commands": true,
+          "target_virtual": true,
+          "no_physical_input": true,
+          "same_user_app": true,
+          "recovered": true,
+          "same_user_window": true,
+          "cursor_unchanged": true
+        },
+        "physical_evidence": "structured",
+        "ax": [
+          {
+            "durationNanoseconds": 204875,
+            "valueKind": "AXUIElement",
+            "windowNumber": 89708,
+            "phase": "before",
+            "processID": 55735,
+            "startedAtUptimeNanoseconds": 332240521853875,
+            "attributeCode": 0,
+            "timeoutCode": 0,
+            "mappingCode": 0
+          },
+          {
+            "durationNanoseconds": 145083,
+            "valueKind": "AXUIElement",
+            "windowNumber": 89708,
+            "phase": "after",
+            "processID": 55735,
+            "startedAtUptimeNanoseconds": 332242565763333,
+            "attributeCode": 0,
+            "timeoutCode": 0,
+            "mappingCode": 0
+          },
+          {
+            "durationNanoseconds": 127250,
+            "valueKind": "AXUIElement",
+            "windowNumber": 89708,
+            "phase": "stability-0",
+            "processID": 55735,
+            "startedAtUptimeNanoseconds": 332242621640041,
+            "attributeCode": 0,
+            "timeoutCode": 0,
+            "mappingCode": 0
+          },
+          {
+            "durationNanoseconds": 383042,
+            "valueKind": "AXUIElement",
+            "windowNumber": 89708,
+            "phase": "stability-1",
+            "processID": 55735,
+            "startedAtUptimeNanoseconds": 332242672914416,
+            "attributeCode": 0,
+            "timeoutCode": 0,
+            "mappingCode": 0
+          },
+          {
+            "durationNanoseconds": 194500,
+            "valueKind": "AXUIElement",
+            "windowNumber": 89708,
+            "phase": "stability-2",
+            "processID": 55735,
+            "startedAtUptimeNanoseconds": 332242723859250,
+            "attributeCode": 0,
+            "timeoutCode": 0,
+            "mappingCode": 0
+          },
+          {
+            "durationNanoseconds": 381292,
+            "valueKind": "AXUIElement",
+            "windowNumber": 89708,
+            "phase": "stability-3",
+            "processID": 55735,
+            "startedAtUptimeNanoseconds": 332242775164666,
+            "attributeCode": 0,
+            "timeoutCode": 0,
+            "mappingCode": 0
+          }
+        ],
+        "activation_source": "workspaceNotification",
+        "notification_delivery_lower_ns": 450709,
+        "notification_delivery_upper_ns": 591917,
+        "observer_to_handler_ns": 96750,
+        "measurement_uncertainty_ns": 288625,
+        "precision": "passed",
+        "qualifies": true,
+        "server_interval_lower_ns": 2999875,
+        "server_interval_upper_ns": 3288500,
+        "detection_delay_lower_ns": 547459,
+        "detection_delay_upper_ns": 688667,
+        "budget": "passed",
+        "clock_control_ns": 40,
+        "raw_timing": {
+          "actionPreparationNanoseconds": 1756583,
+          "finalGuardsNanoseconds": 4417,
+          "secondKeyNanoseconds": 246875,
+          "adoptedWindowsNanoseconds": 2041,
+          "destinationPreparationNanoseconds": 1459250,
+          "requestFinishedNanoseconds": 10566541,
+          "destinationNanoseconds": 3125,
+          "ownerLookupNanoseconds": 0,
+          "firstKeyNanoseconds": 5339958,
+          "preparedWindowsNanoseconds": 414625,
+          "detectedAtUptimeNanoseconds": 332241742489125,
+          "visibleWindowsNanoseconds": 6625,
+          "preparedSnapshotAgeNanoseconds": 386453167,
+          "notificationReceivedAtUptimeNanoseconds": 332241742392375,
+          "preparedIdentityNanoseconds": 50750,
+          "environmentNanoseconds": 19042,
+          "activationNanoseconds": 4893958,
+          "activationSource": "workspaceNotification",
+          "psnLookupNanoseconds": 0,
+          "pauseAndPublicationNanoseconds": 45291
+        },
+        "control_adjusted_phases": {
+          "actionPreparationNanoseconds": 1756543,
+          "finalGuardsNanoseconds": 4377,
+          "secondKeyNanoseconds": 246835,
+          "adoptedWindowsNanoseconds": 2001,
+          "destinationPreparationNanoseconds": 1459210,
+          "destinationNanoseconds": 3085,
+          "ownerLookupNanoseconds": 0,
+          "firstKeyNanoseconds": 5339918,
+          "preparedWindowsNanoseconds": 414585,
+          "visibleWindowsNanoseconds": 6585,
+          "preparedSnapshotAgeNanoseconds": 386453127,
+          "preparedIdentityNanoseconds": 50710,
+          "environmentNanoseconds": 19002,
+          "activationNanoseconds": 4893918,
+          "psnLookupNanoseconds": 0,
+          "pauseAndPublicationNanoseconds": 45251
+        },
+        "server": {
+          "sample_period_us": 100,
+          "samples": 2467,
+          "cpu_ns": 16877000,
+          "wall_ns": 346713709,
+          "max_read_ns": 427417,
+          "p99_sample_gap_ns": 243875,
+          "max_sample_gap_ns": 1415041,
+          "transitions": [
+            {
+              "identity": 0,
+              "at_ns": 332241398387791,
+              "read_ns": 9833,
+              "lower_ns": 0
+            },
+            {
+              "identity": 1,
+              "at_ns": 332241741941666,
+              "read_ns": 5916,
+              "lower_ns": 332241741800458
+            },
+            {
+              "identity": 0,
+              "at_ns": 332241745088958,
+              "read_ns": 10875,
+              "lower_ns": 332241744941541
+            }
+          ]
+        },
+        "cell": {
+          "scenario": "warm-menu",
+          "key_records": true,
+          "sample_us": 100
+        },
+        "log": "/private/tmp/agentseat-focus-certification-matrix-v2.trial-9.log",
+        "runner_exit": 0,
+        "raw_log": "\n== focus-latency\n\u25c7 Test run started.\n\u21b3 Testing Library Version: 2077\n\u21b3 Target Platform: arm64e-apple-macos14.0\n\u25c7 Suite UserFocusRecoveryLiveTests started.\n\u25c7 Test \"Chrome Print restores the same user window without pointer input\" started.\nFOCUS_CLOCK_CONTROL_NS 40\nTrying to load the allocator multiple times. This is *not* supported.\n[29186:9290112:0910/155400.155218:ERROR:google_apis/gcm/engine/registration_request.cc:291] Registration response error message: PHONE_REGISTRATION_ERROR\n[29186:9290112:0910/155400.155374:ERROR:google_apis/gcm/engine/registration_request.cc:291] Registration response error message: PHONE_REGISTRATION_ERROR\n[29186:9290112:0910/155400.155612:ERROR:google_apis/gcm/engine/registration_request.cc:291] Registration response error message: PHONE_REGISTRATION_ERROR\n[29186:9290112:0910/155400.205812:ERROR:google_apis/gcm/engine/mcs_client.cc:702]   Error code: 401  Error message: Authentication Failed: wrong_secret\n[29186:9290112:0910/155400.205824:ERROR:google_apis/gcm/engine/mcs_client.cc:704] Failed to log in to GCM, resetting connection.\nFOCUS_SERVER {\"sample_period_us\":100,\"samples\":2467,\"cpu_ns\":16877000,\"wall_ns\":346713709,\"max_read_ns\":427417,\"p99_sample_gap_ns\":243875,\"max_sample_gap_ns\":1415041,\"transitions\":[{\"identity\":0,\"at_ns\":332241398387791,\"read_ns\":9833,\"lower_ns\":0},{\"identity\":1,\"at_ns\":332241741941666,\"read_ns\":5916,\"lower_ns\":332241741800458},{\"identity\":0,\"at_ns\":332241745088958,\"read_ns\":10875,\"lower_ns\":332241744941541}]}\n\nFOCUS_AX [{\"durationNanoseconds\":204875,\"valueKind\":\"AXUIElement\",\"windowNumber\":89708,\"phase\":\"before\",\"processID\":55735,\"startedAtUptimeNanoseconds\":332240521853875,\"attributeCode\":0,\"timeoutCode\":0,\"mappingCode\":0},{\"durationNanoseconds\":145083,\"valueKind\":\"AXUIElement\",\"windowNumber\":89708,\"phase\":\"after\",\"processID\":55735,\"startedAtUptimeNanoseconds\":332242565763333,\"attributeCode\":0,\"timeoutCode\":0,\"mappingCode\":0},{\"durationNanoseconds\":127250,\"valueKind\":\"AXUIElement\",\"windowNumber\":89708,\"phase\":\"stability-0\",\"processID\":55735,\"startedAtUptimeNanoseconds\":332242621640041,\"attributeCode\":0,\"timeoutCode\":0,\"mappingCode\":0},{\"durationNanoseconds\":383042,\"valueKind\":\"AXUIElement\",\"windowNumber\":89708,\"phase\":\"stability-1\",\"processID\":55735,\"startedAtUptimeNanoseconds\":332242672914416,\"attributeCode\":0,\"timeoutCode\":0,\"mappingCode\":0},{\"durationNanoseconds\":194500,\"valueKind\":\"AXUIElement\",\"windowNumber\":89708,\"phase\":\"stability-2\",\"processID\":55735,\"startedAtUptimeNanoseconds\":332242723859250,\"attributeCode\":0,\"timeoutCode\":0,\"mappingCode\":0},{\"durationNanoseconds\":381292,\"valueKind\":\"AXUIElement\",\"windowNumber\":89708,\"phase\":\"stability-3\",\"processID\":55735,\"startedAtUptimeNanoseconds\":332242775164666,\"attributeCode\":0,\"timeoutCode\":0,\"mappingCode\":0}]\nFOCUS_VALIDATION {\"no_uncertain_commands\":true,\"target_virtual\":true,\"no_physical_input\":true,\"same_user_app\":true,\"recovered\":true,\"same_user_window\":true,\"cursor_unchanged\":true}\nFOCUS_TIMING {\"actionPreparationNanoseconds\":1756583,\"finalGuardsNanoseconds\":4417,\"secondKeyNanoseconds\":246875,\"adoptedWindowsNanoseconds\":2041,\"destinationPreparationNanoseconds\":1459250,\"requestFinishedNanoseconds\":10566541,\"destinationNanoseconds\":3125,\"ownerLookupNanoseconds\":0,\"firstKeyNanoseconds\":5339958,\"preparedWindowsNanoseconds\":414625,\"detectedAtUptimeNanoseconds\":332241742489125,\"visibleWindowsNanoseconds\":6625,\"preparedSnapshotAgeNanoseconds\":386453167,\"notificationReceivedAtUptimeNanoseconds\":332241742392375,\"preparedIdentityNanoseconds\":50750,\"environmentNanoseconds\":19042,\"activationNanoseconds\":4893958,\"activationSource\":\"workspaceNotification\",\"psnLookupNanoseconds\":0,\"pauseAndPublicationNanoseconds\":45291}\nFOCUS recovery=restored frontmost=11.724125 ms detection-to-verification=23.462875 ms request=0 cursor=(1219.16015625, 523.56640625)->(1219.16015625, 523.56640625) HID=0\n[29186:9290125:0910/155401.471016:ERROR:base/process/process_mac.cc:53] task_policy_set TASK_CATEGORY_POLICY: (os/kern) invalid argument (4)\n[29186:9290125:0910/155401.471029:ERROR:base/process/process_mac.cc:98] task_policy_set TASK_SUPPRESSION_POLICY: (os/kern) invalid argument (4)\n[29186:9290125:0910/155401.471035:ERROR:base/process/process_mac.cc:53] task_policy_set TASK_CATEGORY_POLICY: (os/kern) invalid argument (4)\n[29186:9290125:0910/155401.471037:ERROR:base/process/process_mac.cc:98] task_policy_set TASK_SUPPRESSION_POLICY: (os/kern) invalid argument (4)\n[29186:9290125:0910/155401.471040:ERROR:base/process/process_mac.cc:53] task_policy_set TASK_CATEGORY_POLICY: (os/kern) invalid argument (4)\n[29186:9290125:0910/155401.471042:ERROR:base/process/process_mac.cc:98] task_policy_set TASK_SUPPRESSION_POLICY: (os/kern) invalid argument (4)\n[29186:9290087:0910/155401.492025:ERROR:content/browser/gpu/gpu_process_host.cc:1054] GPU process exited unexpectedly: exit_code=15\n\u2714 Test \"Chrome Print restores the same user window without pointer input\" passed after 5.156 seconds.\n\u2714 Suite UserFocusRecoveryLiveTests passed after 5.156 seconds.\n\u2714 Test run with 1 test in 1 suite passed after 5.157 seconds.\nTIER_RESULT {\"executed\": 1, \"problems\": [], \"reported\": 1, \"runs\": 1, \"skip_details\": [], \"skipped\": 0, \"status\": \"passed\"}\nOK   focus-latency: 1 executed, 0 skipped, 1 reported in 1 run(s), log at /var/folders/ck/wcxt_1bs5nz3yxxq5hrdn_1m0000gn/T//agentseat-tier-focus-latency.log\n"
+      },
+      {
+        "functional": "passed",
+        "tier": {
+          "executed": 1,
+          "problems": [],
+          "reported": 1,
+          "runs": 1,
+          "skip_details": [],
+          "skipped": 0,
+          "status": "passed"
+        },
+        "validation": {
+          "cursor_unchanged": true,
+          "no_uncertain_commands": true,
+          "recovered": true,
+          "same_user_window": true,
+          "same_user_app": true,
+          "no_physical_input": true,
+          "target_virtual": true
+        },
+        "physical_evidence": "structured",
+        "ax": [
+          {
+            "durationNanoseconds": 181042,
+            "mappingCode": 0,
+            "phase": "before",
+            "windowNumber": 89708,
+            "timeoutCode": 0,
+            "processID": 55735,
+            "startedAtUptimeNanoseconds": 332247678299416,
+            "valueKind": "AXUIElement",
+            "attributeCode": 0
+          },
+          {
+            "durationNanoseconds": 343334,
+            "mappingCode": 0,
+            "phase": "after",
+            "windowNumber": 89708,
+            "timeoutCode": 0,
+            "processID": 55735,
+            "startedAtUptimeNanoseconds": 332249687903041,
+            "valueKind": "AXUIElement",
+            "attributeCode": 0
+          },
+          {
+            "durationNanoseconds": 355334,
+            "mappingCode": 0,
+            "phase": "stability-0",
+            "windowNumber": 89708,
+            "timeoutCode": 0,
+            "processID": 55735,
+            "startedAtUptimeNanoseconds": 332249738488666,
+            "valueKind": "AXUIElement",
+            "attributeCode": 0
+          },
+          {
+            "durationNanoseconds": 353417,
+            "mappingCode": 0,
+            "phase": "stability-1",
+            "windowNumber": 89708,
+            "timeoutCode": 0,
+            "processID": 55735,
+            "startedAtUptimeNanoseconds": 332249789607083,
+            "valueKind": "AXUIElement",
+            "attributeCode": 0
+          },
+          {
+            "durationNanoseconds": 143667,
+            "mappingCode": 0,
+            "phase": "stability-2",
+            "windowNumber": 89708,
+            "timeoutCode": 0,
+            "processID": 55735,
+            "startedAtUptimeNanoseconds": 332249841138166,
+            "valueKind": "AXUIElement",
+            "attributeCode": 0
+          },
+          {
+            "durationNanoseconds": 191958,
+            "mappingCode": 0,
+            "phase": "stability-3",
+            "windowNumber": 89708,
+            "timeoutCode": 0,
+            "processID": 55735,
+            "startedAtUptimeNanoseconds": 332249895657750,
+            "valueKind": "AXUIElement",
+            "attributeCode": 0
+          }
+        ],
+        "activation_source": "workspaceNotification",
+        "notification_delivery_lower_ns": 347333,
+        "notification_delivery_upper_ns": 491083,
+        "observer_to_handler_ns": 153708,
+        "measurement_uncertainty_ns": 285959,
+        "precision": "passed",
+        "qualifies": true,
+        "server_interval_lower_ns": 3122166,
+        "server_interval_upper_ns": 3408125,
+        "detection_delay_lower_ns": 501041,
+        "detection_delay_upper_ns": 644791,
+        "budget": "passed",
+        "clock_control_ns": 40,
+        "raw_timing": {
+          "psnLookupNanoseconds": 0,
+          "destinationPreparationNanoseconds": 1081709,
+          "actionPreparationNanoseconds": 5204417,
+          "preparedIdentityNanoseconds": 3016583,
+          "firstKeyNanoseconds": 0,
+          "preparedWindowsNanoseconds": 804791,
+          "adoptedWindowsNanoseconds": 3792,
+          "requestFinishedNanoseconds": 5174417,
+          "activationSource": "workspaceNotification",
+          "preparedSnapshotAgeNanoseconds": 388802458,
+          "environmentNanoseconds": 33166,
+          "secondKeyNanoseconds": 0,
+          "ownerLookupNanoseconds": 0,
+          "notificationReceivedAtUptimeNanoseconds": 332248856106958,
+          "pauseAndPublicationNanoseconds": 79209,
+          "detectedAtUptimeNanoseconds": 332248856260666,
+          "activationNanoseconds": 5023709,
+          "destinationNanoseconds": 7125,
+          "finalGuardsNanoseconds": 13292,
+          "visibleWindowsNanoseconds": 11834
+        },
+        "control_adjusted_phases": {
+          "psnLookupNanoseconds": 0,
+          "destinationPreparationNanoseconds": 1081669,
+          "actionPreparationNanoseconds": 5204377,
+          "preparedIdentityNanoseconds": 3016543,
+          "firstKeyNanoseconds": 0,
+          "preparedWindowsNanoseconds": 804751,
+          "adoptedWindowsNanoseconds": 3752,
+          "preparedSnapshotAgeNanoseconds": 388802418,
+          "environmentNanoseconds": 33126,
+          "secondKeyNanoseconds": 0,
+          "ownerLookupNanoseconds": 0,
+          "pauseAndPublicationNanoseconds": 79169,
+          "activationNanoseconds": 5023669,
+          "destinationNanoseconds": 7085,
+          "finalGuardsNanoseconds": 13252,
+          "visibleWindowsNanoseconds": 11794
+        },
+        "server": {
+          "sample_period_us": 100,
+          "samples": 2356,
+          "cpu_ns": 20079000,
+          "wall_ns": 353874708,
+          "max_read_ns": 1174584,
+          "p99_sample_gap_ns": 380709,
+          "max_sample_gap_ns": 2861875,
+          "transitions": [
+            {
+              "identity": 0,
+              "at_ns": 332248505164625,
+              "read_ns": 12667,
+              "lower_ns": 0
+            },
+            {
+              "identity": 1,
+              "at_ns": 332248855759625,
+              "read_ns": 8000,
+              "lower_ns": 332248855615875
+            },
+            {
+              "identity": 0,
+              "at_ns": 332248859024000,
+              "read_ns": 6834,
+              "lower_ns": 332248858881791
+            }
+          ]
+        },
+        "cell": {
+          "scenario": "warm-menu",
+          "key_records": false,
+          "sample_us": 100
+        },
+        "log": "/private/tmp/agentseat-focus-certification-matrix-v2.trial-10.log",
+        "runner_exit": 0,
+        "raw_log": "\n== focus-latency\n\u25c7 Test run started.\n\u21b3 Testing Library Version: 2077\n\u21b3 Target Platform: arm64e-apple-macos14.0\n\u25c7 Suite UserFocusRecoveryLiveTests started.\n\u25c7 Test \"Chrome Print restores the same user window without pointer input\" started.\nFOCUS_CLOCK_CONTROL_NS 40\nTrying to load the allocator multiple times. This is *not* supported.\n[29267:9291024:0910/155407.353831:ERROR:google_apis/gcm/engine/registration_request.cc:291] Registration response error message: PHONE_REGISTRATION_ERROR\n[29267:9291024:0910/155407.353969:ERROR:google_apis/gcm/engine/registration_request.cc:291] Registration response error message: PHONE_REGISTRATION_ERROR\n[29267:9291024:0910/155407.375907:ERROR:google_apis/gcm/engine/registration_request.cc:291] Registration response error message: PHONE_REGISTRATION_ERROR\n[29267:9291024:0910/155407.403778:ERROR:google_apis/gcm/engine/mcs_client.cc:702]   Error code: 401  Error message: Authentication Failed: wrong_secret\n[29267:9291024:0910/155407.403788:ERROR:google_apis/gcm/engine/mcs_client.cc:704] Failed to log in to GCM, resetting connection.\nFOCUS_SERVER {\"sample_period_us\":100,\"samples\":2356,\"cpu_ns\":20079000,\"wall_ns\":353874708,\"max_read_ns\":1174584,\"p99_sample_gap_ns\":380709,\"max_sample_gap_ns\":2861875,\"transitions\":[{\"identity\":0,\"at_ns\":332248505164625,\"read_ns\":12667,\"lower_ns\":0},{\"identity\":1,\"at_ns\":332248855759625,\"read_ns\":8000,\"lower_ns\":332248855615875},{\"identity\":0,\"at_ns\":332248859024000,\"read_ns\":6834,\"lower_ns\":332248858881791}]}\n\nFOCUS_AX [{\"durationNanoseconds\":181042,\"mappingCode\":0,\"phase\":\"before\",\"windowNumber\":89708,\"timeoutCode\":0,\"processID\":55735,\"startedAtUptimeNanoseconds\":332247678299416,\"valueKind\":\"AXUIElement\",\"attributeCode\":0},{\"durationNanoseconds\":343334,\"mappingCode\":0,\"phase\":\"after\",\"windowNumber\":89708,\"timeoutCode\":0,\"processID\":55735,\"startedAtUptimeNanoseconds\":332249687903041,\"valueKind\":\"AXUIElement\",\"attributeCode\":0},{\"durationNanoseconds\":355334,\"mappingCode\":0,\"phase\":\"stability-0\",\"windowNumber\":89708,\"timeoutCode\":0,\"processID\":55735,\"startedAtUptimeNanoseconds\":332249738488666,\"valueKind\":\"AXUIElement\",\"attributeCode\":0},{\"durationNanoseconds\":353417,\"mappingCode\":0,\"phase\":\"stability-1\",\"windowNumber\":89708,\"timeoutCode\":0,\"processID\":55735,\"startedAtUptimeNanoseconds\":332249789607083,\"valueKind\":\"AXUIElement\",\"attributeCode\":0},{\"durationNanoseconds\":143667,\"mappingCode\":0,\"phase\":\"stability-2\",\"windowNumber\":89708,\"timeoutCode\":0,\"processID\":55735,\"startedAtUptimeNanoseconds\":332249841138166,\"valueKind\":\"AXUIElement\",\"attributeCode\":0},{\"durationNanoseconds\":191958,\"mappingCode\":0,\"phase\":\"stability-3\",\"windowNumber\":89708,\"timeoutCode\":0,\"processID\":55735,\"startedAtUptimeNanoseconds\":332249895657750,\"valueKind\":\"AXUIElement\",\"attributeCode\":0}]\nFOCUS_VALIDATION {\"cursor_unchanged\":true,\"no_uncertain_commands\":true,\"recovered\":true,\"same_user_window\":true,\"same_user_app\":true,\"no_physical_input\":true,\"target_virtual\":true}\nFOCUS_TIMING {\"psnLookupNanoseconds\":0,\"destinationPreparationNanoseconds\":1081709,\"actionPreparationNanoseconds\":5204417,\"preparedIdentityNanoseconds\":3016583,\"firstKeyNanoseconds\":0,\"preparedWindowsNanoseconds\":804791,\"adoptedWindowsNanoseconds\":3792,\"requestFinishedNanoseconds\":5174417,\"activationSource\":\"workspaceNotification\",\"preparedSnapshotAgeNanoseconds\":388802458,\"environmentNanoseconds\":33166,\"secondKeyNanoseconds\":0,\"ownerLookupNanoseconds\":0,\"notificationReceivedAtUptimeNanoseconds\":332248856106958,\"pauseAndPublicationNanoseconds\":79209,\"detectedAtUptimeNanoseconds\":332248856260666,\"activationNanoseconds\":5023709,\"destinationNanoseconds\":7125,\"finalGuardsNanoseconds\":13292,\"visibleWindowsNanoseconds\":11834}\nFOCUS recovery=restored frontmost=5.32575 ms detection-to-verification=15.631209 ms request=0 cursor=(1219.16015625, 523.56640625)->(1219.16015625, 523.56640625) HID=0\n[29267:9291035:0910/155408.589412:ERROR:base/process/process_mac.cc:53] task_policy_set TASK_CATEGORY_POLICY: (os/kern) invalid argument (4)\n[29267:9291035:0910/155408.589426:ERROR:base/process/process_mac.cc:98] task_policy_set TASK_SUPPRESSION_POLICY: (os/kern) invalid argument (4)\n[29267:9291035:0910/155408.589431:ERROR:base/process/process_mac.cc:53] task_policy_set TASK_CATEGORY_POLICY: (os/kern) invalid argument (4)\n[29267:9291035:0910/155408.589433:ERROR:base/process/process_mac.cc:98] task_policy_set TASK_SUPPRESSION_POLICY: (os/kern) invalid argument (4)\n[29267:9291035:0910/155408.589436:ERROR:base/process/process_mac.cc:53] task_policy_set TASK_CATEGORY_POLICY: (os/kern) invalid argument (4)\n[29267:9291035:0910/155408.589438:ERROR:base/process/process_mac.cc:98] task_policy_set TASK_SUPPRESSION_POLICY: (os/kern) invalid argument (4)\n[29267:9290996:0910/155408.609542:ERROR:content/browser/gpu/gpu_process_host.cc:1054] GPU process exited unexpectedly: exit_code=15\n\u2714 Test \"Chrome Print restores the same user window without pointer input\" passed after 5.125 seconds.\n\u2714 Suite UserFocusRecoveryLiveTests passed after 5.125 seconds.\n\u2714 Test run with 1 test in 1 suite passed after 5.125 seconds.\nTIER_RESULT {\"executed\": 1, \"problems\": [], \"reported\": 1, \"runs\": 1, \"skip_details\": [], \"skipped\": 0, \"status\": \"passed\"}\nOK   focus-latency: 1 executed, 0 skipped, 1 reported in 1 run(s), log at /var/folders/ck/wcxt_1bs5nz3yxxq5hrdn_1m0000gn/T//agentseat-tier-focus-latency.log\n"
+      },
+      {
+        "functional": "passed",
+        "tier": {
+          "executed": 1,
+          "problems": [],
+          "reported": 1,
+          "runs": 1,
+          "skip_details": [],
+          "skipped": 0,
+          "status": "passed"
+        },
+        "validation": {
+          "same_user_window": true,
+          "recovered": true,
+          "no_physical_input": true,
+          "target_virtual": true,
+          "same_user_app": true,
+          "cursor_unchanged": true,
+          "no_uncertain_commands": true
+        },
+        "physical_evidence": "structured",
+        "ax": [
+          {
+            "valueKind": "AXUIElement",
+            "durationNanoseconds": 121583,
+            "mappingCode": 0,
+            "windowNumber": 89708,
+            "processID": 55735,
+            "startedAtUptimeNanoseconds": 332254913195000,
+            "timeoutCode": 0,
+            "attributeCode": 0,
+            "phase": "before"
+          },
+          {
+            "valueKind": "AXUIElement",
+            "durationNanoseconds": 97792,
+            "mappingCode": 0,
+            "windowNumber": 89708,
+            "processID": 55735,
+            "startedAtUptimeNanoseconds": 332256597385458,
+            "timeoutCode": 0,
+            "attributeCode": 0,
+            "phase": "after"
+          },
+          {
+            "valueKind": "AXUIElement",
+            "durationNanoseconds": 98000,
+            "mappingCode": 0,
+            "windowNumber": 89708,
+            "processID": 55735,
+            "startedAtUptimeNanoseconds": 332256647794708,
+            "timeoutCode": 0,
+            "attributeCode": 0,
+            "phase": "stability-0"
+          },
+          {
+            "valueKind": "AXUIElement",
+            "durationNanoseconds": 140500,
+            "mappingCode": 0,
+            "windowNumber": 89708,
+            "processID": 55735,
+            "startedAtUptimeNanoseconds": 332256698964291,
+            "timeoutCode": 0,
+            "attributeCode": 0,
+            "phase": "stability-1"
+          },
+          {
+            "valueKind": "AXUIElement",
+            "durationNanoseconds": 123333,
+            "mappingCode": 0,
+            "windowNumber": 89708,
+            "processID": 55735,
+            "startedAtUptimeNanoseconds": 332256750183083,
+            "timeoutCode": 0,
+            "attributeCode": 0,
+            "phase": "stability-2"
+          },
+          {
+            "valueKind": "AXUIElement",
+            "durationNanoseconds": 96041,
+            "mappingCode": 0,
+            "windowNumber": 89708,
+            "processID": 55735,
+            "startedAtUptimeNanoseconds": 332256801985250,
+            "timeoutCode": 0,
+            "attributeCode": 0,
+            "phase": "stability-3"
+          }
+        ],
+        "activation_source": "workspaceNotification",
+        "notification_delivery_lower_ns": 1324458,
+        "notification_delivery_upper_ns": 3352625,
+        "observer_to_handler_ns": 1744833,
+        "measurement_uncertainty_ns": 3020792,
+        "precision": "inconclusive",
+        "qualifies": true,
+        "server_interval_lower_ns": 4711083,
+        "server_interval_upper_ns": 7731875,
+        "detection_delay_lower_ns": 3069291,
+        "detection_delay_upper_ns": 5097458,
+        "budget": "passed",
+        "clock_control_ns": 20,
+        "raw_timing": {
+          "destinationNanoseconds": 3000,
+          "activationNanoseconds": 5876958,
+          "pauseAndPublicationNanoseconds": 52667,
+          "ownerLookupNanoseconds": 0,
+          "requestFinishedNanoseconds": 8837875,
+          "activationSource": "workspaceNotification",
+          "notificationReceivedAtUptimeNanoseconds": 332255679982708,
+          "environmentNanoseconds": 24417,
+          "actionPreparationNanoseconds": 1459333,
+          "adoptedWindowsNanoseconds": 2000,
+          "preparedWindowsNanoseconds": 412000,
+          "preparedIdentityNanoseconds": 53333,
+          "detectedAtUptimeNanoseconds": 332255681727541,
+          "destinationPreparationNanoseconds": 5079792,
+          "finalGuardsNanoseconds": 5084,
+          "secondKeyNanoseconds": 1751625,
+          "visibleWindowsNanoseconds": 5916,
+          "firstKeyNanoseconds": 1110542,
+          "preparedSnapshotAgeNanoseconds": 387814166,
+          "psnLookupNanoseconds": 0
+        },
+        "control_adjusted_phases": {
+          "destinationNanoseconds": 2980,
+          "activationNanoseconds": 5876938,
+          "pauseAndPublicationNanoseconds": 52647,
+          "ownerLookupNanoseconds": 0,
+          "environmentNanoseconds": 24397,
+          "actionPreparationNanoseconds": 1459313,
+          "adoptedWindowsNanoseconds": 1980,
+          "preparedWindowsNanoseconds": 411980,
+          "preparedIdentityNanoseconds": 53313,
+          "destinationPreparationNanoseconds": 5079772,
+          "finalGuardsNanoseconds": 5064,
+          "secondKeyNanoseconds": 1751605,
+          "visibleWindowsNanoseconds": 5896,
+          "firstKeyNanoseconds": 1110522,
+          "preparedSnapshotAgeNanoseconds": 387814146,
+          "psnLookupNanoseconds": 0
+        },
+        "server": {
+          "sample_period_us": 100,
+          "samples": 2300,
+          "cpu_ns": 18239000,
+          "wall_ns": 363423917,
+          "max_read_ns": 148917,
+          "p99_sample_gap_ns": 578500,
+          "max_sample_gap_ns": 3138000,
+          "transitions": [
+            {
+              "identity": 0,
+              "at_ns": 332255320958166,
+              "read_ns": 16333,
+              "lower_ns": 0
+            },
+            {
+              "identity": 1,
+              "at_ns": 332255678658250,
+              "read_ns": 6542,
+              "lower_ns": 332255676630083
+            },
+            {
+              "identity": 0,
+              "at_ns": 332255684361958,
+              "read_ns": 22083,
+              "lower_ns": 332255683369333
+            }
+          ]
+        },
+        "cell": {
+          "scenario": "cpu-load",
+          "key_records": true,
+          "sample_us": 100
+        },
+        "log": "/private/tmp/agentseat-focus-certification-matrix-v2.trial-11.log",
+        "runner_exit": 0,
+        "raw_log": "\n== focus-latency\n\u25c7 Test run started.\n\u21b3 Testing Library Version: 2077\n\u21b3 Target Platform: arm64e-apple-macos14.0\n\u25c7 Suite UserFocusRecoveryLiveTests started.\n\u25c7 Test \"Chrome Print restores the same user window without pointer input\" started.\nFOCUS_CLOCK_CONTROL_NS 20\nTrying to load the allocator multiple times. This is *not* supported.\n[29410:9292067:0910/155414.343755:ERROR:google_apis/gcm/engine/registration_request.cc:291] Registration response error message: PHONE_REGISTRATION_ERROR\n[29410:9292067:0910/155414.344008:ERROR:google_apis/gcm/engine/registration_request.cc:291] Registration response error message: PHONE_REGISTRATION_ERROR\n[29410:9292067:0910/155414.486858:ERROR:google_apis/gcm/engine/registration_request.cc:291] Registration response error message: PHONE_REGISTRATION_ERROR\nFOCUS_SERVER {\"sample_period_us\":100,\"samples\":2300,\"cpu_ns\":18239000,\"wall_ns\":363423917,\"max_read_ns\":148917,\"p99_sample_gap_ns\":578500,\"max_sample_gap_ns\":3138000,\"transitions\":[{\"identity\":0,\"at_ns\":332255320958166,\"read_ns\":16333,\"lower_ns\":0},{\"identity\":1,\"at_ns\":332255678658250,\"read_ns\":6542,\"lower_ns\":332255676630083},{\"identity\":0,\"at_ns\":332255684361958,\"read_ns\":22083,\"lower_ns\":332255683369333}]}\n\nFOCUS_AX [{\"valueKind\":\"AXUIElement\",\"durationNanoseconds\":121583,\"mappingCode\":0,\"windowNumber\":89708,\"processID\":55735,\"startedAtUptimeNanoseconds\":332254913195000,\"timeoutCode\":0,\"attributeCode\":0,\"phase\":\"before\"},{\"valueKind\":\"AXUIElement\",\"durationNanoseconds\":97792,\"mappingCode\":0,\"windowNumber\":89708,\"processID\":55735,\"startedAtUptimeNanoseconds\":332256597385458,\"timeoutCode\":0,\"attributeCode\":0,\"phase\":\"after\"},{\"valueKind\":\"AXUIElement\",\"durationNanoseconds\":98000,\"mappingCode\":0,\"windowNumber\":89708,\"processID\":55735,\"startedAtUptimeNanoseconds\":332256647794708,\"timeoutCode\":0,\"attributeCode\":0,\"phase\":\"stability-0\"},{\"valueKind\":\"AXUIElement\",\"durationNanoseconds\":140500,\"mappingCode\":0,\"windowNumber\":89708,\"processID\":55735,\"startedAtUptimeNanoseconds\":332256698964291,\"timeoutCode\":0,\"attributeCode\":0,\"phase\":\"stability-1\"},{\"valueKind\":\"AXUIElement\",\"durationNanoseconds\":123333,\"mappingCode\":0,\"windowNumber\":89708,\"processID\":55735,\"startedAtUptimeNanoseconds\":332256750183083,\"timeoutCode\":0,\"attributeCode\":0,\"phase\":\"stability-2\"},{\"valueKind\":\"AXUIElement\",\"durationNanoseconds\":96041,\"mappingCode\":0,\"windowNumber\":89708,\"processID\":55735,\"startedAtUptimeNanoseconds\":332256801985250,\"timeoutCode\":0,\"attributeCode\":0,\"phase\":\"stability-3\"}]\nFOCUS_VALIDATION {\"same_user_window\":true,\"recovered\":true,\"no_physical_input\":true,\"target_virtual\":true,\"same_user_app\":true,\"cursor_unchanged\":true,\"no_uncertain_commands\":true}\nFOCUS_TIMING {\"destinationNanoseconds\":3000,\"activationNanoseconds\":5876958,\"pauseAndPublicationNanoseconds\":52667,\"ownerLookupNanoseconds\":0,\"requestFinishedNanoseconds\":8837875,\"activationSource\":\"workspaceNotification\",\"notificationReceivedAtUptimeNanoseconds\":332255679982708,\"environmentNanoseconds\":24417,\"actionPreparationNanoseconds\":1459333,\"adoptedWindowsNanoseconds\":2000,\"preparedWindowsNanoseconds\":412000,\"preparedIdentityNanoseconds\":53333,\"detectedAtUptimeNanoseconds\":332255681727541,\"destinationPreparationNanoseconds\":5079792,\"finalGuardsNanoseconds\":5084,\"secondKeyNanoseconds\":1751625,\"visibleWindowsNanoseconds\":5916,\"firstKeyNanoseconds\":1110542,\"preparedSnapshotAgeNanoseconds\":387814166,\"psnLookupNanoseconds\":0}\nFOCUS recovery=restored frontmost=12.541834 ms detection-to-verification=81.723167 ms request=0 cursor=(1219.16015625, 523.56640625)->(1219.16015625, 523.56640625) HID=0\n[29410:9292067:0910/155415.494933:ERROR:google_apis/gcm/engine/connection_factory_impl.cc:484] ConnectionHandler failed with net error: -2\n[29410:9292042:0910/155415.520810:ERROR:content/browser/gpu/gpu_process_host.cc:1054] GPU process exited unexpectedly: exit_code=15\n\u2714 Test \"Chrome Print restores the same user window without pointer input\" passed after 4.808 seconds.\n\u2714 Suite UserFocusRecoveryLiveTests passed after 4.808 seconds.\n\u2714 Test run with 1 test in 1 suite passed after 4.808 seconds.\nTIER_RESULT {\"executed\": 1, \"problems\": [], \"reported\": 1, \"runs\": 1, \"skip_details\": [], \"skipped\": 0, \"status\": \"passed\"}\nOK   focus-latency: 1 executed, 0 skipped, 1 reported in 1 run(s), log at /var/folders/ck/wcxt_1bs5nz3yxxq5hrdn_1m0000gn/T//agentseat-tier-focus-latency.log\n"
+      },
+      {
+        "functional": "passed",
+        "tier": {
+          "executed": 1,
+          "problems": [],
+          "reported": 1,
+          "runs": 1,
+          "skip_details": [],
+          "skipped": 0,
+          "status": "passed"
+        },
+        "validation": {
+          "no_physical_input": true,
+          "cursor_unchanged": true,
+          "target_virtual": true,
+          "no_uncertain_commands": true,
+          "same_user_app": true,
+          "same_user_window": true,
+          "recovered": true
+        },
+        "physical_evidence": "structured",
+        "ax": [
+          {
+            "startedAtUptimeNanoseconds": 332261889550416,
+            "processID": 55735,
+            "valueKind": "AXUIElement",
+            "mappingCode": 0,
+            "windowNumber": 89708,
+            "timeoutCode": 0,
+            "phase": "before",
+            "attributeCode": 0,
+            "durationNanoseconds": 130250
+          },
+          {
+            "startedAtUptimeNanoseconds": 332263451043875,
+            "processID": 55735,
+            "valueKind": "AXUIElement",
+            "mappingCode": 0,
+            "windowNumber": 89708,
+            "timeoutCode": 0,
+            "phase": "after",
+            "attributeCode": 0,
+            "durationNanoseconds": 103541
+          },
+          {
+            "startedAtUptimeNanoseconds": 332263501347666,
+            "processID": 55735,
+            "valueKind": "AXUIElement",
+            "mappingCode": 0,
+            "windowNumber": 89708,
+            "timeoutCode": 0,
+            "phase": "stability-0",
+            "attributeCode": 0,
+            "durationNanoseconds": 104250
+          },
+          {
+            "startedAtUptimeNanoseconds": 332263552240083,
+            "processID": 55735,
+            "valueKind": "AXUIElement",
+            "mappingCode": 0,
+            "windowNumber": 89708,
+            "timeoutCode": 0,
+            "phase": "stability-1",
+            "attributeCode": 0,
+            "durationNanoseconds": 108333
+          },
+          {
+            "startedAtUptimeNanoseconds": 332263603062333,
+            "processID": 55735,
+            "valueKind": "AXUIElement",
+            "mappingCode": 0,
+            "windowNumber": 89708,
+            "timeoutCode": 0,
+            "phase": "stability-2",
+            "attributeCode": 0,
+            "durationNanoseconds": 94167
+          },
+          {
+            "startedAtUptimeNanoseconds": 332263654670916,
+            "processID": 55735,
+            "valueKind": "AXUIElement",
+            "mappingCode": 0,
+            "windowNumber": 89708,
+            "timeoutCode": 0,
+            "phase": "stability-3",
+            "attributeCode": 0,
+            "durationNanoseconds": 102792
+          }
+        ],
+        "activation_source": "workspaceNotification",
+        "notification_delivery_lower_ns": 946375,
+        "notification_delivery_upper_ns": 1189917,
+        "observer_to_handler_ns": 137791,
+        "measurement_uncertainty_ns": 3086542,
+        "precision": "inconclusive",
+        "qualifies": true,
+        "server_interval_lower_ns": 2704916,
+        "server_interval_upper_ns": 5791458,
+        "detection_delay_lower_ns": 1084166,
+        "detection_delay_upper_ns": 1327708,
+        "budget": "passed",
+        "clock_control_ns": 20,
+        "raw_timing": {
+          "destinationNanoseconds": 3000,
+          "destinationPreparationNanoseconds": 786667,
+          "requestFinishedNanoseconds": 5500959,
+          "psnLookupNanoseconds": 0,
+          "preparedWindowsNanoseconds": 537709,
+          "preparedIdentityNanoseconds": 48500,
+          "finalGuardsNanoseconds": 5167,
+          "firstKeyNanoseconds": 0,
+          "secondKeyNanoseconds": 0,
+          "activationSource": "workspaceNotification",
+          "ownerLookupNanoseconds": 0,
+          "notificationReceivedAtUptimeNanoseconds": 332262657454500,
+          "detectedAtUptimeNanoseconds": 332262657592291,
+          "preparedSnapshotAgeNanoseconds": 390949541,
+          "environmentNanoseconds": 23625,
+          "activationNanoseconds": 5405333,
+          "visibleWindowsNanoseconds": 6208,
+          "pauseAndPublicationNanoseconds": 52834,
+          "adoptedWindowsNanoseconds": 2417,
+          "actionPreparationNanoseconds": 4219375
+        },
+        "control_adjusted_phases": {
+          "destinationNanoseconds": 2980,
+          "destinationPreparationNanoseconds": 786647,
+          "psnLookupNanoseconds": 0,
+          "preparedWindowsNanoseconds": 537689,
+          "preparedIdentityNanoseconds": 48480,
+          "finalGuardsNanoseconds": 5147,
+          "firstKeyNanoseconds": 0,
+          "secondKeyNanoseconds": 0,
+          "ownerLookupNanoseconds": 0,
+          "preparedSnapshotAgeNanoseconds": 390949521,
+          "environmentNanoseconds": 23605,
+          "activationNanoseconds": 5405313,
+          "visibleWindowsNanoseconds": 6188,
+          "pauseAndPublicationNanoseconds": 52814,
+          "adoptedWindowsNanoseconds": 2397,
+          "actionPreparationNanoseconds": 4219355
+        },
+        "server": {
+          "sample_period_us": 100,
+          "samples": 2430,
+          "cpu_ns": 14562000,
+          "wall_ns": 365798000,
+          "max_read_ns": 1272209,
+          "p99_sample_gap_ns": 380792,
+          "max_sample_gap_ns": 4998541,
+          "transitions": [
+            {
+              "identity": 0,
+              "at_ns": 332262296265000,
+              "read_ns": 3792,
+              "lower_ns": 0
+            },
+            {
+              "identity": 1,
+              "at_ns": 332262656508125,
+              "read_ns": 7750,
+              "lower_ns": 332262656264583
+            },
+            {
+              "identity": 0,
+              "at_ns": 332262662056041,
+              "read_ns": 7791,
+              "lower_ns": 332262659213041
+            }
+          ]
+        },
+        "cell": {
+          "scenario": "cpu-load",
+          "key_records": false,
+          "sample_us": 100
+        },
+        "log": "/private/tmp/agentseat-focus-certification-matrix-v2.trial-12.log",
+        "runner_exit": 0,
+        "raw_log": "\n== focus-latency\n\u25c7 Test run started.\n\u21b3 Testing Library Version: 2077\n\u21b3 Target Platform: arm64e-apple-macos14.0\n\u25c7 Suite UserFocusRecoveryLiveTests started.\n\u25c7 Test \"Chrome Print restores the same user window without pointer input\" started.\nFOCUS_CLOCK_CONTROL_NS 20\nTrying to load the allocator multiple times. This is *not* supported.\n[29551:9293092:0910/155421.603240:ERROR:google_apis/gcm/engine/registration_request.cc:291] Registration response error message: PHONE_REGISTRATION_ERROR\n[29551:9293092:0910/155421.651618:ERROR:google_apis/gcm/engine/registration_request.cc:291] Registration response error message: PHONE_REGISTRATION_ERROR\nFOCUS_SERVER {\"sample_period_us\":100,\"samples\":2430,\"cpu_ns\":14562000,\"wall_ns\":365798000,\"max_read_ns\":1272209,\"p99_sample_gap_ns\":380792,\"max_sample_gap_ns\":4998541,\"transitions\":[{\"identity\":0,\"at_ns\":332262296265000,\"read_ns\":3792,\"lower_ns\":0},{\"identity\":1,\"at_ns\":332262656508125,\"read_ns\":7750,\"lower_ns\":332262656264583},{\"identity\":0,\"at_ns\":332262662056041,\"read_ns\":7791,\"lower_ns\":332262659213041}]}\n\nFOCUS_AX [{\"startedAtUptimeNanoseconds\":332261889550416,\"processID\":55735,\"valueKind\":\"AXUIElement\",\"mappingCode\":0,\"windowNumber\":89708,\"timeoutCode\":0,\"phase\":\"before\",\"attributeCode\":0,\"durationNanoseconds\":130250},{\"startedAtUptimeNanoseconds\":332263451043875,\"processID\":55735,\"valueKind\":\"AXUIElement\",\"mappingCode\":0,\"windowNumber\":89708,\"timeoutCode\":0,\"phase\":\"after\",\"attributeCode\":0,\"durationNanoseconds\":103541},{\"startedAtUptimeNanoseconds\":332263501347666,\"processID\":55735,\"valueKind\":\"AXUIElement\",\"mappingCode\":0,\"windowNumber\":89708,\"timeoutCode\":0,\"phase\":\"stability-0\",\"attributeCode\":0,\"durationNanoseconds\":104250},{\"startedAtUptimeNanoseconds\":332263552240083,\"processID\":55735,\"valueKind\":\"AXUIElement\",\"mappingCode\":0,\"windowNumber\":89708,\"timeoutCode\":0,\"phase\":\"stability-1\",\"attributeCode\":0,\"durationNanoseconds\":108333},{\"startedAtUptimeNanoseconds\":332263603062333,\"processID\":55735,\"valueKind\":\"AXUIElement\",\"mappingCode\":0,\"windowNumber\":89708,\"timeoutCode\":0,\"phase\":\"stability-2\",\"attributeCode\":0,\"durationNanoseconds\":94167},{\"startedAtUptimeNanoseconds\":332263654670916,\"processID\":55735,\"valueKind\":\"AXUIElement\",\"mappingCode\":0,\"windowNumber\":89708,\"timeoutCode\":0,\"phase\":\"stability-3\",\"attributeCode\":0,\"durationNanoseconds\":102792}]\nFOCUS_VALIDATION {\"no_physical_input\":true,\"cursor_unchanged\":true,\"target_virtual\":true,\"no_uncertain_commands\":true,\"same_user_app\":true,\"same_user_window\":true,\"recovered\":true}\nFOCUS_TIMING {\"destinationNanoseconds\":3000,\"destinationPreparationNanoseconds\":786667,\"requestFinishedNanoseconds\":5500959,\"psnLookupNanoseconds\":0,\"preparedWindowsNanoseconds\":537709,\"preparedIdentityNanoseconds\":48500,\"finalGuardsNanoseconds\":5167,\"firstKeyNanoseconds\":0,\"secondKeyNanoseconds\":0,\"activationSource\":\"workspaceNotification\",\"ownerLookupNanoseconds\":0,\"notificationReceivedAtUptimeNanoseconds\":332262657454500,\"detectedAtUptimeNanoseconds\":332262657592291,\"preparedSnapshotAgeNanoseconds\":390949541,\"environmentNanoseconds\":23625,\"activationNanoseconds\":5405333,\"visibleWindowsNanoseconds\":6208,\"pauseAndPublicationNanoseconds\":52834,\"adoptedWindowsNanoseconds\":2417,\"actionPreparationNanoseconds\":4219375}\nFOCUS recovery=restored frontmost=8.988709 ms detection-to-verification=16.517792 ms request=0 cursor=(1219.16015625, 523.56640625)->(1219.16015625, 523.56640625) HID=0\n[29551:9293092:0910/155422.345690:ERROR:google_apis/gcm/engine/registration_request.cc:275] Registration URL fetching failed.\n[29551:9293092:0910/155422.345789:ERROR:google_apis/gcm/engine/connection_factory_impl.cc:484] ConnectionHandler failed with net error: -2\n[29551:9293103:0910/155422.356845:ERROR:base/process/process_mac.cc:53] task_policy_set TASK_CATEGORY_POLICY: (os/kern) invalid argument (4)\n[29551:9293103:0910/155422.357567:ERROR:base/process/process_mac.cc:98] task_policy_set TASK_SUPPRESSION_POLICY: (os/kern) invalid argument (4)\n[29551:9293103:0910/155422.357580:ERROR:base/process/process_mac.cc:53] task_policy_set TASK_CATEGORY_POLICY: (os/kern) invalid argument (4)\n[29551:9293103:0910/155422.357583:ERROR:base/process/process_mac.cc:98] task_policy_set TASK_SUPPRESSION_POLICY: (os/kern) invalid argument (4)\n[29551:9293103:0910/155422.357586:ERROR:base/process/process_mac.cc:53] task_policy_set TASK_CATEGORY_POLICY: (os/kern) invalid argument (4)\n[29551:9293103:0910/155422.357588:ERROR:base/process/process_mac.cc:98] task_policy_set TASK_SUPPRESSION_POLICY: (os/kern) invalid argument (4)\n[29551:9293065:0910/155422.370134:ERROR:content/browser/gpu/gpu_process_host.cc:1054] GPU process exited unexpectedly: exit_code=15\n\u2714 Test \"Chrome Print restores the same user window without pointer input\" passed after 4.692 seconds.\n\u2714 Suite UserFocusRecoveryLiveTests passed after 4.692 seconds.\n\u2714 Test run with 1 test in 1 suite passed after 4.692 seconds.\nTIER_RESULT {\"executed\": 1, \"problems\": [], \"reported\": 1, \"runs\": 1, \"skip_details\": [], \"skipped\": 0, \"status\": \"passed\"}\nOK   focus-latency: 1 executed, 0 skipped, 1 reported in 1 run(s), log at /var/folders/ck/wcxt_1bs5nz3yxxq5hrdn_1m0000gn/T//agentseat-tier-focus-latency.log\n"
+      }
+    ],
+    "build": "26A5425a",
+    "plan": [
+      {
+        "scenario": "cold",
+        "key_records": false,
+        "sample_us": 100
+      },
+      {
+        "scenario": "cold",
+        "key_records": true,
+        "sample_us": 100
+      },
+      {
+        "scenario": "warm-menu",
+        "key_records": false,
+        "sample_us": 100
+      },
+      {
+        "scenario": "warm-menu",
+        "key_records": true,
+        "sample_us": 100
+      },
+      {
+        "scenario": "cpu-load",
+        "key_records": false,
+        "sample_us": 100
+      },
+      {
+        "scenario": "cpu-load",
+        "key_records": true,
+        "sample_us": 100
+      },
+      {
+        "scenario": "cold",
+        "key_records": true,
+        "sample_us": 100
+      },
+      {
+        "scenario": "cold",
+        "key_records": false,
+        "sample_us": 100
+      },
+      {
+        "scenario": "warm-menu",
+        "key_records": true,
+        "sample_us": 100
+      },
+      {
+        "scenario": "warm-menu",
+        "key_records": false,
+        "sample_us": 100
+      },
+      {
+        "scenario": "cpu-load",
+        "key_records": true,
+        "sample_us": 100
+      },
+      {
+        "scenario": "cpu-load",
+        "key_records": false,
+        "sample_us": 100
+      }
+    ],
+    "planned_trials": 12,
+    "attempted_trials": 12,
+    "incomplete": [],
+    "protocol": "diagnostic, not a statistical qualification",
+    "status": "not_qualified"
+  },
+  "certified_8ms": false,
+  "notes": [
+    "No fixed-mode 300-trial qualification was executed.",
+    "Warm-menu is menu warmup, not repeated warm Print.",
+    "All 12 completed rows returned the exact user window; the initial row had valid AX but its sampler expired before Print.",
+    "Observer lifecycle guard and runner timeout cleanup were added after the matrix; active recovery behavior is unchanged, but this is not a final-source certification."
+  ]
+}

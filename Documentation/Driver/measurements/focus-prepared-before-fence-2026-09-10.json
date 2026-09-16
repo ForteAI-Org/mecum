@@ -1,0 +1,442 @@
+{
+  "budget_ms": 8.0,
+  "completed_trials": 5,
+  "budget_passed_trials": 1,
+  "all_trials_within_budget": false,
+  "server_upper_bound_ms": {
+    "min": 5.42475,
+    "median": 8.653083,
+    "max": 10.027292
+  },
+  "control_adjusted_phases": {
+    "environmentNanoseconds": {
+      "min_ms": 0.020211,
+      "median_ms": 0.021469,
+      "max_ms": 0.022225
+    },
+    "preparedWindowsNanoseconds": {
+      "min_ms": 0.35985,
+      "median_ms": 0.383044,
+      "max_ms": 0.440628
+    },
+    "activationNanoseconds": {
+      "min_ms": 4.758309,
+      "median_ms": 7.896086,
+      "max_ms": 8.208344
+    },
+    "finalGuardsNanoseconds": {
+      "min_ms": 2.435052,
+      "median_ms": 2.706586,
+      "max_ms": 4.007711
+    },
+    "destinationPreparationNanoseconds": {
+      "min_ms": 0.9871,
+      "median_ms": 1.034106,
+      "max_ms": 1.610128
+    },
+    "ownerLookupNanoseconds": {
+      "min_ms": 0.0,
+      "median_ms": 0.0,
+      "max_ms": 0.0
+    },
+    "adoptedWindowsNanoseconds": {
+      "min_ms": 0.001919,
+      "median_ms": 0.0021,
+      "max_ms": 0.002628
+    },
+    "pauseAndPublicationNanoseconds": {
+      "min_ms": 0.050344,
+      "median_ms": 0.052981,
+      "max_ms": 0.056294
+    },
+    "firstKeyNanoseconds": {
+      "min_ms": 0.0,
+      "median_ms": 0.0,
+      "max_ms": 0.0
+    },
+    "preparedSnapshotAgeNanoseconds": {
+      "min_ms": 377.281378,
+      "median_ms": 381.497814,
+      "max_ms": 395.410636
+    },
+    "destinationNanoseconds": {
+      "min_ms": 0.003392,
+      "median_ms": 0.003511,
+      "max_ms": 0.003772
+    },
+    "preparedIdentityNanoseconds": {
+      "min_ms": 0.048267,
+      "median_ms": 0.048669,
+      "max_ms": 2.483356
+    },
+    "secondKeyNanoseconds": {
+      "min_ms": 0.0,
+      "median_ms": 0.0,
+      "max_ms": 0.0
+    },
+    "actionPreparationNanoseconds": {
+      "min_ms": 1.2906,
+      "median_ms": 1.319044,
+      "max_ms": 3.902231
+    },
+    "visibleWindowsNanoseconds": {
+      "min_ms": 0.00594,
+      "median_ms": 0.006294,
+      "max_ms": 0.007552
+    },
+    "psnLookupNanoseconds": {
+      "min_ms": 0.0,
+      "median_ms": 0.0,
+      "max_ms": 0.0
+    }
+  },
+  "trials": [
+    {
+      "server_interval_lower_ns": 6491375,
+      "server_interval_upper_ns": 8459250,
+      "detection_delay_lower_ns": 419417,
+      "detection_delay_upper_ns": 1088500,
+      "budget": "inconclusive",
+      "clock_control_ns": 31,
+      "raw_timing": {
+        "environmentNanoseconds": 21500,
+        "preparedWindowsNanoseconds": 373166,
+        "activationNanoseconds": 8208375,
+        "finalGuardsNanoseconds": 2435083,
+        "destinationPreparationNanoseconds": 991458,
+        "ownerLookupNanoseconds": 0,
+        "adoptedWindowsNanoseconds": 2167,
+        "pauseAndPublicationNanoseconds": 50375,
+        "firstKeyNanoseconds": 0,
+        "requestFinishedNanoseconds": 10730750,
+        "preparedSnapshotAgeNanoseconds": 395410667,
+        "destinationNanoseconds": 3542,
+        "preparedIdentityNanoseconds": 48667,
+        "detectedAtUptimeNanoseconds": 329881772393083,
+        "secondKeyNanoseconds": 0,
+        "actionPreparationNanoseconds": 1418084,
+        "visibleWindowsNanoseconds": 7583,
+        "psnLookupNanoseconds": 0
+      },
+      "control_adjusted_phases": {
+        "environmentNanoseconds": 21469,
+        "preparedWindowsNanoseconds": 373135,
+        "activationNanoseconds": 8208344,
+        "finalGuardsNanoseconds": 2435052,
+        "destinationPreparationNanoseconds": 991427,
+        "ownerLookupNanoseconds": 0,
+        "adoptedWindowsNanoseconds": 2136,
+        "pauseAndPublicationNanoseconds": 50344,
+        "firstKeyNanoseconds": 0,
+        "preparedSnapshotAgeNanoseconds": 395410636,
+        "destinationNanoseconds": 3511,
+        "preparedIdentityNanoseconds": 48636,
+        "secondKeyNanoseconds": 0,
+        "actionPreparationNanoseconds": 1418053,
+        "visibleWindowsNanoseconds": 7552,
+        "psnLookupNanoseconds": 0
+      },
+      "server": {
+        "max_sample_gap_ns": 4159083,
+        "transitions": [
+          {
+            "identity": 0,
+            "at_ns": 329881064926708,
+            "read_ns": 3792,
+            "lower_ns": 0
+          },
+          {
+            "identity": 1,
+            "at_ns": 329881771973666,
+            "read_ns": 21833,
+            "lower_ns": 329881771304583
+          },
+          {
+            "identity": 0,
+            "at_ns": 329881779763833,
+            "read_ns": 19583,
+            "lower_ns": 329881778465041
+          }
+        ]
+      }
+    },
+    {
+      "server_interval_lower_ns": 7725042,
+      "server_interval_upper_ns": 9545875,
+      "detection_delay_lower_ns": 46667,
+      "detection_delay_upper_ns": 1106917,
+      "budget": "inconclusive",
+      "clock_control_ns": 39,
+      "raw_timing": {
+        "preparedIdentityNanoseconds": 49541,
+        "preparedWindowsNanoseconds": 383083,
+        "detectedAtUptimeNanoseconds": 329888583629875,
+        "preparedSnapshotAgeNanoseconds": 380043375,
+        "ownerLookupNanoseconds": 0,
+        "secondKeyNanoseconds": 0,
+        "adoptedWindowsNanoseconds": 1958,
+        "actionPreparationNanoseconds": 1294625,
+        "psnLookupNanoseconds": 0,
+        "visibleWindowsNanoseconds": 6250,
+        "requestFinishedNanoseconds": 11237708,
+        "firstKeyNanoseconds": 0,
+        "finalGuardsNanoseconds": 4007750,
+        "destinationNanoseconds": 3541,
+        "environmentNanoseconds": 20250,
+        "destinationPreparationNanoseconds": 1265709,
+        "activationNanoseconds": 7139000,
+        "pauseAndPublicationNanoseconds": 55208
+      },
+      "control_adjusted_phases": {
+        "preparedIdentityNanoseconds": 49502,
+        "preparedWindowsNanoseconds": 383044,
+        "preparedSnapshotAgeNanoseconds": 380043336,
+        "ownerLookupNanoseconds": 0,
+        "secondKeyNanoseconds": 0,
+        "adoptedWindowsNanoseconds": 1919,
+        "actionPreparationNanoseconds": 1294586,
+        "psnLookupNanoseconds": 0,
+        "visibleWindowsNanoseconds": 6211,
+        "firstKeyNanoseconds": 0,
+        "finalGuardsNanoseconds": 4007711,
+        "destinationNanoseconds": 3502,
+        "environmentNanoseconds": 20211,
+        "destinationPreparationNanoseconds": 1265670,
+        "activationNanoseconds": 7138961,
+        "pauseAndPublicationNanoseconds": 55169
+      },
+      "server": {
+        "max_sample_gap_ns": 5589709,
+        "transitions": [
+          {
+            "identity": 0,
+            "at_ns": 329887878982083,
+            "read_ns": 5292,
+            "lower_ns": 0
+          },
+          {
+            "identity": 1,
+            "at_ns": 329888583583208,
+            "read_ns": 7500,
+            "lower_ns": 329888582522958
+          },
+          {
+            "identity": 0,
+            "at_ns": 329888592068833,
+            "read_ns": 99625,
+            "lower_ns": 329888591308250
+          }
+        ]
+      }
+    },
+    {
+      "server_interval_lower_ns": 7262167,
+      "server_interval_upper_ns": 8653083,
+      "detection_delay_lower_ns": 337958,
+      "detection_delay_upper_ns": 1014666,
+      "budget": "inconclusive",
+      "clock_control_ns": 19,
+      "raw_timing": {
+        "finalGuardsNanoseconds": 2650417,
+        "destinationNanoseconds": 3791,
+        "destinationPreparationNanoseconds": 1034125,
+        "requestFinishedNanoseconds": 10696584,
+        "preparedIdentityNanoseconds": 2483375,
+        "detectedAtUptimeNanoseconds": 329895330426041,
+        "preparedWindowsNanoseconds": 424250,
+        "psnLookupNanoseconds": 0,
+        "activationNanoseconds": 7957250,
+        "ownerLookupNanoseconds": 0,
+        "environmentNanoseconds": 20834,
+        "visibleWindowsNanoseconds": 5959,
+        "secondKeyNanoseconds": 0,
+        "actionPreparationNanoseconds": 3902250,
+        "adoptedWindowsNanoseconds": 2083,
+        "pauseAndPublicationNanoseconds": 53000,
+        "firstKeyNanoseconds": 0,
+        "preparedSnapshotAgeNanoseconds": 381497833
+      },
+      "control_adjusted_phases": {
+        "finalGuardsNanoseconds": 2650398,
+        "destinationNanoseconds": 3772,
+        "destinationPreparationNanoseconds": 1034106,
+        "preparedIdentityNanoseconds": 2483356,
+        "preparedWindowsNanoseconds": 424231,
+        "psnLookupNanoseconds": 0,
+        "activationNanoseconds": 7957231,
+        "ownerLookupNanoseconds": 0,
+        "environmentNanoseconds": 20815,
+        "visibleWindowsNanoseconds": 5940,
+        "secondKeyNanoseconds": 0,
+        "actionPreparationNanoseconds": 3902231,
+        "adoptedWindowsNanoseconds": 2064,
+        "pauseAndPublicationNanoseconds": 52981,
+        "firstKeyNanoseconds": 0,
+        "preparedSnapshotAgeNanoseconds": 381497814
+      },
+      "server": {
+        "max_sample_gap_ns": 6460167,
+        "transitions": [
+          {
+            "identity": 0,
+            "at_ns": 329894590482083,
+            "read_ns": 5625,
+            "lower_ns": 0
+          },
+          {
+            "identity": 1,
+            "at_ns": 329895330088083,
+            "read_ns": 20875,
+            "lower_ns": 329895329411375
+          },
+          {
+            "identity": 0,
+            "at_ns": 329895338064458,
+            "read_ns": 23208,
+            "lower_ns": 329895337350250
+          }
+        ]
+      }
+    },
+    {
+      "server_interval_lower_ns": 2963250,
+      "server_interval_upper_ns": 5424750,
+      "detection_delay_lower_ns": 335834,
+      "detection_delay_upper_ns": 998334,
+      "budget": "passed",
+      "clock_control_ns": 25,
+      "raw_timing": {
+        "destinationNanoseconds": 3417,
+        "firstKeyNanoseconds": 0,
+        "psnLookupNanoseconds": 0,
+        "detectedAtUptimeNanoseconds": 329902020145250,
+        "destinationPreparationNanoseconds": 987125,
+        "preparedWindowsNanoseconds": 359875,
+        "finalGuardsNanoseconds": 2740667,
+        "pauseAndPublicationNanoseconds": 52583,
+        "adoptedWindowsNanoseconds": 2125,
+        "ownerLookupNanoseconds": 0,
+        "preparedIdentityNanoseconds": 48292,
+        "activationNanoseconds": 4758334,
+        "requestFinishedNanoseconds": 7595375,
+        "environmentNanoseconds": 22250,
+        "secondKeyNanoseconds": 0,
+        "actionPreparationNanoseconds": 1290625,
+        "preparedSnapshotAgeNanoseconds": 391087375,
+        "visibleWindowsNanoseconds": 6708
+      },
+      "control_adjusted_phases": {
+        "destinationNanoseconds": 3392,
+        "firstKeyNanoseconds": 0,
+        "psnLookupNanoseconds": 0,
+        "destinationPreparationNanoseconds": 987100,
+        "preparedWindowsNanoseconds": 359850,
+        "finalGuardsNanoseconds": 2740642,
+        "pauseAndPublicationNanoseconds": 52558,
+        "adoptedWindowsNanoseconds": 2100,
+        "ownerLookupNanoseconds": 0,
+        "preparedIdentityNanoseconds": 48267,
+        "activationNanoseconds": 4758309,
+        "environmentNanoseconds": 22225,
+        "secondKeyNanoseconds": 0,
+        "actionPreparationNanoseconds": 1290600,
+        "preparedSnapshotAgeNanoseconds": 391087350,
+        "visibleWindowsNanoseconds": 6683
+      },
+      "server": {
+        "max_sample_gap_ns": 2319834,
+        "transitions": [
+          {
+            "identity": 0,
+            "at_ns": 329901299394625,
+            "read_ns": 4750,
+            "lower_ns": 0
+          },
+          {
+            "identity": 1,
+            "at_ns": 329902019809416,
+            "read_ns": 11791,
+            "lower_ns": 329902019146916
+          },
+          {
+            "identity": 0,
+            "at_ns": 329902024571666,
+            "read_ns": 8125,
+            "lower_ns": 329902022772666
+          }
+        ]
+      }
+    },
+    {
+      "server_interval_lower_ns": 6364250,
+      "server_interval_upper_ns": 10027292,
+      "detection_delay_lower_ns": -790041,
+      "detection_delay_upper_ns": 770667,
+      "budget": "inconclusive",
+      "clock_control_ns": 39,
+      "raw_timing": {
+        "preparedIdentityNanoseconds": 48708,
+        "pauseAndPublicationNanoseconds": 56333,
+        "activationNanoseconds": 7896125,
+        "requestFinishedNanoseconds": 10697375,
+        "adoptedWindowsNanoseconds": 2667,
+        "destinationNanoseconds": 3667,
+        "secondKeyNanoseconds": 0,
+        "actionPreparationNanoseconds": 1319083,
+        "ownerLookupNanoseconds": 0,
+        "psnLookupNanoseconds": 0,
+        "preparedSnapshotAgeNanoseconds": 377281417,
+        "firstKeyNanoseconds": 0,
+        "destinationPreparationNanoseconds": 1610167,
+        "finalGuardsNanoseconds": 2706625,
+        "environmentNanoseconds": 22042,
+        "preparedWindowsNanoseconds": 440667,
+        "visibleWindowsNanoseconds": 6333,
+        "detectedAtUptimeNanoseconds": 329908676125875
+      },
+      "control_adjusted_phases": {
+        "preparedIdentityNanoseconds": 48669,
+        "pauseAndPublicationNanoseconds": 56294,
+        "activationNanoseconds": 7896086,
+        "adoptedWindowsNanoseconds": 2628,
+        "destinationNanoseconds": 3628,
+        "secondKeyNanoseconds": 0,
+        "actionPreparationNanoseconds": 1319044,
+        "ownerLookupNanoseconds": 0,
+        "psnLookupNanoseconds": 0,
+        "preparedSnapshotAgeNanoseconds": 377281378,
+        "firstKeyNanoseconds": 0,
+        "destinationPreparationNanoseconds": 1610128,
+        "finalGuardsNanoseconds": 2706586,
+        "environmentNanoseconds": 22003,
+        "preparedWindowsNanoseconds": 440628,
+        "visibleWindowsNanoseconds": 6294
+      },
+      "server": {
+        "max_sample_gap_ns": 1983667,
+        "transitions": [
+          {
+            "identity": 0,
+            "at_ns": 329907967955708,
+            "read_ns": 6250,
+            "lower_ns": 0
+          },
+          {
+            "identity": 1,
+            "at_ns": 329908676915916,
+            "read_ns": 14708,
+            "lower_ns": 329908675355208
+          },
+          {
+            "identity": 0,
+            "at_ns": 329908685382500,
+            "read_ns": 57375,
+            "lower_ns": 329908683280166
+          }
+        ]
+      }
+    }
+  ],
+  "status": "budget_not_met",
+  "build": "26A5425a"
+}

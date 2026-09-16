@@ -1,0 +1,311 @@
+{
+  "budget_ms": 8.0,
+  "completed_trials": 3,
+  "budget_passed_trials": 1,
+  "all_trials_within_budget": false,
+  "server_upper_bound_ms": {
+    "min": 6.596375,
+    "median": 8.845917,
+    "max": 20.168209
+  },
+  "control_adjusted_phases": {
+    "pauseAndPublicationNanoseconds": {
+      "min_ms": 0.048128,
+      "median_ms": 0.051517,
+      "max_ms": 0.052424
+    },
+    "ownerLookupNanoseconds": {
+      "min_ms": 0.013132,
+      "median_ms": 0.039767,
+      "max_ms": 0.053253
+    },
+    "psnLookupNanoseconds": {
+      "min_ms": 0.00984,
+      "median_ms": 0.022267,
+      "max_ms": 0.030544
+    },
+    "firstKeyNanoseconds": {
+      "min_ms": 1.094559,
+      "median_ms": 7.813419,
+      "max_ms": 8.047257
+    },
+    "environmentNanoseconds": {
+      "min_ms": 0.036627,
+      "median_ms": 0.04059,
+      "max_ms": 0.040683
+    },
+    "destinationNanoseconds": {
+      "min_ms": 0.005628,
+      "median_ms": 0.0071,
+      "max_ms": 0.007173
+    },
+    "secondKeyNanoseconds": {
+      "min_ms": 0.063808,
+      "median_ms": 0.104632,
+      "max_ms": 0.510878
+    },
+    "adoptedWindowsNanoseconds": {
+      "min_ms": 0.003433,
+      "median_ms": 0.003628,
+      "max_ms": 0.003965
+    },
+    "visibleWindowsNanoseconds": {
+      "min_ms": 4.616683,
+      "median_ms": 6.597003,
+      "max_ms": 7.340923
+    },
+    "finalGuardsNanoseconds": {
+      "min_ms": 0.178933,
+      "median_ms": 0.241506,
+      "max_ms": 3.540836
+    },
+    "activationNanoseconds": {
+      "min_ms": 3.258391,
+      "median_ms": 3.999923,
+      "max_ms": 4.310586
+    },
+    "destinationPreparationNanoseconds": {
+      "min_ms": 0.777059,
+      "median_ms": 0.985132,
+      "max_ms": 1.568711
+    }
+  },
+  "trials": [
+    {
+      "server_interval_lower_ns": 5280167,
+      "server_interval_upper_ns": 6596375,
+      "detection_delay_lower_ns": 463958,
+      "detection_delay_upper_ns": 1118416,
+      "budget": "passed",
+      "clock_control_ns": 25,
+      "raw_timing": {
+        "pauseAndPublicationNanoseconds": 51542,
+        "ownerLookupNanoseconds": 39792,
+        "psnLookupNanoseconds": 22292,
+        "detectedAtUptimeNanoseconds": 326763894778916,
+        "firstKeyNanoseconds": 1094584,
+        "environmentNanoseconds": 40708,
+        "destinationNanoseconds": 7125,
+        "costDiagnosis": {
+          "windowCallWall": 4480000,
+          "windowParseWall": 29000,
+          "secondKeyBuildWall": 2833,
+          "firstKeyPostWall": 993792,
+          "firstKeyBuildCPU": 4875,
+          "windowParseCPU": 28750,
+          "windowCallCPU": 95500,
+          "secondKeyBuildCPU": 2417,
+          "secondKeyPostWall": 51459,
+          "secondKeyPostCPU": 22250,
+          "windowBridgeWall": 86417,
+          "windowBridgeCPU": 86000,
+          "windowCount": 31,
+          "firstKeyBuildWall": 5958,
+          "firstKeyPostCPU": 33166
+        },
+        "secondKeyNanoseconds": 63833,
+        "adoptedWindowsNanoseconds": 3458,
+        "visibleWindowsNanoseconds": 4616708,
+        "requestFinishedNanoseconds": 9459959,
+        "finalGuardsNanoseconds": 178958,
+        "activationNanoseconds": 3258416,
+        "destinationPreparationNanoseconds": 777084
+      },
+      "control_adjusted_phases": {
+        "pauseAndPublicationNanoseconds": 51517,
+        "ownerLookupNanoseconds": 39767,
+        "psnLookupNanoseconds": 22267,
+        "firstKeyNanoseconds": 1094559,
+        "environmentNanoseconds": 40683,
+        "destinationNanoseconds": 7100,
+        "secondKeyNanoseconds": 63808,
+        "adoptedWindowsNanoseconds": 3433,
+        "visibleWindowsNanoseconds": 4616683,
+        "finalGuardsNanoseconds": 178933,
+        "activationNanoseconds": 3258391,
+        "destinationPreparationNanoseconds": 777059
+      },
+      "server": {
+        "max_sample_gap_ns": 2977083,
+        "transitions": [
+          {
+            "identity": 0,
+            "at_ns": 326762963586833,
+            "read_ns": 4542,
+            "lower_ns": 0
+          },
+          {
+            "identity": 1,
+            "at_ns": 326763894314958,
+            "read_ns": 11583,
+            "lower_ns": 326763893660500
+          },
+          {
+            "identity": 0,
+            "at_ns": 326763900256875,
+            "read_ns": 12292,
+            "lower_ns": 326763899595125
+          }
+        ]
+      }
+    },
+    {
+      "server_interval_lower_ns": 10651708,
+      "server_interval_upper_ns": 20168209,
+      "detection_delay_lower_ns": 508166,
+      "detection_delay_upper_ns": 1163500,
+      "budget": "failed",
+      "clock_control_ns": 39,
+      "raw_timing": {
+        "psnLookupNanoseconds": 30583,
+        "visibleWindowsNanoseconds": 6597042,
+        "requestFinishedNanoseconds": 23030292,
+        "destinationNanoseconds": 5667,
+        "secondKeyNanoseconds": 510917,
+        "activationNanoseconds": 4310625,
+        "pauseAndPublicationNanoseconds": 48167,
+        "environmentNanoseconds": 36666,
+        "costDiagnosis": {
+          "secondKeyPostWall": 483250,
+          "secondKeyPostCPU": 35666,
+          "firstKeyBuildCPU": 3500,
+          "firstKeyPostCPU": 43084,
+          "secondKeyBuildCPU": 4583,
+          "secondKeyBuildWall": 5084,
+          "firstKeyPostWall": 7715875,
+          "windowCallWall": 6456000,
+          "windowCount": 31,
+          "windowParseCPU": 32292,
+          "windowCallCPU": 147875,
+          "firstKeyBuildWall": 4084,
+          "windowBridgeWall": 86667,
+          "windowParseWall": 32500,
+          "windowBridgeCPU": 86208
+        },
+        "ownerLookupNanoseconds": 53292,
+        "detectedAtUptimeNanoseconds": 326770856539416,
+        "destinationPreparationNanoseconds": 1568750,
+        "firstKeyNanoseconds": 7813458,
+        "adoptedWindowsNanoseconds": 3667,
+        "finalGuardsNanoseconds": 3540875
+      },
+      "control_adjusted_phases": {
+        "psnLookupNanoseconds": 30544,
+        "visibleWindowsNanoseconds": 6597003,
+        "destinationNanoseconds": 5628,
+        "secondKeyNanoseconds": 510878,
+        "activationNanoseconds": 4310586,
+        "pauseAndPublicationNanoseconds": 48128,
+        "environmentNanoseconds": 36627,
+        "ownerLookupNanoseconds": 53253,
+        "destinationPreparationNanoseconds": 1568711,
+        "firstKeyNanoseconds": 7813419,
+        "adoptedWindowsNanoseconds": 3628,
+        "finalGuardsNanoseconds": 3540836
+      },
+      "server": {
+        "max_sample_gap_ns": 8837084,
+        "transitions": [
+          {
+            "identity": 0,
+            "at_ns": 326770098806791,
+            "read_ns": 13833,
+            "lower_ns": 0
+          },
+          {
+            "identity": 1,
+            "at_ns": 326770856031250,
+            "read_ns": 15875,
+            "lower_ns": 326770855375916
+          },
+          {
+            "identity": 0,
+            "at_ns": 326770875544125,
+            "read_ns": 8183584,
+            "lower_ns": 326770866682958
+          }
+        ]
+      }
+    },
+    {
+      "server_interval_lower_ns": 5187000,
+      "server_interval_upper_ns": 8845917,
+      "detection_delay_lower_ns": -551834,
+      "detection_delay_upper_ns": 786125,
+      "budget": "inconclusive",
+      "clock_control_ns": 35,
+      "raw_timing": {
+        "secondKeyNanoseconds": 104667,
+        "visibleWindowsNanoseconds": 7340958,
+        "pauseAndPublicationNanoseconds": 52459,
+        "psnLookupNanoseconds": 9875,
+        "costDiagnosis": {
+          "firstKeyBuildCPU": 10958,
+          "firstKeyPostCPU": 41917,
+          "secondKeyBuildWall": 30917,
+          "secondKeyBuildCPU": 4083,
+          "secondKeyPostCPU": 13583,
+          "firstKeyPostWall": 7967000,
+          "windowParseCPU": 44541,
+          "windowParseWall": 45042,
+          "windowCallWall": 6998167,
+          "windowCallCPU": 163791,
+          "windowBridgeWall": 271166,
+          "firstKeyBuildWall": 18000,
+          "windowBridgeCPU": 207750,
+          "windowCount": 31,
+          "secondKeyPostWall": 68750
+        },
+        "adoptedWindowsNanoseconds": 4000,
+        "destinationPreparationNanoseconds": 985167,
+        "activationNanoseconds": 3999958,
+        "detectedAtUptimeNanoseconds": 326777588902166,
+        "ownerLookupNanoseconds": 13167,
+        "requestFinishedNanoseconds": 20561792,
+        "environmentNanoseconds": 40625,
+        "destinationNanoseconds": 7208,
+        "firstKeyNanoseconds": 8047292,
+        "finalGuardsNanoseconds": 241541
+      },
+      "control_adjusted_phases": {
+        "secondKeyNanoseconds": 104632,
+        "visibleWindowsNanoseconds": 7340923,
+        "pauseAndPublicationNanoseconds": 52424,
+        "psnLookupNanoseconds": 9840,
+        "adoptedWindowsNanoseconds": 3965,
+        "destinationPreparationNanoseconds": 985132,
+        "activationNanoseconds": 3999923,
+        "ownerLookupNanoseconds": 13132,
+        "environmentNanoseconds": 40590,
+        "destinationNanoseconds": 7173,
+        "firstKeyNanoseconds": 8047257,
+        "finalGuardsNanoseconds": 241506
+      },
+      "server": {
+        "max_sample_gap_ns": 2292167,
+        "transitions": [
+          {
+            "identity": 0,
+            "at_ns": 326776867937916,
+            "read_ns": 13333,
+            "lower_ns": 0
+          },
+          {
+            "identity": 1,
+            "at_ns": 326777589454000,
+            "read_ns": 15042,
+            "lower_ns": 326777588116041
+          },
+          {
+            "identity": 0,
+            "at_ns": 326777596961958,
+            "read_ns": 7000,
+            "lower_ns": 326777594641000
+          }
+        ]
+      }
+    }
+  ],
+  "status": "budget_not_met",
+  "build": "26A5425a"
+}

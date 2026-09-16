@@ -1,0 +1,382 @@
+{
+  "budget_ms": 8.0,
+  "completed_trials": 5,
+  "budget_passed_trials": 0,
+  "all_trials_within_budget": false,
+  "server_upper_bound_ms": {
+    "min": 10.185083,
+    "median": 11.334458,
+    "max": 32.360417
+  },
+  "control_adjusted_phases": {
+    "adoptedWindowsNanoseconds": {
+      "min_ms": 0.003605,
+      "median_ms": 0.005726,
+      "max_ms": 0.006888
+    },
+    "firstKeyNanoseconds": {
+      "min_ms": 3.471292,
+      "median_ms": 7.13906,
+      "max_ms": 9.329718
+    },
+    "pauseAndPublicationNanoseconds": {
+      "min_ms": 0.048605,
+      "median_ms": 0.053916,
+      "max_ms": 0.063343
+    },
+    "environmentNanoseconds": {
+      "min_ms": 0.034301,
+      "median_ms": 0.042305,
+      "max_ms": 0.043625
+    },
+    "visibleWindowsNanoseconds": {
+      "min_ms": 6.086221,
+      "median_ms": 6.777291,
+      "max_ms": 8.657397
+    },
+    "ownerLookupNanoseconds": {
+      "min_ms": 0.012772,
+      "median_ms": 0.026343,
+      "max_ms": 1.136846
+    },
+    "finalGuardsNanoseconds": {
+      "min_ms": 0.137605,
+      "median_ms": 2.437346,
+      "max_ms": 3.646226
+    },
+    "psnLookupNanoseconds": {
+      "min_ms": 0.008188,
+      "median_ms": 0.01331,
+      "max_ms": 0.034375
+    },
+    "destinationNanoseconds": {
+      "min_ms": 0.006843,
+      "median_ms": 0.010125,
+      "max_ms": 0.011768
+    },
+    "destinationPreparationNanoseconds": {
+      "min_ms": 0.787813,
+      "median_ms": 1.162051,
+      "max_ms": 1.424083
+    },
+    "activationNanoseconds": {
+      "min_ms": 3.94723,
+      "median_ms": 4.014762,
+      "max_ms": 4.649843
+    },
+    "secondKeyNanoseconds": {
+      "min_ms": 0.218054,
+      "median_ms": 1.603771,
+      "max_ms": 4.871976
+    }
+  },
+  "trials": [
+    {
+      "server_interval_lower_ns": 7727333,
+      "server_interval_upper_ns": 10185083,
+      "detection_delay_lower_ns": 399500,
+      "detection_delay_upper_ns": 1036000,
+      "budget": "inconclusive",
+      "clock_control_ns": 20,
+      "raw_timing": {
+        "requestFinishedNanoseconds": 23733750,
+        "detectedAtUptimeNanoseconds": 325042658424083,
+        "adoptedWindowsNanoseconds": 3625,
+        "firstKeyNanoseconds": 9238709,
+        "pauseAndPublicationNanoseconds": 48625,
+        "environmentNanoseconds": 38833,
+        "visibleWindowsNanoseconds": 8657417,
+        "ownerLookupNanoseconds": 12792,
+        "finalGuardsNanoseconds": 137625,
+        "psnLookupNanoseconds": 8208,
+        "destinationNanoseconds": 7375,
+        "destinationPreparationNanoseconds": 787833,
+        "activationNanoseconds": 3947250,
+        "secondKeyNanoseconds": 1603791
+      },
+      "control_adjusted_phases": {
+        "adoptedWindowsNanoseconds": 3605,
+        "firstKeyNanoseconds": 9238689,
+        "pauseAndPublicationNanoseconds": 48605,
+        "environmentNanoseconds": 38813,
+        "visibleWindowsNanoseconds": 8657397,
+        "ownerLookupNanoseconds": 12772,
+        "finalGuardsNanoseconds": 137605,
+        "psnLookupNanoseconds": 8188,
+        "destinationNanoseconds": 7355,
+        "destinationPreparationNanoseconds": 787813,
+        "activationNanoseconds": 3947230,
+        "secondKeyNanoseconds": 1603771
+      },
+      "server": {
+        "max_sample_gap_ns": 2390542,
+        "transitions": [
+          {
+            "identity": 0,
+            "at_ns": 325042038631250,
+            "read_ns": 6000,
+            "lower_ns": 0
+          },
+          {
+            "identity": 1,
+            "at_ns": 325042658024583,
+            "read_ns": 4375,
+            "lower_ns": 325042657388083
+          },
+          {
+            "identity": 0,
+            "at_ns": 325042667573166,
+            "read_ns": 6375,
+            "lower_ns": 325042665751916
+          }
+        ]
+      }
+    },
+    {
+      "server_interval_lower_ns": 3794375,
+      "server_interval_upper_ns": 32360417,
+      "detection_delay_lower_ns": 312667,
+      "detection_delay_upper_ns": 3715417,
+      "budget": "inconclusive",
+      "clock_control_ns": 42,
+      "raw_timing": {
+        "activationNanoseconds": 4593666,
+        "firstKeyNanoseconds": 3471334,
+        "pauseAndPublicationNanoseconds": 53958,
+        "environmentNanoseconds": 43667,
+        "secondKeyNanoseconds": 3680416,
+        "adoptedWindowsNanoseconds": 6917,
+        "requestFinishedNanoseconds": 22135958,
+        "visibleWindowsNanoseconds": 6777333,
+        "destinationPreparationNanoseconds": 1424125,
+        "destinationNanoseconds": 10167,
+        "psnLookupNanoseconds": 34417,
+        "ownerLookupNanoseconds": 880792,
+        "detectedAtUptimeNanoseconds": 325050116398625,
+        "finalGuardsNanoseconds": 2513792
+      },
+      "control_adjusted_phases": {
+        "activationNanoseconds": 4593624,
+        "firstKeyNanoseconds": 3471292,
+        "pauseAndPublicationNanoseconds": 53916,
+        "environmentNanoseconds": 43625,
+        "secondKeyNanoseconds": 3680374,
+        "adoptedWindowsNanoseconds": 6875,
+        "visibleWindowsNanoseconds": 6777291,
+        "destinationPreparationNanoseconds": 1424083,
+        "destinationNanoseconds": 10125,
+        "psnLookupNanoseconds": 34375,
+        "ownerLookupNanoseconds": 880750,
+        "finalGuardsNanoseconds": 2513750
+      },
+      "server": {
+        "max_sample_gap_ns": 25156125,
+        "transitions": [
+          {
+            "identity": 0,
+            "at_ns": 325049404981958,
+            "read_ns": 4667,
+            "lower_ns": 0
+          },
+          {
+            "identity": 1,
+            "at_ns": 325050116085958,
+            "read_ns": 26000,
+            "lower_ns": 325050112683208
+          },
+          {
+            "identity": 0,
+            "at_ns": 325050145043625,
+            "read_ns": 377625,
+            "lower_ns": 325050119880333
+          }
+        ]
+      }
+    },
+    {
+      "server_interval_lower_ns": 10695084,
+      "server_interval_upper_ns": 18496333,
+      "detection_delay_lower_ns": 723500,
+      "detection_delay_upper_ns": 1395583,
+      "budget": "failed",
+      "clock_control_ns": 24,
+      "raw_timing": {
+        "pauseAndPublicationNanoseconds": 56209,
+        "detectedAtUptimeNanoseconds": 325056735515666,
+        "firstKeyNanoseconds": 7139084,
+        "activationNanoseconds": 3976166,
+        "psnLookupNanoseconds": 13334,
+        "secondKeyNanoseconds": 4872000,
+        "finalGuardsNanoseconds": 3646250,
+        "requestFinishedNanoseconds": 26159042,
+        "adoptedWindowsNanoseconds": 5750,
+        "destinationPreparationNanoseconds": 1279417,
+        "ownerLookupNanoseconds": 20583,
+        "destinationNanoseconds": 11792,
+        "environmentNanoseconds": 42916,
+        "visibleWindowsNanoseconds": 6333625
+      },
+      "control_adjusted_phases": {
+        "pauseAndPublicationNanoseconds": 56185,
+        "firstKeyNanoseconds": 7139060,
+        "activationNanoseconds": 3976142,
+        "psnLookupNanoseconds": 13310,
+        "secondKeyNanoseconds": 4871976,
+        "finalGuardsNanoseconds": 3646226,
+        "adoptedWindowsNanoseconds": 5726,
+        "destinationPreparationNanoseconds": 1279393,
+        "ownerLookupNanoseconds": 20559,
+        "destinationNanoseconds": 11768,
+        "environmentNanoseconds": 42892,
+        "visibleWindowsNanoseconds": 6333601
+      },
+      "server": {
+        "max_sample_gap_ns": 7123083,
+        "transitions": [
+          {
+            "identity": 0,
+            "at_ns": 325056025586125,
+            "read_ns": 12875,
+            "lower_ns": 0
+          },
+          {
+            "identity": 1,
+            "at_ns": 325056734792166,
+            "read_ns": 24166,
+            "lower_ns": 325056734120083
+          },
+          {
+            "identity": 0,
+            "at_ns": 325056752616416,
+            "read_ns": 17375,
+            "lower_ns": 325056745487250
+          }
+        ]
+      }
+    },
+    {
+      "server_interval_lower_ns": 7485459,
+      "server_interval_upper_ns": 11004208,
+      "detection_delay_lower_ns": 165959,
+      "detection_delay_upper_ns": 2020167,
+      "budget": "inconclusive",
+      "clock_control_ns": 32,
+      "raw_timing": {
+        "adoptedWindowsNanoseconds": 4000,
+        "ownerLookupNanoseconds": 26375,
+        "finalGuardsNanoseconds": 258792,
+        "destinationPreparationNanoseconds": 1162083,
+        "firstKeyNanoseconds": 9329750,
+        "pauseAndPublicationNanoseconds": 63375,
+        "secondKeyNanoseconds": 585709,
+        "detectedAtUptimeNanoseconds": 325063062013875,
+        "requestFinishedNanoseconds": 23106083,
+        "environmentNanoseconds": 34333,
+        "visibleWindowsNanoseconds": 8109459,
+        "activationNanoseconds": 4649875,
+        "psnLookupNanoseconds": 12208,
+        "destinationNanoseconds": 6875
+      },
+      "control_adjusted_phases": {
+        "adoptedWindowsNanoseconds": 3968,
+        "ownerLookupNanoseconds": 26343,
+        "finalGuardsNanoseconds": 258760,
+        "destinationPreparationNanoseconds": 1162051,
+        "firstKeyNanoseconds": 9329718,
+        "pauseAndPublicationNanoseconds": 63343,
+        "secondKeyNanoseconds": 585677,
+        "environmentNanoseconds": 34301,
+        "visibleWindowsNanoseconds": 8109427,
+        "activationNanoseconds": 4649843,
+        "psnLookupNanoseconds": 12176,
+        "destinationNanoseconds": 6843
+      },
+      "server": {
+        "max_sample_gap_ns": 3625958,
+        "transitions": [
+          {
+            "identity": 0,
+            "at_ns": 325062360013125,
+            "read_ns": 15167,
+            "lower_ns": 0
+          },
+          {
+            "identity": 1,
+            "at_ns": 325063061847916,
+            "read_ns": 28583,
+            "lower_ns": 325063059993708
+          },
+          {
+            "identity": 0,
+            "at_ns": 325063070997916,
+            "read_ns": 9583,
+            "lower_ns": 325063069333375
+          }
+        ]
+      }
+    },
+    {
+      "server_interval_lower_ns": 9495416,
+      "server_interval_upper_ns": 11334458,
+      "detection_delay_lower_ns": -181709,
+      "detection_delay_upper_ns": 770458,
+      "budget": "failed",
+      "clock_control_ns": 29,
+      "raw_timing": {
+        "ownerLookupNanoseconds": 1136875,
+        "destinationPreparationNanoseconds": 819709,
+        "secondKeyNanoseconds": 218083,
+        "detectedAtUptimeNanoseconds": 325069572694541,
+        "finalGuardsNanoseconds": 2437375,
+        "psnLookupNanoseconds": 26667,
+        "visibleWindowsNanoseconds": 6086250,
+        "requestFinishedNanoseconds": 19308000,
+        "environmentNanoseconds": 42334,
+        "adoptedWindowsNanoseconds": 6917,
+        "pauseAndPublicationNanoseconds": 52500,
+        "activationNanoseconds": 4014791,
+        "firstKeyNanoseconds": 5244709,
+        "destinationNanoseconds": 10750
+      },
+      "control_adjusted_phases": {
+        "ownerLookupNanoseconds": 1136846,
+        "destinationPreparationNanoseconds": 819680,
+        "secondKeyNanoseconds": 218054,
+        "finalGuardsNanoseconds": 2437346,
+        "psnLookupNanoseconds": 26638,
+        "visibleWindowsNanoseconds": 6086221,
+        "environmentNanoseconds": 42305,
+        "adoptedWindowsNanoseconds": 6888,
+        "pauseAndPublicationNanoseconds": 52471,
+        "activationNanoseconds": 4014762,
+        "firstKeyNanoseconds": 5244680,
+        "destinationNanoseconds": 10721
+      },
+      "server": {
+        "max_sample_gap_ns": 2948000,
+        "transitions": [
+          {
+            "identity": 0,
+            "at_ns": 325068847006583,
+            "read_ns": 13542,
+            "lower_ns": 0
+          },
+          {
+            "identity": 1,
+            "at_ns": 325069572876250,
+            "read_ns": 5167,
+            "lower_ns": 325069571924083
+          },
+          {
+            "identity": 0,
+            "at_ns": 325069583258541,
+            "read_ns": 8250,
+            "lower_ns": 325069582371666
+          }
+        ]
+      }
+    }
+  ],
+  "status": "budget_not_met",
+  "build": "26A5425a"
+}

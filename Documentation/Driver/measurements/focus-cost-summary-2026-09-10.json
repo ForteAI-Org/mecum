@@ -1,0 +1,154 @@
+{
+  "build": "26A5425a",
+  "control": {
+    "wall_mean_ns": 328,
+    "cpu_mean_ns": 136
+  },
+  "live_trials": 3,
+  "functional_passes": 3,
+  "budget_passes": 1,
+  "phases": {
+    "windowCallWall": {
+      "minimum_ms": 4.479672,
+      "median_ms": 6.455672,
+      "maximum_ms": 6.997839
+    },
+    "windowParseWall": {
+      "minimum_ms": 0.028672,
+      "median_ms": 0.032172,
+      "maximum_ms": 0.044714
+    },
+    "secondKeyBuildWall": {
+      "minimum_ms": 0.002505,
+      "median_ms": 0.004756,
+      "maximum_ms": 0.030589
+    },
+    "firstKeyPostWall": {
+      "minimum_ms": 0.993464,
+      "median_ms": 7.715547,
+      "maximum_ms": 7.966672
+    },
+    "firstKeyBuildCPU": {
+      "minimum_ms": 0.003364,
+      "median_ms": 0.004739,
+      "maximum_ms": 0.010822
+    },
+    "windowParseCPU": {
+      "minimum_ms": 0.028614,
+      "median_ms": 0.032156,
+      "maximum_ms": 0.044405
+    },
+    "windowCallCPU": {
+      "minimum_ms": 0.095364,
+      "median_ms": 0.147739,
+      "maximum_ms": 0.163655
+    },
+    "secondKeyBuildCPU": {
+      "minimum_ms": 0.002281,
+      "median_ms": 0.003947,
+      "maximum_ms": 0.004447
+    },
+    "secondKeyPostWall": {
+      "minimum_ms": 0.051131,
+      "median_ms": 0.068422,
+      "maximum_ms": 0.482922
+    },
+    "secondKeyPostCPU": {
+      "minimum_ms": 0.013447,
+      "median_ms": 0.022114,
+      "maximum_ms": 0.03553
+    },
+    "windowBridgeWall": {
+      "minimum_ms": 0.086089,
+      "median_ms": 0.086339,
+      "maximum_ms": 0.270838
+    },
+    "windowBridgeCPU": {
+      "minimum_ms": 0.085864,
+      "median_ms": 0.086072,
+      "maximum_ms": 0.207614
+    },
+    "firstKeyBuildWall": {
+      "minimum_ms": 0.003756,
+      "median_ms": 0.00563,
+      "maximum_ms": 0.017672
+    },
+    "firstKeyPostCPU": {
+      "minimum_ms": 0.03303,
+      "median_ms": 0.041781,
+      "maximum_ms": 0.042948
+    }
+  },
+  "isolated_debug": {
+    "first_call_ms": 21.786458,
+    "warm_samples": 50,
+    "warm_phases": {
+      "call_wall_ns": {
+        "minimum_ms": 0.593922,
+        "median_ms": 0.8760889999999999,
+        "maximum_ms": 7.205214
+      },
+      "call_cpu_ns": {
+        "minimum_ms": 0.094864,
+        "median_ms": 0.270843,
+        "maximum_ms": 0.423614
+      },
+      "bridge_wall_ns": {
+        "minimum_ms": 0.062963,
+        "median_ms": 0.158943,
+        "maximum_ms": 0.276047
+      },
+      "bridge_cpu_ns": {
+        "minimum_ms": 0.063614,
+        "median_ms": 0.158426,
+        "maximum_ms": 0.27678
+      },
+      "parse_wall_ns": {
+        "minimum_ms": 0.024506,
+        "median_ms": 0.0579425,
+        "maximum_ms": 0.107297
+      },
+      "parse_cpu_ns": {
+        "minimum_ms": 0.024739,
+        "median_ms": 0.058698,
+        "maximum_ms": 0.102947
+      }
+    }
+  },
+  "isolated_release": {
+    "first_call_ms": 88.832542,
+    "warm_samples": 50,
+    "warm_phases": {
+      "call_wall_ns": {
+        "minimum_ms": 0.362797,
+        "median_ms": 0.5782134999999999,
+        "maximum_ms": 3.313589
+      },
+      "call_cpu_ns": {
+        "minimum_ms": 0.082239,
+        "median_ms": 0.12696849999999998,
+        "maximum_ms": 0.366406
+      },
+      "bridge_wall_ns": {
+        "minimum_ms": 0.050839,
+        "median_ms": 0.0722135,
+        "maximum_ms": 0.196588
+      },
+      "bridge_cpu_ns": {
+        "minimum_ms": 0.051114,
+        "median_ms": 0.0692395,
+        "maximum_ms": 0.15628
+      },
+      "parse_wall_ns": {
+        "minimum_ms": 0.015089,
+        "median_ms": 0.017984,
+        "maximum_ms": 0.092006
+      },
+      "parse_cpu_ns": {
+        "minimum_ms": 0.01528,
+        "median_ms": 0.018218,
+        "maximum_ms": 0.043697
+      }
+    }
+  }
+}

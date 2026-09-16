@@ -1,0 +1,176 @@
+# AgentSeatKit
+
+A macOS library that drives a **seat**: a virtual display, one or more target
+windows moved onto it, background input delivered to those windows, an HID fence
+that keeps the person's cursor out, and capture of what the seat shows. It knows
+nothing about who decides: the consumer observes, chooses, and hands the kit
+coordinates.
+
+The point of the kit is what it refuses to do. It never posts a global event, it
+never falls back onto the person's desktop, it never repeats an action whose
+effect it could not confirm, and on a macOS build it has not been validated
+against it declines to act rather than guessing.
+
+## Shape
+
+| Module | What it owns |
+|---|---|
+| `SeatCore` | pure types and contracts: window references, commands, receipts, guard and recovery policy, frame math |
+| `PrivateSymbols` | build identity, the private symbol table, record layouts, the compatibility ledger, TCC preflight |
+| `VirtualScreens` | the virtual display's own life and the physical topology it attaches to |
+| `WindowPlacement` | where a window is, where it sits in the front to back order, and how it is moved and staged |
+| `SeatInput` | event construction and delivery to one window, per-platform preparation |
+| `CursorGuard` | the HID event tap that confines the physical cursor |
+| `SeatCapture` | the display monitor, per-window frames and stills |
+| `SeatSession` | `SeatHost` and `AgentSeat`: lifecycle, turns, watchdog, recovery |
+| `TargetReader` | reads another application's accessibility tree and returns value types; it never acts, no facility depends on it, and what a reading means is the caller's |
+
+There is no umbrella module: every consumer writes the imports it uses, so the
+boundaries are visible at the top of the file rather than hidden behind one
+name. The package ships two products, and that is where the shape shows: link
+`AgentSeatKit` to drive a seat, and `TargetReader` only if you also want to read
+somebody else's window.
+
+## Using it
+
+```swift
+let host = SeatHost(configuration: .default)
+try await host.start()                                  // virtual display + fence, atomic
+
+let seat = try host.makeSeat()
+let turn = try await seat.acquire()                     // exclusive between safe points
+let window = try await seat.adopt(reference, platform: .universal)
+
+let receipt = try await seat.send(.click(location), to: window, turn: turn)
+// the consumer verifies the effect however it likes, then says so:
+seat.confirm(receipt, .observed)
+
+try await seat.release(window, .returnToUserSeat)
+seat.release(turn)
+await host.stop()
+```
+
+`SeatHost.events` and `AgentSeat.events` carry state transitions, issues and
+recovery progress. Every action returns an observation of the User Seat so the
+consumer can tell a person's own activity from an anomaly; the kit reports, it
+does not attribute.
+
+## The fence is alive only while somebody holds it
+
+The HID fence is reference counted in the process: the first acquisition
+installs the tap, the last release removes it. A `SeatHost` holds it from
+`start()` to `stop()`, so while the host is up the person's cursor cannot reach
+the virtual display, and a diagnostic run with a hand on the mouse confirmed it:
+186 events corrected out of 210 observed, zero disables of the tap, the cursor
+stopped at the corner of the physical display and never entered the virtual one.
+
+**Outside that window, with the virtual display still present, the cursor can
+enter it.** That is the contract and not a defect. A tap at the head of the HID
+stream is not something a library leaves installed after the work is over, and
+the consumer that wants confinement outside an operation holds the fence itself:
+`SeatHost.fence` is the same shared instance, and `CursorFence.acquire` from the
+consumer's own code keeps it up for as long as the consumer needs.
+
+The corollary is the reason the watchdog exists at all. "The pointer entered the
+virtual display" is a check the fence cannot make, because the fence knows the
+person's displays and deliberately knows nothing about the virtual one; only the
+watchdog can combine the fence's latched signals with the display's geometry.
+
+## Testing it
+
+Everything goes through the `Makefile`; `make help` lists it.
+
+```
+make test           unit tier: pure, parallel, no permission needed
+make host-tests     host tier: TCC and a real display, two commands, counts asserted
+make live-tests     live tier: real windows and a real browser
+make bench          the measurements of spec section 8, each one a gate
+make compat-report  runs the tiers and writes docs/compatibility/<build>.{md,json}
+make promote-build BUILD=26A5425a
+```
+
+Three tiers. Unit is pure and parallel. Host needs TCC and a real display. Live
+drives real windows and a real browser, and it needs the person's Mac to itself:
+a running consumer holds the virtual display's identity, and a second display
+with the same identity is refused.
+
+**A real display means an awake one.** `CGGetActiveDisplayList` is empty on a Mac
+whose screen has gone to sleep, so there is no physical topology to attach a
+virtual display to and the seat cycle fails with `.noPhysicalDisplays`. The Live
+tier asks for one thing more: that nobody is driving the machine while it runs.
+A person's own application switches cannot be told apart from an anomaly of the
+target, so a row taken with a hand on the mouse comes back `INCO`, and an
+inconclusive row is never a pass. Both are preconditions of measuring, not
+defects to work around.
+
+**A green exit status from a tier is not evidence that the tier ran.** A live HID
+tap plus repeated virtual display creation ends the process with exit code 0 and
+no summary line at all. So the Host tier runs as **two commands**, the seat cycle
+apart from the display suites, and every tier asserts the number of tests it
+reported. That is what the `Makefile` is for, and it is why running
+`xcrun swift test` by hand on the Host tier will tell you it passed when it died
+after three tests.
+
+The Live tier runs `--no-parallel` for a second reason: its two suites drive the
+same browser, and in parallel one of them quits the window the other adopted.
+
+The Live tier also needs a cooperative target to drive, and **the kit ships no
+application**: test applications belong to the consumer. Point
+`AGENTSEAT_FIXTURE_APP` at a binary that
+
+- comes up as that target when launched with `--session <token>`, and
+- publishes its state as JSON at `/tmp/agentseat-fixture-<uid>-<token>.json`,
+  once or twice a second, with the fields `FixtureReport` declares (extra keys
+  are ignored, so a consumer's own state object can be a superset).
+
+Without the variable those rows are skipped, with the reason, and `make bench`
+skips `stage`, which needs a second process because Stage Manager groups windows
+by application. `/tmp` and not `TMPDIR` because `TMPDIR` is per process on
+macOS, so two processes never agree on it.
+
+```
+AGENTSEAT_FIXTURE_APP=/path/to/target make live-tests
+```
+
+## Validating a macOS build
+
+`make compat-report` runs the tiers and assembles `docs/compatibility/<build>.md`
+for a person to read, plus `docs/compatibility/<build>.json`, a draft ledger
+entry. It writes nothing into the ledger.
+
+`make promote-build BUILD=<build>` is the only thing in the repository that
+writes `Sources/PrivateSymbols/Ledger/validated-builds.json`, it takes the
+build on the command line because it is a decision and not a step, and it
+refuses a draft with any row that is not `verified`. The same build validated on
+a second Mac adds that `hw.model` to the entry's hardware list.
+
+A benchmark is a gate: it exits non zero on a violated budget. Two things are
+reported and not gated, both for the same reason, which is that they measure the
+machine and not the kit: a maximum above the absolute ceiling on a tight loop is
+the scheduler taking the CPU away, and a regression against the saved baseline
+on a run started above half the cores of load average is `INCONCLUSIVE`. An
+inconclusive run is not a pass either. A baseline row is regenerated by deleting
+it from `Tests/Benchmarks/Baselines/<build>-<model>.json` and running the driver;
+a run that happens to be fast never saves its own numbers over one.
+
+## Requirements
+
+macOS 26 or later to build, though every private primitive is validated per
+build: see `docs/spi-ledger.md` for what is used and what was discarded, and
+`docs/compatibility/` for the report of each validated build. Accessibility is
+required for input and the fence, Screen Recording for capture. The kit relies on
+undocumented system interfaces, so it is not a basis for the Mac App Store.
+
+## Documents
+
+`docs/spec.md` (the hand-off specification), `docs/adr/` (why the load-bearing
+decisions are what they are), `docs/spi-ledger.md` (every private primitive that
+is used, that was verified and left out, or that was discarded, with the reason
+and the build), `docs/compatibility/<build>.md` (the report of one validated
+build), `CONTEXT.md` (the domain vocabulary, binding), `CODE_STYLE.md`,
+`CLAUDE.md`.
+
+The comments are the fourth document. A comment here says what a thing does and
+why it is that shape, with the number that decided it, and never where the
+number came from: a reference to a research note somebody else cannot open
+explains nothing.
