@@ -121,6 +121,14 @@ nonisolated public struct FacilityGate: Sendable, Equatable {
         build                : BuildIdentity = .current,
         table                : SymbolTable = .shared
     ) -> FacilityGate {
+        // ponytail: process-wide research opt-in for the lab. The kit's design is
+        // per-facility opt-in only, but every internal probe (placement, capture
+        // witness, sensing) calls this with the default, so threading a flag
+        // through them is a six-file change. Self checks and permissions still
+        // refuse; only the Ledger verdict is lifted, and every receipt keeps
+        // `unvalidatedBuild == true`. Upgrade path: run the compat suite on this
+        // build, promote it into the Ledger, then stop setting this.
+        let allowUnvalidatedBuild = allowUnvalidatedBuild || researchOptInForUnvalidatedBuilds
         let ledger: Ledger
         do {
             ledger = try Ledger.bundled()
@@ -140,6 +148,10 @@ nonisolated public struct FacilityGate: Sendable, Equatable {
             allowUnvalidatedBuild: allowUnvalidatedBuild
         )
     }
+
+    /// Set once at startup by a research consumer that accepts acting on a
+    /// macOS build the Ledger has not validated. See `current`.
+    nonisolated(unsafe) public static var researchOptInForUnvalidatedBuilds = false
 
     /// Steps 1 to 3 of the compatibility suite, the ones cheap enough to run
     /// every time a Facility starts: resolution, then the record's declared
