@@ -70,6 +70,8 @@ let package = Package(
         driver("SeatCapture", ["SeatCore", "WindowPlacement"]),
         // The host and the seat: turns, adoption, recovery, watchdog.
         driver("SeatSession", ["SeatCore", "PrivateSymbols", "VirtualScreens", "WindowPlacement", "SeatInput", "CursorGuard", "SeatCapture"]),
+        // Read-only reader of another application's window.
+        driver("TargetReader", ["SeatCore", "WindowPlacement"]),
 
         // MARK: Driver tests
         driverTests("SeatCore", ["SeatCore"]),
@@ -80,5 +82,6 @@ let package = Package(
         driverTests("CursorGuard", ["CursorGuard", "SeatCore"]),
         driverTests("SeatCapture", ["SeatCapture", "SeatCore"]),
         driverTests("SeatSession", ["SeatSession", "SeatCore", "CursorGuard", "SeatInput"]),
+        driverTests("TargetReader", ["TargetReader"]),
     ]
 )
