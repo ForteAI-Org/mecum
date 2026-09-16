@@ -26,7 +26,7 @@ public enum InputCleanupResult: Sendable, Equatable {
     public var needsRecovery: Bool {
         switch self {
             case .notRequired, .succeeded: false
-            case .notAttempted, .failed : true
+            case .notAttempted, .failed  : true
         }
     }
 }

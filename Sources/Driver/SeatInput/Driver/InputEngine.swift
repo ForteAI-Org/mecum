@@ -33,6 +33,21 @@ nonisolated package final class InputEngine {
     /// every Receipt says so. It describes the evidence, not the permission.
     package let unvalidatedBuild: Bool
 
+    /// Whether this build encodes a modifier transition record the way the rest
+    /// of the event table is encoded, asked once for the life of the process.
+    ///
+    /// It is a `static let`, so Swift computes it lazily and exactly once under
+    /// its own lock: one event built, mutated and thrown away, and never again.
+    /// The answer gates `ModifierPolicy.flagsChanged`, which refuses rather than
+    /// quietly falling back, because a silent downgrade would make a matrix row
+    /// pass for the wrong reason.
+    package static let flagsChangedRecordIsVerified: Bool =
+        RecordLayout.verifyFlagsChangedRecord().passed
+
+    /// The process-wide registry of what this kit is holding down, injectable
+    /// so a test does not have to reach through a singleton.
+    package let keyHold: KeyHold
+
     private let commandGate: InputCommandGate?
     private let identityReader: (Int) -> WindowIdentity?
     private let geometryReader: (WindowReference) -> WindowGeometryObservation?
@@ -77,6 +92,7 @@ nonisolated package final class InputEngine {
         table           : SymbolTable = .shared,
         unvalidatedBuild: Bool = false,
         commandGate     : InputCommandGate? = nil,
+        keyHold         : KeyHold = .shared,
         allowUnvalidatedIdentity: Bool = false,
         identityReader          : @escaping (Int, SymbolTable, FacilityGate) -> WindowIdentity? = {
             WindowServerProbe.identity(of: $0, table: $1, validatedBy: $2)
@@ -89,6 +105,7 @@ nonisolated package final class InputEngine {
         }
     ) throws {
         self.commandGate = commandGate
+        self.keyHold     = keyHold
         let identityGate = FacilityGate.current(
             facility             : .windowIdentity,
             allowUnvalidatedBuild: allowUnvalidatedIdentity,
@@ -228,14 +245,31 @@ nonisolated package final class InputEngine {
             through: DispatchTime.now().uptimeNanoseconds
         )
 
+        // Resolved and refused before construction, like every other refusal of
+        // this engine: a policy this build cannot express must stop the Command
+        // while nothing has gone out.
+        let modifierPolicy = try Self.resolveModifierPolicy(
+            platform.modifierPolicy(for: validatedCommand),
+            flagsChangedRecordIsVerified: Self.flagsChangedRecordIsVerified
+        )
+
+        let heldModifiers = keyHold.modifiers(processID: window.processID)
+        try Self.requireStableShortcutContext(
+            for : validatedCommand,
+            held: heldModifiers
+        )
+
         let constructionStart = DispatchTime.now().uptimeNanoseconds
         do {
             try InputEvents.append(
                 validatedCommand,
-                source       : source,
-                pacing       : platform.dragPacing,
-                correlationID: correlationID,
-                into         : &pending
+                source         : source,
+                pacing         : platform.dragPacing,
+                keyRepeatPacing: platform.keyRepeatPacing,
+                held           : heldModifiers,
+                policy         : modifierPolicy,
+                correlationID  : correlationID,
+                into           : &pending
             )
         } catch {
             trace.recordEventConstruction(
@@ -333,6 +367,11 @@ nonisolated package final class InputEngine {
         }
         let elapsed = DispatchTime.now().uptimeNanoseconds &- start
 
+        // Recorded after the posting loop and never before it: the loop cannot
+        // fail, so what went out is what the registry may claim is held. A
+        // refusal happens above and leaves the registry untouched.
+        recordHold(of: validatedCommand, on: window.processID, owner: correlationID)
+
         return InputReceipt(
             eventCount: pending.count,
             route     : InputRoute(
@@ -342,7 +381,9 @@ nonisolated package final class InputEngine {
                 ownerConnectionID: resolved.ownerConnectionID
             ),
             timing          : InputTiming(postingNanoseconds: elapsed),
-            unvalidatedBuild: unvalidatedBuild
+            unvalidatedBuild: unvalidatedBuild,
+            heldAfter       : keyHold.modifiers(processID: window.processID),
+            textMeasure     : validatedCommand.textMeasure
         )
     }
 
@@ -409,5 +450,76 @@ nonisolated package final class InputEngine {
         event.setIntegerValueField(windowNumberField, value: Int64(windowNumber))
         event.setIntegerValueField(ownerConnectionField, value: Int64(ownerConnectionID))
         setWindowLocation(eventPointer, Double(point.x), Double(point.y))
+    }
+
+    /// The policy this build may actually express, or a refusal.
+    ///
+    /// It takes the verified flag rather than reading it, so the refusal is a
+    /// pure decision a unit test can drive both ways. An engine needs real
+    /// private symbols to exist at all, and two lines that only ever run on a
+    /// build where the record check failed would otherwise never be exercised
+    /// anywhere.
+    ///
+    /// There is no implicit fall back to `.eventFlags`. A silent downgrade
+    /// would post a Command that looks like it worked and make a matrix row
+    /// pass for the wrong reason.
+    package static func resolveModifierPolicy(
+        _ requested                 : ModifierPolicy,
+        flagsChangedRecordIsVerified: Bool
+    ) throws -> ModifierPolicy {
+        guard requested != .flagsChanged || flagsChangedRecordIsVerified else {
+            throw InputFailure.modifierPolicyUnavailable(requested)
+        }
+        return requested
+    }
+
+    /// Refuses a character Shortcut whose layout plane changed after it was
+    /// resolved. Resolution precedes the driver's per-PID exclusion wait, so
+    /// posting with a newer held state could select a different physical key.
+    /// A refusal keeps that mismatch above the posting loop.
+    package static func requireStableShortcutContext(
+        for command: InputCommand,
+        held       : Modifiers
+    ) throws {
+        guard case .key(_, _, let modifiers, let phase, let origin?) = command,
+              phase != .up
+        else {
+            return
+        }
+        let current = held.union(modifiers)
+        let commandPlaneMatches = current.contains(.command) == origin.commandPlane
+        let requiredShiftIsStillHeld = !origin.requiresShift || current.contains(.shift)
+        guard commandPlaneMatches && requiredShiftIsStillHeld else {
+            throw InputFailure.shortcutContextChanged(
+                resolved: origin.effectiveModifiers,
+                current : current
+            )
+        }
+    }
+
+    /// Updates the hold registry for a Command that has already been posted.
+    ///
+    /// Only the two phases that are not symmetric touch it. A `.press` presses
+    /// and releases inside one atomic Command and leaves nothing behind, a
+    /// `.repeated` carries neither a down nor an up of its own, and no mouse or
+    /// text Command holds a key at all.
+    ///
+    /// The character the key was resolved from travels into the registry with
+    /// it, because the person can change keyboard layout between the down and
+    /// the up and what went down is what has to come up.
+    private func recordHold(of command: InputCommand, on processID: Int32, owner: Int64) {
+        guard case .key(let virtualKey, _, _, let phase, let origin) = command else { return }
+        switch phase {
+            case .down:
+                keyHold.press(
+                    KeyHold.HeldKey(virtualKey: virtualKey, character: origin?.character),
+                    owner    : owner,
+                    processID: processID
+                )
+            case .up:
+                keyHold.release(virtualKey: virtualKey, owner: owner, processID: processID)
+            case .press, .repeated:
+                break
+        }
     }
 }

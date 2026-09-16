@@ -198,6 +198,14 @@ public final class AgentSeat {
             throw SessionFailure.unconfirmedCommands(count: unconfirmed)
         }
 
+        // The same safe point invariant one step further: a key this Turn
+        // pressed and never released is state inside another application, and
+        // the next holder would inherit it without being told.
+        let stillHeld = heldKeyCount(of: turn)
+        guard stillHeld == 0 else {
+            throw SessionFailure.keysStillHeld(count: stillHeld)
+        }
+
         try turns.release(turn)
         focusRecovery?.endHold()
 
@@ -205,6 +213,166 @@ public final class AgentSeat {
         observer?.conclude()
         observer         = nil
         observationSoFar = nil
+    }
+
+    /// send drives a declarative Shortcut: it resolves the key, posts the one
+    /// Command that carries it, and records which layout answered.
+    ///
+    /// The layout is read **only** for a Shortcut written as a character, which
+    /// is the only kind that needs one. A position, an arrow or an escape, means
+    /// the same thing on every layout, so asking the system what is installed
+    /// could only cost a `UCKeyTranslate` sweep and introduce an error.
+    ///
+    /// A release of a character the Turn is already holding does not resolve
+    /// again: it lifts the key that actually went down. The person can change
+    /// keyboard layout between the press and the release, and on a Dvorak
+    /// machine c is not where a QWERTY layout puts it, so resolving twice would
+    /// lift a key that was never pressed and leave the pressed one down.
+    @discardableResult
+    public nonisolated func send(
+        _ shortcut: Shortcut,
+        phase     : KeyPhase = .press,
+        to window : AdoptedWindow,
+        turn      : Turn,
+        platform  : (any InputPlatform)? = nil
+    ) async throws -> InputReceipt {
+
+        let needsLayout: Bool = if case .character = shortcut.key { true } else { false }
+        let resolved = try ShortcutResolution.resolve(
+            shortcut,
+            phase    : phase,
+            layout   : needsLayout ? KeyboardLayoutReader.current() : nil,
+            owner    : turn.correlationID,
+            processID: window.reference.processID
+        )
+        let traceContext = InputTraceIdentity.submitted(
+            command      : resolved.command,
+            window       : window.reference,
+            correlationID: turn.correlationID
+        )
+        return try await send(
+            resolved.command,
+            to              : window,
+            turn            : turn,
+            platform        : platform,
+            layoutGeneration: resolved.layoutGeneration,
+            traceContext    : traceContext
+        )
+    }
+
+    /// sendText delivers a whole string in chunks, re-verifying the recipient
+    /// between them.
+    ///
+    /// The re-verification is not a mechanism added here: each chunk is its own
+    /// Command, and the driver re-reads the target window's identity before
+    /// building a Command and again immediately before its first event. Cutting
+    /// the text into Commands is therefore what makes the recipient checked
+    /// between chunks, and this method is the chunking plus the accounting.
+    ///
+    /// Every cut falls on a grapheme cluster boundary, so no chunk can carry
+    /// half of a joined emoji. A single cluster too large for one chunk is
+    /// refused before anything is posted.
+    ///
+    /// What it returns is delivery and never effect. A `.stoppedAfter` outcome
+    /// means the chunks already posted are already inside the target and there
+    /// is no rollback: it is thrown as `TextDeliveryFailure` **carrying** that
+    /// outcome, so a caller cannot see only the error and retry from the start.
+    @discardableResult
+    public nonisolated func sendText(
+        _ text  : String,
+        to window: AdoptedWindow,
+        turn    : Turn,
+        mode    : TextDeliveryMode = .inserted,
+        limits  : TextDeliveryLimits = .measured,
+        platform: (any InputPlatform)? = nil
+    ) async throws -> TextDeliveryOutcome {
+
+        let chunks = try TextChunking.chunks(
+            of              : text,
+            maximumClusters : limits.maximumClusters,
+            maximumCodeUnits: limits.maximumCodeUnits
+        )
+        let commands = chunks.map { chunk in
+            mode == .typed ? InputCommand.text(chunk) : InputCommand.insertText(chunk)
+        }
+
+        do {
+            let receipts = try await sendSequence(
+                commands,
+                to      : window,
+                turn    : turn,
+                platform: platform
+            )
+            return TextDeliveryOutcome.of(
+                chunks       : chunks,
+                mode         : mode,
+                receipts     : receipts,
+                requestedText: text
+            )
+        } catch let failure as InputSequenceFailure {
+            throw TextDeliveryFailure(
+                outcome: TextDeliveryOutcome.of(
+                    chunks       : chunks,
+                    mode         : mode,
+                    receipts     : failure.completedReceipts,
+                    requestedText: text
+                ),
+                cause  : failure.cause
+            )
+        } catch {
+            // Nothing came back, so nothing was posted: a refusal of the driver
+            // happens before the first event of the first chunk.
+            throw TextDeliveryFailure(
+                outcome: TextDeliveryOutcome.of(
+                    chunks       : chunks,
+                    mode         : mode,
+                    receipts     : [],
+                    requestedText: text
+                ),
+                cause  : error
+            )
+        }
+    }
+
+    /// Reports the keys the kit is still holding when there is no longer a Turn
+    /// to refuse.
+    ///
+    /// `release` refuses a Turn that still holds keys, which covers the ordinary
+    /// case. This is the other one: a seat going terminal, where every Turn is
+    /// about to be failed and nobody will ever send the missing key ups. It is
+    /// reported and never thrown, for the same reason `preparationNotRestored`
+    /// is: the key downs already went out, and an error at this point has nobody
+    /// left to hand it to.
+    ///
+    /// The event is yielded straight to the channel rather than through
+    /// `report`, which runs the state machine: this runs immediately before a
+    /// forced transition to `failed`, and a second opinion about the next state
+    /// is the last thing that path needs.
+    private func reportStrandedKeys() {
+        let processes = Set(records.values.map(\.window.reference.processID))
+        let stranded  = processes.reduce(0) { total, processID in
+            total + KeyHold.shared.releaseEveryOwner(processID: processID).count
+        }
+        guard stranded > 0 else { return }
+        eventChannel.yield(.issueDetected(.keysNotReleased, cause: nil))
+    }
+
+    /// How many keys **this Turn** is still holding across every adopted
+    /// window's process.
+    ///
+    /// Scoped to the Turn and not to the process: another holder's keys on the
+    /// same application are that holder's to release, and refusing this release
+    /// for them would make one Turn unable to finish because another one is
+    /// mid-gesture. The processes are a Set because two windows of one
+    /// application are one process and would otherwise be counted twice.
+    private func heldKeyCount(of turn: Turn) -> Int {
+        let processes = Set(records.values.map(\.window.reference.processID))
+        return processes.reduce(0) { total, processID in
+            total + KeyHold.shared.held(
+                owner    : turn.correlationID,
+                processID: processID
+            ).count
+        }
     }
 
     // MARK: The windows
@@ -433,10 +601,11 @@ public final class AgentSeat {
     }
 
     private func send(
-        _ command : InputCommand,
-        to window : AdoptedWindow,
-        turn      : Turn,
-        platform  : (any InputPlatform)?,
+        _ command       : InputCommand,
+        to window       : AdoptedWindow,
+        turn            : Turn,
+        platform        : (any InputPlatform)?,
+        layoutGeneration: UInt64? = nil,
         traceContext suppliedTraceContext: InputTraceContext
     ) async throws -> InputReceipt {
 
@@ -477,7 +646,15 @@ public final class AgentSeat {
                     traceContext.completed(at: DispatchTime.now().uptimeNanoseconds)
                 )
                 : receipt
-            return finish(traced, returningTo: previous)
+            // Stamped **before** `finish` records it, never after it is
+            // returned. `confirm` matches a Receipt by its whole value, which
+            // is the anti replay invariant: a Receipt changed on the way out is
+            // a Receipt the seat will not recognise, and a Command that cannot
+            // be confirmed is a Turn that cannot be given back.
+            let resolved = layoutGeneration == nil
+                ? traced
+                : traced.replacingLayoutGeneration(layoutGeneration)
+            return finish(resolved, returningTo: previous)
 
         } catch let failure as InputPreparationFailure {
             if failure.progress.neededRecovery != nil {
@@ -941,7 +1118,7 @@ public final class AgentSeat {
 
         do {
             _ = try await sender.send(
-                .key(virtualKey: Self.escapeKeyCode, text: "", flags: []),
+                .key(virtualKey: Self.escapeKeyCode, text: "", modifiers: []),
                 to           : target,
                 correlationID: turn.correlationID,
                 platform     : AppKitPlatform()
@@ -1064,6 +1241,7 @@ public final class AgentSeat {
     /// itself, because the display and the fence are not its own.
     func failFromHost(_ issues: [SeatIssue]) {
 
+        reportStrandedKeys()
         stopFocusRecovery()
 
         recoveryTask?.cancel()
@@ -1078,6 +1256,7 @@ public final class AgentSeat {
     /// make it back.
     func releaseAllWindows(_ mode: ReleaseMode) async -> [Int: WindowReleaseOutcome] {
 
+        reportStrandedKeys()
         isTearingDown = true
         if adoptionInFlight {
             await withCheckedContinuation { adoptionWaiters.append($0) }
@@ -1119,6 +1298,15 @@ public final class AgentSeat {
 
         guard !isTearingDown, state.acceptsCommands else { throw SessionFailure.seatNotReady(state) }
 
+        // Recovery follows the requested adopted window. The display baseline
+        // remains the one already recorded by the seat.
+        if let baseline = seatGuard {
+            seatGuard = SeatGuard(
+                target       : record.window.reference,
+                displayID    : baseline.displayID,
+                displayBounds: baseline.displayBounds
+            )
+        }
         let verificationStart = DispatchTime.now().uptimeNanoseconds
         let issues = currentIssues(for: record)
         traceContext.recordWindowVerification(
@@ -1172,7 +1360,12 @@ public final class AgentSeat {
 
         guard let seatGuard else { return [.windowUnavailable] }
 
-        return seatGuard.issues(
+        let windowGuard = SeatGuard(
+            target       : record.window.reference,
+            displayID    : seatGuard.displayID,
+            displayBounds: seatGuard.displayBounds
+        )
+        return windowGuard.issues(
             server              : sensing.windowGeometry(of: record.window.id),
             currentDisplayID    : displayID,
             currentDisplayBounds: sensing.virtualDisplayBounds,

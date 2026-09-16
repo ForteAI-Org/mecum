@@ -99,6 +99,13 @@ nonisolated public protocol SeatSensing: Sendable {
     /// Prepare before input, never in the activation callback. Live sensing
     /// reads display state on MainActor and enumerates windows off that actor.
     @MainActor func prepareFocusRecoverySnapshot() async -> FocusRecoverySnapshot?
+
+    /// Reads every on-screen window owned by the requested processes. The
+    /// snapshot declares its coverage and refuses incomplete evidence. The
+    /// default uses the existing full-list reader for custom implementations.
+    @MainActor func prepareFocusRecoverySnapshot(
+        for processIDs: Set<Int32>
+    ) async -> FocusRecoverySnapshot?
     var userMayBeSwitchingApplications: Bool { get }
     func windowIsVisibleOnPhysicalDisplay(_ window: WindowReference) -> Bool
     func visibleWindowsAreVirtual(ownedBy processID: Int32) -> Bool
@@ -129,6 +136,11 @@ extension SeatSensing {
     nonisolated public var focusRecoverySnapshot: FocusRecoverySnapshot? { nil }
     @MainActor public func prepareFocusRecoverySnapshot() async -> FocusRecoverySnapshot? {
         focusRecoverySnapshot
+    }
+    @MainActor public func prepareFocusRecoverySnapshot(
+        for processIDs: Set<Int32>
+    ) async -> FocusRecoverySnapshot? {
+        await prepareFocusRecoverySnapshot()
     }
     public var userMayBeSwitchingApplications: Bool { false }
     public func windowIsVisibleOnPhysicalDisplay(_ window: WindowReference) -> Bool { false }

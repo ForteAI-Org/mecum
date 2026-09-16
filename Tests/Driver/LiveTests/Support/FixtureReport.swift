@@ -102,4 +102,51 @@ nonisolated struct FixtureReport: Decodable {
     let lastMouseWindowNumber: Int
     let lastMouseHitView     : String
     let lastScrollHitView    : String
+
+    // MARK: The shortcut channel, ticket A7
+
+    /// Every field below is optional on purpose. `JSONDecoder` fails the whole
+    /// decode on one missing required key, so a non-optional addition here
+    /// would make an older fixture binary unreadable and take every AppKit row
+    /// of the matrix down with it. Absent means the fixture does not publish
+    /// this yet, which the harness already reports as `countersUnreadable` and
+    /// never as a pass.
+    let lastShortcutDelivered : String?
+    let lastShortcutEffect    : String?
+    let shortcutEffectCount   : Int?
+
+    /// The selection, for the rows whose effect is a selection: Command and A
+    /// widens it, Option and the right arrow moves its start by a word.
+    let selectedRangeLocation : Int?
+    let selectedRangeLength   : Int?
+
+    /// `NSPasteboard.general.changeCount`, a monotonic integer. The copy row
+    /// reads it and nothing else: it says something was put on the clipboard
+    /// without reading anything of the person's.
+    let pasteboardChangeCount : Int?
+
+    /// How many times the fixture's own `cancelOperation:` ran, which is what
+    /// an Escape reaches through the responder chain.
+    let cancelCount           : Int?
+
+    /// How many windows the fixture owns. Command and Shift and S opens a save
+    /// panel, which changes nothing a text field could report, so the oracle is
+    /// that a window appeared.
+    let ownedWindowCount      : Int?
+
+    /// Every key down the target received, autorepeat ones included. It is the
+    /// only counter that answers "did this event arrive" for a key that changes
+    /// no text, which is what the repeat sweep asks.
+    let keyDownCount          : Int?
+
+    /// The composition the target is holding, as a length in UTF-16 units, and
+    /// the string it marks when it holds one.
+    ///
+    /// A target that never composes publishes zero and an empty string, or
+    /// omits both: these are optional like every other key a consumer's own
+    /// application may not have. The composition row is skipped when they are
+    /// absent, and says so.
+    let markedTextLength      : Int?
+    let compositionText       : String?
+    let compositionCount      : Int?
 }

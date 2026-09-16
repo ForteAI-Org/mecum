@@ -34,42 +34,73 @@ let facility: [SwiftSetting] = [
     .enableUpcomingFeature("ExistentialAny"),
 ]
 
-// Test targets stay nonisolated by default so synchronous tests run in parallel.
 let suite: [SwiftSetting] = pure
-
-func driver(_ name: String, _ dependencies: [String] = [], settings: [SwiftSetting] = facility,
-            resources: [Resource]? = nil) -> Target {
-    .target(name: name, dependencies: dependencies.map { .target(name: $0) },
-            path: "Sources/Driver/\(name)", resources: resources, swiftSettings: settings)
+func driver(
+    _ name        : String,
+    _ dependencies: [String]       = [],
+      settings    : [SwiftSetting] = facility,
+      resources   : [Resource]?    = nil
+) -> Target {
+    
+    .target(
+        name         : name,
+        dependencies : dependencies.map { .target(name: $0) },
+        path         : "Sources/Driver/\(name)",
+        resources    : resources,
+        swiftSettings: settings
+    )
 }
 
-func driverTests(_ name: String, _ dependencies: [String], resources: [Resource]? = nil) -> Target {
-    .testTarget(name: "\(name)Tests", dependencies: dependencies.map { .target(name: $0) },
-                path: "Tests/Driver/\(name)Tests", resources: resources, swiftSettings: suite)
+func driverTests(
+    _ name        : String,
+    _ dependencies: [String],
+      resources   : [Resource]? = nil
+) -> Target {
+    
+    .testTarget(
+        name         : "\(name)Tests",
+        dependencies : dependencies.map { .target(name: $0) },
+        path         : "Tests/Driver/\(name)Tests",
+        resources    : resources,
+        swiftSettings: suite
+    )
 }
 
 let package = Package(
-    name: "Mecum",
+    name     : "Mecum",
     platforms: [deployment],
-    products: [],
+    products : [],
     targets: [
+        
         // MARK: Driver
         // Pure types and role protocols. No OS call, no facility import.
         driver("SeatCore", settings: pure),
+        
         // Build identity, private symbol table, record layouts, ledger, TCC preflight.
-        driver("PrivateSymbols", ["SeatCore"], resources: [.copy("Ledger/validated-builds.json")]),
+        driver(
+            "PrivateSymbols",
+            ["SeatCore"],
+            resources: [.copy("Ledger/validated-builds.json")]
+        ),
+        
         // The virtual display: create it, attach it to the topology, put the topology back.
         driver("VirtualScreens", ["SeatCore", "PrivateSymbols"]),
+        
         // Where a window is, its front to back order, and how it is moved.
         driver("WindowPlacement", ["SeatCore", "PrivateSymbols", "VirtualScreens"]),
+        
         // Input posting, preparation and platform policies.
         driver("SeatInput", ["SeatCore", "PrivateSymbols", "WindowPlacement"]),
+        
         // The HID cursor fence.
         driver("CursorGuard", ["SeatCore", "PrivateSymbols"]),
+        
         // Window and display capture, frames and the monitor layer.
         driver("SeatCapture", ["SeatCore", "WindowPlacement"]),
+        
         // The host and the seat: turns, adoption, recovery, watchdog.
         driver("SeatSession", ["SeatCore", "PrivateSymbols", "VirtualScreens", "WindowPlacement", "SeatInput", "CursorGuard", "SeatCapture"]),
+        
         // Read-only reader of another application's window.
         driver("TargetReader", ["SeatCore", "WindowPlacement"]),
 
@@ -77,6 +108,7 @@ let package = Package(
         // The `malloc_logger` counter every allocation budget is measured with.
         // A C target: the hook runs inside the allocator, so its body must not allocate.
         .target(name: "AllocationCounter", path: "Tools/Driver/AllocationCounter"),
+        
         // The measurement driver behind `make bench`.
         .executableTarget(
             name: "SeatBench",

@@ -7,6 +7,7 @@
 
 import Darwin
 import Foundation
+import PrivateSymbols
 
 // The measurement driver. One benchmark per subcommand, each of them a gate: it
 // exits non zero when a budget of spec section 8 is violated, so `make bench`
@@ -19,6 +20,10 @@ import Foundation
 
 let arguments = CommandLine.arguments
 let benchmark = arguments.count > 1 ? arguments[1] : FenceCallbackBench.name
+
+// Certification measures a build before promotion, with an explicit research opt-in.
+FacilityGate.researchOptInForUnvalidatedBuilds =
+    ProcessInfo.processInfo.environment["AGENTSEAT_BENCH_TESTS"] == "1"
 
 /// One optional path argument. An empty one means "skip this", so a caller can
 /// ask for a baseline comparison without also writing a report.

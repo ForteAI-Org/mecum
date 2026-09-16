@@ -24,23 +24,22 @@ struct SystemGateHostTests {
     static let measuredWindowField   : UInt32 = 51
     static let measuredOwnerField    : UInt32 = 52
 
-    @Test("every private symbol resolves, in the image the Ledger names", .enabled(if: tierEnabled()))
+    @Test("every private symbol resolves in its declared image before or after promotion",
+          .enabled(if: tierEnabled()))
     func symbolsResolve() throws {
         let table  = SymbolTable.shared
         let ledger = try Ledger.bundled()
-        let entry  = try #require(
-            ledger.entry(for: .current),
-            "this build (\(BuildIdentity.current.osVersion)) is not in the Ledger"
-        )
+        let entry = ledger.entry(for: .current)
 
         for symbol in PrivateSymbol.allCases {
             let resolved = try #require(table.symbols[symbol], "\(symbol.rawValue) did not resolve")
             #expect(resolved.name    == symbol.rawValue)
             #expect(resolved.address != 0)
-            guard let row = entry.primitives[symbol.rawValue], let expected = row.image else { continue }
+            let expected = entry?.primitives[symbol.rawValue]?.image
+                ?? URL(fileURLWithPath: symbol.image).lastPathComponent
             #expect(
                 resolved.image == expected,
-                "\(symbol.rawValue) resolved in \(resolved.image), the Ledger says \(expected)"
+                "\(symbol.rawValue) resolved in \(resolved.image), expected \(expected)"
             )
         }
     }
@@ -149,7 +148,23 @@ struct SystemGateHostTests {
         #expect(check.passed, "\(check.failureReason ?? "no reason")")
     }
 
-    @Test("the running build is the one the Ledger describes", .enabled(if: tierEnabled()))
+    @Test("a modifier transition encodes its type the way the rest of the table does", .enabled(if: tierEnabled()))
+    func flagsChangedRecordTypeHolds() {
+        // The one event type the kit may want to post that no record has ever
+        // been read for. `typeByte(of:)` predicts 0x0C from the rule, and a
+        // rule is not a verification: until this passes on a build, the
+        // modifier policy that would post a transition refuses there.
+        let check = RecordLayout.verifyFlagsChangedRecord()
+
+        #expect(check.eventTypeHeld, "assigning .flagsChanged to a keyboard event did not stick")
+        #expect(check.declaredLength == Self.measuredDeclaredLength)
+        #expect(check.expectedTypeByte == 0x0C)
+        #expect(check.observedTypeByte == check.expectedTypeByte)
+        #expect(check.passed, "\(check.failure.map(String.init(describing:)) ?? "no reason")")
+    }
+
+    @Test("the running build has an identity and agrees with any existing Ledger entry",
+          .enabled(if: tierEnabled()))
     func buildIdentityMatchesLedger() throws {
         let build = BuildIdentity.current
         #expect(!build.osVersion.isEmpty)
@@ -158,7 +173,7 @@ struct SystemGateHostTests {
         #expect(build.nanosecondsPerTick > 0)
 
         let ledger = try Ledger.bundled()
-        let entry  = try #require(ledger.entry(for: build), "\(build.osVersion) is not in the Ledger")
+        guard let entry = ledger.entry(for: build) else { return }
         #expect(entry.productVersion == build.productVersion)
         #expect(
             entry.hardware.contains(build.hardwareModel),
@@ -169,8 +184,11 @@ struct SystemGateHostTests {
     /// The self checks are the part of the gate that has to hold here and now.
     /// The grants are not: a test process may well have none, and that is a
     /// `permissionMissing`, never an `unavailable`.
-    @Test("no Facility is unavailable or unvalidated on this build", .enabled(if: tierEnabled()))
-    func facilitiesAreReady() {
+    @Test("Facilities pass their self checks and preserve the build validation boundary",
+          .enabled(if: tierEnabled()))
+    func facilitiesAreReady() throws {
+        let ledger = try Ledger.bundled()
+        let buildIsRecorded = ledger.entry(for: .current) != nil
         for facility in Facility.all {
             #expect(
                 FacilityGate.selfCheckFailure(for: facility) == nil,
@@ -184,7 +202,11 @@ struct SystemGateHostTests {
             case .permissionMissing(let kind):
                 #expect(!Permissions.preflight(kind))
                 #expect(!gate.mayAct)
-            case .unvalidated, .unavailable:
+            case .unvalidated:
+                #expect(!buildIsRecorded, "A recorded build must not lose its validation")
+                #expect(gate.unvalidatedBuild)
+                #expect(gate.mayAct, "The Host tier explicitly opts into qualifying a new build")
+            case .unavailable:
                 Issue.record("\(facility.name) is \(gate.readiness) on this build")
             }
         }

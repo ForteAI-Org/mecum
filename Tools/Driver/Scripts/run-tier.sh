@@ -8,7 +8,7 @@
 # Runs one test tier and refuses to believe its exit status on its own.
 #
 # A live HID tap plus repeated virtual display creation ends the process with
-# exit code 0 and no summary line at all (docs/spi-ledger.md), so a green exit
+# exit code 0 and no summary line at all (docs/SpiLedger.md), so a green exit
 # proves nothing about whether the tier finished. What is trustworthy is the
 # summary the runner printed and the reported, executed and skipped counts, which is why every
 # tier here declares how many tests it must report.

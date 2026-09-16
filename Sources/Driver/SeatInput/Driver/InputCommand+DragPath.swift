@@ -27,7 +27,7 @@ nonisolated extension InputCommand {
         from start: InputLocation,
         to end    : InputLocation,
         steps     : Int = dragStepCount,
-        flags     : CGEventFlags = []
+        modifiers : Modifiers = []
     ) -> InputCommand {
 
         let count = max(steps, 1)
@@ -62,7 +62,7 @@ nonisolated extension InputCommand {
         // `leftMouseDragged` before the release, which is what a hand does and
         // what the Chromium drag was measured against.
         path.append(end)
-        return .drag(points: path, flags: flags)
+        return .drag(points: path, modifiers: modifiers)
     }
 
     private static func interpolate(

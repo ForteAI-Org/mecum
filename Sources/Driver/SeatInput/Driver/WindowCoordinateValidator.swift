@@ -43,9 +43,9 @@ nonisolated package enum WindowCoordinateValidator {
         case .click(let location, let button):
             return .click(try validate(location, against: current), button: button)
 
-        case .drag(let points, let flags):
+        case .drag(let points, let modifiers):
             let validated = try points.map { try validate($0, against: current) }
-            return .drag(points: validated, flags: flags)
+            return .drag(points: validated, modifiers: modifiers)
 
         case .scroll(let location, let deltaY):
             return .scroll(try validate(location, against: current), deltaY: deltaY)

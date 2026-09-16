@@ -42,13 +42,19 @@ nonisolated struct MarkerTable<Value> {
 
     /// The value for a marker, or nil. Linear scan, no allocation.
     func value(for marker: Int64) -> Value? {
-        for entry in entries where entry.marker == marker { return entry.value }
+        for entry in entries where entry.marker == marker {
+            return entry.value
+        }
+        
         return nil
     }
 
     /// Replaces the value for an existing marker or appends a new one, so a
     /// second `begin` for the same marker refreshes it instead of duplicating.
-    mutating func insert(_ value: Value, for marker: Int64) {
+    mutating func insert(
+        _   value : Value,
+        for marker: Int64
+    ) {
         for index in entries.indices where entries[index].marker == marker {
             entries[index].value = value
             return

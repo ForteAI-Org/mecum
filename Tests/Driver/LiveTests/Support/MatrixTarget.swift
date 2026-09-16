@@ -11,6 +11,14 @@ import SeatCore
 import SeatInput
 import WindowPlacement
 
+/// Which family a target belongs to. A row needs it because what can be
+/// observed differs: an Escape reaches `cancelOperation:` in an AppKit
+/// responder chain and has no standard effect at all inside a web page.
+nonisolated enum TargetFamily: Sendable, Equatable {
+    case appKit
+    case chromium
+}
+
 /// MatrixTarget is one black box the matrix drives: how to find it, where to
 /// aim, and how to read what happened. The two implementations are the two
 /// families the kit ships a platform for, and neither of them is cooperating
@@ -18,6 +26,10 @@ import WindowPlacement
 /// file, the browser page writes its own window title.
 @MainActor
 protocol MatrixTarget: AnyObject {
+
+    /// The family this target belongs to.
+    var family: TargetFamily { get }
+
 
     /// The name the outcome table prints.
     var name: String { get }
@@ -71,6 +83,32 @@ extension MatrixTarget {
             throw LiveFailure.windowGeometryUnavailable(window.windowNumber)
         }
         return location
+    }
+
+    /// Several points of **one** gesture, all carrying the same observation.
+    ///
+    /// `location(of:)` reads the geometry again for every point, and a reading
+    /// carries a version derived from monotonic uptime, so two of them are
+    /// never equal. `InputCommand.drag(from:to:)` keeps the observation on its
+    /// interpolated points only when both ends came from the same reading, and
+    /// that is the right rule: a drag is one gesture and its geometry has to be
+    /// one reading of the window. Asking twice is what made every drag row lose
+    /// its coordinates and refuse with `coordinateObservationMissing`.
+    func locations(of points: [CGPoint]) throws -> [InputLocation] {
+        let pointFrame = window.frame
+        guard let reference = WindowServerProbe.geometry(of: window.windowNumber),
+              reference.frame == pointFrame,
+              let geometry  = WindowGeometryProbe.observation(of: reference),
+              geometry.window.frame == pointFrame
+        else {
+            throw LiveFailure.windowGeometryUnavailable(window.windowNumber)
+        }
+        return try points.map { point in
+            guard let location = InputLocation(screenPoint: point, observedIn: geometry) else {
+                throw LiveFailure.windowGeometryUnavailable(window.windowNumber)
+            }
+            return location
+        }
     }
 
     /// The identity to hand the seat, with the size the window really has.

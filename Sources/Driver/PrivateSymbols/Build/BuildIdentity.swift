@@ -73,10 +73,13 @@ nonisolated public struct BuildIdentity: Sendable, Equatable {
     /// cannot be read is a build outside the Ledger, which the gate already
     /// handles as `unvalidated`.
     static func sysctlString(_ name: String) -> String {
+        
         var size = 0
         guard sysctlbyname(name, nil, &size, nil, 0) == 0, size > 0 else { return "" }
+        
         var buffer = [UInt8](repeating: 0, count: size)
         guard sysctlbyname(name, &buffer, &size, nil, 0) == 0 else { return "" }
+        
         return String(decoding: buffer.prefix { $0 != 0 }, as: UTF8.self)
     }
 }

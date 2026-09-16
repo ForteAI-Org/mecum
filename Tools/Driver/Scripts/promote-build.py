@@ -35,7 +35,7 @@ def main(argv):
         return 2
     build = argv[1]
 
-    draft_path = DRAFTS / f"{build}.json"
+    draft_path = DRAFTS / f"Build{build}.json"
     if not draft_path.exists():
         print(f"promote-build: no draft at {draft_path}.", file=sys.stderr)
         print("               Run `make compat-report` on the machine running that build.",

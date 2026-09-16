@@ -44,7 +44,7 @@ final class BenchTargetView: NSView {
 /// The control is the same process, pumping the same event loop, with **no
 /// host**: no display, no tap, no heartbeat. Its CPU, its wake-ups and its
 /// footprint are what get subtracted, because a benchmark without a subtracted
-/// control is not a measurement (`CODE_STYLE.md`).
+/// control is not a measurement (`CodeStyle.md`).
 @MainActor
 enum SeatSessionBench {
 

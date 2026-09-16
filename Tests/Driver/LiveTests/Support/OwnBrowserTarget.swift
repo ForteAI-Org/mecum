@@ -77,7 +77,10 @@ final class OwnBrowserTarget {
     /// Launches the browser and waits, pumping, for its window to appear **and
     /// to stop moving**. A window that is still being placed by the browser is
     /// one whose adoption the placement confirmation refuses, correctly.
-    static func launched(timeout: Double = 60) throws -> OwnBrowserTarget {
+    static func launched(
+        timeout : Double = 60,
+        pageHTML: String = OwnBrowserTarget.pageHTML
+    ) throws -> OwnBrowserTarget {
 
         let scratch = FileManager.default.temporaryDirectory
             .appendingPathComponent("agentseat-menu-\(ProcessInfo.processInfo.processIdentifier)")
@@ -136,6 +139,43 @@ final class OwnBrowserTarget {
             throw OwnBrowserFailure.neverBecameReadable
         }
         return OwnBrowserTarget(process: process, scratch: scratch, window: settled)
+    }
+
+    /// Opens another window in this test's profile and waits for its attested
+    /// identity and accessibility element. No existing user profile is addressed.
+    func openAdditionalWindow() throws -> WindowReference {
+        let existing = Set(ChromeWindow.windows(ownedBy: ChromeTarget.ownerName)
+            .filter { $0.processID == processID }.map(\.windowNumber))
+        let request = Process()
+        request.executableURL = URL(fileURLWithPath: Self.executablePath)
+        request.arguments = [
+            "--user-data-dir=\(scratch.appendingPathComponent("profile").path)",
+            "--new-window",
+            scratch.appendingPathComponent("menu-probe.html").absoluteString
+        ]
+        try request.run()
+        defer { if request.isRunning { request.terminate() } }
+        var found: WindowReference?
+        var previous: WindowReference?
+        let ready = LivePump.run(
+            until: {
+                for candidate in ChromeWindow.windows(ownedBy: ChromeTarget.ownerName)
+                    where candidate.processID == self.processID
+                        && !existing.contains(candidate.windowNumber) {
+                    guard let window = WindowServerProbe.geometry(of: candidate.windowNumber),
+                          window.frame.width > 300, window.frame.height > 300,
+                          ChromeWindow.element(processID: self.processID,
+                                               windowNumber: window.windowNumber) != nil
+                    else { continue }
+                    defer { previous = window }
+                    if previous == window { found = window; return true }
+                }
+                return false
+            },
+            timeout: 20
+        )
+        guard ready, let found else { throw OwnBrowserFailure.neverBecameReadable }
+        return found
     }
 
     /// The browser's own window, found by owner process and by size: a Chromium

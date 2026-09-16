@@ -122,6 +122,16 @@ nonisolated final class SystemSeatSensing: SeatSensing, @unchecked Sendable {
     }
 
     @MainActor
+    func prepareFocusRecoverySnapshot(
+        for processIDs: Set<Int32>
+    ) async -> FocusRecoverySnapshot? {
+        await FocusRecoverySnapshot.readingWindowsConcurrently(
+            in     : focusEnvironment(),
+            ownedBy: processIDs
+        )
+    }
+
+    @MainActor
     private func focusEnvironment() -> FocusRecoverySnapshot {
         let start = DispatchTime.now().uptimeNanoseconds
         let topology = display.topology

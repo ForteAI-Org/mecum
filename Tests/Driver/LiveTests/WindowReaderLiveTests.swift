@@ -133,7 +133,7 @@ struct WindowReaderLiveTests {
             Unsettled on Chrome. The reading that made this a known issue was taken with a \
             readiness signal that returned in 60 ms on a stable but unbuilt tree, so it proves \
             nothing; the corrected wait reads full trees from background Electron targets. Chrome \
-            has not been re-read since. See docs/spi-ledger.md.
+            has not been re-read since. See docs/SpiLedger.md.
             """,
             isIntermittent: true
         ) {

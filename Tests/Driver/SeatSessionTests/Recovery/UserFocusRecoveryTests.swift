@@ -409,6 +409,74 @@ struct UserFocusRecoveryTests {
         fixture.recovery.stop()
     }
 
+    @Test("an incomplete window list pauses recovery without blaming the displays")
+    func incompleteWindowDiagnostic() async throws {
+        let fixture = Harness()
+        defer { fixture.recovery.stop() }
+        fixture.sensing.focusRecoverySnapshot = FocusRecoverySnapshot(
+            topologyIsValid      : true,
+            virtualBounds        : FakeGeometry.virtual,
+            physicalBounds       : [FakeGeometry.physical],
+            windows              : [Self.user, FakeGeometry.adoptedWindow],
+            windowsAreComplete   : false,
+            firstUnresolvedWindow: 2
+        )
+        fixture.recovery.beginHold()
+        try await fixture.recovery.prepareBeforeAction()
+        fixture.activateTarget()
+        #expect(fixture.requested.isEmpty)
+        #expect(fixture.gate.isPaused)
+        #expect(fixture.reports.last?.detail.contains("window list is incomplete at Window ID 2") == true)
+        #expect(fixture.reports.last?.detail.contains("topology") == false)
+    }
+
+    @Test("a snapshot scoped to another process cannot authorize restoration")
+    func wrongSnapshotScope() async throws {
+        let fixture = Harness()
+        defer { fixture.recovery.stop() }
+        fixture.sensing.focusRecoverySnapshot = FocusRecoverySnapshot(
+            topologyIsValid  : true,
+            virtualBounds    : FakeGeometry.virtual,
+            physicalBounds   : [FakeGeometry.physical],
+            windows          : [Self.user, FakeGeometry.adoptedWindow],
+            coveredProcessIDs: [Self.user.processID]
+        )
+        fixture.recovery.beginHold()
+        try await fixture.recovery.prepareBeforeAction()
+        fixture.activateTarget()
+        #expect(fixture.requested.isEmpty)
+        #expect(fixture.gate.isPaused)
+    }
+
+    @Test("a physical dialog of another adopted application prevents restoration")
+    func otherAdoptedProcessHasPhysicalWindow() async throws {
+        let fixture = Harness()
+        defer { fixture.recovery.stop() }
+        let second = Self.reference(
+            processID   : 5555,
+            windowNumber: 901,
+            frame       : FakeGeometry.adoptedWindow.frame
+        )
+        let dialog = Self.reference(
+            processID   : second.processID,
+            windowNumber: 902,
+            frame       : Self.user.frame
+        )
+        fixture.targets.append(second)
+        fixture.sensing.focusRecoverySnapshot = FocusRecoverySnapshot(
+            topologyIsValid: true,
+            virtualBounds  : FakeGeometry.virtual,
+            physicalBounds : [FakeGeometry.physical],
+            windows        : [Self.user, FakeGeometry.adoptedWindow, second, dialog]
+        )
+        fixture.recovery.beginHold()
+        try await fixture.recovery.prepareBeforeAction()
+        fixture.activateTarget()
+        #expect(fixture.requested.isEmpty)
+        #expect(fixture.gate.isPaused)
+        #expect(fixture.reports.last?.detail == "A prepared target window is outside the virtual display")
+    }
+
     @MainActor
     private final class Harness {
         let sensing = FakeSensing()

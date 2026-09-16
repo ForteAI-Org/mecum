@@ -56,9 +56,17 @@ final class FixtureTarget: MatrixTarget {
         return "AGENTSEAT_FIXTURE_APP names \(binaryURL.path), which is not an executable file."
     }
 
-    /// Starts the target and waits, pumping, until it published a report the
-    /// driver could act on: the first ones go out before AppKit has given the
-    /// window a number, and a Window ID of zero is not an identity.
+    /// Starts the target and waits, pumping, until the **window server** can
+    /// attest its window.
+    ///
+    /// Waiting for the report to carry a window number is not enough, and the
+    /// difference is a race that cost two suites. AppKit gives a window its
+    /// number before the window server publishes it, so a suite that read the
+    /// reference the moment `launched` returned got one with no identity and
+    /// failed to adopt with `windowIdentityUnverified`, while a suite that
+    /// happened to do a second of other work first succeeded. The condition has
+    /// to be the thing the caller actually needs: a window that can authorize
+    /// input.
     static func launched(timeout: Double = 20) throws -> FixtureTarget {
         guard let binaryURL else { throw FixtureFailure.notConfigured }
 
@@ -77,7 +85,8 @@ final class FixtureTarget: MatrixTarget {
         let published = LivePump.run(
             until  : {
                 report = FixtureReport.read(sessionToken: sessionToken)
-                return report?.windowNumber ?? 0 > 0
+                guard let number = report?.windowNumber, number > 0 else { return false }
+                return WindowServerProbe.geometry(of: number)?.identity != nil
             },
             timeout: timeout
         )
@@ -85,10 +94,14 @@ final class FixtureTarget: MatrixTarget {
             process.terminate()
             throw FixtureFailure.neverPublished(reportURL.path)
         }
+        // Re-read once more: the report that satisfied the condition was taken
+        // before the window server answered, so its geometry may be a moment
+        // older than the identity that was just attested.
+        let settled = FixtureReport.read(sessionToken: sessionToken) ?? report
         return FixtureTarget(
             process     : process,
             sessionToken: sessionToken,
-            report      : report
+            report      : settled
         )
     }
 
@@ -126,6 +139,8 @@ final class FixtureTarget: MatrixTarget {
         return reference.replacingFrame(frame)
     }
 
+    var family: TargetFamily { .appKit }
+
     var expectedSize: CGSize {
         CGSize(width: latest.windowWidth, height: latest.windowHeight)
     }
@@ -159,6 +174,22 @@ final class FixtureTarget: MatrixTarget {
             // The same reading under the name the bulk insertion row watches,
             // because on the browser half the two are different counters.
             "field"  : Double(latest.textValue.count),
+
+            // The shortcut channel, under the same names the browser half
+            // publishes so one row reads either target.
+            "shortcutDelivered": latest.lastShortcutDelivered
+                .map(ShortcutRow.number(ofCode:)) ?? ShortcutRow.absent,
+            "shortcutEffect"   : latest.lastShortcutEffect
+                .map(ShortcutRow.number(ofCode:)) ?? ShortcutRow.absent,
+            "shortcutEffects"  : Double(latest.shortcutEffectCount ?? 0),
+            "selection"        : Double(latest.selectedRangeLength ?? 0),
+            "caret"            : Double(latest.selectedRangeLocation ?? 0),
+            "clipboard"        : Double(latest.pasteboardChangeCount ?? 0),
+            "cancels"          : Double(latest.cancelCount ?? 0),
+            "windows"          : Double(latest.ownedWindowCount ?? 0),
+            "keyDowns"         : Double(latest.keyDownCount ?? 0),
+            "marked"           : Double(latest.markedTextLength ?? 0),
+            "compositions"     : Double(latest.compositionCount ?? 0),
         ]
     }
 

@@ -36,6 +36,138 @@ struct AgentSeatTests {
         return (seat, window)
     }
 
+    // MARK: Keys the Turn is holding
+
+    @Test("alternating adopted windows validates each window against its own identity")
+    func alternatingWindowIdentity() async throws {
+        let sensing = FakeSensing()
+        let (seat, first) = try await Self.adopted(sensing: sensing)
+        let reference = FakeGeometry.reference(
+            frame       : FakeGeometry.adoptedWindow.frame,
+            windowNumber: 778
+        )
+        sensing.additionalWindows[reference.windowNumber] = reference
+        let second = try await seat.adopt(reference, platform: AppKitPlatform())
+        let turn = try await seat.acquire()
+        for window in [first, second, first] {
+            let receipt = try await seat.send(Self.click, to: window, turn: turn)
+            try seat.confirm(receipt, .observed)
+            _ = await seat.concludeObservation()
+        }
+        try seat.release(turn)
+    }
+
+    @Test("a Turn that is still holding a key cannot be given back")
+    func releaseRefusesWhileKeysAreHeld() async throws {
+        let (seat, window) = try await Self.adopted()
+        let turn = try await seat.acquire()
+        let processID = window.reference.processID
+        defer { _ = KeyHold.shared.releaseAll(owner: turn.correlationID, processID: processID) }
+
+        KeyHold.shared.press(
+            KeyHold.HeldKey(virtualKey: 56),
+            owner    : turn.correlationID,
+            processID: processID
+        )
+
+        // The same safe point invariant as an unconfirmed Command, one step
+        // further: a held key is state inside another application, and the next
+        // holder would inherit it without being told.
+        #expect(throws: SessionFailure.keysStillHeld(count: 1)) {
+            try seat.release(turn)
+        }
+    }
+
+    @Test("the Turn comes back once what it pressed has been released")
+    func releaseSucceedsAfterTheKeysAreUp() async throws {
+        let (seat, window) = try await Self.adopted()
+        let turn = try await seat.acquire()
+        let processID = window.reference.processID
+
+        KeyHold.shared.press(
+            KeyHold.HeldKey(virtualKey: 56),
+            owner    : turn.correlationID,
+            processID: processID
+        )
+        #expect(KeyHold.shared.release(
+            virtualKey: 56,
+            owner     : turn.correlationID,
+            processID : processID
+        ))
+
+        try seat.release(turn)
+    }
+
+    @Test("another Turn's keys do not keep this one from being given back")
+    func releaseIgnoresAnotherHoldersKeys() async throws {
+        let (seat, window) = try await Self.adopted()
+        let turn = try await seat.acquire()
+        let processID = window.reference.processID
+        let stranger: Int64 = -991
+        defer { _ = KeyHold.shared.releaseAll(owner: stranger, processID: processID) }
+
+        // Refusing for somebody else's keys would make one Turn unable to
+        // finish because another one is mid gesture.
+        KeyHold.shared.press(
+            KeyHold.HeldKey(virtualKey: 55),
+            owner    : stranger,
+            processID: processID
+        )
+
+        try seat.release(turn)
+    }
+
+    @Test("a seat going terminal with keys still down says so and forgets them")
+    func terminalSeatReportsStrandedKeys() async throws {
+        let (seat, window) = try await Self.adopted()
+        let turn = try await seat.acquire()
+        let processID = window.reference.processID
+
+        var issues: [SeatIssue] = []
+        let listening = Task { @MainActor in
+            for await event in seat.events {
+                if case .issueDetected(let issue, _) = event { issues.append(issue) }
+            }
+        }
+        defer { listening.cancel() }
+
+        KeyHold.shared.press(
+            KeyHold.HeldKey(virtualKey: 55),
+            owner    : turn.correlationID,
+            processID: processID
+        )
+
+        // `release` refuses a Turn holding keys, which covers the ordinary
+        // case. This is the other one: there is no Turn left to refuse, so the
+        // only honest answer is to say it out loud.
+        seat.failFromHost([.displayChanged])
+
+        for _ in 0 ..< 20 { await Task.yield() }
+        #expect(issues.contains(.keysNotReleased))
+        // The bookkeeping is cleared, because nobody will ever send the ups.
+        // The target may still hold the key, and the kit cannot fix that from a
+        // failed seat, which is exactly why the Issue exists.
+        #expect(KeyHold.shared.held(processID: processID).isEmpty)
+    }
+
+    @Test("a seat going terminal with nothing held stays quiet about keys")
+    func terminalSeatWithNoKeysIsQuiet() async throws {
+        let (seat, _) = try await Self.adopted()
+
+        var issues: [SeatIssue] = []
+        let listening = Task { @MainActor in
+            for await event in seat.events {
+                if case .issueDetected(let issue, _) = event { issues.append(issue) }
+            }
+        }
+        defer { listening.cancel() }
+
+        seat.failFromHost([.displayChanged])
+
+        for _ in 0 ..< 20 { await Task.yield() }
+        #expect(!issues.contains(.keysNotReleased))
+    }
+
     // MARK: Adoption
 
     @Test("a sequence paused after posting preserves its receipts and cannot be silently replayed")

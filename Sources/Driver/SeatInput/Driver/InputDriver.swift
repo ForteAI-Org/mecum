@@ -20,7 +20,7 @@ import SeatCore
 /// own AppKit state when the platform asks for it, then post plain events**.
 /// No `mouseMoved` primer, no 12 and 28 ms pauses, no Chromium field stamping;
 /// all three were measured to change no outcome, and all three are in
-/// `docs/spi-ledger.md` under "verified but not used".
+/// `docs/SpiLedger.md` under "verified but not used".
 ///
 /// The actor protects this driver's reused engine and pending-event buffer. The
 /// process-scoped exclusion coordinates every driver aimed at the same PID, so
@@ -844,6 +844,13 @@ public actor InputDriver {
     /// The Receipt of a Command that was posted under a Preparation. The engine
     /// does not know it was prepared, so the two fields that describe it are
     /// filled in here.
+    ///
+    /// **Every other field has to be carried through by hand.** This rebuilds
+    /// the Receipt rather than copying it, so a field added to `InputReceipt`
+    /// and not added here silently returns to its default on every prepared
+    /// Command, which is every Chromium one. That is how `heldAfter`,
+    /// `layoutGeneration` and `textMeasure` were all nil on one family and
+    /// right on the other until the text ceiling sweep of ticket B4 noticed.
     private func prepared(_ receipt: InputReceipt, settleNanoseconds: UInt64) -> InputReceipt {
         InputReceipt(
             eventCount : receipt.eventCount,
@@ -857,7 +864,10 @@ public actor InputDriver {
             trace           : receipt.trace,
             observation     : receipt.observation,
             unvalidatedBuild: receipt.unvalidatedBuild,
-            cleanup         : .notAttempted
+            cleanup         : .notAttempted,
+            heldAfter       : receipt.heldAfter,
+            layoutGeneration: receipt.layoutGeneration,
+            textMeasure     : receipt.textMeasure
         )
     }
 
@@ -880,7 +890,10 @@ public actor InputDriver {
             trace           : receipt.trace,
             observation     : receipt.observation,
             unvalidatedBuild: receipt.unvalidatedBuild,
-            cleanup         : receipt.cleanup
+            cleanup         : receipt.cleanup,
+            heldAfter       : receipt.heldAfter,
+            layoutGeneration: receipt.layoutGeneration,
+            textMeasure     : receipt.textMeasure
         )
     }
 }

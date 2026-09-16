@@ -30,7 +30,8 @@ nonisolated public enum InputFailure: Error, Sendable, Equatable {
     case primitiveUnavailable(String)
 
     /// The gate refused: an unknown build, a missing grant or a self check that
-    /// did not pass. Fail closed, spec section 6 and `docs/adr/0001`. The
+    /// did not pass. Fail closed, Spec section 6 and
+    /// `Documentation/Driver/adr/Adr0001FailClosedPrivatePrimitives.md`. The
     /// readiness carries which of the three it was.
     case facilityUnavailable(FacilityReadiness)
 
@@ -70,6 +71,47 @@ nonisolated public enum InputFailure: Error, Sendable, Equatable {
 
     /// A sequence with no Command in it.
     case noCommands
+
+    /// A Shortcut named a character the installed keyboard layout cannot
+    /// name on its base, Command or required Shift symbol plane. Refused rather
+    /// than resolved to virtual key zero with the character attached: that is
+    /// the `.text` path and it means something else, and a menu key equivalent
+    /// matched on virtual key zero matches nothing.
+    case keyUnresolvable(character: String, inputSourceID: String)
+
+    /// A character Shortcut's Command plane, or required Shift symbol row,
+    /// changed before the driver built its events.
+    case shortcutContextChanged(resolved: Modifiers, current: Modifiers)
+
+    /// A `repeated` phase asked for no repeats at all, or for more than one
+    /// atomic Command may hold the target's exclusion for. Both are the same
+    /// refusal because both describe a count that cannot be posted, and the
+    /// numbers say which it was.
+    case invalidRepeatCount(requested: Int, maximum: Int)
+
+    /// The platform asked for `.flagsChanged` on a build where the modifier
+    /// transition record has not been verified.
+    ///
+    /// There is no implicit fall back to `.eventFlags`. A silent downgrade
+    /// would post a Command that looks like it worked and would make a matrix
+    /// row pass for the wrong reason, which is the one thing the matrix exists
+    /// to prevent.
+    case modifierPolicyUnavailable(ModifierPolicy)
+
+    /// One grapheme cluster is longer, in UTF-16 code units, than a single
+    /// delivery may carry. It is refused and never split: half of a joined
+    /// emoji is not a smaller emoji, it is different text.
+    case textClusterTooLarge(codeUnits: Int, maximum: Int)
+
+    /// A chunk bound that cannot describe any chunk. Both numbers are carried
+    /// so the refusal says which one was wrong.
+    case invalidTextLimit(clusters: Int, codeUnits: Int)
+
+    /// One Command asked to carry more text than anybody has measured being
+    /// delivered. Refused rather than attempted: the kit does not post what
+    /// nobody measured, and a partial insertion has no failure mode a caller
+    /// could detect. The unit is the one that Command counts in.
+    case textTooLong(TextMeasure, maximum: Int)
 
     /// A `text` Command with nothing to type.
     case emptyText

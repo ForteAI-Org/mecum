@@ -85,7 +85,7 @@ make test           unit tier: pure, parallel, no permission needed
 make host-tests     host tier: TCC and a real display, two commands, counts asserted
 make live-tests     live tier: real windows and a real browser
 make bench          the measurements of spec section 8, each one a gate
-make compat-report  runs the tiers and writes docs/compatibility/<build>.{md,json}
+make compat-report  runs the tiers and writes docs/compatibility/Build<build>.{md,json}
 make promote-build BUILD=26A5425a
 ```
 
@@ -134,8 +134,8 @@ AGENTSEAT_FIXTURE_APP=/path/to/target make live-tests
 
 ## Validating a macOS build
 
-`make compat-report` runs the tiers and assembles `docs/compatibility/<build>.md`
-for a person to read, plus `docs/compatibility/<build>.json`, a draft ledger
+`make compat-report` runs the tiers and assembles `docs/compatibility/Build<build>.md`
+for a person to read, plus `docs/compatibility/Build<build>.json`, a draft ledger
 entry. It writes nothing into the ledger.
 
 `make promote-build BUILD=<build>` is the only thing in the repository that
@@ -156,18 +156,18 @@ a run that happens to be fast never saves its own numbers over one.
 ## Requirements
 
 macOS 26 or later to build, though every private primitive is validated per
-build: see `docs/spi-ledger.md` for what is used and what was discarded, and
+build: see `docs/SpiLedger.md` for what is used and what was discarded, and
 `docs/compatibility/` for the report of each validated build. Accessibility is
 required for input and the fence, Screen Recording for capture. The kit relies on
 undocumented system interfaces, so it is not a basis for the Mac App Store.
 
 ## Documents
 
-`docs/spec.md` (the hand-off specification), `docs/adr/` (why the load-bearing
-decisions are what they are), `docs/spi-ledger.md` (every private primitive that
+`docs/Spec.md` (the hand-off specification), `docs/adr/` (why the load-bearing
+decisions are what they are), `docs/SpiLedger.md` (every private primitive that
 is used, that was verified and left out, or that was discarded, with the reason
-and the build), `docs/compatibility/<build>.md` (the report of one validated
-build), `CONTEXT.md` (the domain vocabulary, binding), `CODE_STYLE.md`,
+and the build), `docs/compatibility/Build<build>.md` (the report of one validated
+build), `Context.md` (the domain vocabulary, binding), `CodeStyle.md`,
 `CLAUDE.md`.
 
 The comments are the fourth document. A comment here says what a thing does and

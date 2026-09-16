@@ -160,7 +160,7 @@ final class BenchOutcome<Value> {
 /// stream**: the virtual display, the animated window redrawing at 60 Hz, the
 /// preview window, the event pump. That control runs first, in the same
 /// process, and its CPU and its footprint are what get subtracted. A benchmark
-/// without a subtracted control is not a measurement (`CODE_STYLE.md`), and
+/// without a subtracted control is not a measurement (`CodeStyle.md`), and
 /// here the control is most of the cost: the scene alone measures 6,8 % of one
 /// core and 79 MB.
 ///

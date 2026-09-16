@@ -39,10 +39,14 @@ nonisolated public struct FacilityGate: Sendable, Equatable {
     /// the evidence and not the permission.
     public let unvalidatedBuild: Bool
 
-    init(readiness: FacilityReadiness, mayAct: Bool, unvalidatedBuild: Bool) {
-        self.readiness         = readiness
-        self.mayAct            = mayAct
-        self.unvalidatedBuild  = unvalidatedBuild
+    init(
+        readiness       : FacilityReadiness,
+        mayAct          : Bool,
+        unvalidatedBuild: Bool
+    ) {
+        self.readiness        = readiness
+        self.mayAct           = mayAct
+        self.unvalidatedBuild = unvalidatedBuild
     }
 
     /// The derivation, with the self checks and the permission already run.
@@ -64,6 +68,7 @@ nonisolated public struct FacilityGate: Sendable, Equatable {
         missingPermission    : PermissionKind?,
         allowUnvalidatedBuild: Bool = false
     ) -> FacilityGate {
+        
         if let selfCheckFailure {
             return FacilityGate(
                 readiness       : .unavailable(reason: selfCheckFailure),
@@ -71,6 +76,7 @@ nonisolated public struct FacilityGate: Sendable, Equatable {
                 unvalidatedBuild: false
             )
         }
+        
         if let missingPermission {
             return FacilityGate(
                 readiness       : .permissionMissing(kind: missingPermission),
@@ -94,19 +100,20 @@ nonisolated public struct FacilityGate: Sendable, Equatable {
             return unvalidated(.hardware(build: build.osVersion, model: build.hardwareModel))
         }
 
-        switch ledger.verdict(for: facility, in: entry) {
-        case .validated:
-            return FacilityGate(
-                readiness       : .validated(build: build.osVersion),
-                mayAct          : true,
-                unvalidatedBuild: false
-            )
-        case .limited:
-            // `limited` means a primitive failed on some model, so the honest
-            // scope is the hardware even though this model is in the list.
-            return unvalidated(.hardware(build: build.osVersion, model: build.hardwareModel))
-        case .unvalidated:
-            return unvalidated(.build(build.osVersion))
+        return switch ledger.verdict(for: facility, in: entry) {
+            case .validated:
+                FacilityGate(
+                    readiness       : .validated(build: build.osVersion),
+                    mayAct          : true,
+                    unvalidatedBuild: false
+                )
+                
+            case .limited:
+                unvalidated(
+                    .hardware(build: build.osVersion, model: build.hardwareModel)
+                )
+        
+            case .unvalidated: unvalidated(.build(build.osVersion))
         }
     }
 

@@ -11,7 +11,7 @@
 # 1. The Host tier runs as **two commands**, the seat cycle apart from
 #    everything else. A live HID fence held across repeated virtual display
 #    creation ends the process, and in one command the run stops partway with a
-#    green exit status and no summary at all (Documentation/Driver/spi-ledger.md).
+#    green exit status and no summary at all (Documentation/Driver/SpiLedger.md).
 # 2. Every tier **asserts how many tests it reported**, because of the same
 #    defect: exit status 0 is not evidence that a run finished.
 #
@@ -31,14 +31,14 @@ HOST_CYCLE_TESTS := 1
 
 # Everything else in the Host tier: the display suites, capture, the fence, the
 # permissions preflight and the version gate.
-HOST_REST_TESTS := 22
+HOST_REST_TESTS := 29
 
 # The Live tier: the probe page title contract, the input matrix with its six Commands on both families, the
 # target's layout, the two probe rows, the contextual menu on both families,
 # the typing cost sweep and the two text delivery measurements. The last three
 # are reported and skipped unless AGENTSEAT_TYPING_SWEEP=1 or
 # AGENTSEAT_TEXT_DELIVERY=1 asks for them.
-LIVE_TESTS := 11
+LIVE_TESTS := 20
 
 # The measurements `make bench` gates on. Narrow it for a quick pass, for
 # example `make bench BENCH="fence-callback send-click"`; `seat-idle` alone
@@ -55,7 +55,7 @@ help:
 	@echo 'make host-tests     host tier: TCC and a real display, two commands, counts asserted'
 	@echo 'make live-tests     live tier: real windows and a real browser'
 	@echo 'make bench          the measurements of spec section 8, each one a gate'
-	@echo 'make compat-report  runs the tiers and writes Documentation/Driver/compatibility/<build>.{md,json}'
+	@echo 'make compat-report  runs the tiers and writes Documentation/Driver/compatibility/Build<build>.{md,json}'
 	@echo 'make promote-build BUILD=26A5425a   copies that draft into the ledger'
 	@echo
 	@echo 'AGENTSEAT_FIXTURE_APP must point at the consumer'"'"'s instrumented binary for'
@@ -72,6 +72,8 @@ help:
 test:
 	@$(PYTHON) Tools/Driver/Scripts/test-run-tier.py
 	@$(PYTHON) Tools/Driver/Scripts/test-focus-latency.py
+	@$(PYTHON) Tools/Driver/Scripts/test-compat-report.py
+	@bash Tools/Driver/Scripts/test-seatbench-contract.sh
 	@$(TIER) unit - $(SWIFT) test
 
 # Two commands, and the split is not a style choice: see the header.
@@ -102,7 +104,7 @@ bench:
 	        echo "SKIP stage: AGENTSEAT_FIXTURE_APP is not set, and the stash needs a second process"; \
 	        continue; \
 	    fi; \
-	    AGENTSEAT_FIXTURE_APP="$(AGENTSEAT_FIXTURE_APP)" \
+	    AGENTSEAT_BENCH_TESTS=1 AGENTSEAT_FIXTURE_APP="$(AGENTSEAT_FIXTURE_APP)" \
 	        $(SWIFT) run -c release SeatBench "$$name" "" \
 	        $(BENCH_OUT)/$$name.json $(BASELINES) || failed="$$failed $$name"; \
 	done; \

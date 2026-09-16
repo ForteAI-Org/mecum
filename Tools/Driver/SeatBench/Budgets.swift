@@ -42,29 +42,23 @@ nonisolated enum Budget {
     /// measures 13,8 us at p99, of which 125 ns is the kit's own share.
     static let fenceClampP99Nanoseconds: Double = 500_000
 
-    /// Heap allocations attributable to one `send` of a click after warm up,
-    /// on top of what CoreGraphics charges for building and posting the two
-    /// events. Zero. A window list scan for the same identity costs 787 per
-    /// click, 609 of them inside `CGWindowListCopyWindowInfo` alone.
+    /// Heap allocations attributable to the kit's ownership checks in one
+    /// guarded identity resolution, after subtracting a measured control that
+    /// performs the same two documented `GetProcessPID` mappings. Zero. The raw
+    /// identity and control allocations remain in the report; geometry and
+    /// CoreGraphics event allocations are separate and are not claimed as zero.
     static let sendClickAllocations = 0
 
     /// The attributable p95 of one `send` of a click, in nanoseconds, settle
     /// and Preparation excluded: the whole send minus a control that builds and
     /// posts the same two events.
     ///
-    /// The rule is to open at 200 us and tighten to twice the measured p95. That
-    /// attributable p95 comes out at **zero** in every run: the whole send is
-    /// faster at p95 than the control that
-    /// only builds and posts, because the kit's own share is 1,2 us in total
-    /// (0,3 us to build the two events, 0,6 us to re-read the identity, 0,04 us
-    /// per record written) and that is below the run to run spread of
-    /// `postToPid` itself.
-    ///
-    /// Twice zero is not a budget, so the number below is the other half of the
-    /// same rule: the spread of the control's own p95 across runs, which is
-    /// what a regression has to stand out from. Ten microseconds, twenty times
-    /// under the spec's opening ceiling.
-    static let sendClickNanosecondsP95: Double = 10_000
+    /// The current guarded coordinate path includes two complete geometry
+    /// readings. On macOS 27.0 build 26A428 on Mac16,1, three release runs
+    /// measured attributable p95s of 443 250, 403 917 and 410 458 ns; their
+    /// median is 410 458 ns. The budget is rounded above twice that median and
+    /// remains below the specification's absolute 1 ms ceiling.
+    static let sendClickNanosecondsP95: Double = 850_000
 
     static let sendClickRegressionFloorNanoseconds: Double = 25_000
 

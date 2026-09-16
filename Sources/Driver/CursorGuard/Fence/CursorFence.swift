@@ -80,7 +80,8 @@ nonisolated public final class CursorFence: @unchecked Sendable {
     /// where a Seat Host runs (spec section 7), so the slot itself needs no
     /// lock; the hold count sits next to the rest of the state, behind the
     /// fence's own lock, so `snapshot()` can report it from any thread.
-    @MainActor private static var installed: CursorFence?
+    @MainActor
+    private static var installed: CursorFence?
 
     // MARK: Immutable state
 

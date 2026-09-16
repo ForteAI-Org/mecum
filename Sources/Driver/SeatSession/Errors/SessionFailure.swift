@@ -43,6 +43,18 @@ nonisolated public enum SessionFailure: Error, Sendable, Equatable {
     /// established.
     case unconfirmedCommands(count: Int)
 
+    /// `release` was refused because this Turn is still holding keys down on a
+    /// target process. It is the same invariant one step further: a held key is
+    /// real state inside somebody else's application, and handing the seat to
+    /// the next holder with a key still down would make that key the next
+    /// holder's problem without the next holder ever knowing.
+    ///
+    /// The holder releases what it pressed and calls `release` again. The kit
+    /// does not post the missing key ups itself, for the same reason it never
+    /// replays a Command: what to release and in what order is the holder's
+    /// knowledge, not a guess the seat can make safely.
+    case keysStillHeld(count: Int)
+
     /// `confirm` was given a Receipt that is not the oldest unconfirmed one.
     ///
     /// A Turn is exclusive, so the Commands under it are strictly ordered and

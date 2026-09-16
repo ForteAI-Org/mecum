@@ -192,6 +192,28 @@ final class ChromeTarget: MatrixTarget {
         return nil
     }
 
+    /// Every probe page window the browser owns, largest first.
+    ///
+    /// `find` answers the biggest one, which is what a single target row wants.
+    /// The two window rows want both, because the question they ask is whether
+    /// two windows of **one process** share what the kit is holding down: the
+    /// PID is the boundary the system has, and the registry is keyed by it on
+    /// that belief.
+    static func findAll() -> [ChromeTarget] {
+        let candidates = ChromeWindow.windows(ownedBy: ownerName)
+        let named = candidates.filter { $0.title.contains(titleMark) }
+        let byAccessibility = candidates.filter { candidate in
+            !candidate.title.contains(titleMark)
+                && ChromeWindow.accessibilityTitle(
+                    processID   : candidate.processID,
+                    windowNumber: candidate.windowNumber
+                ).contains(titleMark)
+        }
+        return (named + byAccessibility)
+            .sorted { $0.frame.width * $0.frame.height > $1.frame.width * $1.frame.height }
+            .map(ChromeTarget.init(window:))
+    }
+
     var window: WindowReference {
         guard let reference = WindowServerProbe.geometry(of: windowNumber),
               reference.processID == processID
@@ -200,6 +222,8 @@ final class ChromeTarget: MatrixTarget {
         }
         return reference.replacingFrame(frame)
     }
+
+    var family: TargetFamily { .chromium }
 
     var expectedSize: CGSize { originalFrame.size }
 
@@ -247,30 +271,33 @@ final class ChromeTarget: MatrixTarget {
         return ""
     }
 
-    /// "AS clicks=N keys=S wheel=W drag=D typed=T paste=P field=F", parsed into
-    /// the same counters the fixture reports. `typed`, `paste` and `field` are
-    /// counts and not the text itself: a window title is read through the window
-    /// server, and a title that grows with every character measures the
-    /// truncation.
+    /// Decodes the probe's compact counter packet into the fixture's field names.
     func state() -> [String: Double] {
-        // No counters, no reading. Answering with defaults here is what turned
-        // an unreadable title into numbers a caller could not tell from data.
-        let published = title()
-        guard published.contains(Self.counterMark) else { return [:] }
-        // The page publishes short names for a measured reason: see its own
-        // comment. They are mapped here to the names a row asks for.
-        let names = ["c": "clicks", "k": "keys", "w": "wheel",
-                     "d": "drag", "t": "typed", "p": "paste", "f": "field"]
+        Self.parseState(title())
+    }
+
+    /// Rejects truncated or partial counter packets instead of inventing zeros.
+    static func parseState(_ published: String) -> [String: Double] {
+        guard let marker = published.range(of: counterMark) else { return [:] }
+        let payload = published[marker.upperBound...].split(separator: " ").first ?? ""
+        let fields = payload.split(separator: ",", omittingEmptySubsequences: false)
+        guard fields.count == 12 else { return [:] }
+        let names = [0: "clicks", 1: "keys", 2: "wheel", 3: "drag", 4: "typed",
+                     5: "paste", 6: "field", 9: "shortcutEffects", 10: "lastModifiers",
+                     11: "dialogOpen"]
         var result: [String: Double] = [:]
-        for part in published.split(separator: " ") {
-            let pieces = part.split(separator: "=", maxSplits: 1).map(String.init)
-            guard pieces.count == 2, let name = names[pieces[0]],
-                  let number = Double(pieces[1])
-            else { continue }
+        for (index, name) in names {
+            guard let number = Double(fields[index]), number.isFinite else { return [:] }
             result[name] = number
         }
-        // The one counter both text paths move, so the same row measures both.
-        result["chars"] = (result["typed"] ?? 0) + (result["paste"] ?? 0)
+        for (index, name) in [7: "shortcutDelivered", 8: "shortcutEffect"] {
+            let code = String(fields[index])
+            guard code == "--" || ShortcutRow.allCases.contains(where: { $0.code == code })
+            else { return [:] }
+            result[name] = ShortcutRow.number(ofCode: code)
+        }
+        result["chars"] = result["typed"]! + result["paste"]!
+        result["keyDowns"] = result["keys"]
         return result
     }
 

@@ -72,6 +72,17 @@ public enum SeatIssue: String, Sendable, Equatable, CaseIterable {
     /// the state, so the seat stays usable and only says it is degraded.
     case preparationNotRestored
 
+    /// The seat went terminal while keys the kit pressed were still down on a
+    /// target process.
+    ///
+    /// It is reported and never thrown, like `preparationNotRestored` and for
+    /// the same reason: the key downs did go out, and there is no longer a Turn
+    /// to hand the refusal to. Under the default modifier policy a stranded
+    /// modifier is bookkeeping the target was never told about, but a stranded
+    /// ordinary key is a real key down with no key up, so the Issue says so
+    /// rather than letting a clean teardown imply a clean target.
+    case keysNotReleased
+
     /// A contextual menu the kit opened in the target is still on screen after
     /// both of the levers that close one.
     ///

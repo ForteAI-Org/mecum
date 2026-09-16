@@ -9,8 +9,8 @@
 
 It runs nothing. The evidence comes from the tiers `make compat-report` has
 already run: the tier logs `run-tier.sh` left behind and the benchmark JSON.
-This script reads them, writes `Documentation/Driver/compatibility/<build>.md` for a person and
-`Documentation/Driver/compatibility/<build>.json` as a draft ledger entry, and never touches
+This script reads them, writes `Documentation/Driver/compatibility/Build<build>.md` for a person and
+`Documentation/Driver/compatibility/Build<build>.json` as a draft ledger entry, and never touches
 `validated-builds.json`: promotion is a separate, human act.
 
 The draft's `state` per primitive is `verified` only when every step that
@@ -119,8 +119,9 @@ def tier_result(logs, label):
 def tier_verdict(logs, label):
     """A skipped required test leaves the evidence incomplete.
 
-    Live's three optional calibrations are not acceptance gates. Their opt-in
-    reason may be skipped; a missing fixture or browser is not that reason.
+    Live's explicitly optional and manual experiments are outside the unattended
+    acceptance run. Their omissions stay in the report; required tests may not
+    be skipped because a fixture, browser or permission is missing.
     """
     result = tier_result(logs, label)
     if result is None:
@@ -132,8 +133,14 @@ def tier_verdict(logs, label):
     if result["skipped"]:
         skips = result.get("skip_details", [])
         optional = label == "live" and len(skips) == result["skipped"] and all(
-            any(f"{flag}=1 is required: this optional calibration is disabled by default."
-                in line for flag in ("AGENTSEAT_TEXT_DELIVERY", "AGENTSEAT_TYPING_SWEEP"))
+            (any(f"{flag}=1 is required: this optional calibration is disabled by default."
+                 in line for flag in ("AGENTSEAT_TEXT_DELIVERY", "AGENTSEAT_TYPING_SWEEP",
+                                     "AGENTSEAT_STASHED_ADOPTION"))
+             or ('skipped: "needs AGENTSEAT_MANUAL_TESTS=1 and a person at the keyboard"' in line
+                 and any(f'Test "{name}"' in line for name in (
+                     "the person's own held modifier stays out of the kit's events",
+                     "a transition the kit never released is cleared by the person's own key",
+                 ))))
             for line in skips
         )
         if not optional:
@@ -235,7 +242,8 @@ def main():
 
     out = pathlib.Path(options.out)
     out.mkdir(parents=True, exist_ok=True)
-    (out / f"{build}.json").write_text(json.dumps({build: draft}, indent=2) + "\n")
+    output_stem = f"Build{build}"
+    (out / f"{output_stem}.json").write_text(json.dumps({build: draft}, indent=2) + "\n")
 
     def verdict(facility):
         names = FACILITIES[facility]
@@ -378,8 +386,8 @@ def main():
         "",
     ]
 
-    (out / f"{build}.md").write_text("\n".join(lines))
-    print(f"compat-report: wrote {out}/{build}.md and {out}/{build}.json")
+    (out / f"{output_stem}.md").write_text("\n".join(lines))
+    print(f"compat-report: wrote {out}/{output_stem}.md and {out}/{output_stem}.json")
     print(f"compat-report: steps {step_state}, draft state {verified}")
     return 0 if all_passed else 1
 

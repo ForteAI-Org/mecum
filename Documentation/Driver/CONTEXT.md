@@ -43,6 +43,37 @@ One complete, atomic input action: key, click of either button, drag or scroll.
 One call, one command; the driver never splits or retries it.
 _Avoid_: action, gesture, step
 
+**Shortcut**:
+A declarative hotkey: one key reference plus the modifiers held around it. It is
+not a Command. It is the value that resolves, through the Key Table and the
+Keyboard Layout, into the one key Command the driver posts.
+_Avoid_: hotkey, key combo, accelerator
+
+**Key Table**:
+The kit's own versioned table from virtual key to physical key name, the name
+that describes a position and is the same on every layout. Its version is bumped
+by hand, so a consumer that stored a physical name notices when the table moved
+under it.
+_Avoid_: keymap, key codes
+
+**Keyboard Layout**:
+One reading of the keyboard layout installed right now: its input source id, a
+generation that changes when the person switches layout, and the base, Command
+and Shift rows that name each virtual key. It resolves a shortcut expressed as
+a character. Option and Control remain event flags rather than changing that
+name, and no Unicode payload is attached to a resolved Shortcut. It is the only
+place the layout enters at all.
+_Avoid_: keymap, snapshot (an accessibility model of a window), input source
+
+**Key Hold**:
+The keys the kit itself is holding down on one target process, owned per Turn.
+It holds keys and not only modifiers, because a letter left down leaks the same
+way a Command key does; the modifiers are the subset whose virtual key is one,
+and that subset is what stamps the flags of the next Command. It never describes
+the person's own hand, which the kit neither reads nor infers. A Turn cannot be
+given back while it still holds a key.
+_Avoid_: modifier state, modifier hold, flags
+
 **Contextual Menu**:
 The menu a right click opens inside the target: a window of that process at the
 pop up menu level, running a modal tracking loop, and absent from the target's

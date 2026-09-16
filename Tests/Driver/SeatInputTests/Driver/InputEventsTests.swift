@@ -25,17 +25,23 @@ struct InputEventsTests {
     }
 
     private func build(
-        _ command    : InputCommand,
-        correlationID: Int64 = 7,
-        pacing       : DragPacing = .realistic
+        _ command      : InputCommand,
+        correlationID  : Int64 = 7,
+        pacing         : DragPacing = .realistic,
+        keyRepeatPacing: KeyRepeatPacing = .systemDefault,
+        held           : Modifiers = [],
+        policy         : ModifierPolicy = .eventFlags
     ) throws -> [PreparedEvent] {
         var events: [PreparedEvent] = []
         try InputEvents.append(
             command,
-            source       : try makeSource(),
-            pacing       : pacing,
-            correlationID: correlationID,
-            into         : &events
+            source         : try makeSource(),
+            pacing         : pacing,
+            keyRepeatPacing: keyRepeatPacing,
+            held           : held,
+            policy         : policy,
+            correlationID  : correlationID,
+            into           : &events
         )
         return events
     }
@@ -121,7 +127,7 @@ struct InputEventsTests {
 
     @Test("a key is a down and an up, unrouted, and the modifiers are held for both")
     func keyIsDownAndUpUnrouted() throws {
-        let events = try build(.key(virtualKey: 6, text: "Z", flags: .maskCommand))
+        let events = try build(.key(virtualKey: 6, text: "Z", modifiers: .command))
 
         #expect(events.count == 2)
         #expect(events.map(\.event.type) == [.keyDown, .keyUp])
@@ -130,6 +136,323 @@ struct InputEventsTests {
         #expect(events.allSatisfy { $0.windowPointFromTop == nil })
         #expect(events.allSatisfy { $0.event.flags.contains(.maskCommand) })
         #expect(events.allSatisfy { $0.event.getIntegerValueField(.eventSourceUserData) == 7 })
+    }
+
+    // MARK: the declared ceilings
+
+    @Test("the largest measured inserted string still builds")
+    func measuredInsertedCeilingIsAccepted() throws {
+        let text   = String(repeating: "a", count: TextLimits.maximumInsertedCodeUnits)
+        let events = try build(.insertText(text))
+
+        // Two events at any length, which is the whole point of this path.
+        #expect(events.count == 2)
+    }
+
+    @Test("one code unit past the measured ceiling refuses")
+    func insertedTextAboveTheCeilingRefuses() {
+        let text = String(repeating: "a", count: TextLimits.maximumInsertedCodeUnits + 1)
+
+        #expect(throws: InputFailure.textTooLong(
+            TextMeasure(TextLimits.maximumInsertedCodeUnits + 1, .utf16CodeUnits),
+            maximum: TextLimits.maximumInsertedCodeUnits
+        )) {
+            try build(.insertText(text))
+        }
+    }
+
+    @Test("the ceiling of an inserted string counts code units and not keystrokes")
+    func insertedCeilingCountsCodeUnits() {
+        // Emoji built from a joiner sequence: well under the ceiling in
+        // keystrokes, well over it in what the event actually carries. Counting
+        // the wrong unit here would post an unmeasured payload.
+        let family = "\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}"
+        let text   = String(repeating: family, count: 1200)
+
+        #expect(text.count < TextLimits.maximumInsertedCodeUnits)
+        #expect(text.utf16.count > TextLimits.maximumInsertedCodeUnits)
+        #expect(throws: InputFailure.self) { try build(.insertText(text)) }
+    }
+
+    @Test("a typed string refuses past its own ceiling, counted in keystrokes")
+    func typedTextAboveTheCeilingRefuses() {
+        let text = String(repeating: "a", count: TextLimits.maximumTypedClusters + 1)
+
+        #expect(throws: InputFailure.textTooLong(
+            TextMeasure(TextLimits.maximumTypedClusters + 1, .graphemeClusters),
+            maximum: TextLimits.maximumTypedClusters
+        )) {
+            try build(.text(text))
+        }
+    }
+
+    @Test("the chunk limit sits below the ceiling a single Command may carry")
+    func chunkLimitsStayUnderTheCeilings() {
+        // A chunk that could not be posted as a Command would make `sendText`
+        // build pieces the driver then refuses, one at a time.
+        #expect(TextDeliveryLimits.measured.maximumCodeUnits <= TextLimits.maximumInsertedCodeUnits)
+        #expect(TextDeliveryLimits.measured.maximumClusters  <= TextLimits.maximumTypedClusters)
+    }
+
+    // MARK: the transition policy
+
+    /// EventState is what one built event announces: its kind and the modifier
+    /// state it carries. A transition says what is held *after* it; a key event
+    /// says what was held while it was pressed. Arrays of tuples are not
+    /// Equatable in Swift, and a whole expected sequence in one expectation is
+    /// what makes a wrong order readable when it fails.
+    private struct EventState: Equatable, CustomStringConvertible {
+        let type     : CGEventType
+        let modifiers: Modifiers
+
+        init(_ type: CGEventType, _ modifiers: Modifiers) {
+            self.type      = type
+            self.modifiers = modifiers
+        }
+
+        var description: String { "\(type.rawValue):\(modifiers.rawValue)" }
+    }
+
+    private func states(of events: [PreparedEvent]) -> [EventState] {
+        events.map { EventState($0.event.type, Modifiers($0.event.flags)) }
+    }
+
+    @Test("the default policy posts no transitions at all")
+    func eventFlagsPostsNoTransitions() throws {
+        let events = try build(.key(virtualKey: 8, text: "c", modifiers: [.command, .shift]))
+
+        #expect(events.map(\.event.type) == [.keyDown, .keyUp])
+    }
+
+    @Test("a shortcut presses what it adds, types, and releases the exact inverse")
+    func transitionsWrapTheKeyInInverseOrder() throws {
+        let events = try build(
+            .key(virtualKey: 8, text: "c", modifiers: [.command, .shift]),
+            policy: .flagsChanged
+        )
+
+        // Cumulative and never differential: the second transition says Command
+        // *and* Shift, not Shift alone.
+        #expect(states(of: events) == [
+            EventState(.flagsChanged, [.command]),
+            EventState(.flagsChanged, [.command, .shift]),
+            EventState(.keyDown,      [.command, .shift]),
+            EventState(.keyUp,        [.command, .shift]),
+            EventState(.flagsChanged, [.command]),
+            EventState(.flagsChanged, []),
+        ])
+    }
+
+    @Test("the transitions carry the keycode of the modifier that moved")
+    func transitionsCarryTheirOwnKeycode() throws {
+        let events = try build(
+            .key(virtualKey: 8, text: "c", modifiers: [.command, .shift]),
+            policy: .flagsChanged
+        )
+        let keycodes = events
+            .filter { $0.event.type == .flagsChanged }
+            .map { $0.event.getIntegerValueField(.keyboardEventKeycode) }
+
+        // Command is 55 and Shift is 56, pressed in bit order and released in
+        // the exact inverse.
+        #expect(keycodes == [55, 56, 56, 55])
+    }
+
+    @Test("a shortcut adds only what the session does not already hold")
+    func transitionsSkipWhatIsAlreadyHeld() throws {
+        let events = try build(
+            .key(virtualKey: 8, text: "c", modifiers: [.command, .shift]),
+            held  : .shift,
+            policy: .flagsChanged
+        )
+
+        // Shift was already down and stays down: this Command's transitions are
+        // Command's alone, and the key still carries both.
+        #expect(states(of: events) == [
+            EventState(.flagsChanged, [.command, .shift]),
+            EventState(.keyDown,      [.command, .shift]),
+            EventState(.keyUp,        [.command, .shift]),
+            EventState(.flagsChanged, [.shift]),
+        ])
+    }
+
+    @Test("pressing a modifier key is a transition and not a key down")
+    func modifierKeyBecomesATransition() throws {
+        let down = try build(.key(virtualKey: 56, text: "", phase: .down), policy: .flagsChanged)
+        let up   = try build(
+            .key(virtualKey: 56, text: "", phase: .up),
+            held  : .shift,
+            policy: .flagsChanged
+        )
+
+        #expect(states(of: down) == [EventState(.flagsChanged, .shift)])
+        #expect(states(of: up)   == [EventState(.flagsChanged, [])])
+    }
+
+    @Test("a press of a modifier key is its transition down and back up")
+    func modifierKeyPressIsBothTransitions() throws {
+        let events = try build(.key(virtualKey: 55, text: "", phase: .press), policy: .flagsChanged)
+
+        #expect(states(of: events) == [
+            EventState(.flagsChanged, .command),
+            EventState(.flagsChanged, []),
+        ])
+    }
+
+    @Test("a shortcut with nothing to add posts no transitions under either policy")
+    func noAddedModifiersMeansNoTransitions() throws {
+        let events = try build(.key(virtualKey: 8, text: "c"), policy: .flagsChanged)
+
+        #expect(events.map(\.event.type) == [.keyDown, .keyUp])
+    }
+
+    // MARK: held modifiers
+
+    @Test("a Command carries what the session already holds on top of its own")
+    func heldModifiersAreCarried() throws {
+        let events = try build(
+            .key(virtualKey: 8, text: "c", modifiers: .command),
+            held: .shift
+        )
+
+        // A session holding Shift that sends Command and C delivers Command,
+        // Shift and C, which is what a hand on a keyboard would produce. The
+        // shortcut does not clear a context the caller built on purpose.
+        #expect(events.allSatisfy { Modifiers($0.event.flags) == [.command, .shift] })
+    }
+
+    @Test("a held modifier that the Command also names is not counted twice")
+    func heldAndOwnedModifiersUnion() throws {
+        let events = try build(
+            .key(virtualKey: 8, text: "c", modifiers: .command),
+            held: .command
+        )
+
+        #expect(events.allSatisfy { Modifiers($0.event.flags) == .command })
+    }
+
+    @Test("a drag carries the session's held modifiers too")
+    func dragCarriesHeldModifiers() throws {
+        let events = try build(
+            .drag(points: [location(0, 0), location(40, 0), location(80, 0)], modifiers: .option),
+            held: .command
+        )
+
+        #expect(events.dropFirst().allSatisfy {
+            Modifiers($0.event.flags) == [.option, .command]
+        })
+    }
+
+    @Test("pressing a modifier key carries its own bit down and not up")
+    func modifierKeyCarriesItsOwnBit() throws {
+        let events = try build(.key(virtualKey: 56, text: "", phase: .press))
+
+        // What the real key does: the down is already shifted, the up is not.
+        #expect(Modifiers(events[0].event.flags) == .shift)
+        #expect(Modifiers(events[1].event.flags) == [])
+    }
+
+    @Test("releasing a modifier key drops its bit even while the session holds it")
+    func modifierUpDropsItsOwnBit() throws {
+        let events = try build(.key(virtualKey: 55, text: "", phase: .up), held: .command)
+
+        #expect(Modifiers(events[0].event.flags) == [])
+    }
+
+    // MARK: phases and repeat
+
+    @Test("a phase builds exactly the events it names", arguments: [
+        (KeyPhase.press, [CGEventType.keyDown, .keyUp]),
+        (.down,          [.keyDown]),
+        (.up,            [.keyUp]),
+    ])
+    func phaseBuildsItsEvents(phase: KeyPhase, types: [CGEventType]) throws {
+        let events = try build(.key(virtualKey: 6, text: "Z", phase: phase))
+
+        #expect(events.map(\.event.type) == types)
+        #expect(events.count == phase.eventCount)
+    }
+
+    @Test("a repeat is that many plain downs, with the autorepeat field left alone")
+    func repeatIsPlainDowns() throws {
+        let events = try build(.key(virtualKey: 124, text: "", phase: .repeated(count: 4)))
+
+        #expect(events.count == 4)
+        #expect(events.allSatisfy { $0.event.type == .keyDown })
+        // Not marked as repeats, and that is the whole finding of ticket A3's
+        // sweep: an event carrying the autorepeat field was delivered to
+        // neither target family, at any count and any pacing, while ordinary
+        // presses arrived every time.
+        #expect(events.allSatisfy { $0.event.getIntegerValueField(.keyboardEventAutorepeat) == 0 })
+        // A repeat carries no up of its own: it is what happens between a down
+        // and an up, so the caller sends those around it.
+        #expect(!events.contains { $0.event.type == .keyUp })
+    }
+
+    @Test("a press and a down are not marked as repeats")
+    func ordinaryKeysAreNotRepeats() throws {
+        let events = try build(.key(virtualKey: 6, text: "Z"))
+
+        #expect(events.allSatisfy { $0.event.getIntegerValueField(.keyboardEventAutorepeat) == 0 })
+    }
+
+    @Test("the repeats are paced, and the last one is not")
+    func repeatPacingSkipsTheLastGap() throws {
+        let pacing = KeyRepeatPacing(intervalMicroseconds: 12_345)
+        let events = try build(
+            .key(virtualKey: 124, text: "", phase: .repeated(count: 3)),
+            keyRepeatPacing: pacing
+        )
+
+        // The trailing pause a drag pays after its final event is held
+        // exclusion on the target here, and it buys nothing.
+        #expect(events.map(\.delayAfterPostingMicroseconds) == [12_345, 12_345, 0])
+    }
+
+    @Test("a repeat holds its modifiers on every down")
+    func repeatHoldsItsModifiers() throws {
+        let events = try build(
+            .key(virtualKey: 124, text: "", modifiers: .option, phase: .repeated(count: 3))
+        )
+
+        #expect(events.allSatisfy { $0.event.flags.contains(.maskAlternate) })
+    }
+
+    @Test("a repeat count that cannot be posted is refused before anything is built", arguments: [
+        0, -1, KeyPhase.maximumRepeatCount + 1,
+    ])
+    func invalidRepeatCountRefuses(count: Int) throws {
+        // Refused during construction and not during posting: the posting loop
+        // has no way to stop, so a count it could not finish has to be caught
+        // while nothing has gone out.
+        #expect(throws: InputFailure.invalidRepeatCount(
+            requested: count,
+            maximum  : KeyPhase.maximumRepeatCount
+        )) {
+            try build(.key(virtualKey: 124, text: "", phase: .repeated(count: count)))
+        }
+    }
+
+    @Test("the largest accepted repeat still builds")
+    func maximumRepeatCountIsAccepted() throws {
+        let events = try build(
+            .key(virtualKey: 124, text: "", phase: .repeated(count: KeyPhase.maximumRepeatCount))
+        )
+
+        #expect(events.count == KeyPhase.maximumRepeatCount)
+    }
+
+    @Test("a repeat materialises its text once, however many downs it builds")
+    func repeatReusesOneBuffer() throws {
+        let command = InputCommand.key(
+            virtualKey: 6, text: "Z", phase: .repeated(count: KeyPhase.maximumRepeatCount)
+        )
+        let events = try build(command)
+
+        #expect(InputEvents.explicitBufferCopyCount(
+            for            : command,
+            builtEventCount: events.count
+        ) == 1)
     }
 
     @Test("the text a key produces travels on the event")
@@ -279,7 +602,7 @@ struct InputEventsTests {
         let command = InputCommand.drag(
             from : location(0, 0),
             to   : location(80, 0),
-            flags: .maskShift
+            modifiers: .shift
         )
         let events = try build(command)
 

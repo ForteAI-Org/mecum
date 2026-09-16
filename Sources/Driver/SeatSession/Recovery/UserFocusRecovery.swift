@@ -98,7 +98,8 @@ final class UserFocusRecovery {
         do { try prepareDestination(destination, targets) }
         catch { return }
         let identityDuration = now() &- identityStart
-        let snapshot = await sensing.prepareFocusRecoverySnapshot()
+        let processIDs = Set(targets.map(\.processID)).union([destination.processID])
+        let snapshot = await sensing.prepareFocusRecoverySnapshot(for: processIDs)
         try Task.checkCancellation()
         guard allowed, !isPaused, sensing.fenceIsActive else { throw InputFailure.inputPaused }
         guard generation == preparationGeneration,
@@ -183,15 +184,21 @@ final class UserFocusRecovery {
         timing.preparedIdentityNanoseconds = action?.identityDuration ?? 0
         timing.preparedWindowsNanoseconds = action?.snapshot.windowsNanoseconds ?? 0
         timing.preparedSnapshotAgeNanoseconds = action.map { detected &- $0.started } ?? 0
-        let environmentValid = snapshot?.topologyIsValid == true
-            && sensing.physicalTopologyIsUnchanged && sensing.virtualDisplayIsOnline
-            && sensing.virtualDisplayBounds == snapshot?.virtualBounds
+        let topologyValid   = snapshot?.topologyIsValid == true
+        let windowsComplete = snapshot?.windowsAreComplete == true
+        let physicalStable  = sensing.physicalTopologyIsUnchanged
+        let virtualOnline   = sensing.virtualDisplayIsOnline
+        let virtualUnmoved  = sensing.virtualDisplayBounds == snapshot?.virtualBounds
+        let environmentValid = topologyValid && windowsComplete
+            && physicalStable && virtualOnline && virtualUnmoved
         timing.environmentNanoseconds = now() &- checkpoint
         checkpoint = now()
         let adoptedValid = environmentValid && snapshot?.containsAdoptedWindows(targets) == true
         timing.adoptedWindowsNanoseconds = now() &- checkpoint
         checkpoint = now()
-        let visibleValid = adoptedValid && snapshot?.containsOnlyVirtualWindows(of: processID) == true
+        let visibleValid = adoptedValid && Set(targets.map(\.processID)).allSatisfy {
+            snapshot?.containsOnlyVirtualWindows(of: $0) == true
+        }
         timing.visibleWindowsNanoseconds = now() &- checkpoint
         checkpoint = now()
         let destinationValid = visibleValid && destination.map {
@@ -225,7 +232,19 @@ final class UserFocusRecovery {
         } else {
             let reason: String
             if !fresh { reason = "No fresh prepared action or attempt available" }
-            else if !environmentValid { reason = "Display topology is invalid" }
+            else if !environmentValid {
+                let fallen = [
+                    topologyValid  ? nil : "the prepared snapshot's topology",
+                    windowsComplete ? nil : "the prepared window list is incomplete"
+                        + (snapshot?.firstUnresolvedWindow.map { " at Window ID \($0)" } ?? ""),
+                    physicalStable ? nil : "the physical topology, which changed",
+                    virtualOnline  ? nil : "the virtual display, which is not online",
+                    virtualUnmoved ? nil : "the virtual display's bounds, which moved from "
+                        + "\(String(describing: snapshot?.virtualBounds)) to "
+                        + "\(sensing.virtualDisplayBounds)",
+                ].compactMap { $0 }
+                reason = "Focus recovery evidence is invalid: " + fallen.joined(separator: ", ")
+            }
             else if !adoptedValid { reason = "An adopted window is absent or outside the virtual display" }
             else if !visibleValid { reason = "A prepared target window is outside the virtual display" }
             else if !destinationValid { reason = "The prepared user window is absent or invalid" }

@@ -37,7 +37,8 @@ import PrivateSymbols
 ///    three shapes of code it breaks are written down.
 ///
 /// It is `@MainActor` by the target's default isolation rather than the `actor`
-/// spec section 7 asks for, and it waits for nothing: see `docs/adr/0007`. Both
+/// Spec section 7 asks for, and it waits for nothing: see
+/// `Documentation/Driver/adr/Adr0007TheDisplayLifecycleIsCallerPumped.md`. Both
 /// follow from the same measured fact, that a virtual display only makes
 /// progress while the caller's application event loop turns.
 public final class VirtualDisplay {
@@ -178,7 +179,9 @@ public final class VirtualDisplay {
     /// CoreGraphics to call the display active and online, nor for AppKit to
     /// publish an `NSScreen`, nor does it configure the topology.
     ///
-    /// That is the decision of `docs/adr/0007`, and it is measured: a virtual
+    /// That is the decision of
+    /// `Documentation/Driver/adr/Adr0007TheDisplayLifecycleIsCallerPumped.md`,
+    /// and it is measured: a virtual
     /// display only makes progress while the caller's application event loop
     /// turns, so a wait here either blocks the thread that would have pumped,
     /// or suspends it and lets the concurrency runtime end the process. The

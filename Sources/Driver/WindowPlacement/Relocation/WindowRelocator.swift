@@ -15,7 +15,8 @@ import SeatCore
 import VirtualScreens
 
 /// WindowRelocator is the kit's **entire** use of the accessibility API, and
-/// the reason `docs/adr/0004` exists: `AXPosition` to move a window onto the
+/// the reason `Documentation/Driver/adr/Adr0004AccessibilityOnlyForPlacement.md`
+/// exists: `AXPosition` to move a window onto the
 /// Virtual Display, `kAXRaiseAction` to bring it on stage, and
 /// `_AXUIElementGetWindow` to find the element behind a Window ID. It never
 /// reads an element tree, never asks a control for its value and never performs

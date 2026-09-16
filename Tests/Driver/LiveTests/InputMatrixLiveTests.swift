@@ -44,6 +44,20 @@ nonisolated struct Outcome {
     /// `inconclusive`, and an inconclusive row is never a pass either.
     var physicalEvents: UInt64 = 0
 
+    /// Whether this row could not give its Turn back.
+    ///
+    /// It stops the run. A Turn that was not released is held forever, and
+    /// `acquire` has no timeout, so the next row does not fail: it waits, and
+    /// the whole suite hangs with no output at all. One row that cannot finish
+    /// is a finding; a suite that hangs is nothing.
+    var turnStuck = false
+
+    /// Whether the target saw the key event of a shortcut row arrive, which is
+    /// a different claim from whether it acted on it. Nil for a row that is not
+    /// a shortcut. It is the whole point of the shortcut half of the matrix:
+    /// Command and V is delivered to both families and acted on by neither.
+    var shortcutDelivered: Bool?
+
     /// Whether the target published the counter this row reads. A target that
     /// cannot be read says nothing about the driver, so the row is neither a
     /// pass nor a failure — the same rule a hand on the machine gets.
@@ -75,11 +89,30 @@ nonisolated struct Outcome {
 nonisolated struct CalibratedPlatform: InputPlatform {
 
     let base  : any InputPlatform
-    let settle: Duration
+    let settle: Duration?
+
+    /// The modifier policy to use instead of the family's own, for the run that
+    /// measures the other half of the spike. Nil keeps the family's answer.
+    let policy: ModifierPolicy?
+
+    init(base: any InputPlatform, settle: Duration? = nil, policy: ModifierPolicy? = nil) {
+        self.base   = base
+        self.settle = settle
+        self.policy = policy
+    }
 
     func preparation(for command: InputCommand) -> Preparation { base.preparation(for: command) }
-    func preparationSettle(for command: InputCommand) -> Duration { settle }
-    var dragPacing: DragPacing { base.dragPacing }
+
+    func preparationSettle(for command: InputCommand) -> Duration {
+        settle ?? base.preparationSettle(for: command)
+    }
+
+    func modifierPolicy(for command: InputCommand) -> ModifierPolicy {
+        policy ?? base.modifierPolicy(for: command)
+    }
+
+    var dragPacing     : DragPacing      { base.dragPacing }
+    var keyRepeatPacing: KeyRepeatPacing { base.keyRepeatPacing }
 }
 
 /// The acceptance test of the whole input path: the matrix, run against the
@@ -106,141 +139,95 @@ nonisolated struct CalibratedPlatform: InputPlatform {
 @MainActor
 struct InputMatrixLiveTests {
 
+    /// Why the menu resolved rows are known issues rather than failures.
+    static let knownIssueReason = "A key equivalent is resolved by the frontmost application menu, and the seat may never be frontmost; see docs/SpiLedger.md under Discarded. The row stays measured, so the build where it turns green is an unexpected pass rather than nobody noticing."
+
+    /// The family a finished row belonged to, recovered from its printed name
+    /// because an `Outcome` keeps no reference to its target.
+    private func familyOfTarget(named name: String) -> TargetFamily {
+        name.contains("Chrome") ? .chromium : .appKit
+    }
+
     /// How long an effect may take to show up in the target's own report.
     static let effectTimeout: Double = 2
 
-    @Test("click, keyboard, scroll and drag reach both families with the seat intact",
-          .enabled(if: liveSkipReason(needsFixture: true, needsChrome: true) == nil,
-                   Comment(rawValue: liveSkipReason(needsFixture: true, needsChrome: true) ?? "")))
+    /// The fixture is the consumer's and may simply not be on this machine, so
+    /// the gate asks only for the browser. A run without it measures the
+    /// Chromium family alone and **says so**: half the matrix labelled as half
+    /// is evidence, half the matrix reported as a pass is not.
+    @Test("the input matrix reaches every target family present, with the seat intact",
+          .timeLimit(.minutes(3)),
+          .enabled(if: liveSkipReason(needsChrome: true) == nil,
+                   Comment(rawValue: liveSkipReason(needsChrome: true) ?? "")))
     func theInputMatrix() async throws {
 
-        LivePump.prepare()
-        #expect(Permissions.preflight(.postEvent),     "Post Event is not granted to the test runner")
-        #expect(Permissions.preflight(.accessibility), "Accessibility is not granted to the test runner")
-
-        let baselineOnline = Set(try DisplayList.online())
-        let baselineMain   = CGMainDisplayID()
-        let personBefore   = UserSeatState.capture()
         var outcomes: [Outcome] = []
+        var fenceSnapshot: FenceSnapshot?
 
-        if let settle = settleOverrideMilliseconds() {
-            print("settle calibration run: \(settle) ms")
-        }
+        try await LiveStage.run(needsFixture: FixtureTarget.isAvailable) { stage in
 
-        // MARK: the two targets, both left exactly where they were found
-
-        let fixture = try FixtureTarget.launched()
-        defer { fixture.terminate() }
-        let firstReport = fixture.latest
-        #expect(
-            firstReport.controlsAreHitTestable,
-            """
-            the instrumented target opened with an unreachable control at \
-            \(Int(firstReport.windowWidth)) by \(Int(firstReport.windowHeight)): \
-            \(firstReport.controlHitTestReport)
-            """
-        )
-
-        // A fixture that came up in front of the person's own application hands
-        // the focus straight back: the matrix is about a target that is *not*
-        // the front application.
-        if firstReport.applicationIsActive,
-           let previous = NSRunningApplication(processIdentifier: personBefore.frontmostProcessID),
-           previous.processIdentifier != firstReport.processID {
-            previous.activate()
-            LivePump.run(for: 0.5)
-        }
-
-        let chromeWasRunning = !NSRunningApplication
-            .runningApplications(withBundleIdentifier: "com.google.Chrome").isEmpty
-        let chrome = try openProbePage(handingFocusBackTo: personBefore)
-        defer {
-            if !chromeWasRunning { quitChrome() }
-        }
-
-        let fixtureHome = WindowServerProbe.geometry(of: fixture.window.windowNumber)?.frame
-        let chromeHome  = chrome.map(\.originalFrame)
-
-        // MARK: the seat, whole, from the kit
-
-        let host = SeatHost(configuration: SeatHostConfiguration())
-        var hostIsUp = false
-        defer {
-            if hostIsUp { Task { await host.stop() } }
-        }
-        try await host.start()
-        hostIsUp = true
-        #expect(host.state == .ready, "the host came up \(host.state.rawValue)")
-
-        let seat   = try host.makeSeat()
-        let events = SeatEventLog()
-        let seatEventTask = Task { @MainActor in
-            for await event in seat.events { events.record(event) }
-        }
-        let hostEventTask = Task { @MainActor in
-            for await event in host.events { events.record(event) }
-        }
-        defer {
-            seatEventTask.cancel()
-            hostEventTask.cancel()
-        }
-
-        let displayID     = try #require(host.displayID)
-        let virtualBounds = CGDisplayBounds(displayID)
-        let fence         = try #require(host.fence, "the host started without a fence")
-        print("virtual display \(displayID) at \(virtualBounds), fence \(fence.isActive)")
-
-        // MARK: the AppKit half
-
-        let adoptedFixture = try await adopt(fixture, onto: seat, bounds: virtualBounds)
-        fixture.refresh()
-        #expect(
-            fixture.latest.controlsAreHitTestable,
-            Comment(rawValue: "the instrumented target's controls stopped being"
-                + " reachable once staged: " + fixture.latest.controlHitTestReport)
-        )
-
-        for action in Action.all {
-            outcomes.append(await perform(
-                action,
-                on    : fixture,
-                seat  : seat,
-                window: adoptedFixture,
-                fence : fence
-            ))
-        }
-
-        _ = await seat.release(adoptedFixture, .returnToUserSeat)
-        if let fixtureHome, WindowServerProbe.geometry(of: fixture.window.windowNumber)
-            .map({ !rectanglesMatchLoosely($0.frame, fixtureHome) }) == true {
-            restore(fixture.window, to: fixtureHome.origin)
-        }
-        LivePump.run(for: 1.0)
-
-        // MARK: the Chromium half, alone on the display
-
-        if let chrome {
-            let adoptedChrome = try await adopt(chrome, onto: seat, bounds: virtualBounds)
-            for action in Action.all {
-                outcomes.append(await perform(
-                    action,
-                    on    : chrome,
-                    seat  : seat,
-                    window: adoptedChrome,
-                    fence : fence
-                ))
+            if stage.fixture == nil {
+                Issue.record(Comment(rawValue: FixtureTarget.unavailableReason
+                    + " The AppKit half of this matrix did not run: every row below is"
+                    + " the Chromium family alone."))
             }
-            _ = await seat.release(adoptedChrome, .returnToUserSeat)
-            if let chromeHome, WindowServerProbe.geometry(of: chrome.window.windowNumber)
-                .map({ !rectanglesMatchLoosely($0.frame, chromeHome) }) == true {
-                restore(chrome.window, to: chromeHome.origin)
+
+            // MARK: one target at a time, alone on the display
+
+            for target in stage.targets {
+                let adopted = try await adopt(
+                    target,
+                    onto  : stage.seat,
+                    bounds: stage.virtualBounds
+                )
+                target.refresh()
+                if let fixture = stage.fixture,
+                   target.window.windowNumber == fixture.window.windowNumber {
+                    #expect(
+                        fixture.latest.controlsAreHitTestable,
+                        Comment(rawValue: "the instrumented target's controls stopped being"
+                            + " reachable once staged: " + fixture.latest.controlHitTestReport)
+                    )
+                }
+
+                for action in Action.all {
+                    // Printed before the row, and flushed, because the only
+                    // thing worse than a row that hangs is a log that does not
+                    // say which one.
+                    print("  -> \(target.name) \(action.name)")
+                    fflush(stdout)
+                    let outcome = await perform(
+                        action,
+                        on    : target,
+                        seat  : stage.seat,
+                        window: adopted,
+                        fence : stage.fence
+                    )
+                    outcomes.append(outcome)
+                    print("  <- \(target.name) \(action.name): \(outcome.verdict)")
+                    fflush(stdout)
+                    if outcome.turnStuck { break }
+                }
+
+                await stage.giveBack(adopted, of: target, home: stage.home(of: target))
             }
-            LivePump.run(for: 1.0)
+
+            // The drag still has to reach the fixture's process, control or no
+            // control: that is the part the driver is answerable for. Asserted here
+            // and not after the stage comes down, because after it the fixture is
+            // already terminated.
+            if let fixture = stage.fixture {
+                fixture.refresh()
+                #expect(
+                    fixture.latest.syntheticMouseDragCount > 0,
+                    "no dragged event ever reached the fixture: \(fixture.diagnostics)"
+                )
+                #expect(fixture.latest.lastMouseWindowNumber == fixture.window.windowNumber)
+            }
+
+            fenceSnapshot = stage.fence.snapshot()
         }
-
-        // MARK: the report and the teardown
-
-        let fenceSnapshot = fence.snapshot()
+        let snapshot = try #require(fenceSnapshot)
         print("\n| target         | action   | fx   | effect                                     | seat | detail")
         for outcome in outcomes {
             print(outcome.line)
@@ -248,36 +235,11 @@ struct InputMatrixLiveTests {
             if !outcome.error.isEmpty   { print("      error:   \(outcome.error)") }
         }
         print("""
-            fence: \(fenceSnapshot.observedEventCount) HID events observed, \
-            \(fenceSnapshot.clampedEventCount) clamped, \
-            \(fenceSnapshot.disableCount) disables
+            fence: \(snapshot.observedEventCount) HID events observed, \
+            \(snapshot.clampedEventCount) clamped, \
+            \(snapshot.disableCount) disables
             """)
 
-        for _ in 0..<40 { await Task.yield() }
-        let teardown = await host.stop()
-        hostIsUp = false
-        LivePump.run(for: 0.4)
-
-        print(
-            "teardown: display removed \(teardown.displayRemoved), "
-                + "fence released \(teardown.fenceReleased), "
-                + "topology \(String(describing: teardown.topologyRestoration)), "
-                + "\(events.events.count) events"
-        )
-        #expect(teardown.displayRemoved, "the virtual display was left online")
-        #expect(teardown.fenceReleased, "the fence's tap was left installed")
-        #expect(teardown.topologyRestoration != .topologyChangedByUser,
-                "the display set changed during the run, the topology was left alone")
-        #expect(
-            events.events.contains { event in
-                if case .hostStateChanged(_, let to, _) = event { return to == .ready }
-                return false
-            },
-            "the host's transitions never reached the event stream"
-        )
-
-        #expect(Set(try DisplayList.online()) == baselineOnline, "a display was left behind")
-        #expect(CGMainDisplayID() == baselineMain)
 
         // MARK: what the matrix has to prove
 
@@ -297,50 +259,42 @@ struct InputMatrixLiveTests {
 
             #expect(outcome.seatIntact, "\(outcome.target) \(outcome.action): \(outcome.seat)")
 
-            // Command and V is delivered and not acted on, on both families,
-            // and that is the measurement rather than a regression: a key
-            // equivalent is resolved by the frontmost application's menu, and
-            // the seat may never be frontmost. The row stays and stays
-            // measured, so the day a build acts on it the known issue turns
-            // into an unexpected pass instead of nobody noticing.
-            if outcome.action == Action.paste.rawValue {
-                withKnownIssue(
-                    """
-                    Command and V reaches both families and neither pastes: the target \
-                    reports itself active, its window key and `paste:` resolving to its own \
-                    text view, and nothing arrives. Eleven routes were measured and every \
-                    one failed; see docs/spi-ledger.md. The person's clipboard is not \
-                    touched here, so what this row detects is the resolution and not the \
-                    content: a build where it turns green needs the reading redone.
-                    """
-                ) {
-                    #expect(
-                        outcome.effectPassed,
-                        "\(outcome.target) \(outcome.action): \(outcome.effect) \(outcome.error)"
-                    )
+            if let row = ShortcutRow(rawValue: outcome.action) {
+                // Delivery is asserted for every shortcut row, the ones nothing
+                // is expected to act on included: an event that does not even
+                // arrive is a different finding from one that arrives and is
+                // ignored, and only the second is the measured behaviour.
+                #expect(
+                    outcome.shortcutDelivered == true,
+                    "\(outcome.target) \(outcome.action): the key event never reached the target"
+                )
+                let expectation = row.expectation(on: familyOfTarget(named: outcome.target))
+                if expectation == .effectNotObservable {
+                    // Delivery was already asserted above, and delivery is all
+                    // this family lets anybody see. Reporting it as a pass or a
+                    // failure would both be lies.
+                    Issue.record(Comment(rawValue: "\(outcome.target) \(outcome.action): "
+                        + "delivered, and this family exposes no effect to observe"))
+                    continue
                 }
-                continue
+                if expectation == .deliveredOnly {
+                    withKnownIssue(
+                        Comment(rawValue: "\(outcome.action) reaches the target and the "
+                            + "target does not act on it. " + Self.knownIssueReason)
+                    ) {
+                        #expect(outcome.effectPassed, Comment(rawValue: outcome.effect))
+                    }
+                    continue
+                }
             }
 
-            if outcome.isInconclusive {
-                print("  inconclusive, not judged: \(outcome.target) \(outcome.action) — \(outcome.effect)")
-                continue
-            }
             #expect(
                 outcome.effectPassed,
                 "\(outcome.target) \(outcome.action): \(outcome.effect) \(outcome.error)"
             )
         }
 
-        // The drag still has to reach the fixture's process, control or no
-        // control: that is the part the driver is answerable for.
-        fixture.refresh()
-        #expect(
-            fixture.latest.syntheticMouseDragCount > 0,
-            "no dragged event ever reached the fixture: \(fixture.diagnostics)"
-        )
-        #expect(fixture.latest.lastMouseWindowNumber == fixture.window.windowNumber)
-        #expect(fenceSnapshot.disableCount == 0, "the cursor fence was disabled during the run")
+        #expect(snapshot.disableCount == 0, "the cursor fence was disabled during the run")
     }
 
     // MARK: The Fixture's layout
@@ -417,17 +371,32 @@ struct InputMatrixLiveTests {
     /// need: a Chromium renderer refuses a key event carrying more than one
     /// character without the Preparation, and a native one takes it either way.
     ///
-    /// `paste` is not a Command, it is the **detector**: a plain key Command
-    /// carrying Command and V, which is resolved by the frontmost application's
-    /// menu and therefore by nobody here. It runs before the mouse rows for the
-    /// same reason the keyboard row runs first and a sharper one: the target's
-    /// Paste item is only enabled while the first responder can accept text, and
-    /// clicking a button or dragging a slider moves the first responder off the
-    /// text field.
-    enum Action: String, CaseIterable {
-        case keyboard, insertText, paste, click, scroll, drag
+    /// Command and V used to be a row here, as the detector for the key
+    /// equivalent a menu resolves. It moved to `ShortcutRow`, which drives all
+    /// eight of them under one expectation table: two rows for one measurement
+    /// are two places to update the same evidence, and one of them would rot.
+    enum Action: Hashable {
+        case keyboard, insertText, click, scroll, drag
+        case shortcut(ShortcutRow)
 
-        static let all = Action.allCases
+        /// The mechanical rows first, then the eight shortcuts. The order is
+        /// the old one with the shortcuts appended, because the mouse rows move
+        /// the first responder off the text field and every shortcut row needs
+        /// it there.
+        static let all: [Action] =
+            [.keyboard, .insertText] + ShortcutRow.allCases.map(Action.shortcut)
+            + [.click, .scroll, .drag]
+
+        var name: String {
+            switch self {
+            case .keyboard:        "keyboard"
+            case .insertText:      "insertText"
+            case .click:           "click"
+            case .scroll:          "scroll"
+            case .drag:            "drag"
+            case .shortcut(let r): r.rawValue
+            }
+        }
 
         var effectKey: String {
             switch self {
@@ -436,16 +405,16 @@ struct InputMatrixLiveTests {
             case .click:      "clicks"
             case .scroll:     "wheel"
             case .drag:       "drag"
-            case .paste:      "chars"
+            // The counter of effects, not the code: a row watches for it to
+            // move and then checks that the code it moved to is its own.
+            case .shortcut:   "shortcutEffects"
             }
         }
-    }
 
-    /// `kVK_ANSI_V`, written out because a bare 9 in the middle of a Command is
-    /// the kind of constant that gets copied into the wrong row. The character
-    /// travels on the event too, so a layout where V is not at 9 still produces
-    /// the V a menu item would match on.
-    static let vKeyCode: CGKeyCode = 9
+        var shortcutRow: ShortcutRow? {
+            if case .shortcut(let row) = self { row } else { nil }
+        }
+    }
 
     /// The string the bulk insertion row puts into the target's field. Long
     /// enough that no target could produce it from one keystroke, short enough
@@ -470,27 +439,68 @@ struct InputMatrixLiveTests {
         fence    : CursorFence
     ) async -> Outcome {
 
-        var outcome    = Outcome(target: target.name, action: action.rawValue)
-        let before     = target.state()
+        var outcome    = Outcome(target: target.name, action: action.name)
+        var before     = target.state()
         let baseline   = UserSeatState.capture()
         let handBefore = fence.snapshot().observedEventCount
-        let platform   = settleOverrideMilliseconds().map {
-            CalibratedPlatform(base: target.platform, settle: .milliseconds($0)) as any InputPlatform
-        } ?? target.platform
+        let settle     = settleOverrideMilliseconds().map { Duration.milliseconds($0) }
+        let policy     = modifierPolicyOverride()
+        let platform   : any InputPlatform = (settle == nil && policy == nil)
+            ? target.platform
+            : CalibratedPlatform(base: target.platform, settle: settle, policy: policy)
 
         var turn: Turn?
 
+        func mark(_ step: String) {
+            print("       . \(action.name) \(step)")
+            fflush(stdout)
+        }
+
         do {
+            mark("acquire")
             let held = try await seat.acquire()
             turn = held
+            mark("acquired \(held.generation)")
 
-            let command = try makeCommand(action, for: target)
-            let receipt = try await seat.send(
-                command,
-                to      : window,
-                turn    : held,
-                platform: platform
-            )
+            if action.shortcutRow == .cancel, target.family == .chromium {
+                let setup = try await seat.send(
+                    Shortcut.physical(PhysicalKey(name: "F8", virtualKey: 100)),
+                    to      : window,
+                    turn    : held,
+                    platform: platform
+                )
+                let opened = LivePump.run(until: { target.state()["dialogOpen"] == 1 }, timeout: 2)
+                try seat.confirm(setup, opened ? .observed : .absent)
+                try #require(opened, "The browser must open the dialog before cancellation is measured")
+                before = target.state()
+            }
+            let observesWindows = action.shortcutRow?.oracleIsANewWindow == true
+            let windowsBefore = observesWindows ? Self.visibleWindowIDs(of: target.window.processID) : nil
+            if observesWindows {
+                try #require(windowsBefore != nil, "The target's window list is unavailable")
+            }
+
+            let receipt: InputReceipt
+            mark("send")
+            if let row = action.shortcutRow {
+                // Sent as a Shortcut and not as a built Command, so the seat
+                // resolves the character through the installed layout. On the
+                // Dvorak machine this was written on, a hard coded virtual key
+                // would press something else entirely.
+                receipt = try await seat.send(
+                    row.shortcut,
+                    to      : window,
+                    turn    : held,
+                    platform: platform
+                )
+            } else {
+                receipt = try await seat.send(
+                    try makeCommand(action, for: target),
+                    to      : window,
+                    turn    : held,
+                    platform: platform
+                )
+            }
             outcome.receipt = "\(receipt.eventCount) events, "
                 + "\(receipt.route.routedEventCount) routed to window "
                 + "\(receipt.route.windowNumber) on connection "
@@ -499,14 +509,39 @@ struct InputMatrixLiveTests {
                 + "\(receipt.timing.settleNanoseconds / 1_000_000) ms, posting "
                 + "\(receipt.timing.postingNanoseconds / 1_000) us, generation \(held.generation)"
 
+            mark("sent")
             let cursorAfterSend = UserSeatState.capture().cursor
-            let change = waitForChange(action.effectKey, from: before, in: target)
+            mark("waiting for \(action.effectKey)")
+            var change = waitForChange(action.effectKey, from: before, in: target)
+            if let windowsBefore {
+                guard let windowsAfter = Self.visibleWindowIDs(of: target.window.processID) else {
+                    throw LiveFailure.unsupported("The target's window list became unavailable")
+                }
+                change = (!windowsAfter.subtracting(windowsBefore).isEmpty, Double(windowsAfter.count))
+            }
+            mark("observed \(change.changed)")
             outcome.effectPassed = change.changed
+
+            if let row = action.shortcutRow {
+                // Two claims, kept apart. Delivery is the target having seen
+                // the key event; effect is the target having done the thing.
+                // Every menu key equivalent is expected to be the first without
+                // the second, and one counter would hide exactly that.
+                let after = target.state()
+                outcome.shortcutDelivered = after["shortcutDelivered"] == row.number
+                outcome.effectPassed = observesWindows ? change.changed
+                    : change.changed && after["shortcutEffect"] == row.number
+                if row == .cancel, target.family == .chromium {
+                    outcome.effectPassed = outcome.effectPassed && after["dialogOpen"] == 0
+                }
+            }
             // The target publishes its counters in a window title, and a title
             // read while the page rewrites it comes back without them. Printing
             // the absence as a number is what made one row fail for having
             // measured nothing and its neighbour pass for the same reason.
-            if before[action.effectKey] == nil || target.state()[action.effectKey] == nil {
+            if let windowsBefore {
+                outcome.effect = "visible windows \(windowsBefore.count) -> \(Int(change.value))"
+            } else if before[action.effectKey] == nil || target.state()[action.effectKey] == nil {
                 outcome.countersUnreadable = true
                 outcome.effect = "\(action.effectKey) unreadable: the target published no counters"
             } else {
@@ -519,7 +554,9 @@ struct InputMatrixLiveTests {
             // the counter moved, `absent` when it verifiably did not: the one
             // answer never given here is `unknown`, because that would be the
             // seat's end.
+            mark("confirm")
             try seat.confirm(receipt, change.changed ? .observed : .absent)
+            mark("confirmed")
 
         } catch {
             outcome.error  = "\(error)"
@@ -536,18 +573,48 @@ struct InputMatrixLiveTests {
         outcome.seat           = seatState.detail
         outcome.physicalEvents = fence.snapshot().observedEventCount &- handBefore
 
+        mark("seat check")
         if let turn {
+            mark("conclude observation")
             _ = await seat.concludeObservation()
-            do { try seat.release(turn) }
-            catch { outcome.error += " | release refused: \(error)" }
+            mark("release")
+            do {
+                try seat.release(turn)
+            } catch {
+                outcome.error    += " | release refused: \(error)"
+                outcome.turnStuck = true
+                Issue.record(Comment(rawValue: "\(target.name) \(action.name): the Turn was "
+                    + "refused and is still held (\(error)). Every later row would wait on it "
+                    + "forever, so the run stops here."))
+            }
         }
         return outcome
     }
 
+    /// Reads the target's on-screen Window IDs without inferring native panels
+    /// from page counters. A failed reading is unknown, never an empty set.
+    private static func visibleWindowIDs(of processID: Int32) -> Set<Int>? {
+        guard let entries = CGWindowListCopyWindowInfo(.optionOnScreenOnly, kCGNullWindowID)
+            as? [[String: Any]] else { return nil }
+        var result: Set<Int> = []
+        for entry in entries {
+            guard let owner = entry[kCGWindowOwnerPID as String] as? NSNumber else { return nil }
+            guard owner.int32Value == processID else { continue }
+            guard let number = entry[kCGWindowNumber as String] as? NSNumber else { return nil }
+            result.insert(number.intValue)
+        }
+        return result
+    }
+
     private func makeCommand(_ action: Action, for target: any MatrixTarget) throws -> InputCommand {
         switch action {
+        case .shortcut:
+            // Unreachable: `perform` sends a shortcut through the seat's own
+            // Shortcut entry point, which is where the layout is consulted.
+            throw LiveFailure.unsupported("a shortcut row does not build a Command here")
+
         case .keyboard:
-            return .key(virtualKey: 6, text: "Z", flags: [])
+            return .key(virtualKey: 6, text: "Z", modifiers: [])
 
         case .click:
             let point = try #require(target.clickPoint(), "the target has no clickable point")
@@ -559,19 +626,15 @@ struct InputMatrixLiveTests {
 
         case .drag:
             let path = try #require(target.dragEndpoints(), "the target has nothing to drag")
-            return .drag(
-                from: try target.location(of: path.start),
-                to  : try target.location(of: path.end)
-            )
+            // Both ends from **one** reading: `drag(from:to:)` keeps the
+            // observation on its interpolated points only when the two agree,
+            // and two readings never do.
+            let ends = try target.locations(of: [path.start, path.end])
+            return .drag(from: ends[0], to: ends[1])
 
         case .insertText:
             return .insertText(Self.insertedSample)
 
-        case .paste:
-            // Built here and not a Command of its own: the kit has no paste,
-            // because a key equivalent is resolved by the frontmost
-            // application's menu and the seat may never be frontmost.
-            return .key(virtualKey: Self.vKeyCode, text: "v", flags: .maskCommand)
         }
     }
 
@@ -654,133 +717,6 @@ struct InputMatrixLiveTests {
 
     // MARK: Adoption, with the kit's own relocator
 
-    /// Hands a window to the seat and makes sure it is on stage at full size
-    /// before anything is posted to it.
-    ///
-    /// The move, the two agreeing window server readings and the raise are all
-    /// the seat's now (`adopt`, `stage`). What is still the harness's is the
-    /// decision that a stashed window has to be staged at all, because Stage
-    /// Manager stashes whatever was on stage when a second window arrives and
-    /// only the caller knows which of its targets it wants to act on next.
-    private func adopt(
-        _ target: any MatrixTarget,
-        onto seat: AgentSeat,
-        bounds   : CGRect
-    ) async throws -> AdoptedWindow {
 
-        var adopted = try await seat.adopt(
-            target.fullSizeReference,
-            platform: target.platform,
-            title   : target.name
-        )
-        LivePump.run(for: 0.4)
-        target.refresh()
 
-        if !seat.isStaged(adopted) || !target.isStaged(within: bounds) {
-            // Stage Manager stashed it on arrival. `stage` is `kAXRaiseAction`
-            // plus two agreeing readings from the window server, and it is the
-            // reason a Command is never posted at a thumbnail's coordinates.
-            //
-            // Timed here and not only in the benchmark: this is the one place a
-            // window the person's own Stage Manager really stashed goes through
-            // `stage`, and the budget of spec section 8 is written about
-            // exactly that window (1 s p95, against 532 ms measured on
-            // Chrome). The benchmark cannot manufacture the stash without
-            // activating an application, which the kit must never do.
-            let stashed = WindowServerProbe.geometry(of: target.window.windowNumber)?.frame
-            let start   = DispatchTime.now().uptimeNanoseconds
-            adopted = try await seat.stage(adopted)
-            let elapsed = DispatchTime.now().uptimeNanoseconds - start
-            print(String(
-                format: "stage: %@ came on stage in %.0f ms, from %@",
-                target.name, Double(elapsed) / 1e6,
-                String(describing: stashed ?? .null)
-            ))
-            #expect(
-                elapsed <= 1_000_000_000,
-                Comment(rawValue: "stage took \(elapsed / 1_000_000) ms, budget 1000 ms")
-            )
-            LivePump.run(for: 0.4)
-        }
-        target.refresh()
-
-        let staged = WindowServerProbe.geometry(of: target.window.windowNumber)?.frame ?? .null
-        #expect(
-            target.isStaged(within: bounds),
-            "\(target.name) never came on stage at full size: \(staged)"
-        )
-        return adopted
-    }
-
-    /// Two frames that agree within a couple of points, for deciding whether a
-    /// window the seat already returned still needs putting back by hand.
-    private func rectanglesMatchLoosely(_ lhs: CGRect, _ rhs: CGRect) -> Bool {
-        abs(lhs.minX - rhs.minX) <= 2 && abs(lhs.minY - rhs.minY) <= 2
-    }
-
-    private func restore(_ window: WindowReference, to origin: CGPoint) {
-        do {
-            try WindowRelocator.move(window, to: origin)
-            LivePump.run(for: 0.5)
-        } catch {
-            Issue.record("could not put window \(window.windowNumber) back: \(error)")
-        }
-    }
-
-    // MARK: The browser
-
-    private func openProbePage(handingFocusBackTo person: UserSeatState) throws -> ChromeTarget? {
-        guard let page = Bundle.module.url(forResource: "probe-page", withExtension: "html") else {
-            Issue.record("probe-page.html is not in the test bundle")
-            return nil
-        }
-        let open = Process()
-        open.executableURL = URL(fileURLWithPath: "/usr/bin/open")
-        open.arguments     = ["-g", "-a", ChromeTarget.ownerName, page.absoluteString]
-        do {
-            try open.run()
-            open.waitUntilExit()
-            try #require(open.terminationStatus == 0, "open returned \(open.terminationStatus)")
-        } catch {
-            Issue.record("Google Chrome could not be opened: \(error)")
-            return nil
-        }
-
-        var target: ChromeTarget?
-        _ = LivePump.run(
-            until  : {
-                target = ChromeTarget.find()
-                return target != nil
-            },
-            timeout: 45
-        )
-        guard let target else {
-            Issue.record("Chrome did not publish the probe page title \(ChromeTarget.titleMark) within 45 seconds")
-            return nil
-        }
-        if NSRunningApplication(processIdentifier: target.processID)?.isActive == true,
-           let previous = NSRunningApplication(processIdentifier: person.frontmostProcessID) {
-            previous.activate()
-            LivePump.run(for: 0.5)
-        }
-        print("chrome window \(target.windowNumber) of pid \(target.processID), \(target.diagnostics)")
-        return target
-    }
-
-    private func quitChrome() {
-        let quit = Process()
-        quit.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
-        quit.arguments     = ["-e", "tell application \"\(ChromeTarget.ownerName)\" to quit"]
-        try? quit.run()
-        quit.waitUntilExit()
-    }
-
-}
-
-/// What the event stream carried during the run, which is the channel a
-/// consumer reads its Issues and its recovery progress from.
-@MainActor
-final class SeatEventLog {
-    private(set) var events: [SeatEvent] = []
-    func record(_ event: SeatEvent) { events.append(event) }
 }

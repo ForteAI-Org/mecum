@@ -37,7 +37,7 @@ the product. Where the two disagree, this file wins here.
   identifiers (`windowID`, `processID`) except where a field mirrors an SDK
   struct one to one.
 - Booleans read as questions: `isStaged`, `hasTurn`, `canRecover`.
-- The domain vocabulary is `CONTEXT.md` and it is binding: a type that means Seat
+- The domain vocabulary is `Context.md` and it is binding: a type that means Seat
   Host is called `SeatHost`.
 
 ## Comments, in English

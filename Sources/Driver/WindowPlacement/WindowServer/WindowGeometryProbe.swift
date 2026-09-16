@@ -15,8 +15,8 @@ import SeatCore
 /// delivery path.
 nonisolated public enum WindowGeometryProbe {
 
-    private static let maximumDisplayCount: Int = 32
-    private static let scaleTolerance: CGFloat = 0.000_001
+    private static let maximumDisplayCount: Int     = 32
+    private static let scaleTolerance     : CGFloat = 0.000_001
 
     /// observation returns nil unless the window is still the attested target
     /// and lies on exactly one display with a uniform pixel-to-point scale.
@@ -26,6 +26,7 @@ nonisolated public enum WindowGeometryProbe {
         of window             : WindowReference,
         allowUnvalidatedBuild : Bool = false
     ) -> WindowGeometryObservation? {
+        
         guard let expectedIdentity = window.identity,
               let current = WindowServerProbe.geometry(
                   of                   : window.windowNumber,
@@ -33,6 +34,7 @@ nonisolated public enum WindowGeometryProbe {
               ),
               current.identity == expectedIdentity,
               let scaleFactor = scaleFactor(for: current.frame)
+                
         else { return nil }
 
         return WindowGeometryObservation(
@@ -52,9 +54,10 @@ nonisolated public enum WindowGeometryProbe {
         guard frame.hasFinitePositiveArea else { return nil }
 
         return withUnsafeTemporaryAllocation(
-            of: CGDirectDisplayID.self,
+            of      : CGDirectDisplayID.self,
             capacity: maximumDisplayCount
         ) { displays in
+            
             var displayCount: UInt32 = 0
             guard CGGetDisplaysWithRect(
                 frame,
@@ -71,9 +74,11 @@ nonisolated public enum WindowGeometryProbe {
                 let displayID = displays[index]
                 let bounds    = CGDisplayBounds(displayID)
                 let overlap   = bounds.intersection(frame)
+               
                 guard !overlap.isNull, overlap.width > 0, overlap.height > 0 else { continue }
                 guard bounds.contains(frame) else { return nil }
                 guard containingDisplay == nil else { return nil }
+                
                 containingDisplay = displayID
             }
             guard let displayID = containingDisplay else { return nil }

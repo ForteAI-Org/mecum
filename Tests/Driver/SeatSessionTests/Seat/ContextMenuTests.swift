@@ -55,7 +55,7 @@ struct ContextMenuTests {
                     if opensAMenu { sensing.menus = [FakeGeometry.menuWindow] }
                 case .click(_, .left):
                     if closedBy.contains(.chosenItem) { sensing.menus = [] }
-                case .key(53, _, _):
+                case .key(53, _, _, _, _):
                     if closedBy.contains(.escapeKey) { sensing.menus = [] }
                 default:
                     break
@@ -221,7 +221,7 @@ struct ContextMenuTests {
         // the tracking loop watches is the target's own application state.
         #expect(context.sender.preparationCycles == [FakeGeometry.windowNumber])
         #expect(!context.sender.sent.contains { command, _ in
-            command == .key(virtualKey: 53, text: "", flags: [])
+            command == .key(virtualKey: 53, text: "", modifiers: [])
         }, "no escape was needed, so none was posted")
     }
 
@@ -237,7 +237,7 @@ struct ContextMenuTests {
         #expect(receipt.closedBy == .escapeKey)
         #expect(context.sender.preparationCycles == [FakeGeometry.windowNumber])
         #expect(context.sender.sent.contains { command, _ in
-            command == .key(virtualKey: 53, text: "", flags: [])
+            command == .key(virtualKey: 53, text: "", modifiers: [])
         })
     }
 
@@ -311,7 +311,7 @@ struct ContextMenuTests {
         // Both levers were pulled before it gave up.
         #expect(context.sender.preparationCycles == [FakeGeometry.windowNumber])
         #expect(context.sender.sent.contains { command, _ in
-            command == .key(virtualKey: 53, text: "", flags: [])
+            command == .key(virtualKey: 53, text: "", modifiers: [])
         })
 
         for _ in 0 ..< 20 { await Task.yield() }

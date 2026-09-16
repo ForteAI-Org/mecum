@@ -20,12 +20,12 @@ extension InputCommand {
 
     public var kind: InputCommandKind {
         switch self {
-        case .key:        .key
-        case .text:       .text
-        case .insertText: .insertText
-        case .click:      .click
-        case .drag:       .drag
-        case .scroll:     .scroll
+            case .key:        .key
+            case .text:       .text
+            case .insertText: .insertText
+            case .click:      .click
+            case .drag:       .drag
+            case .scroll:     .scroll
         }
     }
 }

@@ -58,7 +58,10 @@ nonisolated package enum InputEvents {
         builtEventCount: Int
     ) -> Int {
         switch command {
-        case .key(_, let text, _):
+        case .key(_, let text, _, _, _):
+            // One materialisation for the whole Command whatever the phase
+            // builds: a repeat of thirty two downs reuses the same buffer a
+            // single press does.
             text.isEmpty ? 0 : 1
         case .text:
             builtEventCount / 2
@@ -78,66 +81,219 @@ nonisolated package enum InputEvents {
     /// on mouse events into `mouseEventNumber` as well, which is what a target
     /// application reads to group a press with its release.
     package static func append(
-        _ command    : InputCommand,
-        source       : CGEventSource,
-        pacing       : DragPacing,
-        correlationID: Int64,
-        into events  : inout [PreparedEvent]
+        _ command      : InputCommand,
+        source         : CGEventSource,
+        pacing         : DragPacing,
+        keyRepeatPacing: KeyRepeatPacing = .systemDefault,
+        held           : Modifiers = [],
+        policy         : ModifierPolicy = .eventFlags,
+        correlationID  : Int64,
+        into events    : inout [PreparedEvent]
     ) throws {
 
         switch command {
-        case .key(let virtualKey, let text, let flags):
-            guard
-                let down = CGEvent(keyboardEventSource: source, virtualKey: virtualKey, keyDown: true),
-                let up   = CGEvent(keyboardEventSource: source, virtualKey: virtualKey, keyDown: false)
-            else {
-                throw InputFailure.eventCreationFailed
-            }
-            down.flags = flags
-            up.flags   = flags
-            if !text.isEmpty {
-                // The character travels on the event, so a keyboard layout the
-                // kit knows nothing about still produces the right one.
-                var utf16 = Array(text.utf16)
-                utf16.withUnsafeMutableBufferPointer { buffer in
-                    down.keyboardSetUnicodeString(
-                        stringLength : buffer.count,
-                        unicodeString: buffer.baseAddress
-                    )
-                    up.keyboardSetUnicodeString(
-                        stringLength : buffer.count,
-                        unicodeString: buffer.baseAddress
+        case .key(let virtualKey, let text, let modifiers, let phase, _):
+            if case .repeated(let count) = phase {
+                // Refused here, before the first event is built, because the
+                // posting loop has no way to stop: a count that cannot be
+                // posted has to be caught while nothing has gone out yet.
+                guard (1 ... KeyPhase.maximumRepeatCount).contains(count) else {
+                    throw InputFailure.invalidRepeatCount(
+                        requested: count,
+                        maximum  : KeyPhase.maximumRepeatCount
                     )
                 }
             }
-            mark(down, correlationID: correlationID, isMouse: false)
-            mark(up,   correlationID: correlationID, isMouse: false)
-            events.append(PreparedEvent(event: down, windowPointFromTop: nil))
-            events.append(PreparedEvent(event: up,   windowPointFromTop: nil))
+            // What the session already holds is carried too, and only what this
+            // Command names is its own to press and release. A session holding
+            // Shift that sends Command and C delivers Command, Shift and C,
+            // which is what a hand on a keyboard would produce.
+            let effective = held.union(modifiers)
+            // A key that is itself a modifier carries its own bit on the way
+            // down and not on the way up, which is what the real key does.
+            let ownModifier = Modifiers(virtualKey: virtualKey)
+            let downFlags   = (ownModifier.map { effective.union($0) } ?? effective).cgFlags
+            let upFlags     = (ownModifier.map { effective.subtracting($0) } ?? effective).cgFlags
+            // Materialised once for the whole Command and reused by every event
+            // it builds, which is what keeps a repeat of thirty two downs at the
+            // same explicit copy count as a single press.
+            var utf16 = text.isEmpty ? [] : Array(text.utf16)
+
+            func appendKeyEvent(
+                isDown    : Bool,
+                autorepeat: Bool,
+                delay     : UInt32
+            ) throws {
+                guard let event = CGEvent(
+                    keyboardEventSource: source,
+                    virtualKey         : virtualKey,
+                    keyDown            : isDown
+                ) else {
+                    throw InputFailure.eventCreationFailed
+                }
+                event.flags = isDown ? downFlags : upFlags
+                // The autorepeat field is deliberately **not** written, and
+                // `autorepeat` only says which phase asked for it.
+                //
+                // Measured on 26A428 against both target families: an event
+                // carrying `keyboardEventAutorepeat` is not delivered at all.
+                // Twelve counts across three intervals, on an AppKit target and
+                // a Chromium renderer, zero arrived every time, while four
+                // ordinary presses arrived four times out of four on both. The
+                // pacing changed nothing, so it is the field and not the speed.
+                // A repeat is therefore posted as ordinary key downs, and what
+                // that gives up is written on `KeyPhase.repeated`.
+                _ = autorepeat
+                if !utf16.isEmpty {
+                    // The character travels on the event, so a keyboard layout
+                    // the kit knows nothing about still produces the right one.
+                    utf16.withUnsafeMutableBufferPointer { buffer in
+                        event.keyboardSetUnicodeString(
+                            stringLength : buffer.count,
+                            unicodeString: buffer.baseAddress
+                        )
+                    }
+                }
+                mark(event, correlationID: correlationID, isMouse: false)
+                events.append(PreparedEvent(
+                    event                        : event,
+                    windowPointFromTop           : nil,
+                    delayAfterPostingMicroseconds: delay
+                ))
+            }
+
+            // A modifier transition carries the **whole** current modifier
+            // state, not the one bit that moved: pressing Command then Shift
+            // produces flagsChanged(Command) and flagsChanged(Command, Shift).
+            // Emitting only the bit that changed is the easy mistake.
+            func appendTransition(cumulative: Modifiers, keyOf modifier: Modifiers) throws {
+                guard let transitionKey = modifier.singleVirtualKey else { return }
+                guard let event = CGEvent(
+                    keyboardEventSource: source,
+                    virtualKey         : transitionKey,
+                    keyDown            : true
+                ) else {
+                    throw InputFailure.eventCreationFailed
+                }
+                // CoreGraphics has no constructor for a transition, so the type
+                // is reassigned. That the reassignment sticks is what
+                // `RecordLayout.verifyFlagsChangedRecord()` proves on the build
+                // before this policy is allowed at all.
+                event.type  = .flagsChanged
+                event.flags = cumulative.cgFlags
+                mark(event, correlationID: correlationID, isMouse: false)
+                events.append(PreparedEvent(event: event, windowPointFromTop: nil))
+            }
+
+            let usesTransitions = policy == .flagsChanged
+            // Only what this Command does not already hold is its own to press
+            // and, afterwards, to release. The rest stays exactly as it was.
+            let added = modifiers.subtracting(held)
+
+            // A modifier key under the transition policy **is** a transition: a
+            // real keyboard reports Shift going down as flagsChanged and never
+            // as a key down. An ordinary key stays a key down and up, wrapped
+            // by the transitions of the modifiers this Command adds.
+            let modifierKeyTransitions = usesTransitions && ownModifier != nil
+
+            switch phase {
+            case .press:
+                if modifierKeyTransitions, let ownModifier {
+                    try appendTransition(cumulative: held.union(ownModifier),     keyOf: ownModifier)
+                    try appendTransition(cumulative: held.subtracting(ownModifier), keyOf: ownModifier)
+                    break
+                }
+                var cumulative = held
+                if usesTransitions {
+                    for modifier in added.inPressOrder {
+                        cumulative.insert(modifier)
+                        try appendTransition(cumulative: cumulative, keyOf: modifier)
+                    }
+                }
+                try appendKeyEvent(isDown: true,  autorepeat: false, delay: 0)
+                try appendKeyEvent(isDown: false, autorepeat: false, delay: 0)
+                if usesTransitions {
+                    // The exact inverse, and only of what this Command pressed.
+                    for modifier in added.inPressOrder.reversed() {
+                        cumulative.remove(modifier)
+                        try appendTransition(cumulative: cumulative, keyOf: modifier)
+                    }
+                }
+
+            case .down:
+                if modifierKeyTransitions, let ownModifier {
+                    try appendTransition(cumulative: held.union(ownModifier), keyOf: ownModifier)
+                } else {
+                    try appendKeyEvent(isDown: true, autorepeat: false, delay: 0)
+                }
+
+            case .up:
+                if modifierKeyTransitions, let ownModifier {
+                    try appendTransition(
+                        cumulative: held.subtracting(ownModifier),
+                        keyOf     : ownModifier
+                    )
+                } else {
+                    try appendKeyEvent(isDown: false, autorepeat: false, delay: 0)
+                }
+
+            case .repeated(let count):
+                // No pause after the last repeat. A drag pays one after its
+                // final event and nothing notices; here the pause is held
+                // exclusion on the target for every other driver in the
+                // process, and the last one buys nothing.
+                for index in 0 ..< count {
+                    try appendKeyEvent(
+                        isDown    : true,
+                        autorepeat: true,
+                        delay     : index == count - 1 ? 0 : keyRepeatPacing.intervalMicroseconds
+                    )
+                }
+            }
 
         case .text(let text):
             guard !text.isEmpty else { throw InputFailure.emptyText }
+            // Two events per cluster inside one atomic Command, so the ceiling
+            // is about the exclusion this holds as much as about delivery.
+            guard text.count <= TextLimits.maximumTypedClusters else {
+                throw InputFailure.textTooLong(
+                    TextMeasure(text.count, .graphemeClusters),
+                    maximum: TextLimits.maximumTypedClusters
+                )
+            }
             for character in text {
                 try append(
-                    .key(virtualKey: 0, text: String(character), flags: []),
-                    source       : source,
-                    pacing       : pacing,
-                    correlationID: correlationID,
-                    into         : &events
+                    .key(virtualKey: 0, text: String(character), modifiers: []),
+                    source         : source,
+                    pacing         : pacing,
+                    keyRepeatPacing: keyRepeatPacing,
+                    held           : held,
+                    policy         : policy,
+                    correlationID  : correlationID,
+                    into           : &events
                 )
             }
 
         case .insertText(let text):
             guard !text.isEmpty else { throw InputFailure.emptyText }
+            guard text.utf16.count <= TextLimits.maximumInsertedCodeUnits else {
+                throw InputFailure.textTooLong(
+                    TextMeasure(text.utf16.count, .utf16CodeUnits),
+                    maximum: TextLimits.maximumInsertedCodeUnits
+                )
+            }
             // The same pair a bare key produces, with the whole string as the
             // payload instead of one character: two events for any length, and
             // the target's own input client is what splits it, or does not.
             try append(
-                .key(virtualKey: 0, text: text, flags: []),
-                source       : source,
-                pacing       : pacing,
-                correlationID: correlationID,
-                into         : &events
+                .key(virtualKey: 0, text: text, modifiers: []),
+                source         : source,
+                pacing         : pacing,
+                keyRepeatPacing: keyRepeatPacing,
+                held           : held,
+                policy         : policy,
+                correlationID  : correlationID,
+                into           : &events
             )
 
         case .click(let location, let button):
@@ -161,7 +317,7 @@ nonisolated package enum InputEvents {
             events.append(PreparedEvent(event: down, windowPointFromTop: location.windowPointFromTop))
             events.append(PreparedEvent(event: up,   windowPointFromTop: location.windowPointFromTop))
 
-        case .drag(let path, let flags):
+        case .drag(let path, let modifiers):
             guard path.count >= 3 else { throw InputFailure.invalidDragPath(pointCount: path.count) }
             guard let start = path.first, path.allSatisfy(\.isFinite) else {
                 throw InputFailure.invalidLocation
@@ -189,7 +345,7 @@ nonisolated package enum InputEvents {
                 guard let event = mouseEvent(type, at: location.screenPoint, source: source) else {
                     throw InputFailure.eventCreationFailed
                 }
-                event.flags = flags
+                event.flags = held.union(modifiers).cgFlags
                 mark(event, correlationID: correlationID, isMouse: true)
                 events.append(PreparedEvent(
                     event                        : event,

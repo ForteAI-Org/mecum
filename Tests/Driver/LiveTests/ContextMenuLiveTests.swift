@@ -193,6 +193,7 @@ struct ContextMenuLiveTests {
         let fixture = try FixtureTarget.launched()
         defer { fixture.terminate() }
 
+
         rows.append(await measure(
             family : "AppKit fixture",
             seat   : seat,

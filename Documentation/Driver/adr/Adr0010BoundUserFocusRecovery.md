@@ -112,8 +112,8 @@ Primary source for the private ABI and key-window recipe:
 [yabai extern.h](https://github.com/koekeishiya/yabai/blob/master/src/misc/extern.h)
 and [window_manager.c](https://github.com/koekeishiya/yabai/blob/master/src/window_manager.c).
 Local arm64 disassembly on 26A5425a confirms the pointer to two 32-bit PSN words,
-the Window ID, and the 0x200 mode bit. Runtime results and test scope are in
-[the focus recovery experiment](../user-focus-recovery-2026-09-10.md).
+the Window ID, and the 0x200 mode bit. The raw runtime evidence remains under
+`../measurements/` and the contract remains in this ADR.
 
 ## Diagnostic comparison and event provenance (2026-09-10)
 
@@ -128,4 +128,37 @@ posting thread. It preserves synchronous handling when already on main and
 passes immutable PID/time values to MainActor otherwise. A stopped observer
 ignores a queued callback. Reports distinguish receipt, handler entry and the
 context-menu fallback poll; notification receipt is not an OS event timestamp.
-See [the campaign](../focus-certification-2026-09-10.md) for measurement limits.
+The measurement bundle under `../measurements/` records the campaign limits.
+
+## Process scope of prepared window evidence (2026-09-14)
+
+Preparation requests the set of all adopted application PIDs plus the saved
+destination PID. The WindowServer list's owner PID classifies each row before
+identity resolution. Every on-screen row for those processes must resolve to
+an attested Window Reference with the same PID and Window ID. This includes
+dialogs and other windows of an adopted application, not only adopted IDs.
+All adopted processes must have their visible windows inside the virtual
+display before a restoration request is allowed.
+
+A row belonging to another positive PID is outside this claim and is not
+attested. This applies to WindowServer surfaces and unrelated applications
+without guessing from owner names, window titles, levels or connection IDs.
+In particular, a failed identity lookup is never itself an exclusion rule.
+An unavailable list, a missing or invalid owner PID, or an unresolved relevant
+row invalidates the window evidence and keeps recovery paused. No partial
+list authorizes restoration.
+
+`FocusRecoverySnapshot.coveredProcessIDs` records the scope. A nil scope means
+the custom reader declares a complete reading of all processes; an explicit
+set cannot support claims about other processes. The scoped sensing method
+defaults to the existing unscoped reader, preserving custom conformers without
+silently granting coverage. `windowsAreComplete` describes that scope alone
+and remains separate from display topology. Every snapshot predicate checks
+both completeness and process coverage.
+
+This relies on the PID supplied by the WindowServer listing for classification,
+and on the independent connection/PSN/PID chain for every retained reference.
+It does not establish identity from a PID alone or change the existing limit
+on windows created or moved after preparation. Hold binding, cancellation,
+snapshot age, exact destination identity, user intent, the closed input gate
+and the two verification readings retain their existing rules.

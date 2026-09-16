@@ -49,6 +49,20 @@ nonisolated public protocol InputPlatform: Sendable {
     /// and after every step.
     var dragPacing: DragPacing { get }
 
+    /// How this family is told which modifiers are held: stamped on the key
+    /// events, or also announced with real transition events.
+    ///
+    /// It takes the Command for the same reason `preparation(for:)` does, and
+    /// not because any measured family needs two answers yet: `.repeated` may
+    /// well want a different one from `.press`, and a single value per platform
+    /// would have to be changed everywhere to find out.
+    func modifierPolicy(for command: InputCommand) -> ModifierPolicy
+
+    /// The pause between two repeats of a held key. It is the platform's for
+    /// the same reason the drag's pacing is: the gap is what makes a repeat a
+    /// repeat, and a target that accelerates while a key is held reads it.
+    var keyRepeatPacing: KeyRepeatPacing { get }
+
     /// A last field on an event, for a target family that needs one. The
     /// default does nothing, and both platforms the kit ships keep it that way:
     /// the Chromium stamping this hook was kept for turned out to change no
@@ -67,6 +81,15 @@ nonisolated extension InputPlatform {
 
     /// The pacing measured on the fixture and on Chromium renderers.
     public var dragPacing: DragPacing { .realistic }
+
+    /// Stamped on the events and nothing else, which is what both shipped
+    /// platforms use and what ADR 0011 argues for.
+    public func modifierPolicy(for command: InputCommand) -> ModifierPolicy { .eventFlags }
+
+    /// macOS's own shipping interval. Unlike the drag's pacing this is not a
+    /// measurement of either target family: no row has driven a held key yet,
+    /// and ticket A3's sweep is what replaces it with one.
+    public var keyRepeatPacing: KeyRepeatPacing { .systemDefault }
 
     /// Nothing, which is what both shipped platforms need.
     public func decorate(_ event: CGEvent, for command: InputCommand) {}

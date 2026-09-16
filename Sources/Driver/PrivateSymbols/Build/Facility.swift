@@ -35,12 +35,12 @@ nonisolated public enum PrimitiveRequirement: Sendable, Hashable {
     /// The key this requirement has in `validated-builds.json`.
     public var ledgerKey: String {
         switch self {
-        case .symbol(let symbol):       symbol.rawValue
-        case .objcClass(let objcClass): objcClass.rawValue
-        case .selector(let selector):   selector.ledgerKey
-        case .field(let key):           key
-        case .record(let key):          key
-        case .behavior(let key):        key
+            case .symbol(let symbol)      : symbol.rawValue
+            case .objcClass(let objcClass): objcClass.rawValue
+            case .selector(let selector)  : selector.ledgerKey
+            case .field(let key)          : key
+            case .record(let key)         : key
+            case .behavior(let key)       : key
         }
     }
 
@@ -48,12 +48,12 @@ nonisolated public enum PrimitiveRequirement: Sendable, Hashable {
     /// kind is a parse-time disagreement and not a silent mismatch.
     public var kind: PrimitiveKind {
         switch self {
-        case .symbol:    .symbol
-        case .objcClass: .objcClass
-        case .selector:  .selector
-        case .field:     .field
-        case .record:    .record
-        case .behavior:  .behavior
+            case .symbol:    .symbol
+            case .objcClass: .objcClass
+            case .selector:  .selector
+            case .field:     .field
+            case .record:    .record
+            case .behavior:  .behavior
         }
     }
 }

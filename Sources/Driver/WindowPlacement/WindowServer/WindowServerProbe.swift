@@ -164,6 +164,26 @@ nonisolated public enum WindowServerProbe {
         return first
     }
 
+    /// Maps an already-attested process serial number through the exact cached
+    /// SDK function used by `identity(of:)`. SeatBench uses this package-only
+    /// read to measure the two documented PID mappings separately from the kit's
+    /// ownership checks. It adds no alternative identity path: failure stays
+    /// `nil`, and callers still have to compare the answer with the attested PID.
+    package static func mappedProcessID(of process: ProcessIdentity) -> Int32? {
+        guard let getProcessPID else { return nil }
+
+        var serialNumber = ProcessSerialNumberValue(
+            high: process.serialNumberHigh,
+            low : process.serialNumberLow
+        )
+        var processID: Int32 = 0
+        let result = withUnsafePointer(to: &serialNumber) { pointer in
+            getProcessPID(UnsafeRawPointer(pointer), &processID)
+        }
+        guard result == 0, processID > 0 else { return nil }
+        return processID
+    }
+
     /// Attests one row of a WindowServer list under a gate the caller evaluated
     /// once for the whole list. This avoids a second list allocation per window
     /// while still binding every row to its owner connection and process life.

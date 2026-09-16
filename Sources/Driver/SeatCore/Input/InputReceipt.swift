@@ -42,6 +42,36 @@ public struct InputReceipt: Sendable, Equatable {
     /// throwing it as a delivery failure would invite an unsafe replay.
     public let cleanup: InputCleanupResult
 
+    /// The modifiers this session still holds on the target process after this
+    /// Command, every holder of that process included.
+    ///
+    /// It is an observation and not a promise, like everything else here: it
+    /// says what the kit believes it is holding, which under the default
+    /// modifier policy is bookkeeping that no target was ever told about. A
+    /// non-empty value after a Command that was not a `.down` means another
+    /// Turn is holding something on the same process.
+    public let heldAfter: Modifiers
+
+    /// How much text this Command carried, in the unit that Command counts in,
+    /// or nil when it carried none.
+    ///
+    /// It is here because `eventCount` is not it and must never be read as it:
+    /// `.insertText` is two events at any length, so a caller inferring how much
+    /// text arrived from the event count would be wrong by three orders of
+    /// magnitude. This says what was **posted**, which like everything else on
+    /// a Receipt is delivery and not effect.
+    public let textMeasure: TextMeasure?
+
+    /// The `KeyboardLayout.generation` that resolved this Command, or nil when
+    /// no layout was consulted.
+    ///
+    /// Nil is the ordinary answer: a Command built from a virtual key or from a
+    /// key position never asks what layout is installed, and a mouse Command
+    /// never does either. A consumer comparing this across two receipts sees
+    /// the person changing keyboard layout without the kit having to watch for
+    /// it.
+    public let layoutGeneration: UInt64?
+
     /// True when the Preparation may still be applied. Kept as the compatible
     /// spelling for existing consumers; `cleanup` carries the richer evidence.
     public var hasUnrestoredPreparation: Bool { cleanup.needsRecovery }
@@ -55,6 +85,9 @@ public struct InputReceipt: Sendable, Equatable {
         observation             : SeatObservation? = nil,
         unvalidatedBuild        : Bool = false,
         cleanup                 : InputCleanupResult? = nil,
+        heldAfter               : Modifiers = [],
+        layoutGeneration        : UInt64? = nil,
+        textMeasure             : TextMeasure? = nil,
         hasUnrestoredPreparation: Bool = false
     ) {
         self.eventCount               = eventCount
@@ -64,6 +97,9 @@ public struct InputReceipt: Sendable, Equatable {
         self.trace                    = trace
         self.observation              = observation
         self.unvalidatedBuild = unvalidatedBuild
+        self.heldAfter        = heldAfter
+        self.layoutGeneration = layoutGeneration
+        self.textMeasure      = textMeasure
         self.cleanup          = cleanup ?? Self.compatibleCleanup(
             preparation             : preparation,
             hasUnrestoredPreparation: hasUnrestoredPreparation
@@ -82,7 +118,10 @@ public struct InputReceipt: Sendable, Equatable {
             trace                   : trace,
             observation             : observation,
             unvalidatedBuild: unvalidatedBuild,
-            cleanup         : cleanup
+            cleanup         : cleanup,
+            heldAfter       : heldAfter,
+            layoutGeneration: layoutGeneration,
+            textMeasure     : textMeasure
         )
     }
 
@@ -97,7 +136,29 @@ public struct InputReceipt: Sendable, Equatable {
             trace                   : trace,
             observation             : observation,
             unvalidatedBuild: unvalidatedBuild,
-            cleanup         : cleanup
+            cleanup         : cleanup,
+            heldAfter       : heldAfter,
+            layoutGeneration: layoutGeneration,
+            textMeasure     : textMeasure
+        )
+    }
+
+    /// replacingLayoutGeneration records which keyboard layout reading resolved
+    /// this Command. The driver cannot know it: resolution happens above, in
+    /// the session, and only for a Shortcut written as a character.
+    public func replacingLayoutGeneration(_ layoutGeneration: UInt64?) -> InputReceipt {
+        InputReceipt(
+            eventCount      : eventCount,
+            route           : route,
+            preparation     : preparation,
+            timing          : timing,
+            trace           : trace,
+            observation     : observation,
+            unvalidatedBuild: unvalidatedBuild,
+            cleanup         : cleanup,
+            heldAfter       : heldAfter,
+            layoutGeneration: layoutGeneration,
+            textMeasure     : textMeasure
         )
     }
 
@@ -112,7 +173,10 @@ public struct InputReceipt: Sendable, Equatable {
             trace           : trace,
             observation     : observation,
             unvalidatedBuild: unvalidatedBuild,
-            cleanup         : cleanup
+            cleanup         : cleanup,
+            heldAfter       : heldAfter,
+            layoutGeneration: layoutGeneration,
+            textMeasure     : textMeasure
         )
     }
 

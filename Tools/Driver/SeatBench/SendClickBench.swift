@@ -25,14 +25,21 @@ import WindowPlacement
 /// historical evidence but are not directly comparable to this scenario.
 ///
 /// The whole send is measured against a control that builds and posts the same
-/// two CoreGraphics events. The difference now includes identity, two geometry
-/// snapshots, transform validation, routing and the Receipt. Existing limits
-/// remain visible so the next measured run exposes their impact; this source
-/// does not claim they still pass.
+/// two CoreGraphics events. The latency difference includes identity, two
+/// geometry snapshots, transform validation, routing and the Receipt. Identity
+/// allocations have a second control: the same two documented `GetProcessPID`
+/// mappings, using the target's attested process serial number.
 @MainActor
 enum SendClickBench {
 
     static let name = "send-click"
+
+    /// Pre-geometry rows with the same names remain historical evidence, but
+    /// baseline comparison refuses them because they measure a different path.
+    static let measurementContract = "guarded-coordinate-v2"
+    static let contractBoundSamples: Set<String> = [
+        "send_click_full", "resolve_identity", "get_process_pid_twice_control",
+    ]
 
     /// The Preparation talks to the window server four times per cycle, so it
     /// gets its own count: at 500 it dominates the runtime of the whole driver
@@ -52,7 +59,7 @@ enum SendClickBench {
     /// The pieces that are the kit's own code and nothing else: no CoreGraphics
     /// object is built or handed over inside them, so their allocation count is
     /// an assertion and not an estimate.
-    static let zeroAllocationPieces: Set<String> = ["resolve_identity", "route_event"]
+    static let zeroAllocationPieces: Set<String> = ["route_event"]
 
     static func run(
         iterations       : Int,
@@ -116,6 +123,19 @@ enum SendClickBench {
             return false
         }
         source.localEventsSuppressionInterval = 0
+
+        // Bind the control to the exact PSN/PID pair already attested for this target.
+        guard let targetIdentity = target.identity else {
+            print("send-click: FAIL, the target has no attested identity for the SDK control")
+            return false
+        }
+        let targetProcess = targetIdentity.process
+        guard WindowServerProbe.mappedProcessID(of: targetProcess) == target.processID,
+              WindowServerProbe.mappedProcessID(of: targetProcess) == target.processID
+        else {
+            print("send-click: FAIL, GetProcessPID control could not reproduce the target PID")
+            return false
+        }
 
         print("""
             send-click: pid \(getpid()) window \(window.windowNumber), \
@@ -182,9 +202,40 @@ enum SendClickBench {
             )
         })
 
-        samples.append(measure("resolve_identity", iterations: iterations, warmUp: 50) {
-            _ = try? engine.identity(of: target)
+        let identityWarmUp = 50
+        var identityAttempts  = 0
+        var failedIdentities  = 0
+        samples.append(measure(
+            "resolve_identity",
+            iterations: iterations,
+            warmUp    : identityWarmUp
+        ) {
+            identityAttempts += 1
+            do {
+                let observed = try engine.identity(of: target)
+                if observed != targetIdentity { failedIdentities += 1 }
+            } catch {
+                failedIdentities += 1
+            }
         })
+        let expectedIdentityReads = iterations + identityWarmUp
+
+        let mappingWarmUp = 50
+        var mappingAttempts = 0
+        var failedMappings  = 0
+        samples.append(measure(
+            "get_process_pid_twice_control",
+            iterations: iterations,
+            warmUp    : mappingWarmUp
+        ) {
+            for _ in 0..<2 {
+                mappingAttempts += 1
+                if WindowServerProbe.mappedProcessID(of: targetProcess) != target.processID {
+                    failedMappings += 1
+                }
+            }
+        })
+        let expectedMappings = 2 * (iterations + mappingWarmUp)
 
         let identity = try? engine.identity(of: target)
         if let identity, let routed = CGEvent(
@@ -259,14 +310,84 @@ enum SendClickBench {
             full.allocationsPerCall - control.allocationsPerCall
         )
         print(String(
-            format: "attributable to the kit: p50 %.0f ns, p95 %.0f ns, %.3f allocations per call",
+            format: "guarded-path delta: p50 %.0f ns, p95 %.0f ns, %.3f raw allocations per call",
             attributableP50, attributableP95, attributableAllocations
         ))
 
         var passed = true
 
-        // The allocation budget is asserted on the kit's own pieces and not on
-        // the subtraction, and that is a measurement decision worth its lines.
+        let identitySample = samples.first(where: { $0.name == "resolve_identity" })
+        let mappingControl = samples.first(where: {
+            $0.name == "get_process_pid_twice_control"
+        })
+        let identityAllocationResult = IdentityAllocationAssessment.evaluate(
+            identityAllocations: identitySample?.allocations,
+            identityIterations : identitySample?.iterations ?? 0,
+            controlAllocations : mappingControl?.allocations,
+            controlIterations  : mappingControl?.iterations ?? 0,
+            expectedIdentityReads: expectedIdentityReads,
+            observedIdentityReads: identityAttempts,
+            failedIdentityReads  : failedIdentities,
+            expectedMappings   : expectedMappings,
+            observedMappings   : mappingAttempts,
+            failedMappings     : failedMappings
+        )
+
+        let allocationEvidence: [String: Any]
+        switch identityAllocationResult {
+        case .success(let assessment):
+            let allocationPassed = assessment.residualAllocationsPerCall
+                <= Double(Budget.sendClickAllocations)
+            print(String(
+                format: "identity allocations: raw %.3f/call, two-call SDK control %.3f/call, residual %.3f/call",
+                assessment.identityAllocationsPerCall,
+                assessment.controlAllocationsPerCall,
+                assessment.residualAllocationsPerCall
+            ))
+            if !allocationPassed {
+                print(String(
+                    format: "FAIL resolve_identity: residual %.3f allocations per call, budget %d",
+                    assessment.residualAllocationsPerCall,
+                    Budget.sendClickAllocations
+                ))
+                passed = false
+            }
+            allocationEvidence = [
+                "status"                       : "measured",
+                "identity_raw_total"           : assessment.identityAllocations,
+                "identity_raw_per_call"        : assessment.identityAllocationsPerCall,
+                "get_process_pid_control_total": assessment.controlAllocations,
+                "get_process_pid_control_per_call": assessment.controlAllocationsPerCall,
+                "residual_total"               : assessment.residualAllocations,
+                "residual_per_call"            : assessment.residualAllocationsPerCall,
+                "mapping_attempts"             : mappingAttempts,
+                "mapping_failures"             : failedMappings,
+                "identity_attempts"            : identityAttempts,
+                "identity_failures"            : failedIdentities,
+                "budget"                       : [
+                    "limit" : Budget.sendClickAllocations,
+                    "passed": allocationPassed,
+                ],
+            ]
+        case .failure(let invalid):
+            print("FAIL resolve_identity allocation evidence: \(invalid.message)")
+            passed = false
+            allocationEvidence = [
+                "status"          : "invalid",
+                "reason"          : invalid.message,
+                "mapping_attempts": mappingAttempts,
+                "mapping_failures": failedMappings,
+                "identity_attempts": identityAttempts,
+                "identity_failures": failedIdentities,
+                "budget"          : [
+                    "limit" : Budget.sendClickAllocations,
+                    "passed": false,
+                ],
+            ]
+        }
+
+        // Framework costs remain raw. `route_event` is the other exact zero gate;
+        // identity uses the validated SDK control above.
         // `postToPid` allocates between 11 and 22 times per event **for the
         // same code** from one run to the next, because this benchmark posts to
         // a process that is not draining its own queue and the allocator cost
@@ -313,6 +434,7 @@ enum SendClickBench {
         let report: [String: Any] = [
             "schema_version": 1,
             "benchmark"     : name,
+            "measurement_contract": measurementContract,
             "provenance"    : provenance(clock: clock),
             "scenario"      : "own-process NSWindow target, AppKitPlatform, no preparation on "
                 + "the measured send; events never leave the benchmark process",
@@ -320,6 +442,7 @@ enum SendClickBench {
                 "p50"                 : attributableP50,
                 "p95"                 : attributableP95,
                 "allocations_per_call": attributableAllocations,
+                "identity_allocations" : allocationEvidence,
                 "budget"              : [
                     "limit" : Budget.sendClickNanosecondsP95,
                     "passed": passed,
@@ -327,9 +450,13 @@ enum SendClickBench {
             ],
             "delivered"     : ["driver": deliveredFull, "control": deliveredControl],
             "results"       : samples.map { sample -> [String: Any] in
-                sample.name == "send_click_full"
+                var row = sample.name == "send_click_full"
                     ? sample.json(budgetLimit: Budget.sendClickNanosecondsP95, passed: passed)
                     : sample.json(budgetLimit: nil, passed: nil)
+                if Self.contractBoundSamples.contains(sample.name) {
+                    row["measurement_contract"] = measurementContract
+                }
+                return row
             },
         ]
 
@@ -379,9 +506,34 @@ enum SendClickBench {
 
         var passed = true
         for sample in samples where sample.name != "probe_overhead" {
-            guard let row = rows.first(where: { $0["name"] as? String == sample.name }),
-                  let previous = row["p95"] as? Double, previous > 0
-            else { continue }
+            guard let row = rows.first(where: { $0["name"] as? String == sample.name }) else {
+                if Self.contractBoundSamples.contains(sample.name) {
+                    print(
+                        "send-click: no-comparable-baseline for \(sample.name); "
+                            + "the saved baseline has no \(measurementContract) row"
+                    )
+                }
+                continue
+            }
+
+            if Self.contractBoundSamples.contains(sample.name),
+               row["measurement_contract"] as? String != measurementContract {
+                print(
+                    "send-click: no-comparable-baseline for \(sample.name); "
+                        + "saved row predates \(measurementContract)"
+                )
+                continue
+            }
+
+            guard let previous = row["p95"] as? Double, previous > 0 else {
+                if Self.contractBoundSamples.contains(sample.name) {
+                    print(
+                        "send-click: no-comparable-baseline for \(sample.name); "
+                            + "the saved contract row has no valid p95"
+                    )
+                }
+                continue
+            }
 
             let allowed = previous * (1 + Budget.regressionTolerance)
             // A percentage alone would report the scheduler: the control's own
