@@ -1,0 +1,22 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>AS c=0 k=0 w=0 d=0 t=0 p=0 f=0</title></head>
+<body style="margin:0;background:#123;color:#fff;font:28px -apple-system">
+<button id="b" style="position:fixed;inset:0;border:0;background:#123;color:#fff;font:40px -apple-system">AgentSeat probe page</button>
+<textarea id="f" style="position:fixed;top:0;left:0;right:0;height:56px;border:0;background:#012;color:#fff;font:13px monospace"></textarea>
+<script>
+let c=0,k=0,w=0,d=0,down=null,typed=0,pasted=0;
+// Short names on purpose. A window title long enough for the window server
+// to elide its middle loses whatever sat there: a title of 60 characters
+// came back as `w=24…ag=0`, which reads as a missing drag counter and not
+// as the truncation it is. Nothing here grows with the payload.
+const t=()=>{document.title=`AS c=${c} k=${k} w=${w} d=${d} t=${typed} p=${pasted} f=${f.value.length}`;};
+b.addEventListener('click',()=>{c++;t();});
+document.addEventListener('keydown',e=>{k++;if(e.key.length===1&&!e.metaKey)typed++;t();});
+document.addEventListener('paste',e=>{pasted+=(e.clipboardData.getData('text')||'').length;t();});
+document.addEventListener('wheel',e=>{w+=Math.round(e.deltaY);t();},{passive:true});
+b.addEventListener('mousedown',e=>{down=[e.clientX,e.clientY];});
+b.addEventListener('mouseup',e=>{if(down){d=Math.max(d,Math.round(Math.hypot(e.clientX-down[0],e.clientY-down[1])));down=null;t();}});
+f.addEventListener('input',t);
+f.focus();
+t();
+</script></body></html>

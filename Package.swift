@@ -95,5 +95,12 @@ let package = Package(
         driverTests("SeatCapture", ["SeatCapture", "SeatCore"]),
         driverTests("SeatSession", ["SeatSession", "SeatCore", "CursorGuard", "SeatInput"]),
         driverTests("TargetReader", ["TargetReader"]),
+
+        // Host (TCC, real display) and Live (fixture and reader) tiers, gated by
+        // AGENTSEAT_HOST_TESTS=1 and AGENTSEAT_LIVE_TESTS=1 and run serialized.
+        driverTests("Host", ["SeatCore", "PrivateSymbols", "VirtualScreens", "WindowPlacement", "SeatInput", "CursorGuard", "SeatCapture", "SeatSession"]),
+        driverTests("Live", ["SeatCore", "PrivateSymbols", "VirtualScreens", "WindowPlacement",
+                             "SeatInput", "CursorGuard", "SeatSession", "TargetReader"],
+                    resources: [.copy("Fixtures/probe-page.html")]),
     ]
 )
