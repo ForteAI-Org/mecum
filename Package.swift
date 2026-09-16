@@ -73,6 +73,18 @@ let package = Package(
         // Read-only reader of another application's window.
         driver("TargetReader", ["SeatCore", "WindowPlacement"]),
 
+        // MARK: Driver tools
+        // The `malloc_logger` counter every allocation budget is measured with.
+        // A C target: the hook runs inside the allocator, so its body must not allocate.
+        .target(name: "AllocationCounter", path: "Tools/Driver/AllocationCounter"),
+        // The measurement driver behind `make bench`.
+        .executableTarget(
+            name: "SeatBench",
+            dependencies: ["SeatCore", "PrivateSymbols", "VirtualScreens", "WindowPlacement", "SeatInput", "CursorGuard", "SeatCapture", "SeatSession", "AllocationCounter"].map { .target(name: $0) },
+            path: "Tools/Driver/SeatBench",
+            swiftSettings: facility
+        ),
+
         // MARK: Driver tests
         driverTests("SeatCore", ["SeatCore"]),
         driverTests("PrivateSymbols", ["PrivateSymbols", "SeatCore"]),
