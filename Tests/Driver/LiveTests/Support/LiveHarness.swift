@@ -132,6 +132,30 @@ enum LivePump {
         }
         return condition()
     }
+
+    /// The same wait, for a condition the **kit's own tasks** have to produce:
+    /// the seat's window watch, its recovery loop, the host's heartbeat.
+    ///
+    /// `run(until:)` cannot answer those and the difference is not a detail.
+    /// It is synchronous, so it holds the main actor for its whole duration
+    /// while turning the run loop inside it, and a main-actor task enqueued
+    /// behind it never gets a slot: measured here as a window watch that made
+    /// zero passes in ten seconds and then one immediately afterwards. This
+    /// alternates a slice of the application's loop with giving the actor back,
+    /// which is what an application running `NSApplication.run()` does anyway
+    /// between two events.
+    static func settle(
+        until condition: @MainActor () -> Bool,
+        timeout        : Double
+    ) async -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if condition() { return true }
+            run(for: 0.02)
+            for _ in 0..<8 { await Task.yield() }
+        }
+        return condition()
+    }
 }
 
 /// UserSeatState is the person's side of every assertion in this suite: which

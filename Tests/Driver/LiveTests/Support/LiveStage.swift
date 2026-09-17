@@ -66,9 +66,10 @@ struct LiveStage {
     /// person's topology untouched, and a suite that forgot to check would look
     /// exactly like a suite that passed.
     static func run(
-        needsFixture: Bool = true,
-        needsChrome : Bool = true,
-        _ body      : (LiveStage) async throws -> Void
+        needsFixture : Bool = true,
+        needsChrome  : Bool = true,
+        configuration: SeatHostConfiguration = SeatHostConfiguration(),
+        _ body       : (LiveStage) async throws -> Void
     ) async throws {
 
         LivePump.prepare()
@@ -151,7 +152,7 @@ struct LiveStage {
 
         // MARK: the seat, whole, from the kit
 
-        let host = SeatHost(configuration: SeatHostConfiguration())
+        let host = SeatHost(configuration: configuration)
         var hostIsUp = false
         defer {
             if hostIsUp { Task { await host.stop() } }

@@ -65,6 +65,14 @@ nonisolated struct SeatWindowSession {
     /// about held keys.
     var processIDs: Set<Int32> { Set(records.values.map(\.window.reference.processID)) }
 
+    /// The same processes as attested lifetimes rather than as numbers. A PID
+    /// is reused after the application it named terminated, so a window whose
+    /// PID matches and whose process serial number does not belongs to a
+    /// different application that happened to inherit the number.
+    var processIdentities: Set<ProcessIdentity> {
+        Set(records.values.compactMap { $0.window.reference.identity?.process })
+    }
+
     /// Adds a window and makes it the current target.
     mutating func adopt(_ record: WindowRecord) {
         records[record.window.id] = record

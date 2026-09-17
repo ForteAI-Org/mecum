@@ -127,6 +127,20 @@ case SeatSessionBench.idleName:
         baselineDirectory: baseline
     ) ? 0 : 1)
 
+case SeatSessionBench.windowWatchName:
+    // Two halves, one with the watch and one without, and the number that
+    // matters is their difference: the seconds here are per half.
+    let seconds  = arguments.count > 2
+        ? (Double(arguments[2]) ?? SeatSessionBench.defaultWindowWatchSeconds)
+        : SeatSessionBench.defaultWindowWatchSeconds
+    let output   = argument(3)
+    let baseline = argument(4)
+    exit(SeatSessionBench.runWindowWatch(
+        seconds          : seconds,
+        outputPath       : output,
+        baselineDirectory: baseline
+    ) ? 0 : 1)
+
 case SeatSessionBench.recoveryName:
     let episodes = arguments.count > 2 ? (Int(arguments[2]) ?? 10) : 10
     let output   = argument(3)
@@ -144,7 +158,7 @@ default:
         + "\(InputTraceOverheadBench.name), "
         + "\(MonitorBench.thirtyName), \(MonitorBench.sixtyName), "
         + "\(MonitorBench.oneHundredTwentyName), \(StageBench.name), "
-        + "\(SeatSessionBench.idleName), "
+        + "\(SeatSessionBench.idleName), \(SeatSessionBench.windowWatchName), "
         + "\(SeatSessionBench.recoveryName)")
     exit(2)
 }

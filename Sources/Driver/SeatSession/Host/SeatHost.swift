@@ -263,6 +263,8 @@ public final class SeatHost {
             defaultPlatform      : configuration.platform
         )
 
+        if configuration.followsNewWindows { created.enableWindowFollowing() }
+
         if configuration.restoresUserFocus {
             try created.enableFocusRecovery(driver: driver,
                 allowUnvalidatedBuild: configuration.allowUnvalidatedFocusRecovery,

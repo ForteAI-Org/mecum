@@ -193,4 +193,8 @@ nonisolated final class SystemSeatSensing: SeatSensing, @unchecked Sendable {
     func menuWindows(ownedBy processID: Int32) -> [WindowReference] {
         WindowServerProbe.menuWindows(ownedBy: processID)
     }
+
+    func windowSurfaces(ownedBy processIDs: Set<Int32>) -> [WindowSurface]? {
+        WindowServerProbe.surfaces(ownedBy: processIDs)
+    }
 }

@@ -380,6 +380,115 @@
         960,
         540
       ]
+    },
+    {
+      "budget" : {
+        "limit" : 0.20000000000000001,
+        "passed" : true
+      },
+      "mean" : 0.026720633526583021,
+      "n" : 60,
+      "name" : "window-watch-cpu-median",
+      "p50" : 0.026720633526583021,
+      "p95" : 0.11734574347942928,
+      "status" : "measured",
+      "unit" : "percent"
+    },
+    {
+      "budget" : {
+        "limit" : 1,
+        "passed" : true
+      },
+      "mean" : 0.3167082518137152,
+      "n" : 60,
+      "name" : "window-watch-wakeups",
+      "p50" : 0.3167082518137152,
+      "status" : "measured",
+      "unit" : "per-second"
+    },
+    {
+      "budget" : {
+        "limit" : 2,
+        "passed" : true
+      },
+      "mean" : 0.96666666666666667,
+      "n" : 60,
+      "name" : "window-watch-scans",
+      "p50" : 0.96666666666666667,
+      "status" : "measured",
+      "unit" : "per-second"
+    },
+    {
+      "mean" : 0.036930752115421045,
+      "n" : 60,
+      "name" : "window-watch-control-cpu-median",
+      "p50" : 0.036930752115421045,
+      "status" : "measured",
+      "unit" : "percent"
+    },
+    {
+      "allocations_per_call" : 0,
+      "allocations_total" : 0,
+      "budget" : {
+        "limit" : 2000000000,
+        "passed" : true
+      },
+      "frees_total" : 0,
+      "max" : 759936250,
+      "mean" : 757464174.79999995,
+      "min" : 756213833,
+      "n" : 10,
+      "name" : "recovery",
+      "p50" : 756717916,
+      "p95" : 759936250,
+      "p99" : 759936250,
+      "status" : "measured",
+      "unit" : "ns"
+    },
+    {
+      "budget" : {
+        "limit" : 0.10000000000000001,
+        "passed" : true
+      },
+      "mean" : 0.017846146659367158,
+      "n" : 300,
+      "name" : "seat-idle-cpu-median",
+      "p50" : 0.017846146659367158,
+      "p95" : 0.30554917458711267,
+      "status" : "measured",
+      "unit" : "percent"
+    },
+    {
+      "budget" : {
+        "limit" : 5,
+        "passed" : true
+      },
+      "mean" : 0.84919664962407637,
+      "n" : 300,
+      "name" : "seat-idle-wakeups",
+      "p50" : 0.84919664962407637,
+      "status" : "measured",
+      "unit" : "per-second"
+    },
+    {
+      "budget" : {
+        "limit" : 4194304,
+        "passed" : true
+      },
+      "mean" : 229376,
+      "n" : 1,
+      "name" : "seat-idle-footprint",
+      "p50" : 229376,
+      "status" : "measured",
+      "unit" : "bytes"
+    },
+    {
+      "mean" : 101096833,
+      "n" : 1,
+      "name" : "seat-idle-teardown",
+      "p50" : 101096833,
+      "status" : "measured",
+      "unit" : "nanoseconds"
     }
   ],
   "scenario" : "synthetic in-region mouseMoved events, no tap installed, no warp",

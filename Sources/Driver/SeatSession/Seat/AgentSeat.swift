@@ -113,6 +113,11 @@ public final class AgentSeat {
     private var focusRecoveryWasDegraded = false
     private var actionInFlight = false
 
+    private var windowWatch    : AppWindowWatch?
+    private var windowInventory = AppWindowInventory()
+    private var windowFollowTask: Task<Void, Never>?
+    private var windowFollowAgain = false
+
     /// Most recent focus episode, including a failed verification. Readiness
     /// describes the private facility separately from the normal input gate.
     public private(set) var lastFocusRecovery: UserFocusRecoveryReport?
@@ -120,6 +125,12 @@ public final class AgentSeat {
 
     /// Last failed adoption, including cancellation and the verified rollback.
     public private(set) var lastAdoptionFailure: WindowAdoptionFailure?
+
+    /// How many window server passes the window watch has made since the seat
+    /// started following. It is published because the cost of the watch is a
+    /// number in scans as well as in CPU, and a benchmark that reported only
+    /// the CPU would hide a pass that got cheap by looking less often.
+    public private(set) var windowFollowScanCount = 0
 
     /// A failed move still owned by the host until teardown can restore it.
     public var hasPendingWindowRestorations: Bool { !pendingAdoptions.isEmpty }
@@ -408,7 +419,12 @@ public final class AgentSeat {
         try checkIdentityIsAttested(of: window)
         guard mayAdmit(window) else { throw SessionFailure.seatNotReady(state) }
 
-        return try await adoptionTransaction(window, platform: platform, title: title)
+        return try await adoptionTransaction(
+            window,
+            platform: platform,
+            title   : title,
+            reason  : .adopted
+        )
     }
 
     /// integrateDetectedWindow brings a window somebody else detected into the
@@ -443,7 +459,12 @@ public final class AgentSeat {
         beginTransfer()
         defer { endTransfer() }
 
-        return try await adoptionTransaction(window, platform: platform, title: title)
+        return try await adoptionTransaction(
+            window,
+            platform: platform,
+            title   : title,
+            reason  : .detected
+        )
     }
 
     /// A raw PID and Window ID are an unverified compatibility value and cannot
@@ -469,7 +490,8 @@ public final class AgentSeat {
     private func adoptionTransaction(
         _ window: WindowReference,
         platform: any InputPlatform,
-        title   : String
+        title   : String,
+        reason  : SeatTargetChange
     ) async throws -> AdoptedWindow {
 
         lastAdoptionFailure = nil
@@ -526,6 +548,8 @@ public final class AgentSeat {
             let displaced = session.currentTargetNumber
             session.adopt(record)
             if record.isStaged { stagedWindowNumber = record.window.id }
+            windowInventory.clearAttempts(of: record.window.id)
+            refreshWindowFollowing()
 
             seatGuard = SeatGuard(
                 target       : placed,
@@ -534,7 +558,7 @@ public final class AgentSeat {
             )
 
             transition(to: previous == .degraded ? .degraded : .ready, reason: .requested)
-            eventChannel.yield(.targetChanged(from: displaced, to: placed, reason: .adopted))
+            eventChannel.yield(.targetChanged(from: displaced, to: placed, reason: reason))
             return record.window
 
         } catch {
@@ -642,6 +666,7 @@ public final class AgentSeat {
 
         let outcome = await returnToUserSeat(window, mode)
         let successor = session.forget(window.id)
+        refreshWindowFollowing()
         eventChannel.yield(.windowReleased(windowNumber: window.id, outcome: outcome))
 
         // An explicit release is one of the two proofs that the target is gone,
@@ -892,6 +917,9 @@ public final class AgentSeat {
         defer {
             actionInFlight = false
             restoreActionState(previous, reason: .requested)
+            // A window opened by the Command that has just finished is looked
+            // for here, at the boundary, rather than a beat later.
+            requestWindowFollow()
         }
 
         do {
@@ -998,6 +1026,9 @@ public final class AgentSeat {
         defer {
             actionInFlight = false
             restoreActionState(previous, reason: .requested)
+            // A window opened by the Command that has just finished is looked
+            // for here, at the boundary, rather than a beat later.
+            requestWindowFollow()
         }
 
         do {
@@ -1147,6 +1178,9 @@ public final class AgentSeat {
         defer {
             actionInFlight = false
             restoreActionState(previous, reason: .requested)
+            // A window opened by the Command that has just finished is looked
+            // for here, at the boundary, rather than a beat later.
+            requestWindowFollow()
         }
 
         guard sensing.menuWindows(ownedBy: target.processID).isEmpty else {
@@ -1481,6 +1515,10 @@ public final class AgentSeat {
 
         if focusRecovery?.isPaused == true { return }
 
+        // The window watch's periodic half rides this beat instead of adding
+        // a timer: it is the net behind the accessibility wake-up.
+        requestWindowFollow()
+
         guard state == .waiting, let target = seatGuard?.target else { return }
 
         switch sensing.isActive(processID: target.processID) {
@@ -1506,6 +1544,7 @@ public final class AgentSeat {
 
         reportStrandedKeys()
         stopFocusRecovery()
+        stopWindowFollowing()
 
         recoveryTask?.cancel()
         recoveryTask = nil
@@ -1521,6 +1560,7 @@ public final class AgentSeat {
 
         reportStrandedKeys()
         isTearingDown = true
+        stopWindowFollowing()
         if adoptionInFlight {
             await withCheckedContinuation { adoptionWaiters.append($0) }
         }
@@ -1537,6 +1577,266 @@ public final class AgentSeat {
         }
 
         return outcomes
+    }
+
+    // MARK: Following the application's own windows
+
+    /// How long the seat waits between two passes of a burst. The wake-up leads
+    /// the window server by 79 to 249 ms measured, and a candidate needs two
+    /// agreeing readings, so a cadence of 120 ms puts the second reading past
+    /// the longest measured lead on the third pass.
+    private static let windowFollowInterval = Duration.milliseconds(120)
+
+    /// The longest burst one wake-up may cause: ten passes at 120 ms covers
+    /// 1,2 s, which is four times the longest lead measured. The cap is what
+    /// makes a wake-up that arrives every beat cost a bounded amount of work
+    /// instead of an unbounded one.
+    private static let maximumWindowFollowPasses = 10
+
+    /// Starts following the windows of the applications this seat drives.
+    /// Installed only through a host configured for it; a seat that was never
+    /// asked takes no reading of anybody's windows.
+    func enableWindowFollowing() {
+
+        guard windowWatch == nil, !isTearingDown else { return }
+        windowWatch = AppWindowWatch(created: { [weak self] in self?.requestWindowFollow() })
+        refreshWindowFollowing()
+    }
+
+    /// Stops it, whole: the burst, the accessibility observers and the
+    /// inventory. A notification already on its way in finds a dropped closure
+    /// and does nothing, which is what "no watch acts after the control is
+    /// given back" means in code.
+    func stopWindowFollowing() {
+
+        windowFollowTask?.cancel()
+        windowFollowTask  = nil
+        windowFollowAgain = false
+        windowWatch?.stop()
+        windowWatch     = nil
+        windowInventory = AppWindowInventory()
+    }
+
+    /// Reconciles the observed processes with the ones the seat still holds
+    /// windows of, and takes the baseline for whichever of them is new.
+    ///
+    /// The baseline belongs here and not in the first pass, because here is the
+    /// moment the seat starts driving a process and therefore the moment
+    /// "already there" is defined. A pass runs whenever the main actor is next
+    /// free, which on a busy caller is long enough for the application to have
+    /// opened the very window the feature is about.
+    private func refreshWindowFollowing() {
+
+        guard let windowWatch else { return }
+        windowWatch.follow(session.processIDs)
+
+        let processes = session.processIdentities
+        guard !processes.isEmpty else { return }
+        windowInventory.baseline(
+            surfaces : sensing.windowSurfaces(ownedBy: Set(processes.map(\.processID))),
+            processes: processes
+        )
+    }
+
+    /// Asks for a pass. Every wake-up arrives here: the accessibility
+    /// notification, the boundary of a finished Command and the heartbeat.
+    ///
+    /// Passes are coalesced into one task rather than queued. A second wake-up
+    /// while a burst is running sets a flag the burst reads, so however many
+    /// wake-ups arrive there is at most one task, and it ends after a bounded
+    /// number of passes whatever keeps arriving.
+    private func requestWindowFollow() {
+
+        guard windowWatch != nil, !isTearingDown, state != .failed else { return }
+        guard windowFollowTask == nil else {
+            windowFollowAgain = true
+            return
+        }
+
+        windowFollowTask = Task { @MainActor [weak self] in
+            var passes = 0
+            while let self, !Task.isCancelled {
+                self.windowFollowAgain = false
+                await self.runWindowFollowPass()
+                passes += 1
+
+                guard passes < Self.maximumWindowFollowPasses, !Task.isCancelled,
+                      self.windowWatch != nil, !self.isTearingDown,
+                      self.windowFollowAgain || self.windowInventory.hasPendingCandidate
+                else { break }
+
+                await EventLoopWait.sleep(Self.windowFollowInterval)
+            }
+            guard let self, !Task.isCancelled else { return }
+            self.windowFollowTask = nil
+        }
+    }
+
+    /// One pass: read the window server for the driven processes, fold it into
+    /// the inventory, act on what changed.
+    ///
+    /// The refusals in front are the whole coordination story. Nothing is read
+    /// or moved while a Command or a contextual menu action is in flight, while
+    /// an adoption is already running, or while a focus recovery holds the
+    /// seat: the pass is skipped and the next wake-up finds the same window,
+    /// which is why a detection during a menu action never waits for the menu
+    /// action to end.
+    ///
+    /// The last two refusals are the person's. A physical click or application
+    /// switch observed in the last third of a second is deliberate input, read
+    /// from the event the focus watch latched and not from a PID; and a driven
+    /// application that is active is an ambiguous seat whoever put it in front,
+    /// so the pass stands down rather than moving windows underneath whoever
+    /// did. Neither is inferred from the frontmost PID on its own.
+    /// It is not private so that a test can run one pass and know the answer,
+    /// instead of scheduling one and waiting for a task to be given the main
+    /// actor: every suite here shares that actor, and a wait long enough to
+    /// survive the contention is a wait long enough to hide a defect.
+    func runWindowFollowPass() async {
+
+        guard windowWatch != nil, !isTearingDown, state.acceptsCommands,
+              !actionInFlight, !adoptionInFlight, transfersInFlight == 0,
+              focusRecovery?.isPaused != true,
+              !sensing.userMayBeSwitchingApplications
+        else { return }
+
+        let processes = session.processIdentities
+        guard !processes.isEmpty,
+              !processes.contains(where: { sensing.isActive(processID: $0.processID) == true })
+        else { return }
+
+        windowFollowScanCount += 1
+        let changes = windowInventory.changes(
+            surfaces : sensing.windowSurfaces(
+                ownedBy: Set(processes.map(\.processID))
+            ),
+            processes: processes,
+            adopted  : Set(session.records.keys),
+            within   : sensing.virtualDisplayBounds,
+            menuLevel: WindowServerProbe.popUpMenuLevel
+        )
+
+        for change in changes {
+            guard !isTearingDown, state.acceptsCommands else { return }
+            switch change {
+
+                case .appeared(let window), .reappeared(let window):
+                    await transferDetectedWindow(window)
+
+                case .leftVirtualDisplay(let window):
+                    returnAdoptedWindow(window)
+
+                case .vanished(let windowNumber):
+                    // One missing reading is not a destruction, and the proof
+                    // is the recovery budget, which is the target's own.
+                    if session.currentTargetNumber == windowNumber {
+                        report([.windowUnavailable])
+                    }
+            }
+        }
+    }
+
+    /// Brings one detected window onto the Virtual Display, or says why it
+    /// stays where it is.
+    ///
+    /// The accessibility body is read before anything is written, and it pays
+    /// for itself twice. It is the size to preserve: the window server
+    /// publishes a Stage Manager thumbnail for a stashed window, and centring
+    /// by a thumbnail's size is how a window ends up hanging off the display.
+    /// And the same read is the answer to "can this be moved at all": a surface
+    /// with no window element behind its Window ID has nothing to write
+    /// `AXPosition` on, which is the ordinary shape of an external popup, and
+    /// saying so costs one reading instead of a failed move and a rollback.
+    private func transferDetectedWindow(_ candidate: WindowReference) async {
+
+        guard let fresh = sensing.windowGeometry(of: candidate.windowNumber),
+              fresh.hasSameIdentity(as: candidate)
+        else { return }
+
+        guard windowInventory.mayAttempt(candidate.windowNumber) else {
+            refuseTransfer(fresh, .attemptsExhausted)
+            return
+        }
+
+        let body: CGRect?
+        do { body = try placing.frame(of: fresh) }
+        catch {
+            refuseTransfer(fresh, .notMovable)
+            return
+        }
+        guard let body, body.width > 0, body.height > 0 else {
+            refuseTransfer(fresh, .notMovable)
+            return
+        }
+
+        let bounds = sensing.virtualDisplayBounds
+        guard body.width <= bounds.width, body.height <= bounds.height else {
+            refuseTransfer(fresh, .tooLarge)
+            return
+        }
+
+        do {
+            _ = try await integrateDetectedWindow(
+                fresh.replacingFrame(body),
+                platform: defaultPlatform
+            )
+        } catch {
+            refuseTransfer(fresh, .moveRefused)
+            Self.log.error("""
+                window \(fresh.windowNumber, privacy: .public) was detected and not transferred: \
+                \(String(describing: error), privacy: .public)
+                """)
+        }
+    }
+
+    /// Puts a window the seat already holds back where it put it.
+    ///
+    /// The operating target goes through the seat's own bounded recovery,
+    /// which is the machinery that already answers a window that moved and
+    /// already refuses to relocate while a Command is in flight. Any other held
+    /// window is written straight back to the origin its placement was
+    /// confirmed at, under the watch's own attempt budget, because a recovery
+    /// episode is about the window the guard is fixed to and would answer for
+    /// the wrong one.
+    ///
+    /// The target is answered **before** that budget is consulted, and the
+    /// order is the whole point. The recovery is the seat's safeguard and it
+    /// carries a budget of its own; spending the watch's budget on it as well
+    /// would let a handful of readings switch the safeguard off for good.
+    private func returnAdoptedWindow(_ window: WindowReference) {
+
+        guard let record = session[window.windowNumber],
+              record.window.reference.hasSameIdentity(as: window)
+        else { return }
+
+        guard session.currentTargetNumber != window.windowNumber else {
+            report([.geometryChanged])
+            return
+        }
+
+        guard windowInventory.mayAttempt(window.windowNumber) else {
+            refuseTransfer(window, .attemptsExhausted)
+            return
+        }
+
+        do { try placing.move(window, to: record.window.reference.frame.origin) }
+        catch {
+            refuseTransfer(window, .moveRefused)
+            Self.log.error("""
+                window \(window.windowNumber, privacy: .public) left the virtual display and \
+                could not be put back: \(String(describing: error), privacy: .public)
+                """)
+        }
+    }
+
+    private func refuseTransfer(_ window: WindowReference, _ reason: WindowTransferRefusal) {
+        eventChannel.yield(
+            .windowTransferRefused(
+                windowNumber: window.windowNumber,
+                processID   : window.processID,
+                reason      : reason
+            )
+        )
     }
 
     // MARK: The preflight
@@ -1975,7 +2275,10 @@ public final class AgentSeat {
     private func transition(to next: SeatState, reason: SeatTransitionReason) {
 
         guard next != state else { return }
-        if next == .failed { stopFocusRecovery() }
+        if next == .failed {
+            stopFocusRecovery()
+            stopWindowFollowing()
+        }
 
         let previous = state
         state = next

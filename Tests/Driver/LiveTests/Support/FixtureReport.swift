@@ -5,6 +5,7 @@
 //  Created by Eliomar Alejandro Rodriguez Ferrer on 09/09/2026.
 //
 
+import CoreGraphics
 import Foundation
 
 /// FixtureReport is the contract between this suite and an instrumented target
@@ -149,4 +150,63 @@ nonisolated struct FixtureReport: Decodable {
     let markedTextLength      : Int?
     let compositionText       : String?
     let compositionCount      : Int?
+
+    // MARK: The second window channel, ticket MW-02
+
+    /// Where to click to make this process open another window of its own, in
+    /// Quartz coordinates. It is a button and not a shortcut on purpose: what a
+    /// window watcher has to be checked against is a window opened by a Command
+    /// the agent posted, which is the case in which repeating that Command
+    /// would open a second one.
+    ///
+    /// Optional like every other late field here, and for the same measured
+    /// reason: `JSONDecoder` fails the whole decode on one missing required
+    /// key, so a required addition would make an older fixture binary
+    /// unreadable and take every AppKit row of the matrix down with it.
+    let openWindowQuartzX     : Double?
+    let openWindowQuartzY     : Double?
+
+    /// Every window this process opened after the first, oldest first. A window
+    /// the person closed stays in the list with `isVisible` false rather than
+    /// disappearing from it, because a list that got shorter says nothing about
+    /// which window left.
+    let secondaryWindows      : [SecondaryWindowReport]?
+
+    /// The secondary window at this Window ID, whichever place it has in the
+    /// list. Reading by position would follow the wrong window as soon as a row
+    /// opens two.
+    func secondaryWindow(_ windowNumber: Int) -> SecondaryWindowReport? {
+        secondaryWindows?.first { $0.windowNumber == windowNumber }
+    }
+}
+
+/// SecondaryWindowReport is one window of the same process, in the terms a
+/// watch has to be checked against: which window the server means, where to
+/// click inside it, and whether the click aimed there landed there.
+///
+/// The counters are the second half and not a convenience. Finding a window and
+/// moving it proves the watch saw something; only a press counter that moved
+/// **in this window** proves the window is usable where it was put, and only
+/// the first window's counter standing still proves the event did not go home.
+nonisolated struct SecondaryWindowReport: Decodable {
+
+    let windowNumber  : Int
+    let windowX       : Double
+    let windowY       : Double
+    let windowWidth   : Double
+    let windowHeight  : Double
+
+    /// Where its own button is, in Quartz coordinates.
+    let buttonQuartzX : Double
+    let buttonQuartzY : Double
+
+    let pressCount    : Int
+    let mouseDownCount: Int
+
+    /// False for a window the person closed, which stays in the list.
+    let isVisible     : Bool
+
+    var frame: CGRect {
+        CGRect(x: windowX, y: windowY, width: windowWidth, height: windowHeight)
+    }
 }

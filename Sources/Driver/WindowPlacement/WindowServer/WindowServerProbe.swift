@@ -249,6 +249,65 @@ nonisolated public enum WindowServerProbe {
         .sorted { $0.windowNumber < $1.windowNumber }
     }
 
+    /// Every on-screen window owned by one of these processes, attested row by
+    /// row, with the level and the visibility the same reading reported.
+    ///
+    /// `nil` is a reading that failed and it is not the same answer as an empty
+    /// list. A process that shows nothing and a window server that did not
+    /// answer need different decisions from the caller, and replying `[]` to
+    /// both is how a watcher concludes that every window of an application has
+    /// just vanished.
+    ///
+    /// `.optionOnScreenOnly` is load bearing here and not an optimisation. A Qt
+    /// application was measured holding dozens of real, titled windows that the
+    /// window server knows about and has never shown, built long before the
+    /// person asks for them: with `.optionAll` every one of those reads as a
+    /// window that just appeared, and opening one of them for real produces no
+    /// difference in the list at all.
+    ///
+    /// Attestation is per row, under one gate evaluated once, so a list of `n`
+    /// windows costs one window list allocation and `n` ownership chains rather
+    /// than `n` window lists.
+    public static func surfaces(
+        ownedBy processIDs   : Set<Int32>,
+        allowUnvalidatedBuild: Bool = false,
+        table                : SymbolTable = .shared
+    ) -> [WindowSurface]? {
+
+        guard !processIDs.isEmpty else { return [] }
+
+        let gate = FacilityGate.current(
+            facility             : .windowIdentity,
+            allowUnvalidatedBuild: allowUnvalidatedBuild,
+            table                : table
+        )
+        guard let descriptions = CGWindowListCopyWindowInfo(
+            [.optionOnScreenOnly],
+            kCGNullWindowID
+        ) as? [[String: Any]] else { return nil }
+
+        return descriptions.compactMap { description in
+            guard let processID = owner(of: description), processIDs.contains(processID),
+                  let windowNumber = number(of: description),
+                  let frame = frame(of: description),
+                  let reference = reference(
+                      processID       : processID,
+                      windowNumber    : windowNumber,
+                      frame           : frame,
+                      table           : table,
+                      validatedBy     : gate
+                  )
+            else { return nil }
+
+            return WindowSurface(
+                reference: reference,
+                level    : layer(of: description) ?? 0,
+                isVisible: isOnScreen(description) && alpha(of: description) > 0
+                    && frame.width > 0 && frame.height > 0
+            )
+        }
+    }
+
     /// The frontmost normal-layer window whose frame reaches a display. It is
     /// how a Seat Host asks which window is on stage on the Virtual Display
     /// without asking Stage Manager anything.
@@ -336,6 +395,16 @@ nonisolated public enum WindowServerProbe {
 
     private static func layer(of description: [String: Any]) -> Int? {
         (description[kCGWindowLayer as String] as? NSNumber)?.intValue
+    }
+
+    private static func alpha(of description: [String: Any]) -> Double {
+        (description[kCGWindowAlpha as String] as? NSNumber)?.doubleValue ?? 1
+    }
+
+    /// Absent means on screen: the list was asked for on-screen windows, and a
+    /// row without the key is not evidence that the server hid it.
+    private static func isOnScreen(_ description: [String: Any]) -> Bool {
+        (description[kCGWindowIsOnscreen as String] as? NSNumber)?.boolValue ?? true
     }
 
     private static func frame(of description: [String: Any]) -> CGRect? {

@@ -206,6 +206,46 @@ nonisolated enum Budget {
     /// instantaneous delta. It measures 1,2 MB.
     static let seatIdleFootprintBytes = 4.0 * 1_048_576
 
+    // MARK: The window watch, ticket MW-02
+
+    /// A seat that follows its applications' windows, **net of the same seat
+    /// with the watch off**, at the median: a percentage of one core.
+    ///
+    /// The control is the expensive half of the pair and that is the point.
+    /// Both halves bring up a virtual display, install the fence, adopt this
+    /// process's own window and beat the same heartbeat for the same length of
+    /// time; the only difference is `followsNewWindows`. So what is reported is
+    /// the pass and not the seat, which is the rule a benchmark without a
+    /// subtracted control breaks.
+    ///
+    /// Measured on macOS 27.0 build 26A428 on Mac16,1, three release runs of
+    /// 60 s a side: net medians of 0,092 %, 0,073 % and 0,053 % against a
+    /// control that measured 0,046 %, 0,045 % and 0,078 % on its own. The
+    /// median of the three is 0,073 % and the budget is rounded above twice it.
+    static let windowWatchMedianCpuPercent = 0.2
+
+    /// The same at p95. A pass that lands next to something else the system was
+    /// doing costs more, and one second in twenty is allowed to: the same three
+    /// runs measured 0,142 %, 0,402 % and 0,238 %, a threefold spread for the
+    /// same work scheduled differently. The budget is rounded above twice the
+    /// worst of them, and lands on the number `seatIdleP95CpuPercent` already
+    /// allows one second in twenty to cost.
+    static let windowWatchP95CpuPercent = 1.0
+
+    /// Wake-ups a second the watch may add, net of the same seat with it off.
+    /// It adds no timer: it rides the heartbeat that already beats once a
+    /// second, plus an accessibility notification that fires only when an
+    /// application creates a window, so at rest the budget is about the pass
+    /// and not about a new clock. The three runs measured 0,300, 0,165 and
+    /// 0,099 net against a control of about 2,1 a second.
+    static let windowWatchWakeupsPerSecond = 1.0
+
+    /// Window server passes a second while nothing is happening. The three runs
+    /// each measured 0,967, which is the heartbeat: a burst only follows a
+    /// wake-up, and at rest there is none. Two, so that a beat landing either
+    /// side of a sample boundary is not a violation.
+    static let windowWatchScansPerSecond = 2.0
+
     /// From a recoverable Issue to the seat being `ready` again, at p95: two
     /// seconds.
     ///

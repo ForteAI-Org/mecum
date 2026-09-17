@@ -48,8 +48,9 @@ final class BenchTargetView: NSView {
 @MainActor
 enum SeatSessionBench {
 
-    static let idleName     = "seat-idle"
-    static let recoveryName = "recovery"
+    static let idleName        = "seat-idle"
+    static let recoveryName    = "recovery"
+    static let windowWatchName = "window-watch"
 
     /// The default idle window. Five minutes, which is what the budget says the
     /// median and the p95 have to hold over.
@@ -216,6 +217,214 @@ enum SeatSessionBench {
         return (percents, median, elapsed > 0 ? wakeups / elapsed : 0)
     }
 
+    // MARK: window-watch
+
+    /// The default window each half of the pair is sampled over. A minute is
+    /// sixty CPU samples and sixty heartbeats, which is enough for a median and
+    /// a p95 of a cost this small, and the pair costs two minutes of the
+    /// person's machine rather than ten.
+    static let defaultWindowWatchSeconds: Double = 60
+
+    /// What the window watch costs while nothing is happening, against the same
+    /// seat with the watch off.
+    ///
+    /// The control is the whole measurement. Both halves bring up a virtual
+    /// display, install the fence, adopt this process's own window and beat the
+    /// same heartbeat for the same length of time; the only difference is
+    /// `followsNewWindows`. So what is reported is the pass and not the seat,
+    /// which is the rule a benchmark without a subtracted control breaks.
+    ///
+    /// Three numbers come out and the ticket asks for all three: the CPU, the
+    /// wake-ups, and how many window server passes the watch actually made. The
+    /// last one is not derivable from the first two, and a pass that got cheap
+    /// by looking less often would otherwise read as an improvement.
+    static func runWindowWatch(
+        seconds          : Double,
+        outputPath       : String?,
+        baselineDirectory: String?
+    ) -> Bool {
+
+        let clock = Clock()
+        NSApplication.shared.setActivationPolicy(.accessory)
+        NSApplication.shared.finishLaunching()
+        MonitorBench.pump(0.2)
+
+        guard AXIsProcessTrusted() else {
+            print("\(windowWatchName): FAIL, Accessibility is not granted, nothing can be adopted")
+            return false
+        }
+
+        let window = NSWindow(
+            contentRect: NSRect(x: 200, y: 200, width: 420, height: 320),
+            styleMask  : [.titled],
+            backing    : .buffered,
+            defer      : false
+        )
+        window.title       = "AgentSeatKit window watch bench"
+        window.contentView = BenchTargetView(frame: NSRect(x: 0, y: 0, width: 420, height: 320))
+        window.orderFrontRegardless()
+        MonitorBench.pump(0.3)
+        defer { window.close() }
+
+        guard let home = WindowServerProbe.geometry(of: Int(window.windowNumber)) else {
+            print("\(windowWatchName): FAIL, the window server does not know our own window")
+            return false
+        }
+
+        guard let control = sampleWatch(following: false, home: home, seconds: seconds, clock: clock)
+        else { return false }
+        guard let watched = sampleWatch(following: true, home: home, seconds: seconds, clock: clock)
+        else { return false }
+
+        let netCpu = Sample(
+            name       : windowWatchName,
+            nanoseconds: watched.cpuPercents.map {
+                max(0, $0 - control.cpuMedianPercent) * 1_000
+            },
+            allocations: 0,
+            frees      : 0
+        )
+        let medianPercent = netCpu.p50 / 1_000
+        let p95Percent    = netCpu.p95 / 1_000
+        let netWakeups    = max(0, watched.wakeupsPerSecond - control.wakeupsPerSecond)
+
+        print("""
+            \(windowWatchName): \(Int(seconds)) s a side, net CPU median \
+            \(format(medianPercent)) %, p95 \(format(p95Percent)) %, \
+            wake-ups \(format(netWakeups))/s, scans \(format(watched.scansPerSecond))/s
+            watch off: CPU median \(format(control.cpuMedianPercent)) %, \
+            wake-ups \(format(control.wakeupsPerSecond))/s, \
+            scans \(format(control.scansPerSecond))/s
+            """)
+
+        let passed = medianPercent <= Budget.windowWatchMedianCpuPercent
+            && p95Percent <= Budget.windowWatchP95CpuPercent
+            && netWakeups <= Budget.windowWatchWakeupsPerSecond
+            && watched.scansPerSecond <= Budget.windowWatchScansPerSecond
+            && control.scansPerSecond == 0
+
+        let results: [[String: Any]] = [
+            [
+                "name"  : "\(windowWatchName)-cpu-median",
+                "unit"  : "percent",
+                "n"     : watched.cpuPercents.count,
+                "p50"   : medianPercent,
+                "p95"   : p95Percent,
+                "mean"  : medianPercent,
+                "status": "measured",
+                "budget": [
+                    "limit" : Budget.windowWatchMedianCpuPercent,
+                    "passed": medianPercent <= Budget.windowWatchMedianCpuPercent,
+                ],
+            ],
+            [
+                "name"  : "\(windowWatchName)-wakeups",
+                "unit"  : "per-second",
+                "n"     : watched.cpuPercents.count,
+                "p50"   : netWakeups,
+                "mean"  : netWakeups,
+                "status": "measured",
+                "budget": [
+                    "limit" : Budget.windowWatchWakeupsPerSecond,
+                    "passed": netWakeups <= Budget.windowWatchWakeupsPerSecond,
+                ],
+            ],
+            [
+                "name"  : "\(windowWatchName)-scans",
+                "unit"  : "per-second",
+                "n"     : watched.cpuPercents.count,
+                "p50"   : watched.scansPerSecond,
+                "mean"  : watched.scansPerSecond,
+                "status": "measured",
+                "budget": [
+                    "limit" : Budget.windowWatchScansPerSecond,
+                    "passed": watched.scansPerSecond <= Budget.windowWatchScansPerSecond,
+                ],
+            ],
+            [
+                "name"  : "\(windowWatchName)-control-cpu-median",
+                "unit"  : "percent",
+                "n"     : control.cpuPercents.count,
+                "p50"   : control.cpuMedianPercent,
+                "mean"  : control.cpuMedianPercent,
+                "status": "measured",
+            ],
+        ]
+
+        write(
+            results          : results,
+            clock            : clock,
+            outputPath       : outputPath,
+            baselineDirectory: baselineDirectory
+        )
+        print("\(windowWatchName): \(passed ? "PASS" : "FAIL")")
+        return passed
+    }
+
+    /// One half of the pair: a whole seat holding this process's own window,
+    /// sampled while nothing happens. Nil is a setup that failed, which is a
+    /// failed benchmark and never a zero.
+    private static func sampleWatch(
+        following: Bool,
+        home     : WindowReference,
+        seconds  : Double,
+        clock    : Clock
+    ) -> (
+        cpuPercents     : [Double],
+        cpuMedianPercent: Double,
+        wakeupsPerSecond: Double,
+        scansPerSecond  : Double
+    )? {
+
+        let label = following ? "watch on" : "watch off"
+        let host  = SeatHost(
+            configuration: SeatHostConfiguration(followsNewWindows: following)
+        )
+
+        do { try MonitorBench.awaiting { try await host.start() } }
+        catch {
+            print("\(windowWatchName): FAIL, \(label): the host did not start: \(error)")
+            return nil
+        }
+
+        var scans   = 0
+        var samples : (cpuPercents: [Double], cpuMedianPercent: Double, wakeupsPerSecond: Double)?
+        var failure : String?
+
+        do {
+            let seat    = try host.makeSeat()
+            let adopted = try MonitorBench.awaiting {
+                try await seat.adopt(home, platform: AppKitPlatform(), title: "")
+            }
+            let before = seat.windowFollowScanCount
+            samples = sampleIdle(seconds: seconds, clock: clock, label: label)
+            scans   = seat.windowFollowScanCount - before
+            _ = try MonitorBench.awaiting { await seat.release(adopted, .returnToUserSeat) }
+        } catch {
+            failure = "\(label): \(error)"
+        }
+
+        _ = try? MonitorBench.awaiting { await host.stop() }
+        MonitorBench.pump(0.5)
+
+        if let failure {
+            print("\(windowWatchName): FAIL, \(failure)")
+            return nil
+        }
+        guard let samples, !samples.cpuPercents.isEmpty else {
+            print("\(windowWatchName): FAIL, \(label): no usable sample")
+            return nil
+        }
+
+        let elapsed = Double(samples.cpuPercents.count)
+        return (
+            samples.cpuPercents,
+            samples.cpuMedianPercent,
+            samples.wakeupsPerSecond,
+            elapsed > 0 ? Double(scans) / elapsed : 0
+        )
+    }
+
     // MARK: recovery
 
     /// How long a seat takes to come back from a recoverable Issue, measured
@@ -371,11 +580,9 @@ enum SeatSessionBench {
         ]
         if let outputPath { writeJSON(object, to: outputPath) }
         if let baselineDirectory {
-            let path = baselinePath(in: baselineDirectory)
-            if readJSON(at: path) == nil {
-                writeJSON(object, to: path)
-                print("no-baseline: written to \(path)")
-            }
+            // New rows are added, existing ones left alone. Writing the whole
+            // file would erase every other benchmark's baseline for this build.
+            mergeIntoBaseline(object, at: baselinePath(in: baselineDirectory))
         }
     }
 

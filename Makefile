@@ -35,17 +35,18 @@ HOST_REST_TESTS := 29
 
 # The Live tier: the probe page title contract, the input matrix with its six Commands on both families, the
 # target's layout, the two probe rows, the contextual menu on both families,
-# the multi window row with its two controlled windows, the typing cost sweep
-# and the two text delivery measurements. The last three are reported and
-# skipped unless AGENTSEAT_TYPING_SWEEP=1 or AGENTSEAT_TEXT_DELIVERY=1 asks for
-# them.
-LIVE_TESTS := 21
+# the multi window row with its two controlled windows, the two window watch
+# rows, the typing cost sweep and the two text delivery measurements. The last
+# three are reported and skipped unless AGENTSEAT_TYPING_SWEEP=1 or
+# AGENTSEAT_TEXT_DELIVERY=1 asks for them, and the third-party window watch row
+# unless AGENTSEAT_FOLLOW_APP names a running application.
+LIVE_TESTS := 23
 
 # The measurements `make bench` gates on. Narrow it for a quick pass, for
 # example `make bench BENCH="fence-callback send-click"`; `seat-idle` alone
 # takes five minutes, which is the window its median and p95 are written over.
 BENCH ?= fence-callback fence-clamp input-trace-overhead send-click display-lifecycle \
-         monitor-60 monitor-120 stage seat-idle recovery
+         monitor-60 monitor-120 stage seat-idle window-watch recovery
 
 .PHONY: all test host-tests live-tests bench compat-report promote-build clean help
 

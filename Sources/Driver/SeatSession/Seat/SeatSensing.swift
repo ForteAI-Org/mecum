@@ -117,6 +117,17 @@ nonisolated public protocol SeatSensing: Sendable {
     /// The window's index in the global window order, or nil.
     func windowOrderIndex(of windowNumber: Int) -> Int?
 
+    /// Every on-screen window owned by one of these processes, attested, with
+    /// the level and the visibility of the same reading.
+    ///
+    /// The three answers are distinct and the caller needs all three: `nil` is
+    /// a reading the window server refused, an empty array is "these processes
+    /// show nothing", and a populated one is evidence. Replying `[]` to a
+    /// failed read is how every window of an application reads as destroyed at
+    /// once, which is why the default below answers `nil`: a witness that does
+    /// not implement this has no reading to offer rather than an empty desktop.
+    func windowSurfaces(ownedBy processIDs: Set<Int32>) -> [WindowSurface]?
+
     /// Every window of that process the window server draws at the pop up menu
     /// level and shows on screen.
     ///
@@ -145,4 +156,5 @@ extension SeatSensing {
     public var userMayBeSwitchingApplications: Bool { false }
     public func windowIsVisibleOnPhysicalDisplay(_ window: WindowReference) -> Bool { false }
     public func visibleWindowsAreVirtual(ownedBy processID: Int32) -> Bool { false }
+    public func windowSurfaces(ownedBy processIDs: Set<Int32>) -> [WindowSurface]? { nil }
 }

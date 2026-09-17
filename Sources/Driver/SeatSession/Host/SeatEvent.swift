@@ -42,8 +42,44 @@ nonisolated public enum SeatTargetChange: String, Sendable, Equatable {
     /// A window was adopted and became the target.
     case adopted
 
+    /// A window of a driven application appeared on a physical display, was
+    /// recognised by the seat itself and brought onto the Virtual Display. The
+    /// consumer did not ask for it, which is the whole reason it is a case of
+    /// its own: nothing on the consumer's side was expecting this target.
+    case detected
+
     /// The target was destroyed and the most recent earlier one took over.
     case predecessor
+}
+
+/// WindowTransferRefusal is why a window of a driven application was left where
+/// it was. Each case is an outcome and not a failure to report: a window that
+/// cannot be moved with the primitive this kit has is a fact about the window,
+/// and a seat that stayed silent about it would read as a seat that never saw
+/// it.
+nonisolated public enum WindowTransferRefusal: String, Sendable, Equatable {
+
+    /// No accessibility element answers for this Window ID, so `AXPosition`
+    /// has nothing to write. An external popup drawn by a process that publishes
+    /// no window element is the ordinary case, and the kit adds no primitive to
+    /// reach it.
+    case notMovable
+
+    /// The window does not fit inside the Virtual Display. Nothing is resized:
+    /// a window shrunk to fit is a window the person gets back smaller than
+    /// they left it.
+    case tooLarge
+
+    /// The move, or one of the two readings that confirm it, was refused. The
+    /// window was put back where it was found, and `lastAdoptionFailure`
+    /// carries the whole record including the rollback.
+    case moveRefused
+
+    /// The seat has spent its attempts on this Window ID. An application that
+    /// puts its own window back on the physical display after every move is an
+    /// application that disagrees, and this is where the disagreement stops
+    /// instead of becoming a loop.
+    case attemptsExhausted
 }
 
 /// WindowReleaseOutcome is what happened to an Adopted Window when the seat let
@@ -171,6 +207,15 @@ nonisolated public enum SeatEvent: Sendable, Equatable {
     /// `issues` is empty when the refusal was about the seat's state rather
     /// than about the window.
     case targetChangeRefused(windowNumber: Int, state: SeatState, issues: [SeatIssue])
+
+    /// A window of a driven application was found on a physical display and
+    /// **not** brought onto the Virtual Display, with the reason. A successful
+    /// transfer arrives as `targetChanged` with reason `.detected` instead.
+    case windowTransferRefused(
+        windowNumber: Int,
+        processID   : Int32,
+        reason      : WindowTransferRefusal
+    )
 
     /// A window was let go.
     case windowReleased(windowNumber: Int, outcome: WindowReleaseOutcome)

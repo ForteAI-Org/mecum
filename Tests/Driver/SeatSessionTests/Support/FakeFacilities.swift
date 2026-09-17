@@ -179,6 +179,20 @@ final class FakeSensing: SeatSensing, @unchecked Sendable {
         menuReadCount += 1
         return menus
     }
+
+    /// What the window server answers for the driven processes. `nil` is the
+    /// reading that failed, which the watch has to tell from an empty desktop.
+    var surfaces: [WindowSurface]? = []
+
+    /// How many passes the window watch has really made, for a test that wants
+    /// to know a stopped watch stopped reading rather than stopped acting.
+    private(set) var surfaceReadCount = 0
+
+    func windowSurfaces(ownedBy processIDs: Set<Int32>) -> [WindowSurface]? {
+        surfaceReadCount += 1
+        guard let surfaces else { return nil }
+        return surfaces.filter { processIDs.contains($0.reference.processID) }
+    }
 }
 
 /// The menu window the fakes hand back: a window of the target's process with a
@@ -207,7 +221,18 @@ final class FakePlacing: WindowPlacing, @unchecked Sendable {
 
     var bodyFrame: CGRect?
 
-    func frame(of window: WindowReference) throws -> CGRect? { bodyFrame }
+    /// The accessibility body of one window, for a suite that has several of
+    /// them and needs each to answer for itself.
+    var bodyFrames: [Int: CGRect] = [:]
+
+    /// A window with no element behind its Window ID, which is what an external
+    /// popup looks like to the relocator.
+    var frameError: (any Error)?
+
+    func frame(of window: WindowReference) throws -> CGRect? {
+        if let frameError { throw frameError }
+        return bodyFrames[window.windowNumber] ?? bodyFrame
+    }
 
     var moveError : (any Error)?
     var stageError: (any Error)?
