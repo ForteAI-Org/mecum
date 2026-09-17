@@ -27,9 +27,11 @@ against it declines to act rather than guessing.
 
 There is no umbrella module: every consumer writes the imports it uses, so the
 boundaries are visible at the top of the file rather than hidden behind one
-name. The package ships two products, and that is where the shape shows: link
-`AgentSeatKit` to drive a seat, and `TargetReader` only if you also want to read
-somebody else's window.
+name. Link the `MecumDriver` library product to use these modules, including
+`TargetReader`. A local consumer adds `.package(path: "../mecum")` to its
+package dependencies and `.product(name: "MecumDriver", package: "mecum")` to
+the targets that use the driver. Adjust the relative path to the checkout;
+sources and the resource ledger are compiled directly from Mecum.
 
 ## Using it
 

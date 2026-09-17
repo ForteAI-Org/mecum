@@ -35,10 +35,11 @@ HOST_REST_TESTS := 29
 
 # The Live tier: the probe page title contract, the input matrix with its six Commands on both families, the
 # target's layout, the two probe rows, the contextual menu on both families,
-# the typing cost sweep and the two text delivery measurements. The last three
-# are reported and skipped unless AGENTSEAT_TYPING_SWEEP=1 or
-# AGENTSEAT_TEXT_DELIVERY=1 asks for them.
-LIVE_TESTS := 20
+# the multi window row with its two controlled windows, the typing cost sweep
+# and the two text delivery measurements. The last three are reported and
+# skipped unless AGENTSEAT_TYPING_SWEEP=1 or AGENTSEAT_TEXT_DELIVERY=1 asks for
+# them.
+LIVE_TESTS := 21
 
 # The measurements `make bench` gates on. Narrow it for a quick pass, for
 # example `make bench BENCH="fence-callback send-click"`; `seat-idle` alone

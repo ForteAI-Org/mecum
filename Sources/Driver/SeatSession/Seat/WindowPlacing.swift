@@ -68,6 +68,17 @@ nonisolated public protocol CommandSending: Sendable {
     /// True when the Ledger does not cover this build or this hardware.
     var unvalidatedBuild: Bool { get }
 
+    /// The stop this sender honours at command boundaries, when it has one.
+    ///
+    /// The seat needs it for a reason that has nothing to do with focus: a
+    /// window transfer must hold input closed across its awaits, and the seat
+    /// otherwise reaches the gate only inside `enableFocusRecovery`, which a
+    /// host with `restoresUserFocus` disabled never calls. Routing it through
+    /// the sender is what makes the stop available in both configurations, and
+    /// what lets a test give the seat a real gate. `nil` means the witness has
+    /// no gate and the seat's own refusals are the only stop there is.
+    var inputCommandGate: InputCommandGate? { get }
+
     func send(
         _ command    : InputCommand,
         to window    : WindowReference,
@@ -169,6 +180,8 @@ extension CommandSending {
     }
 
     public nonisolated func recordCompletedTrace(_ trace: InputCommandTrace) {}
+
+    public nonisolated var inputCommandGate: InputCommandGate? { nil }
 }
 
 /// The live placing witness. It is a struct and not the enum itself, because a
@@ -210,4 +223,9 @@ nonisolated public struct SystemWindowPlacing: WindowPlacing {
     }
 }
 
-extension InputDriver: CommandSending {}
+extension InputDriver: CommandSending {
+
+    /// The driver owns the gate outright; the protocol answers with an
+    /// optional because a witness without one is a legitimate witness.
+    public nonisolated var inputCommandGate: InputCommandGate? { commandGate }
+}

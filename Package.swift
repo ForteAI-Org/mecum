@@ -69,7 +69,13 @@ func driverTests(
 let package = Package(
     name     : "Mecum",
     platforms: [deployment],
-    products : [],
+    products : [
+        .library(
+            name: "MecumDriver",
+            targets: ["SeatCore", "PrivateSymbols", "VirtualScreens", "WindowPlacement",
+                      "SeatInput", "CursorGuard", "SeatCapture", "SeatSession", "TargetReader"]
+        ),
+    ],
     targets: [
         
         // MARK: Driver

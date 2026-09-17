@@ -61,14 +61,6 @@ public final class AgentSeat {
         var confirmation: EffectConfirmation?
     }
 
-    /// The seat's own record of an adopted window: the public handle plus the
-    /// facts the caller does not need to carry around.
-    private struct WindowRecord {
-        var window  : AdoptedWindow
-        let platform: any InputPlatform
-        var isStaged: Bool
-    }
-
     private static let log = Logger(subsystem: "dev.forte.AgentSeatKit", category: "Session")
 
     // MARK: The state, which used to be seventeen properties of a view controller
@@ -99,7 +91,10 @@ public final class AgentSeat {
 
     private let turns: TurnQueue
 
-    private var records            : [Int: WindowRecord] = [:]
+    private var session            = SeatWindowSession()
+    private var transferGeneration : UInt64 = 0
+    private var transfersInFlight  = 0
+    private var recoveryTrigger    : [SeatIssue] = []
     private var pendingAdoptions: [Int: AdoptedWindow] = [:]
     private var adoptionRestorations: [Int: WindowReleaseOutcome] = [:]
     private var adoptionInFlight = false
@@ -130,13 +125,27 @@ public final class AgentSeat {
     public var hasPendingWindowRestorations: Bool { !pendingAdoptions.isEmpty }
 
     /// Every successfully adopted window, in Window ID order.
-    public var adoptedWindows: [AdoptedWindow] {
-        records.keys.sorted().compactMap { records[$0]?.window }
-    }
+    public var adoptedWindows: [AdoptedWindow] { session.adoptedWindows }
+
+    /// The window the seat is operating on: the most recent one adopted or
+    /// asked for with `switchTarget(to:)`, nil when the seat holds none.
+    ///
+    /// It is the target and not "the visible window": several adopted windows
+    /// can be on the screen at once, and which of them the seat considers
+    /// current is a decision of this type rather than a reading of Stage
+    /// Manager. `send(_:to:turn:)` still takes its window by parameter, so a
+    /// request addressed to one window is never delivered to another because
+    /// the target moved.
+    public var currentTarget: AdoptedWindow? { session.currentTarget?.window }
+
+    /// The succession of targets, oldest first, each window at most once. It is
+    /// what a closure falls back through, and it is exposed because a consumer
+    /// that shows the person what the agent is doing needs the same order.
+    public var targetHistory: [Int] { session.targetHistory }
 
     /// True when this window is the one Stage Manager currently has on stage.
     public func isStaged(_ window: AdoptedWindow) -> Bool {
-        records[window.id]?.isStaged == true
+        session[window.id]?.isStaged == true
     }
 
     /// The hold currently out, nil when the seat is free.
@@ -349,8 +358,7 @@ public final class AgentSeat {
     /// forced transition to `failed`, and a second opinion about the next state
     /// is the last thing that path needs.
     private func reportStrandedKeys() {
-        let processes = Set(records.values.map(\.window.reference.processID))
-        let stranded  = processes.reduce(0) { total, processID in
+        let stranded = session.processIDs.reduce(0) { total, processID in
             total + KeyHold.shared.releaseEveryOwner(processID: processID).count
         }
         guard stranded > 0 else { return }
@@ -366,8 +374,7 @@ public final class AgentSeat {
     /// mid-gesture. The processes are a Set because two windows of one
     /// application are one process and would otherwise be counted twice.
     private func heldKeyCount(of turn: Turn) -> Int {
-        let processes = Set(records.values.map(\.window.reference.processID))
-        return processes.reduce(0) { total, processID in
+        session.processIDs.reduce(0) { total, processID in
             total + KeyHold.shared.held(
                 owner    : turn.correlationID,
                 processID: processID
@@ -386,6 +393,10 @@ public final class AgentSeat {
     ///
     /// `title` feeds the structural recovery path only; empty turns that path
     /// off, and a recovery then refuses rather than guessing.
+    ///
+    /// There are two entries, this one and `integrateDetectedWindow`, and what
+    /// they differ in is admission and nothing else: the transaction below, the
+    /// move it performs and the verified rollback behind it are shared.
     @discardableResult
     public func adopt(
         _ window: WindowReference,
@@ -394,15 +405,72 @@ public final class AgentSeat {
     ) async throws -> AdoptedWindow {
 
         try Task.checkCancellation()
+        try checkIdentityIsAttested(of: window)
+        guard mayAdmit(window) else { throw SessionFailure.seatNotReady(state) }
+
+        return try await adoptionTransaction(window, platform: platform, title: title)
+    }
+
+    /// integrateDetectedWindow brings a window somebody else detected into the
+    /// seat, at a command boundary. It is the interface MW-02's watcher uses,
+    /// and it exists so that the watcher never calls `adopt` from a callback.
+    ///
+    /// A new window of the target appears exactly when the target is being
+    /// driven, so a detection routinely arrives while the state is `.acting` or
+    /// `.waiting`. `adopt` would answer `seatNotReady` and the window would be
+    /// dropped; widening `acceptsCommands` would instead let an adoption write
+    /// geometry that a Command in flight is already consuming. So this waits for
+    /// the boundary, and only then holds input closed with `.windowTransfer`
+    /// across the move: closing the gate first would refuse the next Command of
+    /// a sequence already running, which is a split Command.
+    ///
+    /// It posts nothing and repeats nothing. In particular it never repeats the
+    /// Command that opened the window it is adopting.
+    @discardableResult
+    package func integrateDetectedWindow(
+        _ window       : WindowReference,
+        platform       : any InputPlatform = ChromiumPlatform(),
+        title          : String = "",
+        within deadline: Duration = .seconds(2)
+    ) async throws -> AdoptedWindow {
+
+        try Task.checkCancellation()
+        try checkIdentityIsAttested(of: window)
+
+        guard await awaitCommandBoundary(within: deadline), mayAdmit(window) else {
+            throw SessionFailure.seatNotReady(state)
+        }
+        beginTransfer()
+        defer { endTransfer() }
+
+        return try await adoptionTransaction(window, platform: platform, title: title)
+    }
+
+    /// A raw PID and Window ID are an unverified compatibility value and cannot
+    /// authorize anything, adoption included.
+    private func checkIdentityIsAttested(of window: WindowReference) throws {
         guard window.identity != nil else {
             throw InputFailure.windowIdentityUnverified(
                 processID   : window.processID,
                 windowNumber: window.windowNumber
             )
         }
-        guard !isTearingDown, !adoptionInFlight, pendingAdoptions.isEmpty,
-              state == .unavailable || state.acceptsCommands,
-              records[window.windowNumber] == nil else { throw SessionFailure.seatNotReady(state) }
+    }
+
+    /// Whether an adoption may start right now. It is a reading and not a
+    /// refusal so that the detected-window entry can wait for it to become
+    /// true instead of failing on the first look.
+    private func mayAdmit(_ window: WindowReference) -> Bool {
+        !isTearingDown && !adoptionInFlight && pendingAdoptions.isEmpty
+            && (state == .unavailable || state.acceptsCommands)
+            && session[window.windowNumber] == nil
+    }
+
+    private func adoptionTransaction(
+        _ window: WindowReference,
+        platform: any InputPlatform,
+        title   : String
+    ) async throws -> AdoptedWindow {
 
         lastAdoptionFailure = nil
         adoptionInFlight = true
@@ -455,7 +523,8 @@ public final class AgentSeat {
 
             try checkAdoptionMayContinue()
             pendingAdoptions[window.windowNumber] = nil
-            records[record.window.id] = record
+            let displaced = session.currentTargetNumber
+            session.adopt(record)
             if record.isStaged { stagedWindowNumber = record.window.id }
 
             seatGuard = SeatGuard(
@@ -465,6 +534,7 @@ public final class AgentSeat {
             )
 
             transition(to: previous == .degraded ? .degraded : .ready, reason: .requested)
+            eventChannel.yield(.targetChanged(from: displaced, to: placed, reason: .adopted))
             return record.window
 
         } catch {
@@ -505,44 +575,55 @@ public final class AgentSeat {
     @discardableResult
     public func stage(_ window: AdoptedWindow) async throws -> AdoptedWindow {
 
-        guard var record = records[window.id] else {
+        guard let record = session[window.id] else {
             throw SessionFailure.windowNotAdopted(windowNumber: window.id)
         }
 
+        let staged: WindowReference
         do {
-            let staged = try await placing.stage(
+            staged = try await placing.stage(
                 record.window.reference,
                 expectedSize: record.window.originalFrame.size,
                 within      : sensing.virtualDisplayBounds
             )
-
-            // Stage Manager keeps one window on stage per host, so staging this
-            // one stashed whatever was there.
-            for id in records.keys where id != window.id { records[id]?.isStaged = false }
-
-            record.isStaged = true
-            record.window   = AdoptedWindow(
-                reference    : staged,
-                originalFrame: record.window.originalFrame,
-                title        : record.window.title
-            )
-            records[window.id] = record
-            stagedWindowNumber = window.id
-
-            if let existing = seatGuard, existing.target.hasSameIdentity(as: staged) {
-                seatGuard = SeatGuard(
-                    target       : staged,
-                    displayID    : existing.displayID,
-                    displayBounds: existing.displayBounds
-                )
-            }
-
-            return record.window
-
         } catch {
             report([.windowStashed])
             throw error
         }
+
+        // The record is read again after the await, and it is not the one that
+        // was captured before it: the animation costs half a second, and a
+        // window released or replaced during it must not be written back from a
+        // value that describes a window the seat no longer holds.
+        guard var current = session[window.id],
+              current.window.reference.hasSameIdentity(as: record.window.reference) else {
+            throw SessionFailure.windowNotAdopted(windowNumber: window.id)
+        }
+
+        current.isStaged = true
+        current.window   = AdoptedWindow(
+            reference    : staged,
+            originalFrame: current.window.originalFrame,
+            title        : current.window.title
+        )
+        session[window.id] = current
+        stagedWindowNumber = window.id
+
+        // Which of the others is still on stage is read back, never assumed:
+        // several adopted windows stay visible together, so the last window
+        // `stage` was called for is not evidence that the rest became
+        // thumbnails. An unreadable window keeps the value it had.
+        session.refreshStaging(besides: window.id) { sensing.windowGeometry(of: $0)?.frame.size }
+
+        if let existing = seatGuard, existing.target.hasSameIdentity(as: staged) {
+            seatGuard = SeatGuard(
+                target       : staged,
+                displayID    : existing.displayID,
+                displayBounds: existing.displayBounds
+            )
+        }
+
+        return current.window
     }
 
     /// release lets a window go: back to its original frame in the User Seat by
@@ -557,13 +638,195 @@ public final class AgentSeat {
         _ mode  : ReleaseMode = .returnToUserSeat
     ) async -> WindowReleaseOutcome {
 
-        defer { records[window.id] = nil }
-
         if stagedWindowNumber == window.id { stagedWindowNumber = nil }
 
         let outcome = await returnToUserSeat(window, mode)
+        let successor = session.forget(window.id)
         eventChannel.yield(.windowReleased(windowNumber: window.id, outcome: outcome))
+
+        // An explicit release is one of the two proofs that the target is gone,
+        // and the only place other than an exhausted recovery where a
+        // predecessor is chosen. A teardown chooses none: every window is on
+        // its way out and restaging one would be work against the person.
+        await takeOverAfterLostTarget(successor)
         return outcome
+    }
+
+    /// Puts the predecessor back on stage and makes it the target again, after
+    /// the current one was proved gone.
+    private func takeOverAfterLostTarget(_ successor: Int?) async {
+
+        guard !isTearingDown, let successor, session[successor] != nil else { return }
+        do { _ = try await transferTarget(to: successor, reason: .predecessor) }
+        catch {
+            Self.log.error("""
+                the predecessor at Window ID \(successor, privacy: .public) could not take over: \
+                \(String(describing: error), privacy: .public)
+                """)
+        }
+    }
+
+    // MARK: The current target
+
+    /// switchTarget moves the seat's operating target to another Adopted
+    /// Window, brings it on stage and tells the consumer to observe again.
+    ///
+    /// ## The contract
+    ///
+    /// It waits for a command boundary instead of interrupting: a Command in
+    /// flight finishes atomically, and a Turn still holding a key is refused
+    /// rather than having its presses stranded on the window it is leaving.
+    /// It holds input closed with `.windowTransfer` for the whole transaction,
+    /// so no Command starts on coordinates the stage is about to change, and
+    /// nothing already posted is ever repeated. It re-confirms identity and
+    /// geometry **after** the staging await, because the window a transaction
+    /// starts on is not necessarily the one it ends on, and an uncertain
+    /// reading is a refusal rather than a staged window. On a refusal it
+    /// changes nothing at all: the previous target stays the target, and
+    /// `targetChangeRefused` carries the state and the Issues that decided it.
+    ///
+    /// The target is not "the window input goes to". `send(_:to:turn:)` keeps
+    /// taking its window by parameter, so a request addressed to one window is
+    /// never delivered to another because the target moved; what changes is
+    /// which window the seat guards, observes and falls back from.
+    @discardableResult
+    public func switchTarget(to window: AdoptedWindow) async throws -> AdoptedWindow {
+
+        guard session[window.id] != nil else {
+            refuseTargetChange(window.id, issues: [])
+            throw SessionFailure.windowNotAdopted(windowNumber: window.id)
+        }
+        return try await transferTarget(to: window.id, reason: .requested)
+    }
+
+    /// The transfer itself, shared by an explicit request and by a predecessor
+    /// taking over after the target was proved gone.
+    @discardableResult
+    private func transferTarget(
+        to windowNumber: Int,
+        reason         : SeatTargetChange,
+        within deadline: Duration = .seconds(2)
+    ) async throws -> AdoptedWindow {
+
+        guard await awaitCommandBoundary(within: deadline), !isTearingDown,
+              state.acceptsCommands, let record = session[windowNumber] else {
+            refuseTargetChange(windowNumber, issues: [])
+            throw SessionFailure.seatNotReady(state)
+        }
+
+        // A key this Turn pressed is state inside the window it was pressed on,
+        // and moving the target with one still down would leave it there with
+        // nobody left to lift it.
+        if let turn = turns.current {
+            let held = heldKeyCount(of: turn)
+            guard held == 0 else {
+                refuseTargetChange(windowNumber, issues: [])
+                throw SessionFailure.keysStillHeld(count: held)
+            }
+        }
+
+        transferGeneration &+= 1
+        let generation = transferGeneration
+        let displaced  = session.currentTargetNumber
+
+        beginTransfer()
+        defer { endTransfer() }
+
+        let staged: AdoptedWindow
+        do {
+            staged = try await stage(record.window)
+        } catch {
+            // The staging Issue is the one that decided this refusal, and
+            // `stage` has just reported it. An empty list here would say the
+            // seat's state was the reason, which is a different fact.
+            refuseTargetChange(windowNumber, issues: [.windowStashed])
+            throw error
+        }
+
+        // Everything above was read before an await that costs the staging
+        // animation, so identity and geometry are established again here. A
+        // second transfer started meanwhile owns the target, and this one loses.
+        try Task.checkCancellation()
+        guard generation == transferGeneration, !isTearingDown, state != .failed,
+              let confirmed = session[windowNumber], confirmed.isStaged,
+              confirmed.window.reference.hasSameIdentity(as: staged.reference),
+              let reading = sensing.windowGeometry(of: windowNumber),
+              reading.hasSameIdentity(as: staged.reference),
+              sensing.virtualDisplayBounds.contains(reading.frame)
+        else {
+            refuseTargetChange(windowNumber, issues: [.windowUnavailable])
+            throw SeatInterruption(issues: [.windowUnavailable])
+        }
+
+        session[windowNumber]?.window = AdoptedWindow(
+            reference    : reading,
+            originalFrame: confirmed.window.originalFrame,
+            title        : confirmed.window.title
+        )
+        session.makeCurrent(windowNumber)
+        seatGuard = SeatGuard(
+            target       : reading,
+            displayID    : displayID,
+            displayBounds: sensing.virtualDisplayBounds
+        )
+
+        // The observation belongs to the window it was opened on. It is folded
+        // into the hold's running total so the next Command opens a new one on
+        // the new target instead of reporting the old one's.
+        if let observer {
+            observationSoFar = (observationSoFar ?? SeatObservation()).merging(observer.conclude())
+            self.observer = nil
+        }
+
+        eventChannel.yield(.targetChanged(from: displaced, to: reading, reason: reason))
+        return session[windowNumber]?.window ?? staged
+    }
+
+    private func refuseTargetChange(_ windowNumber: Int, issues: [SeatIssue]) {
+        eventChannel.yield(
+            .targetChangeRefused(windowNumber: windowNumber, state: state, issues: issues)
+        )
+    }
+
+    /// Waits for the boundary between two Commands, the only moment at which
+    /// anything here moves a window. False means the deadline passed with a
+    /// Command still in flight, and the caller refuses rather than cutting it.
+    ///
+    /// It sleeps and never pumps. The Command it is waiting for is running on
+    /// the main actor, so a wait that turned the event loop here would hold the
+    /// actor the Command needs to finish on and the boundary would never
+    /// arrive: measured as a transfer that timed out against its own send.
+    private func awaitCommandBoundary(within deadline: Duration) async -> Bool {
+
+        let limit = DispatchTime.now().uptimeNanoseconds + UInt64(deadline.wholeNanoseconds)
+        while actionInFlight, DispatchTime.now().uptimeNanoseconds < limit {
+            await EventLoopWait.sleep(.milliseconds(10))
+        }
+        return !actionInFlight
+    }
+
+    /// The stop the sender honours at command boundaries, when it has one. The
+    /// seat reaches it through the sender because the focus recovery path is
+    /// installed only for a host that restores user focus, and a window
+    /// transfer has to close the gate in both configurations.
+    private var commandGate: InputCommandGate? { sender.inputCommandGate }
+
+    /// One cause for however many transfers are open.
+    ///
+    /// Transfers nest: a window released while another transfer is staging
+    /// starts its predecessor's take over from inside that transfer's await. A
+    /// set holds one `.windowTransfer` whoever inserted it, so the inner
+    /// transfer's end would otherwise reopen input while the outer one is still
+    /// moving a window. Counting here and not in the gate keeps the gate's rule
+    /// the simple one: closed while any cause stands.
+    private func beginTransfer() {
+        transfersInFlight += 1
+        if transfersInFlight == 1 { commandGate?.pause(.windowTransfer) }
+    }
+
+    private func endTransfer() {
+        transfersInFlight -= 1
+        if transfersInFlight == 0 { commandGate?.resume(.windowTransfer) }
     }
 
     // MARK: The action
@@ -1292,7 +1555,7 @@ public final class AgentSeat {
             throw SessionFailure.turnRequired
         }
 
-        guard let record = records[window.id] else {
+        guard let record = session[window.id] else {
             throw SessionFailure.windowNotAdopted(windowNumber: window.id)
         }
 
@@ -1483,7 +1746,7 @@ public final class AgentSeat {
             audit                     : audit,
             recordsUserContext        : true,
             issueCheck                : { [weak self] in
-                guard let self, let record = self.records[record.window.id] else {
+                guard let self, let record = self.session[record.window.id] else {
                     return [.processUnavailable]
                 }
                 return self.currentIssues(for: record)
@@ -1731,7 +1994,7 @@ public final class AgentSeat {
 
         guard recoveryTask == nil,
               let seatGuard,
-              let record = records[seatGuard.target.windowNumber]
+              let record = session[seatGuard.target.windowNumber]
         else { return }
 
         // The one refusal that comes before any recovery: an input was posted
@@ -1757,6 +2020,7 @@ public final class AgentSeat {
         }
 
         recoveryEpisode += 1
+        recoveryTrigger = issues
         let episode = recoveryEpisode
 
         recoveryTask = Task { @MainActor [weak self] in
@@ -1815,11 +2079,43 @@ public final class AgentSeat {
 
                 case .fail(let issue):
                     eventChannel.yield(.issueDetected(issue, cause: nil))
+                    if await handedOverAfterDestruction(of: record) { return }
                     transition(to: .failed, reason: .issues([issue]))
                     turns.failAll(with: SeatInterruption(issues: [issue]))
                     return
             }
         }
+    }
+
+    /// The second and last proof that the target was destroyed: a recovery that
+    /// started from `.windowUnavailable` spent its whole budget and the window
+    /// server still cannot read the window.
+    ///
+    /// A single missing reading during a Space or a Stage Manager transition is
+    /// deliberately not enough, and the budget is what tells the two apart. The
+    /// predecessor has to be readable and its process alive before it takes
+    /// over, because two windows of one application die together and handing
+    /// the seat a second dead window would say the opposite. With none it gets
+    /// the failed seat it would have had anyway, since choosing a window nobody
+    /// adopted is worse than saying there is nothing left.
+    private func handedOverAfterDestruction(of record: WindowRecord) async -> Bool {
+
+        let windowNumber = record.window.id
+        guard recoveryTrigger.contains(.windowUnavailable),
+              session.currentTargetNumber == windowNumber,
+              sensing.windowGeometry(of: windowNumber) == nil,
+              let successor = session.predecessor(of: windowNumber),
+              let predecessor = session[successor],
+              sensing.windowGeometry(of: successor) != nil,
+              sensing.isActive(processID: predecessor.window.reference.processID) != nil
+        else { return false }
+
+        _ = session.forget(windowNumber)
+        if stagedWindowNumber == windowNumber { stagedWindowNumber = nil }
+        eventChannel.yield(.windowReleased(windowNumber: windowNumber, outcome: .vanished))
+        transition(to: wasDegradedBeforeRecovery ? .degraded : .ready, reason: .recovered)
+        await takeOverAfterLostTarget(successor)
+        return true
     }
 
     /// Waits while a Command is in flight, bounded by the longest a Command can

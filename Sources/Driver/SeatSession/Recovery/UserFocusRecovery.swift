@@ -162,7 +162,7 @@ final class UserFocusRecovery {
         timing.detectedAtUptimeNanoseconds = started
         timing.activationSource = source
         timing.notificationReceivedAtUptimeNanoseconds = receivedAt
-        gate.pause()
+        gate.pause(.focusRecovery)
         isPaused = true
         activatingPID = processID
         code = nil
@@ -273,7 +273,7 @@ final class UserFocusRecovery {
                 timer?.invalidate()
                 timer = nil
                 isPaused = false
-                gate.resume()
+                gate.resume(.focusRecovery)
                 emit(userSelectedDestination ? .userTookControl : .restored)
                 return
             }
@@ -307,7 +307,9 @@ final class UserFocusRecovery {
         allowed = false
         timer?.invalidate()
         timer = nil
-        gate.pause()
+        // Terminal on purpose, and its own cause: a seat that lost its focus
+        // recovery never posts again, and nothing resolves this one.
+        gate.pause(.focusRecoveryStopped)
         if isPaused { emit(.cancelled) }
         isPaused = false
     }

@@ -32,6 +32,20 @@ nonisolated public enum SeatTransitionReason: Sendable, Equatable {
     case cancelled
 }
 
+/// SeatTargetChange is why the seat's operating target moved, as a value: a
+/// consumer answers a change it asked for and one it was handed differently.
+nonisolated public enum SeatTargetChange: String, Sendable, Equatable {
+
+    /// `switchTarget(to:)` asked for it.
+    case requested
+
+    /// A window was adopted and became the target.
+    case adopted
+
+    /// The target was destroyed and the most recent earlier one took over.
+    case predecessor
+}
+
 /// WindowReleaseOutcome is what happened to an Adopted Window when the seat let
 /// it go. A window that vanished is not a failure: the person may have closed
 /// it, and closing is not the kit's business.
@@ -146,6 +160,17 @@ nonisolated public enum SeatEvent: Sendable, Equatable {
     /// how everyone else hears about it, and the share it was judged against
     /// comes from the watchdog's heartbeat.
     case monitorQualityChanged(MonitorQualityChange)
+
+    /// The seat's operating target moved to another Adopted Window, which is
+    /// on stage and confirmed there. `to` is the reference as it reads **after**
+    /// the transfer, and the consumer observes again before sending any
+    /// coordinate: nothing computed against the previous target survives this.
+    case targetChanged(from: Int?, to: WindowReference, reason: SeatTargetChange)
+
+    /// A requested target change did not happen and the target is unchanged.
+    /// `issues` is empty when the refusal was about the seat's state rather
+    /// than about the window.
+    case targetChangeRefused(windowNumber: Int, state: SeatState, issues: [SeatIssue])
 
     /// A window was let go.
     case windowReleased(windowNumber: Int, outcome: WindowReleaseOutcome)

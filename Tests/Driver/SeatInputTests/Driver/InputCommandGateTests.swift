@@ -26,7 +26,7 @@ struct InputCommandGateTests {
         }
         while resume == nil { await Task.yield() }
         #expect(!posted)
-        if cancel { task.cancel() } else { gate.pause() }
+        if cancel { task.cancel() } else { gate.pause(.focusRecovery) }
         resume?.resume()
         let result = await task.result
         if case .success = result { Issue.record("An interrupted boundary must throw") }
@@ -42,8 +42,36 @@ struct InputCommandGateTests {
             try await gate.prepare(correlationID: Int64(correlationID))
             #expect(prepared.count == correlationID)
         }
-        gate.pause()
+        gate.pause(.focusRecovery)
         await #expect(throws: InputFailure.inputPaused) { try await gate.prepare(correlationID: 4) }
         #expect(prepared == [1, 2, 3])
+    }
+
+    @Test("two overlapping causes keep input closed until both are resolved",
+          arguments: [[InputCommandGate.PauseCause.focusRecovery, .windowTransfer],
+                      [InputCommandGate.PauseCause.windowTransfer, .focusRecovery]])
+    func overlappingCauses(_ order: [InputCommandGate.PauseCause]) throws {
+        let gate = InputCommandGate()
+        gate.pause(.focusRecovery)
+        gate.pause(.windowTransfer)
+        #expect(gate.pauseCauses == [.focusRecovery, .windowTransfer])
+
+        gate.resume(order[0])
+        #expect(gate.isPaused, "Resolving one cause must not reopen the gate for the other")
+        #expect(throws: InputFailure.inputPaused) { try gate.check() }
+
+        gate.resume(order[1])
+        #expect(!gate.isPaused)
+        try gate.check()
+    }
+
+    @Test("resolving a cause nobody raised changes nothing")
+    func unrelatedResume() throws {
+        let gate = InputCommandGate()
+        gate.pause(.focusRecoveryStopped)
+        gate.resume(.focusRecovery)
+        gate.resume(.windowTransfer)
+        #expect(gate.isPaused, "The terminal cause is nobody else's to resolve")
+        #expect(throws: InputFailure.inputPaused) { try gate.check() }
     }
 }

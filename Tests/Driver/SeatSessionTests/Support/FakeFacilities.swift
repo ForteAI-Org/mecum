@@ -257,6 +257,13 @@ class FakeSender: CommandSending, @unchecked Sendable {
 
     var unvalidatedBuild = false
 
+    /// A real gate, not a stub: the seat's own window transfer and a focus
+    /// recovery close it at the same time, and whether one of them reopens it
+    /// for the other is exactly what a test has to be able to see.
+    let gate = InputCommandGate()
+
+    var inputCommandGate: InputCommandGate? { gate }
+
     /// Every Command that went out, with the marker it was stamped with.
     var sent: [(command: InputCommand, correlationID: Int64)] = []
 
@@ -273,11 +280,15 @@ class FakeSender: CommandSending, @unchecked Sendable {
         platform     : any InputPlatform
     ) async throws -> InputReceipt {
 
+        // The live driver refuses at the gate before the first event, so a fake
+        // that posted anyway would be modelling a driver that does not exist.
+        try gate.check()
         if let error { throw error }
         if let refusal = refusedCommand?(command) { throw refusal }
 
         sent.append((command, correlationID))
         onSend?(command)
+        await onSendWait?()
         return receipt(for: window)
     }
 
@@ -288,6 +299,7 @@ class FakeSender: CommandSending, @unchecked Sendable {
         platform     : any InputPlatform
     ) async throws -> [InputReceipt] {
 
+        try gate.check()
         if let error { throw error }
 
         for command in commands { sent.append((command, correlationID)) }
@@ -311,6 +323,10 @@ class FakeSender: CommandSending, @unchecked Sendable {
     /// What the target does when a Command reaches it, called before the
     /// Receipt is made.
     var onSend: ((InputCommand) -> Void)?
+
+    /// A Command that takes time, so a test can ask the seat for something
+    /// while one is genuinely in flight.
+    var onSendWait: (() async -> Void)?
 
     /// A refusal for one particular Command, answered before anything is
     /// recorded as sent: the real driver refuses before the first event goes
@@ -349,9 +365,13 @@ class FakeSender: CommandSending, @unchecked Sendable {
 func makeSeat(
     sensing: FakeSensing = FakeSensing(),
     placing: FakePlacing = FakePlacing(),
-    sender : FakeSender  = FakeSender()
+    sender : FakeSender  = FakeSender(),
+    marker : Int64       = 555
 ) -> AgentSeat {
 
+    // `KeyHold` is process wide and keyed by owner and PID, so a test that
+    // presses a key needs a marker of its own: the default one is shared by
+    // every seat here, and these suites run in parallel.
     AgentSeat(
         sensing              : sensing,
         placing              : placing,
@@ -359,6 +379,6 @@ func makeSeat(
         fence                : nil,
         displayID            : 7,
         expectedMainDisplayID: FakeGeometry.mainDisplayID,
-        markers              : { 555 }
+        markers              : { marker }
     )
 }
