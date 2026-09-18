@@ -11,6 +11,9 @@
 //                reads instead of pixels, the pure algorithms that build it, the
 //                roles a platform fills and the thin adapters that fill them.
 //
+//   Engine/      how the agent ACTS on what it sees: the outcome vocabulary,
+//                the verification rule, and the roles an actuator fills.
+//
 // The Driver targets come from AgentSeatKit and keep its per-target settings:
 // pure types are nonisolated by default, facilities are main actor by default.
 import PackageDescription
@@ -97,6 +100,33 @@ func perceptionTests(
     )
 }
 
+func engine(
+    _ name        : String,
+    _ dependencies: [String]       = [],
+      settings    : [SwiftSetting] = facility
+) -> Target {
+
+    .target(
+        name         : name,
+        dependencies : dependencies.map { .target(name: $0) },
+        path         : "Sources/Engine/\(name)",
+        swiftSettings: settings
+    )
+}
+
+func engineTests(
+    _ name        : String,
+    _ dependencies: [String]
+) -> Target {
+
+    .testTarget(
+        name         : "\(name)Tests",
+        dependencies : dependencies.map { .target(name: $0) },
+        path         : "Tests/Engine/\(name)Tests",
+        swiftSettings: suite
+    )
+}
+
 let package = Package(
     name     : "Mecum",
     platforms: [deployment],
@@ -109,6 +139,10 @@ let package = Package(
         .library(
             name: "MecumPerception",
             targets: ["PerceptionCore", "VisionText", "WindowServerListing", "Perception"]
+        ),
+        .library(
+            name: "MecumEngine",
+            targets: ["EngineCore"]
         ),
     ],
     targets: [
@@ -190,8 +224,15 @@ let package = Package(
         // The pipeline: roles in, a scene out. Nonisolated on purpose: recognition must not block the UI.
         perception("Perception", ["PerceptionCore"], settings: pure),
 
+        // MARK: Engine
+        // Outcomes, the verification rule and the actuator roles. Pure.
+        engine("EngineCore", ["PerceptionCore"], settings: pure),
+
         // MARK: Perception tests
         perceptionTests("PerceptionCore", ["PerceptionCore"]),
         perceptionTests("Perception", ["Perception", "PerceptionCore"]),
+
+        // MARK: Engine tests
+        engineTests("EngineCore", ["EngineCore", "PerceptionCore"]),
     ]
 )
