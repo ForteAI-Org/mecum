@@ -108,7 +108,7 @@ let package = Package(
         ),
         .library(
             name: "MecumPerception",
-            targets: ["PerceptionCore", "VisionText", "WindowServerListing"]
+            targets: ["PerceptionCore", "VisionText", "WindowServerListing", "Perception"]
         ),
     ],
     targets: [
@@ -187,7 +187,11 @@ let package = Package(
         // The window server's window list behind `WindowListing`.
         perception("WindowServerListing", ["PerceptionCore"], settings: pure),
 
+        // The pipeline: roles in, a scene out. Nonisolated on purpose: recognition must not block the UI.
+        perception("Perception", ["PerceptionCore"], settings: pure),
+
         // MARK: Perception tests
         perceptionTests("PerceptionCore", ["PerceptionCore"]),
+        perceptionTests("Perception", ["Perception", "PerceptionCore"]),
     ]
 )
