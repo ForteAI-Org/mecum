@@ -142,7 +142,7 @@ let package = Package(
         ),
         .library(
             name: "MecumEngine",
-            targets: ["EngineCore"]
+            targets: ["EngineCore", "Engine", "HIDActuation", "AccessibilityActions", "WorkspaceActivation"]
         ),
     ],
     targets: [
@@ -228,8 +228,20 @@ let package = Package(
         perception("Perception", ["PerceptionCore"], settings: pure),
 
         // MARK: Engine
-        // Outcomes, the verification rule and the actuator roles. Pure.
+        // Outcomes, the verification rule, policies and the roles an actuator and a scene source fill. Pure.
         engine("EngineCore", ["PerceptionCore"], settings: pure),
+
+        // The act and observe cycle over the roles: resolve, gesture, verify, outcome. Nonisolated on purpose.
+        engine("Engine", ["EngineCore", "PerceptionCore"], settings: pure),
+
+        // The foreground `Actuating`: synthetic events at the HID system tap.
+        engine("HIDActuation", ["EngineCore"], settings: pure),
+
+        // `ControlPressing` over the live accessibility tree; reads and presses hop to the main actor.
+        engine("AccessibilityActions", ["EngineCore", "PerceptionCore", "AccessibilityFacts"], settings: pure),
+
+        // `ApplicationActivating` over AppKit's workspace.
+        engine("WorkspaceActivation", ["EngineCore"], settings: pure),
 
         // MARK: Perception tests
         perceptionTests("PerceptionCore", ["PerceptionCore"]),
@@ -242,5 +254,6 @@ let package = Package(
 
         // MARK: Engine tests
         engineTests("EngineCore", ["EngineCore", "PerceptionCore"]),
+        engineTests("Engine", ["Engine", "EngineCore", "PerceptionCore"]),
     ]
 )

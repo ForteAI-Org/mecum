@@ -34,10 +34,24 @@ public enum ActVerification {
         targetID: String?,
         expected: SceneEffect? = nil
     ) -> Verdict {
+        verdict(
+            before  : before,
+            after   : after,
+            effect  : SceneDifference.effect(before: before, after: after, targetID: targetID),
+            expected: expected
+        )
+    }
+
+    /// Judges an action from an effect the caller already named, for a caller that adjusted the
+    /// scene difference with facts the scenes alone do not hold (whether a pop-up window is open).
+    public static func verdict(
+        before  : SceneSnapshot,
+        after   : SceneSnapshot,
+        effect  : SceneEffect?,
+        expected: SceneEffect? = nil
+    ) -> Verdict {
         if after.token == before.token { return .ghost }
-        guard let effect = SceneDifference.effect(before: before, after: after, targetID: targetID) else {
-            return .unattributable
-        }
+        guard let effect else { return .unattributable }
         let matches = expected.map { $0.family == effect.family } ?? true
         return .landed(effect, matchesExpectation: matches)
     }
