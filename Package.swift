@@ -138,7 +138,7 @@ let package = Package(
         ),
         .library(
             name: "MecumPerception",
-            targets: ["PerceptionCore", "VisionText", "WindowServerListing", "Perception"]
+            targets: ["PerceptionCore", "VisionText", "WindowServerListing", "Perception", "AccessibilityFacts"]
         ),
         .library(
             name: "MecumEngine",
@@ -221,6 +221,9 @@ let package = Package(
         // The window server's window list behind `WindowListing`.
         perception("WindowServerListing", ["PerceptionCore"], settings: pure),
 
+        // The live accessibility tree behind `SceneAugmenting`; reads hop to the main actor.
+        perception("AccessibilityFacts", ["PerceptionCore"], settings: pure),
+
         // The pipeline: roles in, a scene out. Nonisolated on purpose: recognition must not block the UI.
         perception("Perception", ["PerceptionCore"], settings: pure),
 
@@ -231,6 +234,11 @@ let package = Package(
         // MARK: Perception tests
         perceptionTests("PerceptionCore", ["PerceptionCore"]),
         perceptionTests("Perception", ["Perception", "PerceptionCore"]),
+
+        // Boundary checks against a running application, gated by MECUM_LIVE_TESTS=1. Named apart from
+        // the Driver Live tier on purpose: `make live-tests` filters on `LiveTests` and asserts a count.
+        perceptionTests("PerceptionBoundary",
+                        ["Perception", "PerceptionCore", "VisionText", "AccessibilityFacts", "WindowServerListing"]),
 
         // MARK: Engine tests
         engineTests("EngineCore", ["EngineCore", "PerceptionCore"]),
