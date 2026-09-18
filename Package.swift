@@ -7,6 +7,10 @@
 //   Driver/   how the agent touches the Mac: background display, window
 //             placement, input, cursor fence, capture, read-only reader.
 //
+//   Perception/  how the agent SEES a window: the text scene a language model
+//                reads instead of pixels, the pure algorithms that build it, the
+//                roles a platform fills and the thin adapters that fill them.
+//
 // The Driver targets come from AgentSeatKit and keep its per-target settings:
 // pure types are nonisolated by default, facilities are main actor by default.
 import PackageDescription
@@ -66,6 +70,33 @@ func driverTests(
     )
 }
 
+func perception(
+    _ name        : String,
+    _ dependencies: [String]       = [],
+      settings    : [SwiftSetting] = facility
+) -> Target {
+
+    .target(
+        name         : name,
+        dependencies : dependencies.map { .target(name: $0) },
+        path         : "Sources/Perception/\(name)",
+        swiftSettings: settings
+    )
+}
+
+func perceptionTests(
+    _ name        : String,
+    _ dependencies: [String]
+) -> Target {
+
+    .testTarget(
+        name         : "\(name)Tests",
+        dependencies : dependencies.map { .target(name: $0) },
+        path         : "Tests/Perception/\(name)Tests",
+        swiftSettings: suite
+    )
+}
+
 let package = Package(
     name     : "Mecum",
     platforms: [deployment],
@@ -74,6 +105,10 @@ let package = Package(
             name: "MecumDriver",
             targets: ["SeatCore", "PrivateSymbols", "VirtualScreens", "WindowPlacement",
                       "SeatInput", "CursorGuard", "SeatCapture", "SeatSession", "TargetReader"]
+        ),
+        .library(
+            name: "MecumPerception",
+            targets: ["PerceptionCore"]
         ),
     ],
     targets: [
@@ -140,5 +175,13 @@ let package = Package(
         driverTests("Live", ["SeatCore", "PrivateSymbols", "VirtualScreens", "WindowPlacement",
                              "SeatInput", "CursorGuard", "SeatSession", "TargetReader"],
                     resources: [.copy("Fixtures/probe-page.html")]),
+
+        // MARK: Perception
+        // The scene vocabulary, the pure algorithms that build and compare scenes, the accessibility
+        // harvest and the roles the pipeline consumes. Foundation and CoreGraphics only: no OS call.
+        perception("PerceptionCore", settings: pure),
+
+        // MARK: Perception tests
+        perceptionTests("PerceptionCore", ["PerceptionCore"]),
     ]
 )
