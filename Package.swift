@@ -12,7 +12,8 @@
 //                roles a platform fills and the thin adapters that fill them.
 //
 //   Engine/      how the agent ACTS on what it sees: the outcome vocabulary,
-//                the verification rule, and the roles an actuator fills.
+//                the verification rule, the act cycle, what it remembers, and
+//                the roles an actuator and a store fill.
 //
 // The Driver targets come from AgentSeatKit and keep its per-target settings:
 // pure types are nonisolated by default, facilities are main actor by default.
@@ -116,13 +117,15 @@ func engine(
 
 func engineTests(
     _ name        : String,
-    _ dependencies: [String]
+    _ dependencies: [String],
+      resources   : [Resource]? = nil
 ) -> Target {
 
     .testTarget(
         name         : "\(name)Tests",
         dependencies : dependencies.map { .target(name: $0) },
         path         : "Tests/Engine/\(name)Tests",
+        resources    : resources,
         swiftSettings: suite
     )
 }
@@ -142,7 +145,8 @@ let package = Package(
         ),
         .library(
             name: "MecumEngine",
-            targets: ["EngineCore", "Engine", "HIDActuation", "AccessibilityActions", "WorkspaceActivation"]
+            targets: ["EngineCore", "Engine", "HIDActuation", "AccessibilityActions", "WorkspaceActivation",
+                      "Memory", "FileKnowledge"]
         ),
     ],
     targets: [
@@ -243,6 +247,12 @@ let package = Package(
         // `ApplicationActivating` over AppKit's workspace.
         engine("WorkspaceActivation", ["EngineCore"], settings: pure),
 
+        // What the agent remembers: observed objects, the brain, routes, recall, and the storing role. Pure.
+        engine("Memory", ["EngineCore", "PerceptionCore"], settings: pure),
+
+        // `KnowledgeStoring` over one JSON file per application, with backups and write-behind.
+        engine("FileKnowledge", ["Memory"], settings: pure),
+
         // MARK: Perception tests
         perceptionTests("PerceptionCore", ["PerceptionCore"]),
         perceptionTests("Perception", ["Perception", "PerceptionCore"]),
@@ -255,5 +265,9 @@ let package = Package(
         // MARK: Engine tests
         engineTests("EngineCore", ["EngineCore", "PerceptionCore"]),
         engineTests("Engine", ["Engine", "EngineCore", "PerceptionCore"]),
+        engineTests("Memory", ["Memory", "EngineCore", "PerceptionCore"],
+                    resources: [.copy("Fixtures/route-corpus.json"), .copy("Fixtures/misfire-corpus.json"),
+                                .copy("Fixtures/misfire-corpus.md")]),
+        engineTests("FileKnowledge", ["FileKnowledge", "Memory", "PerceptionCore"]),
     ]
 )
