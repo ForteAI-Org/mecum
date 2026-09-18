@@ -108,7 +108,7 @@ let package = Package(
         ),
         .library(
             name: "MecumPerception",
-            targets: ["PerceptionCore"]
+            targets: ["PerceptionCore", "VisionText", "WindowServerListing"]
         ),
     ],
     targets: [
@@ -180,6 +180,12 @@ let package = Package(
         // The scene vocabulary, the pure algorithms that build and compare scenes, the accessibility
         // harvest and the roles the pipeline consumes. Foundation and CoreGraphics only: no OS call.
         perception("PerceptionCore", settings: pure),
+
+        // Vision text recognition behind `TextRecognizing`. Runs where it is called; no main actor.
+        perception("VisionText", ["PerceptionCore"], settings: pure),
+
+        // The window server's window list behind `WindowListing`.
+        perception("WindowServerListing", ["PerceptionCore"], settings: pure),
 
         // MARK: Perception tests
         perceptionTests("PerceptionCore", ["PerceptionCore"]),
