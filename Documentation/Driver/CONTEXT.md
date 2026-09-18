@@ -8,9 +8,9 @@ term is English, whatever language the consumer speaks to its own users in.
 ## Seats
 
 **Agent Seat**:
-The agent's operating domain on the shared Virtual Display: one or more Adopted
-Windows with their own input routing, guard, recovery and capture. Today exactly
-one seat exists per host; the model admits n.
+The agent's operating domain on the shared Virtual Display, encompassing Assigned
+Applications and Adopted Windows with their input routing, guard, recovery and
+capture. An assigned application can remain in this domain without any open windows.
 _Avoid_: agent desktop, virtual seat, sandbox
 
 **Seat Host**:
@@ -122,10 +122,38 @@ _Avoid_: snapshot (an accessibility model of a window), screenshot, capture
 The live preview stream of the Virtual Display shown to the human.
 _Avoid_: preview, feed
 
+**Assigned Application**:
+An application instance entrusted as a whole to an Agent Seat, including its
+attributable windows. Its assignment persists while that instance has no windows.
+_Avoid_: adopted process, target PID
+
 **Adopted Window**:
-A target window a seat moved onto the Virtual Display, with its original frame
-recorded so that releasing it returns it to the User Seat.
+An identified window accepted into a seat's management on the Virtual Display,
+whether moved there or already contained there. It is distinct from the Assigned
+Application and need not be the current input or observation target.
 _Avoid_: hosted window, captured window, managed window
+
+**Window Recency**:
+The relative order of verified appearances, reappearances and returns to the
+front within an Assigned Application, excluding raises caused by the kit.
+It is neither window creation age nor the User Seat's global focus.
+_Avoid_: adoption order, birth order, global focus
+
+**Selected Target**:
+The identified window chosen for the agent's next observation and input, which
+may not yet be ready for interaction.
+_Avoid_: focused window, frontmost window
+
+**Operational Target**:
+A Selected Target ready for agent input, with verified identity and containment,
+an up-to-date Frame of that window, and no remaining input suspension.
+_Avoid_: detected window, captured window
+
+**Observation Reference**:
+The link between a Frame and the selected window identity, selection generation
+and geometry version on which a Command is based. It identifies the observation,
+not permission to act or proof of the Command's effect.
+_Avoid_: Window Reference, Receipt, input authority
 
 **Window Reference**:
 Process ID bound to one process lifetime, Window ID, owning WindowServer

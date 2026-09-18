@@ -55,8 +55,20 @@ package final class UserFocusRestorer {
         return code == 0 && current == expected
     }
 
+    /// Requests the prepared destination and reports the whole call's duration.
+    ///
+    /// The full-call timer opens on the first line, before the timing reset and
+    /// the destination guard, and closes in a `defer`, so every return path,
+    /// including a throw, records `restoreCallNanoseconds`. The measured window
+    /// contains three clock reads: its own two and the control read whose cost
+    /// is reported in `restoreCallControlNanoseconds` and never subtracted.
+    /// Errors and effects of the request itself are unchanged by this timing.
     package func restore(_ window: WindowReference) throws -> Int32 {
+        let entry = DispatchTime.now().uptimeNanoseconds
+        let control = DispatchTime.now().uptimeNanoseconds
         timing = UserFocusRequestTiming()
+        timing.restoreCallControlNanoseconds = control &- entry
+        defer { timing.restoreCallNanoseconds = DispatchTime.now().uptimeNanoseconds &- entry }
         guard var participant = preparedDestination,
               participant.processID == window.processID,
               Int(participant.windowNumber) == window.windowNumber else { throw InputFailure.inputPaused }

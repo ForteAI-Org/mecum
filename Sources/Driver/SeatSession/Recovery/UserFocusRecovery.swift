@@ -226,6 +226,9 @@ final class UserFocusRecovery {
             timing.activationNanoseconds = request.activationNanoseconds
             timing.firstKeyNanoseconds = request.firstKeyNanoseconds
             timing.secondKeyNanoseconds = request.secondKeyNanoseconds
+            // The restorer measures its own call, so a throw still carries it.
+            timing.restoreCallNanoseconds = request.restoreCallNanoseconds
+            timing.restoreCallControlNanoseconds = request.restoreCallControlNanoseconds
             timing.requestFinishedNanoseconds = now() &- started
             requestRefusal = refusal
             if let refusal { emit(.waitingForUser, detail: refusal) }

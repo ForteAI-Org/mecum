@@ -13,3 +13,6 @@ DerivedData/
 
 # macOS
 .DS_Store
+
+# Documents
+.scratch/

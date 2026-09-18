@@ -12,6 +12,44 @@ import subprocess
 import tempfile
 
 
+# ASI-D-039: 8 ms per measured entry-to-exit restore call, inclusive, on raw data.
+FULL_CALL_LIMIT_NS = 8_000_000
+FULL_CALL_KEYS = ('restoreCallNanoseconds', 'restoreCallControlNanoseconds')
+
+
+def unsigned_nanoseconds(value):
+    """The recorded duration, or None when it is absent or not a usable count."""
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        return None
+    return value
+
+
+def full_call_verdict(nanoseconds, limit_ns=FULL_CALL_LIMIT_NS):
+    """Missing stays missing: an unrecorded call is neither zero nor a pass."""
+    if nanoseconds is None:
+        return 'missing'
+    return 'passed' if nanoseconds <= limit_ns else 'failed'
+
+
+def full_call_from_log(log):
+    """Salvage the raw entry-to-exit duration from an attempt the trial parser refused."""
+    try:
+        timing = prefixed_json(log, 'FOCUS_TIMING ')
+    except ValueError:
+        return None
+    if not isinstance(timing, dict):
+        return None
+    return unsigned_nanoseconds(timing.get('restoreCallNanoseconds'))
+
+
+def salvaged_full_call(path):
+    """A missing or unreadable log stays missing; it never becomes a zero."""
+    try:
+        return full_call_from_log(Path(path).read_text())
+    except OSError:
+        return None
+
+
 def prefixed_json(log, prefix):
     values = [json.loads(line[len(prefix):]) for line in log.splitlines() if line.startswith(prefix)]
     if len(values) != 1:
@@ -49,9 +87,12 @@ def parse_trial(log, budget_ns):
     if len(controls) != 1:
         raise ValueError('Missing or duplicate measurement control')
     control = controls[0]
+    # The full-call keys stay out of the adjusted view: their criterion is raw.
     adjusted = {key: max(0, value - control) for key, value in timing.items()
                 if key.endswith('Nanoseconds') and key not in
-                ('detectedAtUptimeNanoseconds', 'notificationReceivedAtUptimeNanoseconds', 'requestFinishedNanoseconds')}
+                ('detectedAtUptimeNanoseconds', 'notificationReceivedAtUptimeNanoseconds',
+                 'requestFinishedNanoseconds') + FULL_CALL_KEYS}
+    restore_call = unsigned_nanoseconds(timing.get('restoreCallNanoseconds'))
     ax = prefixed_json(log, 'FOCUS_AX ') if 'FOCUS_AX ' in log else []
     receipt = timing.get('notificationReceivedAtUptimeNanoseconds')
     return {
@@ -75,6 +116,10 @@ def parse_trial(log, budget_ns):
         'detection_delay_lower_ns': timing['detectedAtUptimeNanoseconds'] - lost['at_ns'],
         'detection_delay_upper_ns': timing['detectedAtUptimeNanoseconds'] - lost['lower_ns'],
         'budget': 'passed' if upper <= budget_ns else ('failed' if lower > budget_ns else 'inconclusive'),
+        'restore_call_ns': restore_call,
+        'restore_call_control_ns': unsigned_nanoseconds(timing.get('restoreCallControlNanoseconds')),
+        'full_call_limit_ns': FULL_CALL_LIMIT_NS,
+        'full_call': full_call_verdict(restore_call),
         'clock_control_ns': control,
         'raw_timing': timing,
         'control_adjusted_phases': adjusted,
@@ -82,16 +127,45 @@ def parse_trial(log, budget_ns):
     }
 
 
-def summarize(trials, budget_ns):
+def full_call_summary(trials, unparsed=()):
+    """The raw full-call criterion, independent of the functional verdict of each attempt.
+
+    An attempt the parser refused (sampler miss, contaminated evidence, timeout) still
+    contributes the duration it did record; only genuinely absent data counts as missing.
+    Overruns and the maximum span every observed measurement, parsed or salvaged.
+    """
+    measured = [trial['restore_call_ns'] for trial in trials if trial['restore_call_ns'] is not None]
+    salvaged = [nanoseconds for nanoseconds in unparsed if nanoseconds is not None]
+    observed = measured + salvaged
+    missing = (len(trials) - len(measured)) + (len(unparsed) - len(salvaged))
+    overruns = sum(full_call_verdict(nanoseconds) == 'failed' for nanoseconds in observed)
+    return {
+        'full_call_limit_ms': FULL_CALL_LIMIT_NS / 1e6,
+        'full_call_measured_trials': len(measured),
+        'full_call_missing_trials': len(trials) - len(measured),
+        'full_call_salvaged_measurements': len(salvaged),
+        'full_call_unmeasured_incomplete_attempts': len(unparsed) - len(salvaged),
+        'full_call_observed_measurements': len(observed),
+        'full_call_overrun_trials': overruns,
+        'full_call_max_ns': max(observed) if observed else None,
+        'full_call_max_ms': max(observed) / 1e6 if observed else None,
+        'full_call_criterion': 'passed' if observed and not missing and not overruns else 'not_qualified',
+    }
+
+
+def summarize(trials, budget_ns, unparsed=()):
     if not trials:
         raise ValueError('No trials completed')
-    keys = trials[0]['control_adjusted_phases'].keys()
+    # Mixed samples keep only the phases every trial recorded; nothing is imputed.
+    keys = [key for key in trials[0]['control_adjusted_phases']
+            if all(key in trial['control_adjusted_phases'] for trial in trials)]
     phases = {}
     for key in keys:
         values = [trial['control_adjusted_phases'][key] / 1e6 for trial in trials]
         phases[key] = {'min_ms': min(values), 'median_ms': statistics.median(values), 'max_ms': max(values)}
     upper = [trial['server_interval_upper_ns'] / 1e6 for trial in trials]
-    return {
+    report = dict(full_call_summary(trials, unparsed))
+    report.update({
         'budget_ms': budget_ns / 1e6,
         'completed_trials': len(trials),
         'functional_passed_trials': sum(trial['functional'] == 'passed' for trial in trials),
@@ -107,7 +181,8 @@ def summarize(trials, budget_ns):
         'server_upper_bound_ms': {'min': min(upper), 'median': statistics.median(upper), 'max': max(upper)},
         'control_adjusted_phases': phases,
         'trials': trials,
-    }
+    })
+    return report
 
 
 def campaign_plan(runs, matrix, sample_us):
@@ -141,8 +216,14 @@ def main():
     output.parent.mkdir(parents=True, exist_ok=True)
     trials, incomplete = [], []
     plan = campaign_plan(args.runs, args.matrix, args.sample_us)
+    def refuse(cell, reason, log_path):
+        # A refused attempt keeps whatever full call it did measure, for the raw criterion.
+        incomplete.append({'cell': cell, 'reason': reason, 'log': str(log_path),
+                           'restore_call_ns': salvaged_full_call(log_path)})
     def save():
-        report = summarize(trials, args.budget_ms * 1e6) if trials else {'completed_trials': 0}
+        unparsed = [entry['restore_call_ns'] for entry in incomplete]
+        report = (summarize(trials, args.budget_ms * 1e6, unparsed) if trials
+                  else dict(full_call_summary([], unparsed), completed_trials=0))
         report.update(build=build, plan=plan, planned_trials=len(plan), attempted_trials=len(trials)+len(incomplete),
                       incomplete=incomplete, protocol='diagnostic, not a statistical qualification')
         report['status'] = ('passed' if len(trials) == len(plan) and report['all_trials_qualify']
@@ -175,7 +256,7 @@ def main():
                     try:
                         result.wait(timeout=90)
                     except subprocess.TimeoutExpired:
-                        incomplete.append({'cell': cell, 'reason': 'runner exceeded 90 seconds', 'log': str(log_path)})
+                        refuse(cell, 'runner exceeded 90 seconds', log_path)
                         save()
                         return 2
                     finally:
@@ -197,15 +278,19 @@ def main():
                 if result.returncode != 0:
                     trial['qualifies'] = False
             except (ValueError, KeyError) as error:
-                incomplete.append({'cell': cell, 'reason': str(error), 'log': str(log_path)})
+                refuse(cell, str(error), log_path)
+                salvage = incomplete[-1]['restore_call_ns']
                 save()
-                print(f'INCOMPLETE {index + 1}: {error}; {log_path}', flush=True)
+                print(f'INCOMPLETE {index + 1}: {error}; {log_path}; full call '
+                      f"{salvage if salvage is not None else 'missing'} ns", flush=True)
                 return 2
             trials.append(trial)
             save()
             print(f'Trial {index + 1}/{len(plan)} {cell}: '
                   f"{trial['server_interval_lower_ns']/1e6:.3f}..{trial['server_interval_upper_ns']/1e6:.3f} ms; "
-                  f"budget {trial['budget']}; functional {trial['functional']}; "
+                  f"budget {trial['budget']}; full call {trial['full_call']} "
+                  f"({trial['restore_call_ns'] if trial['restore_call_ns'] is not None else 'missing'} ns); "
+                  f"functional {trial['functional']}; "
                   f"source {trial['activation_source']}", flush=True)
     report = save()
     print(json.dumps({key: value for key, value in report.items()

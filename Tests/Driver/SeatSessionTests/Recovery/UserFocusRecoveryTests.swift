@@ -477,6 +477,51 @@ struct UserFocusRecoveryTests {
         #expect(fixture.reports.last?.detail == "A prepared target window is outside the virtual display")
     }
 
+    @Test("the whole restoration call reaches the report on return and on throw, and stays absent otherwise",
+          arguments: 0..<3)
+    func fullRestoreCallPropagation(_ variant: Int) async throws {
+        let fixture = Harness()
+        fixture.request.restoreCallNanoseconds = 0
+        fixture.request.restoreCallControlNanoseconds = 7
+        if variant == 1 { fixture.restoreFailure = .inputPaused }
+        if variant == 2 { fixture.sensing.userMayBeSwitchingApplications = true }
+        fixture.recovery.beginHold()
+        try await fixture.recovery.prepareBeforeAction()
+        fixture.activateTarget()
+        // A granted request emits its next report once focus is verified.
+        if variant == 0 { fixture.returnUser() }
+        let timing = try #require(fixture.reports.last?.timing)
+        if variant == 2 {
+            #expect(fixture.requested.isEmpty)
+            #expect(timing.restoreCallNanoseconds == nil, "An uninvoked call has no duration")
+            #expect(timing.restoreCallControlNanoseconds == nil)
+        } else {
+            #expect(fixture.requested == [Self.user])
+            #expect(timing.restoreCallNanoseconds == 0, "A measured zero is not an absent measurement")
+            #expect(timing.restoreCallControlNanoseconds == 7)
+        }
+        #expect(timing.activationNanoseconds == 0)
+        fixture.recovery.stop()
+    }
+
+    @Test("a refused request reports no full-call duration from the previous one")
+    func fullRestoreCallIsNotReused() async throws {
+        let fixture = Harness()
+        fixture.request.restoreCallNanoseconds = 1_234
+        fixture.recovery.beginHold()
+        try await fixture.recovery.prepareBeforeAction()
+        fixture.activateTarget()
+        fixture.returnUser()
+        #expect(fixture.reports.last?.timing.restoreCallNanoseconds == 1_234)
+        fixture.sensing.userMayBeSwitchingApplications = true
+        try await fixture.recovery.prepareBeforeAction()
+        fixture.activateTarget()
+        #expect(fixture.requested.count == 1)
+        #expect(fixture.reports.last?.outcome == .waitingForUser)
+        #expect(fixture.reports.last?.timing.restoreCallNanoseconds == nil)
+        fixture.recovery.stop()
+    }
+
     @MainActor
     private final class Harness {
         let sensing = FakeSensing()
@@ -486,6 +531,8 @@ struct UserFocusRecoveryTests {
         var frontOverride: Bool?
         var identityUnavailable = false
         var requested: [WindowReference] = []
+        var restoreFailure: InputFailure?
+        var request = UserFocusRequestTiming()
         var reports: [UserFocusRecoveryReport] = []
         var time: UInt64 = 1_000_000_000
         lazy var recovery = UserFocusRecovery(sensing: sensing, gate: gate,
@@ -493,8 +540,10 @@ struct UserFocusRecoveryTests {
             restore: { [unowned self] window in
                 #expect(gate.isPaused, "The restoration call must never precede the input stop")
                 requested.append(window)
+                if let restoreFailure { throw restoreFailure }
                 return 0
             }, now: { [unowned self] in time },
+            requestTiming: { [unowned self] in request },
             prepareDestination: { [unowned self] destination, targets in
                 if identityUnavailable { throw InputFailure.inputPaused }
                 #expect(targets == self.targets)

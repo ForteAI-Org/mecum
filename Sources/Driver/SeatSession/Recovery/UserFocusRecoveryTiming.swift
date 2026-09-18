@@ -35,4 +35,13 @@ nonisolated public struct UserFocusRecoveryTiming: Sendable, Equatable, Codable 
     public internal(set) var firstKeyNanoseconds: UInt64 = 0
     public internal(set) var secondKeyNanoseconds: UInt64 = 0
     public internal(set) var requestFinishedNanoseconds: UInt64 = 0
+
+    /// Entry to exit of the whole focus restoration call, kept separate from the
+    /// front-process primitive and from verification. Absent when the call was
+    /// not invoked or not measured; a present zero is a measured duration.
+    /// It does not prove that focus actually moved or that the move was unseen.
+    public internal(set) var restoreCallNanoseconds: UInt64?
+
+    /// Declared instrumentation cost of one clock read inside the measured call.
+    public internal(set) var restoreCallControlNanoseconds: UInt64?
 }
