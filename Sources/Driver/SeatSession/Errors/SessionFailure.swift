@@ -96,4 +96,12 @@ nonisolated public enum SessionFailure: Error, Sendable, Equatable {
     /// the person did not ask for and cannot see the cause of. It arrives on
     /// the event stream too, as `SeatIssue.contextMenuLeftOpen`.
     case contextMenuNotClosed(menuWindowNumber: Int, processID: Int32)
+
+    /// The window is in native macOS fullscreen and this host was not
+    /// configured to transfer one. It is the default: the experiment is opt in,
+    /// and the ordinary path is left exactly as it was before MW-03.
+    ///
+    /// Not a degradation and not a retry: a caller that wants this behaviour
+    /// turns `transfersFullScreenWindows` on and reads what it costs.
+    case fullScreenTransferDisabled(windowNumber: Int)
 }

@@ -5,11 +5,13 @@
 //  Created by Eliomar Alejandro Rodriguez Ferrer on 08/09/2026.
 //
 
+import ApplicationServices
 import CoreGraphics
 import Dispatch
 import Foundation
 import SeatCore
 import SeatInput
+import VirtualScreens
 import WindowPlacement
 
 /// WindowPlacing is the seat's whole ability to move a window, behind a role
@@ -53,6 +55,60 @@ nonisolated public protocol WindowPlacing: Sendable {
         sourceDisplayBounds: CGRect,
         to origin          : CGPoint
     ) throws
+
+    // MARK: Native fullscreen, behind the seat's experiment
+
+    /// `AXFullScreen` and its writability, as three answers: unreadable,
+    /// readable but refused, readable and writable. An absent attribute is
+    /// never `false`.
+    func fullScreen(of window: WindowReference) throws -> WindowRelocator.FullScreenReading
+
+    /// Asks the window to enter or leave native fullscreen. It does not wait:
+    /// the write is accepted long before the transition happens, and the two
+    /// are separate facts.
+    func requestFullScreen(_ wanted: Bool, of window: WindowReference) throws
+
+    /// Waits for the observable end of the transition and answers with the
+    /// **re-read** reference, whose frame is the window's normal frame. No
+    /// fixed sleep is evidence, and a process that exited ends the wait instead
+    /// of consuming it.
+    func awaitFullScreen(_ wanted: Bool, of window: WindowReference) async throws -> WindowReference
+
+    /// True while the window's Space is the one on screen. Leaving fullscreen
+    /// then costs the person a Space change there and back.
+    func spaceIsOnScreen(for window: WindowReference) -> Bool
+}
+
+extension WindowPlacing {
+
+    /// A witness written before this ticket answers "not readable" rather than
+    /// "not fullscreen", which is the same distinction the attribute itself
+    /// forces. It keeps the seat's own tests compiling without teaching them a
+    /// fullscreen they do not exercise.
+    public nonisolated func fullScreen(
+        of window: WindowReference
+    ) throws -> WindowRelocator.FullScreenReading {
+        .unreadable(.attributeUnsupported)
+    }
+
+    public nonisolated func requestFullScreen(_ wanted: Bool, of window: WindowReference) throws {
+        throw DisplayFailure.fullScreenNotSettable(windowNumber: window.windowNumber)
+    }
+
+    public nonisolated func awaitFullScreen(
+        _ wanted: Bool,
+        of window: WindowReference
+    ) async throws -> WindowReference {
+        throw DisplayFailure.fullScreenTransitionNotObserved(
+            windowNumber: window.windowNumber,
+            wanted      : wanted,
+            lastFrame   : nil
+        )
+    }
+
+    /// Conservative on purpose: a witness that cannot see the Space says it is
+    /// still on screen, so the gate refuses instead of proceeding blind.
+    public nonisolated func spaceIsOnScreen(for window: WindowReference) -> Bool { true }
 }
 
 /// CommandSending is the seat's whole ability to post input, behind a role
@@ -220,6 +276,25 @@ nonisolated public struct SystemWindowPlacing: WindowPlacing {
             sourceDisplayBounds: sourceDisplayBounds,
             to                 : origin
         )
+    }
+
+    public func fullScreen(of window: WindowReference) throws -> WindowRelocator.FullScreenReading {
+        try WindowRelocator.fullScreen(of: window)
+    }
+
+    public func requestFullScreen(_ wanted: Bool, of window: WindowReference) throws {
+        try WindowRelocator.requestFullScreen(wanted, of: window)
+    }
+
+    public func awaitFullScreen(
+        _ wanted: Bool,
+        of window: WindowReference
+    ) async throws -> WindowReference {
+        try await WindowRelocator.awaitFullScreen(wanted, of: window)
+    }
+
+    public func spaceIsOnScreen(for window: WindowReference) -> Bool {
+        WindowRelocator.spaceIsOnScreen(for: window)
     }
 }
 

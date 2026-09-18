@@ -280,6 +280,18 @@ nonisolated struct AppWindowInventory {
         return true
     }
 
+    /// Offers a window again on the next pass, without spending anything.
+    ///
+    /// A candidate is reported once, when two readings first agree on it, and
+    /// never again while it stays where it is. That is right for a window the
+    /// seat decided about, and wrong for one it **postponed**: MW-03 leaves a
+    /// fullscreen window alone while its Space is the one on screen, and
+    /// without this the window would be dropped for good a moment before it
+    /// became movable.
+    mutating func offerAgain(_ windowNumber: Int) {
+        known[windowNumber]?.agreed = false
+    }
+
     /// Forgets what was spent on a window that is now under control, so a
     /// window that leaves the display again later starts from a full budget
     /// rather than from the attempts its first transfer cost.

@@ -36,11 +36,13 @@ HOST_REST_TESTS := 29
 # The Live tier: the probe page title contract, the input matrix with its six Commands on both families, the
 # target's layout, the two probe rows, the contextual menu on both families,
 # the multi window row with its two controlled windows, the two window watch
-# rows, the typing cost sweep and the two text delivery measurements. The last
-# three are reported and skipped unless AGENTSEAT_TYPING_SWEEP=1 or
-# AGENTSEAT_TEXT_DELIVERY=1 asks for them, and the third-party window watch row
-# unless AGENTSEAT_FOLLOW_APP names a running application.
-LIVE_TESTS := 23
+# rows, the two fullscreen transfer rows, the typing cost sweep and the two text
+# delivery measurements. The last three are reported and skipped unless
+# AGENTSEAT_TYPING_SWEEP=1 or AGENTSEAT_TEXT_DELIVERY=1 asks for them, the
+# third-party window watch row unless AGENTSEAT_FOLLOW_APP names a running
+# application, and the fullscreen rows unless AGENTSEAT_FULLSCREEN_PROBE=1 does:
+# they take a window in and out of fullscreen, which is the person's screen.
+LIVE_TESTS := 25
 
 # The measurements `make bench` gates on. Narrow it for a quick pass, for
 # example `make bench BENCH="fence-callback send-click"`; `seat-idle` alone

@@ -133,4 +133,32 @@ nonisolated public enum DisplayFailure: Error, Sendable, Equatable {
     /// The window was raised but never came back at full size inside the
     /// virtual display, confirmed twice. Stage Manager kept it stashed.
     case stageNotConfirmed(windowNumber: Int, lastFrame: CGRect?)
+
+    // MARK: Native fullscreen
+
+    /// `AXFullScreen` is not on this window at all, so its fullscreen state is
+    /// **not readable**. It is never read as `false`: measured on 26A428, the
+    /// Finder's desktop element answers `kAXErrorAttributeUnsupported` while
+    /// every ordinary window answers a Boolean.
+    case fullScreenStateUnreadable(windowNumber: Int, code: AXError)
+
+    /// `AXFullScreen` reads but does not accept a write on this window.
+    /// Measured per window and not per application: Resolve's Project Manager
+    /// and one System Settings window refuse it while their siblings accept it.
+    case fullScreenNotSettable(windowNumber: Int)
+
+    /// The write was accepted and the transition never became observable inside
+    /// the budget. Accepted and transitioned are two different events.
+    case fullScreenTransitionNotObserved(windowNumber: Int, wanted: Bool, lastFrame: CGRect?)
+
+    /// The window's Space was still on screen, so leaving fullscreen would have
+    /// taken the display there and animated it back. Measured at 437 ms with
+    /// Stage Manager off and 875 ms with it on, against 36 to 100 ms once the
+    /// Space has left.
+    case fullScreenSpaceStillOnScreen(windowNumber: Int)
+
+    /// The process that owns the window is gone. It is a **terminal** answer to
+    /// a wait and never a "not yet": a confirmation that keeps polling a window
+    /// whose application exited spends its whole budget saying nothing.
+    case windowOwnerVanished(windowNumber: Int, processID: Int32)
 }

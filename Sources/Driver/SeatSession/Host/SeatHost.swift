@@ -263,6 +263,9 @@ public final class SeatHost {
             defaultPlatform      : configuration.platform
         )
 
+        created.transfersFullScreenWindows  = configuration.transfersFullScreenWindows
+        created.restoresFullScreenOnRelease = configuration.restoresFullScreenOnRelease
+
         if configuration.followsNewWindows { created.enableWindowFollowing() }
 
         if configuration.restoresUserFocus {

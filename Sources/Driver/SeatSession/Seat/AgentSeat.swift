@@ -5,6 +5,7 @@
 //  Created by Eliomar Alejandro Rodriguez Ferrer on 08/09/2026.
 //
 
+import ApplicationServices
 import CoreGraphics
 import CursorGuard
 import Darwin
@@ -112,6 +113,12 @@ public final class AgentSeat {
     private var focusWatch: UserFocusWatch?
     private var focusRecoveryWasDegraded = false
     private var actionInFlight = false
+
+    /// MW-03's two experiments, both off unless the host was configured for
+    /// them. They are separate because the outward leg is free of focus and the
+    /// return leg is not: see `SeatHostConfiguration`.
+    package var transfersFullScreenWindows  = false
+    package var restoresFullScreenOnRelease = false
 
     private var windowWatch    : AppWindowWatch?
     private var windowInventory = AppWindowInventory()
@@ -487,12 +494,96 @@ public final class AgentSeat {
             && session[window.windowNumber] == nil
     }
 
+    /// MW-03: takes a window out of native fullscreen so that it can be moved
+    /// at all, and answers with the **re-read** reference and whether it was in
+    /// fullscreen to begin with.
+    ///
+    /// A window that is not in native fullscreen passes straight through. A
+    /// maximised window is not this case and is not touched: the two have the
+    /// identical rectangle, and only `AXFullScreen` tells them apart.
+    ///
+    /// Three refusals, all of them measured, all of them leaving the window
+    /// exactly where it is:
+    ///
+    /// - the experiment is off, which is the default;
+    /// - `AXFullScreen` is unreadable or read only, which is **not supported**
+    ///   rather than a retry, and varies per window inside one application;
+    /// - the window's Space is still the one on screen, where leaving costs the
+    ///   person 437 to 875 ms of their display instead of 36 to 100 ms.
+    ///
+    /// The frame that comes back is the accessibility body and not the window
+    /// server's rectangle. With Stage Manager on the server publishes a
+    /// thumbnail for a window it has stashed, and centring the Virtual Display
+    /// placement on a thumbnail's size is how a window ends up hanging off the
+    /// edge; the body answers the real normal frame in both Stage Manager
+    /// states.
+    private func leaveFullScreenForAdoption(
+        _ window: WindowReference
+    ) async throws -> (window: WindowReference, wasFullScreen: Bool) {
+
+        guard let reading = try? placing.fullScreen(of: window), reading.isNativeFullScreen else {
+            return (window, false)
+        }
+        guard transfersFullScreenWindows else {
+            throw SessionFailure.fullScreenTransferDisabled(windowNumber: window.windowNumber)
+        }
+        guard case .writable = reading else {
+            throw reading.value == nil
+                ? DisplayFailure.fullScreenStateUnreadable(
+                    windowNumber: window.windowNumber, code: .attributeUnsupported)
+                : DisplayFailure.fullScreenNotSettable(windowNumber: window.windowNumber)
+        }
+        guard !placing.spaceIsOnScreen(for: window) else {
+            throw DisplayFailure.fullScreenSpaceStillOnScreen(windowNumber: window.windowNumber)
+        }
+
+        try placing.requestFullScreen(false, of: window)
+        do {
+            let settled = try await placing.awaitFullScreen(false, of: window)
+            let body    = try? placing.frame(of: settled)
+            return (body.map { settled.replacingFrame($0) } ?? settled, true)
+        } catch {
+            // The known hole, said out loud rather than papered over: the write
+            // was accepted, so the window can leave fullscreen a moment after
+            // this wait gave up or was cancelled, and there is no record yet to
+            // hang that on. Everything after this point is inside the
+            // transaction, where the handle carries `wasFullScreen`.
+            let left = (try? placing.fullScreen(of: window))?.value == false
+            Self.log.error("""
+                window \(window.windowNumber, privacy: .public) was asked to leave fullscreen and \
+                the transition was not observed: \(String(describing: error), privacy: .public). \
+                It is out of fullscreen now: \(left, privacy: .public)
+                """)
+            throw error
+        }
+    }
+
+    /// Which display a rectangle belongs to, so that a return names a display
+    /// instead of inferring one. `nil` when no display contains its centre,
+    /// which a window parked off the edge legitimately is.
+    private func displayContaining(_ frame: CGRect) -> CGDirectDisplayID? {
+        let centre = CGPoint(x: frame.midX, y: frame.midY)
+        var count  = UInt32.zero
+        guard CGGetOnlineDisplayList(0, nil, &count) == .success, count > 0 else { return nil }
+        var identifiers = [CGDirectDisplayID](repeating: 0, count: Int(count))
+        guard CGGetOnlineDisplayList(count, &identifiers, &count) == .success else { return nil }
+        return identifiers.prefix(Int(count)).first { CGDisplayBounds($0).contains(centre) }
+    }
+
     private func adoptionTransaction(
-        _ window: WindowReference,
-        platform: any InputPlatform,
-        title   : String,
-        reason  : SeatTargetChange
+        _ inbound: WindowReference,
+        platform : any InputPlatform,
+        title    : String,
+        reason   : SeatTargetChange
     ) async throws -> AdoptedWindow {
+
+        // The fullscreen exit happens before anything is recorded, because the
+        // normal frame this whole transaction is written in terms of does not
+        // exist until the window has left fullscreen.
+        let prepared      = try await leaveFullScreenForAdoption(inbound)
+        let window        = prepared.window
+        let wasFullScreen = prepared.wasFullScreen
+        let homeDisplay   = displayContaining(window.frame)
 
         lastAdoptionFailure = nil
         adoptionInFlight = true
@@ -519,7 +610,13 @@ public final class AgentSeat {
                    max(bounds.minY, bounds.maxY - window.frame.height))
         )
 
-        let pending = AdoptedWindow(reference: window, originalFrame: window.frame, title: title)
+        let pending = AdoptedWindow(
+            reference        : window,
+            originalFrame    : window.frame,
+            title            : title,
+            originalDisplayID: homeDisplay,
+            wasFullScreen    : wasFullScreen
+        )
         pendingAdoptions[window.windowNumber] = pending
         adoptionRestorations[window.windowNumber] = nil
         do {
@@ -529,9 +626,11 @@ public final class AgentSeat {
             let placed = try await confirmPlacement(of: window, expectedOrigin: origin, within: bounds)
             let record = WindowRecord(
                 window  : AdoptedWindow(
-                    reference    : placed,
-                    originalFrame: window.frame,
-                    title        : title
+                    reference        : placed,
+                    originalFrame    : window.frame,
+                    title            : title,
+                    originalDisplayID: homeDisplay,
+                    wasFullScreen    : wasFullScreen
                 ),
                 platform: platform,
                 // Staged or stashed is read off the size: a window Stage Manager
@@ -626,9 +725,11 @@ public final class AgentSeat {
 
         current.isStaged = true
         current.window   = AdoptedWindow(
-            reference    : staged,
-            originalFrame: current.window.originalFrame,
-            title        : current.window.title
+            reference        : staged,
+            originalFrame    : current.window.originalFrame,
+            title            : current.window.title,
+            originalDisplayID: current.window.originalDisplayID,
+            wasFullScreen    : current.window.wasFullScreen
         )
         session[window.id] = current
         stagedWindowNumber = window.id
@@ -664,7 +765,15 @@ public final class AgentSeat {
 
         if stagedWindowNumber == window.id { stagedWindowNumber = nil }
 
+        // The return is a placement transition like the adoption, and the
+        // watcher has to know: a window on its way home passes through frames
+        // that are neither the virtual one nor the home one, and the follow
+        // pass would read them as an escape and start pulling it back while
+        // this is still writing. The pause ends when this transfer ends, and
+        // the gate stays closed until every other pending reason ends too.
+        beginTransfer()
         let outcome = await returnToUserSeat(window, mode)
+        endTransfer()
         let successor = session.forget(window.id)
         refreshWindowFollowing()
         eventChannel.yield(.windowReleased(windowNumber: window.id, outcome: outcome))
@@ -784,9 +893,11 @@ public final class AgentSeat {
         }
 
         session[windowNumber]?.window = AdoptedWindow(
-            reference    : reading,
-            originalFrame: confirmed.window.originalFrame,
-            title        : confirmed.window.title
+            reference        : reading,
+            originalFrame    : confirmed.window.originalFrame,
+            title            : confirmed.window.title,
+            originalDisplayID: confirmed.window.originalDisplayID,
+            wasFullScreen    : confirmed.window.wasFullScreen
         )
         session.makeCurrent(windowNumber)
         seatGuard = SeatGuard(
@@ -1753,6 +1864,39 @@ public final class AgentSeat {
               fresh.hasSameIdentity(as: candidate)
         else { return }
 
+        // MW-03's three answers, decided before an attempt is spent, because
+        // two of them are permanent facts about the window and the third is
+        // about the moment.
+        //
+        // `fullScreenSpaceStillOnScreen` is silent and costs nothing: it is a
+        // "come back later", the next pass is the retry, and a window the
+        // person is looking at right now will be transferable the moment they
+        // look away. Spending attempts on it would exhaust the budget in three
+        // passes and refuse the window for good, a third of a second before it
+        // became movable.
+        //
+        // The read itself is behind the experiment, and that is a cost
+        // decision: it is an accessibility round trip per candidate per pass,
+        // and a seat that was not asked to handle fullscreen should not pay it
+        // once a second. With the experiment off the ordinary path still names
+        // the case, from inside the one attempt it makes.
+        if transfersFullScreenWindows,
+           let reading = try? placing.fullScreen(of: fresh), reading.isNativeFullScreen {
+            guard case .writable = reading else {
+                refuseTransfer(fresh, .fullScreenNotSupported)
+                _ = windowInventory.mayAttempt(candidate.windowNumber)
+                return
+            }
+            // Postponed, not refused, and therefore silent: this is a fact
+            // about the moment and not about the window, and the next pass is
+            // the retry. It is the one answer here that publishes no event, so
+            // the reason a window is waiting is thinner than the others.
+            guard !placing.spaceIsOnScreen(for: fresh) else {
+                windowInventory.offerAgain(candidate.windowNumber)
+                return
+            }
+        }
+
         guard windowInventory.mayAttempt(candidate.windowNumber) else {
             refuseTransfer(fresh, .attemptsExhausted)
             return
@@ -1781,11 +1925,30 @@ public final class AgentSeat {
                 platform: defaultPlatform
             )
         } catch {
-            refuseTransfer(fresh, .moveRefused)
+            refuseTransfer(fresh, Self.refusal(for: error))
             Self.log.error("""
                 window \(fresh.windowNumber, privacy: .public) was detected and not transferred: \
                 \(String(describing: error), privacy: .public)
                 """)
+        }
+    }
+
+    /// Why a detected window stayed where it is, keeping the fullscreen answers
+    /// apart from a refused move. They are different facts for the person
+    /// reading the event stream: one is a window this seat was not asked to
+    /// handle, one is a window macOS will not let go of, one is a moment that
+    /// costs too much, and only the last is an attempt that failed.
+    private static func refusal(for error: any Error) -> WindowTransferRefusal {
+        if case .fullScreenTransferDisabled = error as? SessionFailure {
+            return .fullScreenTransferDisabled
+        }
+        switch error as? DisplayFailure {
+            case .fullScreenStateUnreadable, .fullScreenNotSettable:
+                return .fullScreenNotSupported
+            case .fullScreenSpaceStillOnScreen:
+                return .fullScreenSpaceStillOnScreen
+            default:
+                return .moveRefused
         }
     }
 
@@ -2142,7 +2305,9 @@ public final class AgentSeat {
                 let matches: Bool
                 do { matches = try originalFrameMatches(window, server: reading) }
                 catch { writeError = error; return (.refused, writeError) }
-                if matches, previousMatched { return (.returned, writeError) }
+                if matches, previousMatched {
+                    return (await finishReturn(of: window), writeError)
+                }
                 previousMatched = matches
                 if !matches, !requested {
                     requested = true
@@ -2190,6 +2355,23 @@ public final class AgentSeat {
             return .vanished
         }
 
+        // Whatever fullscreen the window is in now has to come off before
+        // anything can be written: `AXPosition` measured `settable false` and
+        // `kAXErrorFailure` on a window in native fullscreen, so a move
+        // attempted first fails and tells the caller the wrong thing.
+        if (try? placing.fullScreen(of: window.reference))?.isNativeFullScreen == true,
+           transfersFullScreenWindows {
+            do {
+                try placing.requestFullScreen(false, of: window.reference)
+                _ = try await placing.awaitFullScreen(false, of: window.reference)
+            } catch {
+                Self.log.error("""
+                    window \(window.id, privacy: .public) could not be taken out of fullscreen                     for its return: \(String(describing: error), privacy: .public)
+                    """)
+                return .refused
+            }
+        }
+
         let bounds = sensing.virtualDisplayBounds
 
         var previousMatched = false
@@ -2222,12 +2404,48 @@ public final class AgentSeat {
 
             do {
                 let matches = try originalFrameMatches(window, server: reading)
-                if matches && previousMatched { return .returned }
+                if matches && previousMatched { return await finishReturn(of: window) }
                 previousMatched = matches
             } catch { return .refused }
         }
 
         return .refused
+    }
+
+    /// The last step of a return, and deliberately the smallest one.
+    ///
+    /// **Fullscreen is not restored unless the host asked for it.** Measured on
+    /// every run and in both Stage Manager states: re-entering native
+    /// fullscreen takes the frontmost application every time and costs 538 to
+    /// 792 ms of Space animation. Doing it by default would end a turn by
+    /// taking the person's seat, which is the one thing this kit exists not to
+    /// do. With the switch off the window comes back out of fullscreen, at its
+    /// normal frame, on the display it came from, and stops there.
+    ///
+    /// **The window is not raised either.** `stage` is not inherited here for
+    /// symmetry with the adoption, and the reason is the same measurement read
+    /// the other way round: `kAXRaiseAction` with Stage Manager on stashes
+    /// whatever was on stage, so raising a returning window would put the
+    /// person's current window away, and with Stage Manager off it would jump
+    /// the returning window over the windows they are looking at. Measured, the
+    /// window comes back at full size on its own display in both states and
+    /// sits behind the person's front window, at front to back index 1 to 3 of
+    /// 15. Being findable is the seat's business; being on top is the person's.
+    private func finishReturn(of window: AdoptedWindow) async -> WindowReleaseOutcome {
+
+        guard window.wasFullScreen, restoresFullScreenOnRelease else { return .returned }
+        do {
+            try placing.requestFullScreen(true, of: window.reference)
+            _ = try await placing.awaitFullScreen(true, of: window.reference)
+        } catch {
+            // The window is home and usable; only the fullscreen state it was
+            // found in is missing. That is reported, not turned into a refusal
+            // of a return that did happen.
+            Self.log.error("""
+                window \(window.id, privacy: .public) returned but did not go back into                 fullscreen: \(String(describing: error), privacy: .public)
+                """)
+        }
+        return .returned
     }
 
     // MARK: Issues, transitions, recovery

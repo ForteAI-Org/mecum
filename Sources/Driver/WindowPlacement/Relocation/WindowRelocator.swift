@@ -110,6 +110,12 @@ nonisolated public enum WindowRelocator {
                 && bounds.contains(reading.frame)
                 && sizesMatch(reading.frame.size, expectedSize)
         }
+        if processIsGone(window.processID) {
+            throw DisplayFailure.windowOwnerVanished(
+                windowNumber: window.windowNumber,
+                processID   : window.processID
+            )
+        }
         guard let confirmed else {
             throw DisplayFailure.stageNotConfirmed(
                 windowNumber: window.windowNumber,
@@ -166,6 +172,157 @@ nonisolated public enum WindowRelocator {
         log.debug("recovered window \(window.windowNumber, privacy: .public) structurally")
     }
 
+    // MARK: Native fullscreen
+
+    /// What `AXFullScreen` says about a window, as three answers and not two.
+    ///
+    /// The ticket asks for this distinction by name and the measurement earned
+    /// it: an absent attribute means the state is **not readable**, never
+    /// `false`, and `AXUIElementIsAttributeSettable` on an unsupported
+    /// attribute returns success with `false`, so the settable check alone
+    /// cannot tell "read only" from "not there". Both calls are read together
+    /// here so that no caller has to remember.
+    nonisolated public enum FullScreenReading: Sendable, Equatable {
+
+        /// `AXFullScreen` is not on this window. The state is unknown.
+        case unreadable(AXError)
+
+        /// Readable, and the window refuses to be written. Measured per window:
+        /// Resolve's Project Manager refuses while its main window accepts.
+        case readOnly(Bool)
+
+        /// Readable and writable.
+        case writable(Bool)
+
+        /// The fullscreen state when it is known, `nil` when it is not.
+        public var value: Bool? {
+            switch self {
+                case .unreadable          : nil
+                case .readOnly(let value) : value
+                case .writable(let value) : value
+            }
+        }
+
+        public var isNativeFullScreen: Bool { value == true }
+    }
+
+    /// Reads `AXFullScreen` and its writability in one pass.
+    public static func fullScreen(of window: WindowReference) throws -> FullScreenReading {
+        let element = try windowElement(for: window)
+        var raw: CFTypeRef?
+        let read = AXUIElementCopyAttributeValue(element, fullScreenAttribute as CFString, &raw)
+        guard read == .success, let number = raw as? NSNumber else { return .unreadable(read) }
+
+        var isSettable = DarwinBoolean(false)
+        let settable = AXUIElementIsAttributeSettable(element, fullScreenAttribute as CFString, &isSettable)
+        return settable == .success && isSettable.boolValue
+            ? .writable(number.boolValue)
+            : .readOnly(number.boolValue)
+    }
+
+    /// Asks the window to enter or leave native fullscreen. It **does not
+    /// wait**: measured on 26A428 the write returns in 10 to 98 ms and returns
+    /// before anything happens, while the transition becomes observable 128 to
+    /// 234 ms later in the background and 912 ms later when the window is the
+    /// active one. Accepted and transitioned are two events and the caller
+    /// confirms the second with `awaitFullScreen`.
+    ///
+    /// A window whose state is unreadable, or readable but not writable, is
+    /// refused with its own case and left exactly where it is.
+    public static func requestFullScreen(_ wanted: Bool, of window: WindowReference) throws {
+        switch try fullScreen(of: window) {
+            case .unreadable(let code):
+                throw DisplayFailure.fullScreenStateUnreadable(
+                    windowNumber: window.windowNumber,
+                    code        : code
+                )
+            case .readOnly:
+                throw DisplayFailure.fullScreenNotSettable(windowNumber: window.windowNumber)
+            case .writable(let current) where current == wanted:
+                return
+            case .writable:
+                break
+        }
+        let element = try windowElement(for: window)
+        let result  = AXUIElementSetAttributeValue(element, fullScreenAttribute as CFString, wanted as CFBoolean)
+        guard result == .success else {
+            throw DisplayFailure.attributeWriteFailed(attribute: "AXFullScreen", code: result)
+        }
+        log.debug("requested fullscreen \(wanted, privacy: .public) on window \(window.windowNumber, privacy: .public)")
+    }
+
+    /// Waits for the **observable** end of a fullscreen transition: the
+    /// attribute reads what was asked for and the window server hands back the
+    /// same rectangle twice running. No fixed sleep is ever evidence here.
+    ///
+    /// The reference that comes back is re-read, never carried across the
+    /// transition, and the frame on it is the window's normal frame, which is
+    /// the one a return has to use. Measured: a window whose pre-fullscreen
+    /// frame was off the display does not get it back, so remembering the frame
+    /// from before would restore a rectangle macOS has already overruled.
+    @discardableResult
+    public static func awaitFullScreen(
+        _ wanted: Bool,
+        of window: WindowReference,
+        timeout  : TimeInterval = 5,
+        interval : Duration     = .milliseconds(20)
+    ) async throws -> WindowReference {
+
+        let deadline = Date().addingTimeInterval(timeout)
+        var previous : WindowReference?
+
+        repeat {
+            if processIsGone(window.processID) {
+                throw DisplayFailure.windowOwnerVanished(
+                    windowNumber: window.windowNumber,
+                    processID   : window.processID
+                )
+            }
+            let state = try? fullScreen(of: window)
+            if state?.value == wanted, let reading = WindowServerProbe.geometry(of: window.windowNumber),
+               reading.hasSameIdentity(as: window) {
+                if let previous,
+                   VirtualWindowPlacementCheck.framesMatch(previous.frame, reading.frame) {
+                    return reading
+                }
+                previous = reading
+            } else {
+                previous = nil
+            }
+            do { try await Task.sleep(for: interval) } catch { break }
+        } while Date() < deadline
+
+        throw DisplayFailure.fullScreenTransitionNotObserved(
+            windowNumber: window.windowNumber,
+            wanted      : wanted,
+            lastFrame   : WindowServerProbe.geometry(of: window.windowNumber)?.frame
+        )
+    }
+
+    /// True while the window's Space is the one on screen. Leaving fullscreen
+    /// then takes the display to that Space and animates it back, which is
+    /// 437 ms of the person's screen with Stage Manager off and 875 ms with it
+    /// on, against 36 to 100 ms once the Space has gone.
+    ///
+    /// It reads the window server and never the frontmost application: the
+    /// person can be in front of an application whose windows are off the
+    /// display, in which case the Space never left and the frontmost PID says
+    /// the opposite.
+    public static func spaceIsOnScreen(for window: WindowReference) -> Bool {
+        WindowServerProbe.isOnTheActiveSpace(windowNumber: window.windowNumber)
+    }
+
+    /// A `String` and not a `CFString`: the latter is not `Sendable`, and a
+    /// static of it is a shared mutable global the compiler is right about.
+    private static let fullScreenAttribute = "AXFullScreen"
+
+    /// The one terminal condition a wait may take from outside itself. A
+    /// missing window server reading is not a destruction, and the kit says so
+    /// everywhere; a process that is gone is.
+    private static func processIsGone(_ processID: Int32) -> Bool {
+        NSRunningApplication(processIdentifier: processID).map(\.isTerminated) ?? true
+    }
+
     // MARK: The Window ID behind an element
 
     /// `_AXUIElementGetWindow`: the Window ID of an accessibility window
@@ -198,14 +355,40 @@ nonisolated public enum WindowRelocator {
 
     // MARK: Resolution and writing
 
+    /// The accessibility element behind a Window ID, through `AXWindows` first
+    /// and through the application's focused and main window after it.
+    ///
+    /// The fallback is not a convenience. Measured on 26A428: a window in
+    /// native fullscreen leaves the application's `AXWindows` list 330 ms
+    /// (Stage Manager off) to 513 ms (on) after the focus moves elsewhere, at
+    /// the moment its Space stops being the one on screen, and `AXWindows` then
+    /// answers **success with an empty array**. Without these two extra routes
+    /// the relocator cannot resolve, and therefore cannot read or write, the
+    /// exact window this ticket is about.
+    ///
+    /// Identity is re-established on every route with `_AXUIElementGetWindow`
+    /// against the Window ID that was asked for. "The application's focused
+    /// window" is never accepted as "the window the caller means".
+    ///
+    /// The limit is stated rather than papered over: a window that is neither
+    /// focused nor main and is not in `AXWindows` is not reachable by any
+    /// public route, and this throws for it.
     private static func windowElement(for window: WindowReference) throws -> AXUIElement {
         let windows = try windowElements(ofProcess: window.processID)
-        guard let element = windows.first(where: {
-            windowNumber(of: $0) == window.windowNumber
-        }) else {
-            throw DisplayFailure.windowElementUnavailable(windowNumber: window.windowNumber)
+        if let listed = windows.first(where: { windowNumber(of: $0) == window.windowNumber }) {
+            return listed
         }
-        return element
+        let application = AXUIElementCreateApplication(window.processID)
+        for attribute in [kAXFocusedWindowAttribute, kAXMainWindowAttribute] {
+            var value: CFTypeRef?
+            guard AXUIElementCopyAttributeValue(
+                application, attribute as CFString, &value
+            ) == .success, let value, CFGetTypeID(value) == AXUIElementGetTypeID() else { continue }
+
+            let candidate = unsafeDowncast(value, to: AXUIElement.self)
+            if windowNumber(of: candidate) == window.windowNumber { return candidate }
+        }
+        throw DisplayFailure.windowElementUnavailable(windowNumber: window.windowNumber)
     }
 
     private static func windowElements(ofProcess processID: Int32) throws -> [AXUIElement] {
@@ -228,7 +411,11 @@ nonisolated public enum WindowRelocator {
             kAXWindowsAttribute as CFString,
             &value
         )
-        guard error == .success, let windows = value as? [AXUIElement], !windows.isEmpty else {
+        // An empty list is returned and not thrown on. `AXWindows` answers
+        // success with no windows at all while the only window of the process
+        // sits in a fullscreen Space that is not on screen, and the caller has
+        // two further routes to try before anything is unavailable.
+        guard error == .success, let windows = value as? [AXUIElement] else {
             throw DisplayFailure.windowElementUnavailable(windowNumber: 0)
         }
         return windows
@@ -329,6 +516,11 @@ nonisolated public enum WindowRelocator {
         var previous : WindowReference?
 
         repeat {
+            // A process that exited is terminal. Measured: with the target
+            // killed mid transition the loop went on polling a Window ID the
+            // server had already forgotten and burned its whole budget to say
+            // nothing. One missing reading still is not a destruction.
+            if processIsGone(window.processID) { return nil }
             if let reading = WindowServerProbe.geometry(of: window.windowNumber),
                reading.hasSameIdentity(as: window),
                isSettled(reading) {

@@ -97,27 +97,47 @@ struct MultiWindowTests {
     /// identity: two windows at one frame would hide a guard that compared the
     /// wrong record.
     static func reference(_ windowNumber: Int) -> WindowReference {
+        Self.reference(windowNumber, processID: FakeGeometry.targetPID)
+    }
+
+    static func reference(_ windowNumber: Int, processID: Int32) -> WindowReference {
         let offset = CGFloat(windowNumber - FakeGeometry.windowNumber) * 60
         return FakeGeometry.reference(
             frame       : FakeGeometry.adoptedWindow.frame.offsetBy(dx: offset, dy: offset),
+            processID   : processID,
             windowNumber: windowNumber
         )
     }
 
     /// A seat holding the requested extra windows on top of the first one, each
     /// readable at full size, in adoption order.
+    /// `processID` is how a row that touches `KeyHold` gets a process nobody
+    /// else is pressing keys on. The default keeps every other row exactly as
+    /// it was.
     static func seat(
-        sensing: FakeSensing = FakeSensing(),
-        placing: FakePlacing = FakePlacing(),
-        sender : FakeSender  = FakeSender(),
-        marker : Int64       = 555,
-        also   : [Int]       = []
+        sensing  : FakeSensing = FakeSensing(),
+        placing  : FakePlacing = FakePlacing(),
+        sender   : FakeSender  = FakeSender(),
+        marker   : Int64       = 555,
+        also     : [Int]       = [],
+        processID: Int32       = FakeGeometry.targetPID
     ) async throws -> (seat: AgentSeat, windows: [AdoptedWindow]) {
 
+        sensing.targetPID = processID
+        sensing.geometry  = FakeGeometry.reference(
+            frame    : FakeGeometry.adoptedWindow.frame,
+            processID: processID
+        )
         let seat  = makeSeat(sensing: sensing, placing: placing, sender: sender, marker: marker)
-        var built = [try await seat.adopt(FakeGeometry.userSeatWindow, platform: AppKitPlatform())]
+        var built = [try await seat.adopt(
+            FakeGeometry.reference(
+                frame    : FakeGeometry.userSeatWindow.frame,
+                processID: processID
+            ),
+            platform: AppKitPlatform()
+        )]
         for windowNumber in also {
-            let reference = Self.reference(windowNumber)
+            let reference = Self.reference(windowNumber, processID: processID)
             sensing.additionalWindows[windowNumber] = reference
             built.append(try await seat.adopt(reference, platform: AppKitPlatform()))
         }
@@ -307,9 +327,10 @@ struct MultiWindowTests {
     func transferRefusedWhileKeysAreHeld() async throws {
         let placing = FakePlacing()
         let (seat, windows) = try await Self.seat(
-            placing: placing,
-            marker : 9_101,
-            also   : [Self.secondWindowNumber]
+            placing  : placing,
+            marker   : 9_101,
+            also     : [Self.secondWindowNumber],
+            processID: FakeGeometry.distinctProcessID()
         )
         _ = try await seat.switchTarget(to: windows[0])
 

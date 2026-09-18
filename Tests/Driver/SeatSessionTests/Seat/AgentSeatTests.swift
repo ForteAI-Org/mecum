@@ -25,14 +25,29 @@ struct AgentSeatTests {
 
     /// A seat with a window already adopted, which is the starting point of
     /// everything about acting. Adoption itself is tested separately.
+    /// `processID` is how a row that touches `KeyHold` gets a process nobody
+    /// else is pressing keys on. The default keeps every other row exactly as
+    /// it was.
     static func adopted(
-        sensing: FakeSensing = FakeSensing(),
-        placing: FakePlacing = FakePlacing(),
-        sender : FakeSender  = FakeSender()
+        sensing  : FakeSensing = FakeSensing(),
+        placing  : FakePlacing = FakePlacing(),
+        sender   : FakeSender  = FakeSender(),
+        processID: Int32       = FakeGeometry.targetPID
     ) async throws -> (seat: AgentSeat, window: AdoptedWindow) {
 
+        sensing.targetPID = processID
+        sensing.geometry  = FakeGeometry.reference(
+            frame    : FakeGeometry.adoptedWindow.frame,
+            processID: processID
+        )
         let seat   = makeSeat(sensing: sensing, placing: placing, sender: sender)
-        let window = try await seat.adopt(FakeGeometry.userSeatWindow, platform: AppKitPlatform())
+        let window = try await seat.adopt(
+            FakeGeometry.reference(
+                frame    : FakeGeometry.userSeatWindow.frame,
+                processID: processID
+            ),
+            platform: AppKitPlatform()
+        )
         return (seat, window)
     }
 
@@ -59,7 +74,9 @@ struct AgentSeatTests {
 
     @Test("a Turn that is still holding a key cannot be given back")
     func releaseRefusesWhileKeysAreHeld() async throws {
-        let (seat, window) = try await Self.adopted()
+        let (seat, window) = try await Self.adopted(
+            processID: FakeGeometry.distinctProcessID()
+        )
         let turn = try await seat.acquire()
         let processID = window.reference.processID
         defer { _ = KeyHold.shared.releaseAll(owner: turn.correlationID, processID: processID) }
@@ -80,7 +97,9 @@ struct AgentSeatTests {
 
     @Test("the Turn comes back once what it pressed has been released")
     func releaseSucceedsAfterTheKeysAreUp() async throws {
-        let (seat, window) = try await Self.adopted()
+        let (seat, window) = try await Self.adopted(
+            processID: FakeGeometry.distinctProcessID()
+        )
         let turn = try await seat.acquire()
         let processID = window.reference.processID
 
@@ -100,7 +119,9 @@ struct AgentSeatTests {
 
     @Test("another Turn's keys do not keep this one from being given back")
     func releaseIgnoresAnotherHoldersKeys() async throws {
-        let (seat, window) = try await Self.adopted()
+        let (seat, window) = try await Self.adopted(
+            processID: FakeGeometry.distinctProcessID()
+        )
         let turn = try await seat.acquire()
         let processID = window.reference.processID
         let stranger: Int64 = -991
@@ -119,7 +140,9 @@ struct AgentSeatTests {
 
     @Test("a seat going terminal with keys still down says so and forgets them")
     func terminalSeatReportsStrandedKeys() async throws {
-        let (seat, window) = try await Self.adopted()
+        let (seat, window) = try await Self.adopted(
+            processID: FakeGeometry.distinctProcessID()
+        )
         let turn = try await seat.acquire()
         let processID = window.reference.processID
 
@@ -152,7 +175,9 @@ struct AgentSeatTests {
 
     @Test("a seat going terminal with nothing held stays quiet about keys")
     func terminalSeatWithNoKeysIsQuiet() async throws {
-        let (seat, _) = try await Self.adopted()
+        let (seat, _) = try await Self.adopted(
+            processID: FakeGeometry.distinctProcessID()
+        )
 
         var issues: [SeatIssue] = []
         let listening = Task { @MainActor in

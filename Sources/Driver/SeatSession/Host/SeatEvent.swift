@@ -80,6 +80,23 @@ nonisolated public enum WindowTransferRefusal: String, Sendable, Equatable {
     /// application that disagrees, and this is where the disagreement stops
     /// instead of becoming a loop.
     case attemptsExhausted
+
+    /// The window is in native fullscreen and the seat was not asked to handle
+    /// that. The experiment is off by default and this is what the ordinary
+    /// path answers, instead of writing `AXPosition` on a window that measured
+    /// `settable false` and `kAXErrorFailure` for it.
+    case fullScreenTransferDisabled
+
+    /// The window is in native fullscreen and cannot leave it: `AXFullScreen`
+    /// is either not readable at all or readable and refused. Measured per
+    /// window, not per application. The window is left exactly where it is,
+    /// and this is a **not supported** answer rather than a retry.
+    case fullScreenNotSupported
+
+    /// The window is in native fullscreen and its Space is still the one on
+    /// screen. Leaving now would take the person's display to that Space and
+    /// animate it back. The next pass finds the same window.
+    case fullScreenSpaceStillOnScreen
 }
 
 /// WindowReleaseOutcome is what happened to an Adopted Window when the seat let

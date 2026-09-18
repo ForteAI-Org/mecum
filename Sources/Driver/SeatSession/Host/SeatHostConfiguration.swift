@@ -110,6 +110,43 @@ nonisolated public struct SeatHostConfiguration: Sendable {
     /// Per-facility research opt-in; never bypasses symbol or permission checks.
     public let allowUnvalidatedFocusRecovery: Bool
 
+    /// **Experimental, off by default.** Take a window that is in native macOS
+    /// fullscreen: leave fullscreen, wait for the observable end of the
+    /// transition, then move it onto the Virtual Display like any other window.
+    ///
+    /// What it costs, measured on 26A428 and written here because a flag whose
+    /// price is in a report nobody reads is a flag that surprises somebody:
+    ///
+    /// - The exit needs **no added activation** and takes no focus. The
+    ///   frontmost application never changed across it in any run, with Stage
+    ///   Manager on or off.
+    /// - It costs 36 to 100 ms of visible change **once the window's Space has
+    ///   left the screen**, and 437 ms (Stage Manager off) to 875 ms (on) of
+    ///   the display going to that Space and animating back if it has not. The
+    ///   seat refuses rather than pay the second price, and the next pass finds
+    ///   the same window.
+    /// - A window whose `AXFullScreen` is unreadable or read only is **not
+    ///   supported**: it is refused by name and left where it is.
+    ///
+    /// It changes nothing for a window that is not in native fullscreen. With
+    /// it off, such a window is refused with `fullScreenTransferDisabled` and
+    /// the ordinary path is exactly what it was before MW-03.
+    public let transfersFullScreenWindows: Bool
+
+    /// **Experimental, off by default, and separate on purpose.** Put the
+    /// window back into native fullscreen when the seat releases it, if that is
+    /// the state it was found in.
+    ///
+    /// It is its own switch because it is not the mirror image of the exit:
+    /// **re-entering fullscreen takes the focus every single time**, measured
+    /// on every run and in both Stage Manager states, and costs 538 to 792 ms
+    /// of Space animation. The exit is free of both.
+    ///
+    /// With it off — the default — a release leaves fullscreen, returns the
+    /// window to its original display at its normal frame, and stops there.
+    /// The window comes back usable and the person's seat is untouched.
+    public let restoresFullScreenOnRelease: Bool
+
     /// Package-only A/B experiment. Production recovery remains activation-only.
     package var focusRecoveryUsesKeyRecords = false
 
@@ -121,7 +158,9 @@ nonisolated public struct SeatHostConfiguration: Sendable {
         eventLoopPump: (@MainActor (Duration) -> Void)? = nil,
         followsNewWindows: Bool = false,
         restoresUserFocus: Bool = false,
-        allowUnvalidatedFocusRecovery: Bool = false
+        allowUnvalidatedFocusRecovery: Bool = false,
+        transfersFullScreenWindows: Bool = false,
+        restoresFullScreenOnRelease: Bool = false
     ) {
         self.display       = display
         self.monitor       = monitor
@@ -131,6 +170,8 @@ nonisolated public struct SeatHostConfiguration: Sendable {
         self.followsNewWindows = followsNewWindows
         self.restoresUserFocus = restoresUserFocus
         self.allowUnvalidatedFocusRecovery = allowUnvalidatedFocusRecovery
+        self.transfersFullScreenWindows  = transfersFullScreenWindows
+        self.restoresFullScreenOnRelease = restoresFullScreenOnRelease
     }
 
     public static let `default` = SeatHostConfiguration()

@@ -46,11 +46,35 @@ nonisolated public struct AdoptedWindow: Sendable, Equatable, Identifiable {
     /// rather than guessing.
     public let title: String
 
+    /// The display the window was taken from, so the return leg names a display
+    /// instead of inferring one from a rectangle. `nil` when it could not be
+    /// read; the return then falls back to the project's existing policy and
+    /// never picks an arbitrary display.
+    public let originalDisplayID: CGDirectDisplayID?
+
+    /// Whether the window was in **native macOS fullscreen** when the seat took
+    /// it. Kept separately from the frame, and kept at all, because a release
+    /// that is refused otherwise leaves nothing in the model that knows this
+    /// window was ever in fullscreen.
+    ///
+    /// It is not the same fact as the frame: a maximised window and a native
+    /// fullscreen one had the identical rectangle on every machine measured,
+    /// (0, 33, 1512, 949) for both, so the rectangle cannot carry this.
+    public let wasFullScreen: Bool
+
     public var id: Int { reference.windowNumber }
 
-    public init(reference: WindowReference, originalFrame: CGRect, title: String = "") {
-        self.reference     = reference
-        self.originalFrame = originalFrame
-        self.title         = title
+    public init(
+        reference        : WindowReference,
+        originalFrame    : CGRect,
+        title            : String = "",
+        originalDisplayID: CGDirectDisplayID? = nil,
+        wasFullScreen    : Bool = false
+    ) {
+        self.reference         = reference
+        self.originalFrame     = originalFrame
+        self.title             = title
+        self.originalDisplayID = originalDisplayID
+        self.wasFullScreen     = wasFullScreen
     }
 }

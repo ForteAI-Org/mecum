@@ -11,6 +11,7 @@ import Foundation
 import SeatCore
 import SeatInput
 @testable import SeatSession
+import WindowPlacement
 
 /// The three role protocols of the session layer, faked. This is what makes
 /// the whole state machine a unit test: no virtual display, no event tap, no
@@ -24,6 +25,25 @@ import SeatInput
 
 /// A virtual display 2560 by 1440 attached to the right of a 1512 by 982
 /// physical one, which is the reference machine's real arrangement.
+/// Hands out a process identifier at a time, so that no two tests share one.
+/// A counter and not a literal per test: a literal is a collision waiting for
+/// the next test to be written, which is exactly how the shared `targetPID`
+/// became a defect.
+private final class ProcessIdentifierPool: @unchecked Sendable {
+
+    static let shared = ProcessIdentifierPool()
+
+    private let lock = NSLock()
+    private var next: Int32 = 5_000
+
+    func mint() -> Int32 {
+        lock.lock()
+        defer { lock.unlock() }
+        next += 1
+        return next
+    }
+}
+
 enum FakeGeometry {
 
     static let physical = CGRect(x: 0, y: 0, width: 1512, height: 982)
@@ -33,6 +53,20 @@ enum FakeGeometry {
     static let targetPID    : Int32             = 4242
     static let userPID      : Int32             = 99
     static let windowNumber                     = 777
+
+    /// A process identifier no other test in this process is using.
+    ///
+    /// `KeyHold` is a singleton of the **process**, and `releaseEveryOwner` is
+    /// scoped to a PID and blind to the owner: the `marker` a seat carries
+    /// separates two tests' owners and cannot separate their processes. So two
+    /// suites running in parallel against the one shared `targetPID` can see
+    /// each other's presses, and one of them reports `keysNotReleased` for a key
+    /// the other pressed.
+    ///
+    /// Every test that presses a key, and every test that asserts nothing is
+    /// held, takes one of these instead of the shared constant. Tests that never
+    /// touch `KeyHold` keep the constant and stay as they were.
+    static func distinctProcessID() -> Int32 { ProcessIdentifierPool.shared.mint() }
 
     static let windowSize = CGSize(width: 800, height: 600)
 
@@ -155,8 +189,13 @@ final class FakeSensing: SeatSensing, @unchecked Sendable {
         )
     }
 
+    /// Which process this sensing answers for. It is an instance value and not
+    /// the shared constant so that a test can own a process of its own; see
+    /// `FakeGeometry.distinctProcessID`.
+    var targetPID: Int32 = FakeGeometry.targetPID
+
     func isActive(processID: Int32) -> Bool? {
-        processID == FakeGeometry.targetPID ? targetIsActive : false
+        processID == targetPID ? targetIsActive : false
     }
 
     func isBehindFrontmostWindow(windowNumber: Int, ownedBy processID: Int32) -> Bool? { isBehind }
@@ -175,7 +214,7 @@ final class FakeSensing: SeatSensing, @unchecked Sendable {
     private(set) var menuReadCount = 0
 
     func menuWindows(ownedBy processID: Int32) -> [WindowReference] {
-        guard processID == FakeGeometry.targetPID else { return [] }
+        guard processID == targetPID else { return [] }
         menuReadCount += 1
         return menus
     }
@@ -263,6 +302,49 @@ final class FakePlacing: WindowPlacing, @unchecked Sendable {
         await onStageWait?()
 
         return window.replacingFrame(CGRect(origin: window.frame.origin, size: expectedSize))
+    }
+
+    // MARK: Native fullscreen, MW-03
+
+    /// What `AXFullScreen` answers per window. Absent means the ordinary case,
+    /// a window that is readable and not in fullscreen.
+    var fullScreenStates: [Int: WindowRelocator.FullScreenReading] = [:]
+
+    /// Window IDs whose Space is still the one on screen. Empty is the case the
+    /// seat is allowed to act in, so a row that does not care says nothing.
+    var spacesOnScreen: Set<Int> = []
+
+    /// Every fullscreen request, in order, as the window and what was asked.
+    var fullScreenRequests: [(window: Int, wanted: Bool)] = []
+
+    /// The normal frame `awaitFullScreen` hands back, which is the whole point
+    /// of re-reading after a transition.
+    var normalFrameAfterExit: CGRect?
+
+    var fullScreenRequestError: (any Error)?
+    var fullScreenAwaitError  : (any Error)?
+
+    func fullScreen(of window: WindowReference) throws -> WindowRelocator.FullScreenReading {
+        fullScreenStates[window.windowNumber] ?? .writable(false)
+    }
+
+    func requestFullScreen(_ wanted: Bool, of window: WindowReference) throws {
+        fullScreenRequests.append((window.windowNumber, wanted))
+        if let fullScreenRequestError { throw fullScreenRequestError }
+        fullScreenStates[window.windowNumber] = .writable(wanted)
+    }
+
+    func awaitFullScreen(
+        _ wanted: Bool,
+        of window: WindowReference
+    ) async throws -> WindowReference {
+        if let fullScreenAwaitError { throw fullScreenAwaitError }
+        guard let normalFrameAfterExit, !wanted else { return window }
+        return window.replacingFrame(normalFrameAfterExit)
+    }
+
+    func spaceIsOnScreen(for window: WindowReference) -> Bool {
+        spacesOnScreen.contains(window.windowNumber)
     }
 
     func recover(

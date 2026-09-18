@@ -378,6 +378,22 @@ nonisolated public enum WindowServerProbe {
         )
     }
 
+    /// Whether the window server still lists this window among the ones on the
+    /// Space that is on screen.
+    ///
+    /// A window in native fullscreen has a Space of its own, and this is the
+    /// public reading of "the person is looking at something else". Measured on
+    /// 26A428: after the focus moves away it goes false 330 ms later with Stage
+    /// Manager off and 513 ms later with it on, and the same reading is what
+    /// `AXWindows` stops answering for at exactly that moment.
+    ///
+    /// It is deliberately not "is this window alive". A window that was
+    /// destroyed also answers false, and the caller that needs the difference
+    /// asks `geometry(of:)`, which is scoped to the id.
+    public static func isOnTheActiveSpace(windowNumber: Int) -> Bool {
+        orderedWindows()?.contains { number(of: $0) == windowNumber } ?? false
+    }
+
     // MARK: Reading one entry of the list
 
     private static func orderedWindows() -> [[String: Any]]? {
