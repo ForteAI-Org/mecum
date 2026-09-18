@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "verifications": [
+    {
+      "id": "mecum-unit",
+      "description": "make test: test degli script e tier Swift con riepiloghi verificati; Host, Live e manuali disabilitati esplicitamente. Non certifica macOS/Qt o consumer.",
+      "command": ["env", "AGENTSEAT_HOST_TESTS=0", "AGENTSEAT_LIVE_TESTS=0", "AGENTSEAT_MANUAL_TESTS=0", "PYTHONDONTWRITEBYTECODE=1", "make", "test"],
+      "cwd": ".",
+      "timeoutMs": 600000
+    },
+    {
+      "id": "mecum-build-seatbench-release",
+      "description": "Compilazione release del prodotto SeatBench, stesso comando di build del target make bench. Non esegue benchmark né apre app o display.",
+      "command": ["xcrun", "swift", "build", "-c", "release", "--product", "SeatBench"],
+      "cwd": ".",
+      "timeoutMs": 600000
+    }
+  ]
+}
