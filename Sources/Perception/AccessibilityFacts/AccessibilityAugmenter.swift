@@ -11,7 +11,7 @@ import Foundation
 import PerceptionCore
 
 /// AccessibilityAugmenter fills `SceneAugmenting` with the live accessibility tree: it finds the
-/// process's main window, hops to the main actor for the reads, and runs the core's generic walk
+/// window matching the capture, hops to the main actor for the reads, and runs the core's generic walk
 /// under a wall-clock budget.
 ///
 /// The budget is the guard against a pathological tree: a file browser exposing hundreds of rows
@@ -24,7 +24,8 @@ public struct AccessibilityAugmenter: SceneAugmenting {
     private let messagingTimeoutSeconds: Float
 
     /// Creates an augmenter. `budgetSeconds` bounds one walk; `messagingTimeoutSeconds` bounds one
-    /// message to the app.
+    /// message to the app. The walk checks its deadline between nodes; an in-flight message and
+    /// its one transient retry can exceed the walk budget.
     public init(budgetSeconds: TimeInterval = 1.5, messagingTimeoutSeconds: Float = 2) {
         self.budgetSeconds           = budgetSeconds
         self.messagingTimeoutSeconds = messagingTimeoutSeconds
@@ -36,7 +37,7 @@ public struct AccessibilityAugmenter: SceneAugmenting {
             let reader = LiveAccessibilityReader()
             let application = reader.application(processID: processID)
             reader.setMessagingTimeout(application, seconds: timeout)
-            guard let window = reader.mainWindow(of: application) else { return [] }
+            guard let window = reader.window(of: application, matching: windowFrame) else { return [] }
             let deadline = Date().addingTimeInterval(budget)
             return AccessibilityAugmentation.elements(
                 under      : window,

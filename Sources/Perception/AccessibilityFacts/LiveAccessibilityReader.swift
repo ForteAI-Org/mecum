@@ -72,6 +72,17 @@ public struct LiveAccessibilityReader: AccessibilityTreeReading {
         return listed.isEmpty ? children(application) : listed
     }
 
+    /// Selects the captured window, including a sheet exposed as a child of another window.
+    /// Focus is not a geometry fallback: a background capture may name a different surface.
+    public nonisolated func window(of application: AXUIElement, matching frame: CGRect) -> AXUIElement? {
+        let listed = windows(of: application)
+        var candidates = listed
+        for window in listed {
+            candidates.append(contentsOf: children(window).filter { role($0) == "AXSheet" })
+        }
+        return AccessibilityWindowMatching.window(among: candidates, capturedFrame: frame, reader: self)
+    }
+
     /// Caps each message to this element's process so a hung app bounds the cost of a read.
     public nonisolated func setMessagingTimeout(_ node: AXUIElement, seconds: Float) {
         AXUIElementSetMessagingTimeout(node, seconds)

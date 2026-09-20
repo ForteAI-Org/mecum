@@ -35,9 +35,10 @@ extension SceneSnapshot {
             let shown = showable.prefix(budget)
             for element in shown {
                 let state = element.state.map { " [\($0.rawValue)]" } ?? ""
+                let details = Self.liveDetails(element)
                 let does  = element.does.map { " — \($0)" } ?? ""
                 let label = element.isUnlabeled ? "(unlabeled icon — target id '\(element.id)')" : element.label
-                out += "    \(label)\(state)\(does)\n"
+                out += "    \(label)\(state)\(details)\(does)\n"
             }
             if showable.count > shown.count {
                 out += "    … +\(showable.count - shown.count) more (describe_section)\n"
@@ -90,11 +91,19 @@ extension SceneSnapshot {
     private static func elementLine(_ element: SceneElement, indent: String) -> String {
         let position = String(format: "%.2f,%.2f", element.bounds.x, element.bounds.y)
         let state    = element.state.map { " [\($0.rawValue)]" } ?? ""
-        let tag      = element.isUnlabeled ? "icon?" : element.kind.rawValue
+        let tag      = element.isUnlabeled ? "\(element.kind.rawValue)?" : element.kind.rawValue
+        let identity = element.isUnlabeled ? " id:'\(element.id)'" : ""
         let group    = element.group.map { " (\($0))" } ?? ""
         let recalled = element.isRecalled ? " ~recalled" : ""
         let does     = element.does.map { " — \($0)" } ?? ""
-        return "\(indent)[\(tag)] \(element.label)\(state)\(group)\(recalled)\(does)  @ \(position)\n"
+        return "\(indent)[\(tag)] \(element.label)\(identity)\(state)\(liveDetails(element))\(group)\(recalled)\(does)  @ \(position)\n"
+    }
+
+    private static func liveDetails(_ element: SceneElement) -> String {
+        let value = element.value.flatMap { $0 == element.label ? nil : " = \($0)" } ?? ""
+        let availability = element.isEnabled == false ? " [disabled]" : ""
+        let owner = element.container.map { " {\($0)}" } ?? ""
+        return value + availability + owner
     }
 
     /// Map order: stateful first, learned affordance second, any labeled control or icon third.

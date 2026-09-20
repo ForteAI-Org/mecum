@@ -26,6 +26,12 @@ public struct SceneElement: Sendable, Equatable, Hashable {
     public var role: String?
     /// The state of a stateful control; nil for anything that carries no state.
     public var state: ControlState?
+    /// The live field or dropdown value, distinct from the control's name.
+    public var value: String?
+    /// The application's enabled flag; nil means it did not expose availability.
+    public var isEnabled: Bool?
+    /// A named accessibility container path, independent of geometric panels and learned groups.
+    public var container: String?
     /// True for an icon nobody has named yet: an honest coverage gap the map surfaces by its id.
     public var isUnlabeled: Bool
     /// A sibling-group tag with an ordinal, when a learned structure places this element in one.
@@ -44,6 +50,9 @@ public struct SceneElement: Sendable, Equatable, Hashable {
         bounds     : NormalizedRect,
         role       : String? = nil,
         state      : ControlState? = nil,
+        value      : String? = nil,
+        isEnabled  : Bool? = nil,
+        container  : String? = nil,
         isUnlabeled: Bool = false,
         group      : String? = nil,
         isRecalled : Bool = false,
@@ -56,6 +65,9 @@ public struct SceneElement: Sendable, Equatable, Hashable {
         self.bounds      = bounds
         self.role        = role
         self.state       = state
+        self.value       = value
+        self.isEnabled   = isEnabled
+        self.container   = container
         self.isUnlabeled = isUnlabeled
         self.group       = group
         self.isRecalled  = isRecalled
@@ -68,7 +80,7 @@ extension SceneElement: Codable {
 
     /// The wire keys are the ones scenes have always used, so a stored scene still decodes.
     private enum CodingKeys: String, CodingKey {
-        case id, kind, label, role, state, group, does, section
+        case id, kind, label, role, state, value, isEnabled, container, group, does, section
         case bounds      = "pos"
         case isUnlabeled = "unlabeled"
         case isRecalled  = "recalled"
@@ -83,6 +95,9 @@ extension SceneElement: Codable {
             bounds     : try c.decode(NormalizedRect.self, forKey: .bounds),
             role       : try c.decodeIfPresent(String.self, forKey: .role),
             state      : try c.decodeIfPresent(ControlState.self, forKey: .state),
+            value      : try c.decodeIfPresent(String.self, forKey: .value),
+            isEnabled  : try c.decodeIfPresent(Bool.self, forKey: .isEnabled),
+            container  : try c.decodeIfPresent(String.self, forKey: .container),
             isUnlabeled: try c.decodeIfPresent(Bool.self, forKey: .isUnlabeled) ?? false,
             group      : try c.decodeIfPresent(String.self, forKey: .group),
             isRecalled : try c.decodeIfPresent(Bool.self, forKey: .isRecalled) ?? false,
@@ -99,6 +114,9 @@ extension SceneElement: Codable {
         try c.encode(bounds, forKey: .bounds)
         try c.encodeIfPresent(role, forKey: .role)
         try c.encodeIfPresent(state, forKey: .state)
+        try c.encodeIfPresent(value, forKey: .value)
+        try c.encodeIfPresent(isEnabled, forKey: .isEnabled)
+        try c.encodeIfPresent(container, forKey: .container)
         if isUnlabeled { try c.encode(true, forKey: .isUnlabeled) }
         try c.encodeIfPresent(group, forKey: .group)
         if isRecalled { try c.encode(true, forKey: .isRecalled) }

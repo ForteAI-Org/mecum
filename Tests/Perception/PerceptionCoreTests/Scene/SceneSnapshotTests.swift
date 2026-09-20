@@ -76,6 +76,19 @@ struct SceneSnapshotTests {
         #expect(scene.token.rawValue == "abc")
     }
 
+    @Test("unnamed visual targets expose their IDs and retain media uncertainty in text")
+    func unnamedTargetsKeepIdentityAndKind() {
+        var scene = sample()
+        scene.elements.append(SceneElement(
+            id: "?|@7,6", kind: .overlayCandidate, label: "(unlabeled)",
+            bounds: rect(0.7, 0.6, 0.02, 0.02), isUnlabeled: true
+        ))
+        let text = scene.text()
+        #expect(text.contains("id:'?|@3,4'"))
+        #expect(text.contains("[overlay-candidate?] (unlabeled)"))
+        #expect(text.contains("id:'?|@7,6'"))
+    }
+
     @Test("the token moves with content and state, and with nothing else")
     func tokenStability() {
         let a = sample()

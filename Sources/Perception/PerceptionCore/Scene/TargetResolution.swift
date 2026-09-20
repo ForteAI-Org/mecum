@@ -37,6 +37,7 @@ extension SceneSnapshot {
         func inSection(_ element: SceneElement) -> Bool {
             guard let section, !section.isEmpty else { return true }
             return element.section?.caseInsensitiveCompare(resolvedSection ?? section) == .orderedSame
+                || (resolvedSection == nil && element.container?.caseInsensitiveCompare(section) == .orderedSame)
         }
         let byID = Self.collapseSameRow(elements.filter { $0.id == target && inSection($0) })
         if byID.count > 1 { return .ambiguous(byID.count) }
@@ -54,6 +55,13 @@ extension SceneSnapshot {
             let want = LabelText.coreKey(cleaned)
             if !want.isEmpty {
                 byLabel = elements.filter { inSection($0) && LabelText.coreKey($0.label) == want }
+            }
+        }
+        if byLabel.isEmpty {
+            let valueKey = LabelText.coreKey(cleaned)
+            byLabel = elements.filter {
+                inSection($0) && !valueKey.isEmpty && $0.value.map(LabelText.coreKey) == valueKey
+                    && AccessibilityAugmentation.interactiveRoles.contains($0.role ?? "")
             }
         }
         if preferStateful, byLabel.count > 1 {
@@ -105,7 +113,7 @@ extension SceneSnapshot {
     public func disambiguation(target: String, limit: Int = 6) -> String {
         candidates(target: target).prefix(limit).map { element in
             let position = String(format: "@%.2f,%.2f", element.bounds.x, element.bounds.y)
-            let selector = element.section.map { "section:'\($0)'" } ?? "id:'\(element.id)'"
+            let selector = (element.container ?? element.section).map { "section:'\($0)'" } ?? "id:'\(element.id)'"
             return "\(selector) \(position)"
         }.joined(separator: " OR ")
     }

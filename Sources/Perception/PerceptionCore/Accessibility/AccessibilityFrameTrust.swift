@@ -19,12 +19,15 @@ public enum AccessibilityFrameTrust {
 
     /// True when the frame has area and intersects the window's real frame.
     public static func isTrustworthy(_ frame: CGRect, in windowFrame: CGRect) -> Bool {
-        frame.width > 0 && frame.height > 0 && windowFrame.intersects(frame)
+        [frame.minX, frame.minY, frame.width, frame.height,
+         windowFrame.minX, windowFrame.minY, windowFrame.width, windowFrame.height].allSatisfy(\.isFinite)
+            && frame.width > 0 && frame.height > 0 && windowFrame.intersects(frame)
     }
 
-    /// The frame normalized to the window, when it is trustworthy; nil otherwise.
+    /// The visible intersection normalized to the window, when it is trustworthy; nil otherwise.
     public static func normalized(_ frame: CGRect, in windowFrame: CGRect) -> NormalizedRect? {
         guard isTrustworthy(frame, in: windowFrame), windowFrame.width > 0, windowFrame.height > 0 else { return nil }
+        let frame = frame.intersection(windowFrame)
         return NormalizedRect(
             x     : Double((frame.minX - windowFrame.minX) / windowFrame.width),
             y     : Double((frame.minY - windowFrame.minY) / windowFrame.height),

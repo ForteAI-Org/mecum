@@ -59,7 +59,8 @@ public enum AccessibilityAugmentation {
     // MARK: Harvest
 
     /// Walks one window's tree and returns the harvested elements, normalized to `windowFrame`.
-    /// Duplicate labels take ordinals ("Track Name", "Track Name #2") so resolution stays unique.
+    /// Preserves named container paths, field values and availability. Duplicate labels within the
+    /// same container take ordinals; labels in different containers remain independently addressable.
     public static func elements<Reader: AccessibilityTreeReading>(
         under window: Reader.Node,
         windowFrame : CGRect,
@@ -70,8 +71,10 @@ public enum AccessibilityAugmentation {
         var out: [SceneElement] = []
         var tables = 0
 
-        func emit(_ frame: CGRect, role: String, label: String, state: ControlState?, clip: CGRect) {
-            guard let bounds = AccessibilityFrameTrust.normalized(frame, in: windowFrame),
+        func emit(_ frame: CGRect, role: String, label: String, state: ControlState?, clip: CGRect,
+                  container: String?, value: String? = nil, isEnabled: Bool? = nil) {
+            guard out.count < limits.maxElements,
+                  let bounds = AccessibilityFrameTrust.normalized(frame, in: windowFrame),
                   clip.contains(CGPoint(x: frame.midX, y: frame.midY)) else { return }
             out.append(SceneElement(
                 id    : SceneIdentity.key(kind: .control, label: label, bounds: bounds, isUnlabeled: false),
@@ -79,14 +82,25 @@ public enum AccessibilityAugmentation {
                 label : label,
                 bounds: bounds,
                 role  : role,
-                state : state
+                state : state,
+                value : value,
+                isEnabled: isEnabled,
+                container: container
             ))
         }
 
-        func walk(_ node: Reader.Node, _ depth: Int, _ clip: CGRect) {
-            guard depth < limits.maxDepth, tables < limits.maxTables, out.count < limits.maxElements,
+        func walk(_ node: Reader.Node, _ depth: Int, _ clip: CGRect, _ container: String?,
+                  column: String? = nil, rowName: String? = nil) {
+            guard depth < limits.maxDepth, out.count < limits.maxElements,
                   !limits.isPastDeadline() else { return }
             let role = reader.role(node) ?? ""
+            var childContainer = container
+            if role == "AXGroup" || tableRoles.contains(role),
+               let name = firstText([reader.title(node), reader.descriptionText(node)]),
+               !name.hasPrefix("UI_"), name.count <= 80 {
+                let clean = cleanLabel(name)
+                childContainer = container.map { $0 + " / " + clean } ?? clean
+            }
             // A scrolling container tightens the clip and prunes a subtree entirely outside it. A plain
             // group also tightens (some toolkits scroll in groups) but is never trusted to prune.
             var childClip = clip
@@ -99,9 +113,14 @@ public enum AccessibilityAugmentation {
                 if !inner.isNull, inner.width >= 8, inner.height >= 8 { childClip = inner }
             }
             if tableRoles.contains(role) {
+                guard tables < limits.maxTables else { return }
                 tables += 1
-                for row in reader.children(node) where reader.role(row) == "AXRow" {
-                    if limits.isPastDeadline() { break }
+                let children = reader.children(node)
+                let columns = children.filter { reader.role($0) == "AXColumn" }.map {
+                    firstText([reader.title($0), reader.descriptionText($0)])
+                }
+                for row in children where reader.role(row) == "AXRow" {
+                    if out.count >= limits.maxElements || limits.isPastDeadline() { break }
                     if let rowFrame = reader.frame(row), rowFrame.height > 0, !childClip.intersects(rowFrame) {
                         continue
                     }
@@ -110,16 +129,29 @@ public enum AccessibilityAugmentation {
                     }
                     let label = cleanLabel(named.name)
                     guard label.count >= 2, label.count <= 48 else { continue }
-                    emit(named.frame, role: "AXRow", label: label, state: nil, clip: childClip)
+                    emit(named.frame, role: "AXRow", label: label, state: nil, clip: childClip,
+                         container: childContainer, isEnabled: reader.isEnabled(row))
+                    let owner = childContainer.map { $0 + " / " + label } ?? label
+                    let cells = reader.children(row)
+                    // Only use column order when the table exposes a complete cell-to-column map.
+                    // Otherwise traverse the controls with their own labels and row context.
+                    let aligned = cells.count == columns.count && cells.allSatisfy { reader.role($0) == "AXCell" }
+                    for (index, cell) in cells.enumerated() {
+                        walk(cell, depth + 2, childClip, owner, column: aligned ? columns[index] : nil, rowName: label)
+                    }
                 }
                 return
             }
             if role == "AXTextField" || role == "AXPopUpButton", let frame = reader.frame(node) {
-                let handle = firstText([reader.descriptionText(node), reader.title(node), reader.value(node)])
-                if let handle, handle.count <= 48 { emit(frame, role: role, label: handle, state: nil, clip: clip) }
+                let handle = column ?? firstText([reader.descriptionText(node), reader.title(node), reader.value(node)])
+                if let handle, handle.count <= 48, column != nil || rowName != cleanLabel(handle) {
+                    emit(frame, role: role, label: handle, state: nil, clip: clip, container: container,
+                         value: firstText([reader.value(node), role == "AXPopUpButton" ? reader.title(node) : nil]),
+                         isEnabled: reader.isEnabled(node))
+                }
             }
             if statefulRoles.contains(role), let frame = reader.frame(node) {
-                let title = firstText([reader.title(node), reader.descriptionText(node)])
+                let title = column ?? firstText([reader.title(node), reader.descriptionText(node)])
                 let value = firstText([reader.value(node)])
                 var state: ControlState?
                 if role == "AXCheckBox" || role == "AXRadioButton" {
@@ -130,18 +162,23 @@ public enum AccessibilityAugmentation {
                         default: break
                     }
                 }
-                if let label = title ?? value, label.count <= 48 {
-                    emit(frame, role: role, label: label, state: state, clip: clip)
+                if let label = title ?? value, label.count <= 48, column != nil || rowName != cleanLabel(label) {
+                    emit(frame, role: role, label: label, state: state, clip: clip, container: container,
+                         value: role == "AXComboBox" || role == "AXMenuButton" ? value : nil,
+                         isEnabled: reader.isEnabled(node))
                 }
             }
-            for child in reader.children(node) { walk(child, depth + 1, childClip) }
+            for child in reader.children(node) {
+                walk(child, depth + 1, childClip, childContainer, column: column, rowName: rowName)
+            }
         }
-        walk(window, 0, windowFrame)
+        walk(window, 0, windowFrame, nil)
 
         var seen: [String: Int] = [:]
         for index in out.indices {
-            let count = (seen[out[index].label] ?? 0) + 1
-            seen[out[index].label] = count
+            let key = (out[index].container ?? "") + "\n" + out[index].label
+            let count = (seen[key] ?? 0) + 1
+            seen[key] = count
             if count > 1 { out[index].label += " #\(count)" }
         }
         return out
@@ -150,9 +187,9 @@ public enum AccessibilityAugmentation {
     // MARK: Merge
 
     /// Merges harvested elements into a pixel-built list. Additive: a harvested element is dropped only
-    /// when a pixel element already carries the same core label at the same spot. An interactive
+    /// when a pixel element already carries the same core label or field value at the same spot. An interactive
     /// harvest upgrades that pixel element in place, keeping its precise position and taking the
-    /// authoritative role, state and clean name; a row harvest yields to the pixel element. Pixels
+    /// authoritative identity, role, state and clean name; a row harvest yields to the pixel element. Pixels
     /// are never removed.
     ///
     /// A harvested element is final once placed, whether it upgraded a pixel element or was appended
@@ -163,34 +200,64 @@ public enum AccessibilityAugmentation {
     public static func merge(pixels: [SceneElement], accessibility: [SceneElement]) -> [SceneElement] {
         guard !accessibility.isEmpty else { return pixels }
         var result = pixels
+        // Normalize once per label, then update alongside upgrades and appends. Re-tokenizing
+        // every candidate for every native element makes dense scenes needlessly quadratic in text work.
+        var coreKeys = pixels.map { LabelText.coreKey(strippingOrdinal($0.label)) }
+        var valueKeys = pixels.map { LabelText.coreKey($0.label) }
         var upgraded = Set<Int>()
         for element in accessibility {
             let core = LabelText.coreKey(strippingOrdinal(element.label))
             let isInteractive = interactiveRoles.contains(element.role ?? "")
-            let match = core.isEmpty ? nil : result.firstIndex { existing in
-                guard LabelText.coreKey(strippingOrdinal(existing.label)) == core else { return false }
-                let center = existing.bounds.center
-                let box = element.bounds
-                let inside = center.x >= box.x - 0.01 && center.x <= box.maxX + 0.01
-                    && center.y >= box.y - 0.01 && center.y <= box.maxY + 0.01
-                let close = abs(center.x - box.midX) < 0.08 && abs(center.y - box.midY) < 0.04
-                return inside || close
+            // Duplicate evidence must overlap the same widget. Window-relative distance thresholds
+            // collapse neighboring mixer buttons and bind dense list rows to the preceding row.
+            var match = core.isEmpty ? nil : result.indices
+                .filter { coreKeys[$0] == core }
+                .map { ($0, overlap(result[$0].bounds, element.bounds)) }
+                .filter { $0.1 > 0.6 }
+                .max { $0.1 < $1.1 }?.0
+            if match == nil, let value = element.value,
+               ["AXTextField", "AXPopUpButton", "AXComboBox", "AXMenuButton"].contains(element.role ?? "") {
+                let valueKey = LabelText.coreKey(value)
+                let candidates = result.indices.filter {
+                    result[$0].role == nil && result[$0].kind == .text && !valueKey.isEmpty
+                        && valueKeys[$0] == valueKey
+                        && overlap(result[$0].bounds, element.bounds) > 0.6
+                }
+                if candidates.count == 1 { match = candidates.first }
             }
             if let index = match {
+                if result[index].container == nil { result[index].container = element.container }
+                if result[index].isEnabled == nil { result[index].isEnabled = element.isEnabled }
+                if result[index].value == nil { result[index].value = element.value }
                 guard isInteractive, !upgraded.contains(index) else { continue }
                 upgraded.insert(index)
                 result[index].kind = .control
+                result[index].id = element.id
                 result[index].role = element.role
                 result[index].state = element.state
+                result[index].value = element.value
+                result[index].isEnabled = element.isEnabled
+                result[index].container = element.container
                 result[index].label = element.label
+                coreKeys[index] = core
+                valueKeys[index] = LabelText.coreKey(element.label)
                 result[index].isUnlabeled = false
                 if result[index].does == nil { result[index].does = element.does }
             } else {
                 upgraded.insert(result.count)
                 result.append(element)
+                coreKeys.append(core)
+                valueKeys.append(LabelText.coreKey(element.label))
             }
         }
         return result
+    }
+
+    private static func overlap(_ first: NormalizedRect, _ second: NormalizedRect) -> Double {
+        let intersection = first.cgRect.intersection(second.cgRect)
+        let smaller = min(first.area, second.area)
+        guard !intersection.isNull, smaller > 0 else { return 0 }
+        return Double(intersection.width * intersection.height) / smaller
     }
 
     // MARK: Names
@@ -225,8 +292,9 @@ public enum AccessibilityAugmentation {
     /// "Shown. Audio 13") down to the name a person says.
     static func cleanLabel(_ raw: String) -> String {
         var text = raw.trimmingCharacters(in: .whitespaces)
-        if let dash = text.range(of: " - ") { text = String(text[..<dash.lowerBound]) }
-        for prefix in ["Shown. ", "Hidden. "] where text.hasPrefix(prefix) {
+        let roleSuffix = " - Audio Track"
+        if text.hasSuffix(roleSuffix) { text = String(text.dropLast(roleSuffix.count)) }
+        for prefix in ["Shown. ", "Hidden. ", "Selected. ", "Active. ", "Inactive. "] where text.hasPrefix(prefix) {
             text = String(text.dropFirst(prefix.count))
         }
         return text.trimmingCharacters(in: .whitespaces)

@@ -22,7 +22,9 @@ public struct SceneToken: Sendable, Equatable, Hashable, Codable, CustomStringCo
     /// Computes the token of a scene from the facts an action depends on.
     public init(bundleID: String, windowTitle: String, elements: [SceneElement]) {
         let body = elements
-            .map { "\($0.id)|\($0.state?.rawValue ?? "")" }
+            .map {
+                "\($0.id)|\($0.state?.rawValue ?? "")|\($0.value ?? "")|\($0.isEnabled.map(String.init) ?? "")|\($0.container ?? "")"
+            }
             .sorted()
             .joined(separator: ";")
         var hash: UInt64 = 0xcbf2_9ce4_8422_2325

@@ -204,5 +204,7 @@ struct AccessibilityAugmentationTests {
         #expect(AccessibilityAugmentation.cleanLabel("Shown. Audio 13") == "Audio 13")
         #expect(AccessibilityAugmentation.cleanLabel("Hidden. Bus 2") == "Bus 2")
         #expect(AccessibilityAugmentation.cleanLabel(" Plain ") == "Plain")
+        #expect(AccessibilityAugmentation.cleanLabel("Drums - Room") == "Drums - Room")
+        #expect(AccessibilityAugmentation.cleanLabel("Drums - Room - Audio Track ") == "Drums - Room")
     }
 }

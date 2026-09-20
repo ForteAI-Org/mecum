@@ -17,6 +17,7 @@ final class FakeNode: @unchecked Sendable {
     var descriptionText: String?
     var value: String?
     var numericValue: Int?
+    var isEnabled: Bool?
     var frame: CGRect?
     private(set) var children: [FakeNode] = []
 
@@ -26,7 +27,8 @@ final class FakeNode: @unchecked Sendable {
         descriptionText: String? = nil,
         value          : String? = nil,
         numericValue   : Int? = nil,
-        frame          : CGRect? = nil
+        frame          : CGRect? = nil,
+        isEnabled      : Bool? = true
     ) {
         self.role            = role
         self.title           = title
@@ -34,6 +36,7 @@ final class FakeNode: @unchecked Sendable {
         self.value           = value
         self.numericValue    = numericValue
         self.frame           = frame
+        self.isEnabled       = isEnabled
     }
 
     @discardableResult
@@ -54,7 +57,7 @@ struct FakeReader: AccessibilityTreeReading {
     func identifier(_ node: FakeNode) -> String? { nil }
     func value(_ node: FakeNode) -> String? { node.value }
     func numericValue(_ node: FakeNode) -> Int? { node.numericValue }
-    func isEnabled(_ node: FakeNode) -> Bool? { true }
+    func isEnabled(_ node: FakeNode) -> Bool? { node.isEnabled }
     func actions(_ node: FakeNode) -> [String] { [] }
     func frame(_ node: FakeNode) -> CGRect? { node.frame }
     func children(_ node: FakeNode) -> [FakeNode] { node.children }
