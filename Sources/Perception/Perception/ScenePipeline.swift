@@ -14,7 +14,8 @@ import PerceptionCore
 ///
 /// Every dependency arrives at construction. The pipeline reads no environment, keeps no global,
 /// and remembers nothing between calls, so two pipelines never couple and a test drives one with
-/// doubles. Recognition and segmentation run concurrently; the wall time is the longer of the two.
+/// doubles. Recognition, icon segmentation and native reads run concurrently; section detection
+/// then receives text bounds. CPU work runs off the caller's actor, including AppKit's main actor.
 /// Accessibility is an optional augmentation stage taken at construction: pixels build the whole
 /// scene, and the stage only adds. Other optional stages (control state reading, taught icon labels,
 /// learned structure) are later roles, absent here on purpose rather than defaulted to a silent no-op.
@@ -55,43 +56,67 @@ public struct ScenePipeline: Sendable {
 
     private let text: any TextRecognizing
     private let regions: (any RegionSegmenting)?
+    private let regionFilter: (any VisualRegionFiltering)?
+    private let sections: (any SectionDetecting)?
     private let augmentation: (any SceneAugmenting)?
     private let accuracy: TextRecognitionAccuracy
 
-    /// Creates a pipeline over its roles. A nil segmenter produces a text-only scene; a nil augmenter
-    /// leaves the scene as the pixels built it.
+    /// Creates a pipeline over its roles. A nil region segmenter supplies no icon candidates. A nil
+    /// region filter leaves media classification to the caller; otherwise filtering receives OCR
+    /// barriers before grouping. A nil section detector uses only caller-provided panels. A nil
+    /// augmenter leaves the pixel scene.
     public init(
         text        : any TextRecognizing,
         regions     : (any RegionSegmenting)? = nil,
+        regionFilter: (any VisualRegionFiltering)? = nil,
+        sections    : (any SectionDetecting)? = nil,
         augmentation: (any SceneAugmenting)? = nil,
         accuracy    : TextRecognitionAccuracy = .accurate
     ) {
         self.text         = text
         self.regions      = regions
+        self.regionFilter = regionFilter
+        self.sections     = sections
         self.augmentation = augmentation
         self.accuracy     = accuracy
     }
 
     /// Perceives one image of one window. Throws when recognition or segmentation cannot run;
     /// an empty window is a scene with no elements, not an error.
+    @concurrent
     public func perceive(_ image: CGImage, of window: Window) async throws -> SceneSnapshot {
-        let text = self.text, regions = self.regions, accuracy = self.accuracy
-        async let recognized: [RecognizedText] = Task {
-            try text.recognizeText(in: image, accuracy: accuracy)
-        }.value
-        async let segmented: [CGRect] = Task { try regions?.segments(in: image) ?? [] }.value
+        try Task.checkCancellation()
+        let text = self.text, regions = self.regions, sections = self.sections, accuracy = self.accuracy
+        async let recognized = text.recognizeText(in: image, accuracy: accuracy)
+        async let segmented = regions?.segments(in: image) ?? []
+        async let harvested = augmentationElements(for: window)
         let (runs, segments) = try await (recognized, segmented)
-        var scene = Self.assemble(
-            runs     : runs,
-            segments : segments,
-            imageSize: CGSize(width: image.width, height: image.height),
-            window   : window
-        )
-        if let augmentation, let processID = window.processID, let frame = window.frame {
-            let harvested = try await augmentation.augmentation(for: processID, windowFrame: frame)
-            scene = Self.augmented(scene, with: harvested)
+        try Task.checkCancellation()
+        let visual = try regionFilter?.filter(segments, in: image, protecting: runs.map(\.pixelBox))
+            ?? VisualRegions(icons: segments)
+        try Task.checkCancellation()
+        var composedWindow = window
+        if composedWindow.sectionRects.isEmpty {
+            let panels = try sections?.sections(in: image, protecting: runs.map(\.pixelBox)) ?? []
+            let size = CGSize(width: image.width, height: image.height)
+            composedWindow.sectionRects = panels.map { NormalizedRect(pixelBox: $0, in: size) }
         }
-        return scene
+        let scene = Self.assemble(
+            runs     : runs,
+            segments : visual.icons,
+            imageSize: CGSize(width: image.width, height: image.height),
+            window   : composedWindow,
+            images   : visual.images,
+            overlays : visual.overlays
+        )
+        let nativeElements = try await harvested
+        try Task.checkCancellation()
+        return Self.augmented(scene, with: nativeElements)
+    }
+
+    private func augmentationElements(for window: Window) async throws -> [SceneElement] {
+        guard let augmentation, let processID = window.processID, let frame = window.frame else { return [] }
+        return try await augmentation.augmentation(for: processID, windowFrame: frame)
     }
 
     /// Reads one region before text recognition and grouping, so nearby captions cannot become
@@ -149,10 +174,12 @@ public struct ScenePipeline: Sendable {
         runs     : [RecognizedText],
         segments : [CGRect],
         imageSize: CGSize,
-        window   : Window
+        window   : Window,
+        images   : [CGRect] = [],
+        overlays : [CGRect] = []
     ) -> SceneSnapshot {
         let usable = runs.filter {
-            !ElementGrouper.isKnobGlyph($0.text) && !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         }
         let textRuns = usable.map { ElementGrouper.TextRun(rect: $0.pixelBox, text: $0.text) }
         let ocrBoxes = usable.map(\.pixelBox)
@@ -168,7 +195,8 @@ public struct ScenePipeline: Sendable {
         for segment in segments {
             let box = segment.integral
             let side = max(box.width, box.height)
-            guard box.width >= 10, box.height >= 10,
+            guard box.width >= 10, box.height >= 10, box.width <= 4 * box.height,
+                  box.height <= 4 * box.width,
                   side <= iconMaxSide
                       || (side <= thumbnailMaxSide && ElementGrouper.hasCaptionBelow(box, ocrBoxes: ocrBoxes)),
                   !ElementGrouper.isTextGlyph(box, ocrBoxes: ocrBoxes, lineHeight: lineHeight),
@@ -176,7 +204,21 @@ public struct ScenePipeline: Sendable {
             else { continue }
             icons.append(ElementGrouper.IconCandidate(rect: box))
         }
-        let grouped = ElementGrouper.group(texts: textRuns, icons: icons)
+        let grouped: [ElementGrouper.GroupedElement]
+        if window.sectionRects.isEmpty {
+            grouped = ElementGrouper.group(texts: textRuns, icons: icons)
+        } else {
+            let panels = window.sectionRects.map { $0.pixelBox(in: imageSize) }
+            func panel(_ rect: CGRect) -> Int {
+                panels.indices.filter { panels[$0].contains(CGPoint(x: rect.midX, y: rect.midY)) }
+                    .min { panels[$0].area < panels[$1].area } ?? -1
+            }
+            let textsByPanel = Dictionary(grouping: textRuns) { panel($0.rect) }
+            let iconsByPanel = Dictionary(grouping: icons) { panel($0.rect) }
+            grouped = ([-1] + Array(panels.indices)).flatMap {
+                ElementGrouper.group(texts: textsByPanel[$0] ?? [], icons: iconsByPanel[$0] ?? [])
+            }
+        }
         var elements = grouped.map { element -> SceneElement in
             let bounds = NormalizedRect(pixelBox: element.rect, in: imageSize)
             let label = element.isUnlabeled ? "(unlabeled)" : element.label
@@ -191,10 +233,23 @@ public struct ScenePipeline: Sendable {
                 isUnlabeled: element.isUnlabeled
             )
         }
+        for (kind, boxes) in [(ElementKind.image, images), (.overlayCandidate, overlays)] {
+            for box in boxes {
+                let bounds = NormalizedRect(pixelBox: box, in: imageSize)
+                let label = kind == .image ? "image" : "(unlabeled)"
+                let unlabeled = kind == .overlayCandidate
+                elements.append(SceneElement(
+                    id: SceneIdentity.key(kind: kind, label: label, bounds: bounds, isUnlabeled: unlabeled),
+                    kind: kind,
+                    label: label,
+                    bounds: bounds,
+                    isUnlabeled: unlabeled
+                ))
+            }
+        }
         var sections: [SceneSection] = []
         if !window.sectionRects.isEmpty {
             (elements, sections) = SceneComposer.compose(elements: elements, sectionRects: window.sectionRects)
-            elements = SceneComposer.coalesceParagraphs(elements)
         }
         return SceneSnapshot(
             bundleID         : window.bundleID,

@@ -162,7 +162,7 @@ let package = Package(
         ),
         .library(
             name: "MecumPerception",
-            targets: ["PerceptionCore", "VisionText", "WindowServerListing", "Perception", "AccessibilityFacts",
+            targets: ["PerceptionCore", "VisionText", "PixelSections", "PixelRegions", "WindowServerListing", "Perception", "AccessibilityFacts",
                       "ScreenCapture"]
         ),
         .library(
@@ -243,6 +243,8 @@ let package = Package(
 
         // Vision text recognition behind `TextRecognizing`. Runs where it is called; no main actor.
         perception("VisionText", ["PerceptionCore"], settings: pure),
+        perception("PixelSections", ["PerceptionCore"], settings: pure),
+        perception("PixelRegions", ["PerceptionCore"], settings: pure),
 
         // The window server's window list behind `WindowListing`.
         perception("WindowServerListing", ["PerceptionCore"], settings: pure),
@@ -296,7 +298,7 @@ let package = Package(
         .target(name: "FileConversations", dependencies: ["ChatCore"],
                 path: "Sources/Chat/FileConversations", swiftSettings: pure),
         .target(name: "LocalMCP", path: "Sources/Chat/LocalMCP", swiftSettings: facility),
-        integration("AutomationRuntime", ["Perception", "VisionText", "WindowServerListing", "AccessibilityFacts",
+        integration("AutomationRuntime", ["Perception", "VisionText", "PixelSections", "PixelRegions", "WindowServerListing", "AccessibilityFacts",
                     "ScreenCapture", "Engine", "EngineCore", "HIDActuation", "AccessibilityActions",
                     "WorkspaceActivation", "Memory", "FileKnowledge", "LiveScenes", "PerceptionCore",
                     "SeatDriving", "SeatCore", "SeatSession", "PrivateSymbols"]),
@@ -317,6 +319,8 @@ let package = Package(
         // MARK: Perception tests
         perceptionTests("PerceptionCore", ["PerceptionCore"]),
         perceptionTests("Perception", ["Perception", "PerceptionCore"]),
+        perceptionTests("PixelSections", ["PixelSections", "PerceptionCore"]),
+        perceptionTests("PixelRegions", ["PixelRegions", "PerceptionCore"]),
 
         // Boundary checks against a running application, gated by MECUM_LIVE_TESTS=1. Named apart from
         // the Driver Live tier on purpose: `make live-tests` filters on `LiveTests` and asserts a count.
@@ -330,7 +334,7 @@ let package = Package(
                     path: "Tests/Chat", swiftSettings: facility),
         .testTarget(
             name: "MecumCLITests",
-            dependencies: ["mecum", "EngineCore", "PerceptionCore", "ChatCore"],
+            dependencies: ["mecum", "EngineCore", "PerceptionCore", "ChatCore", "AutomationRuntime", "Perception"],
             path: "Tests/Engine/MecumCLITests",
             swiftSettings: facility
         ),

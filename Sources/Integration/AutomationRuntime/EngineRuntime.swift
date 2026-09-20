@@ -7,18 +7,13 @@
 
 import AppKit
 import AccessibilityActions
-import AccessibilityFacts
 import Engine
 import EngineCore
 import FileKnowledge
 import Foundation
 import HIDActuation
-import LiveScenes
 import Memory
-import Perception
-import ScreenCapture
 import SeatDriving
-import VisionText
 import WindowServerListing
 import WorkspaceActivation
 
@@ -38,20 +33,14 @@ public struct EngineRuntime {
     public let memory: BrainMemory
 
     public init(knowledgeDirectory: URL, seat: SeatTarget? = nil) {
-        let pipeline = ScenePipeline(text: VisionTextRecognizer(), augmentation: AccessibilityAugmenter())
         if let seat {
-            scenes = SeatSceneProvider(target: seat, pipeline: pipeline, windows: windows,
+            scenes = SeatSceneProvider(target: seat, pipeline: ProductionPerception.pipeline(), windows: windows,
                                        identity: { RunningApplicationLookup.identity(of: $0) })
             actuator   = SeatActuator(target: seat)
             controls   = SeatControls()
             activation = nil
         } else {
-            scenes = LiveSceneProvider(
-                pipeline: pipeline,
-                windows : windows,
-                capturer: StillCapturer(),
-                identity: { RunningApplicationLookup.identity(of: $0) }
-            )
+            scenes = ProductionPerception.foregroundScenes()
             actuator   = HIDActuator()
             controls   = AccessibilityController()
             activation = WorkspaceActivator()

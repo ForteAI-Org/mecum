@@ -73,14 +73,14 @@ struct ScenePipelineTests {
         #expect(scene.viewportPixelSize == ViewportPixelSize(width: 1000, height: 500))
     }
 
-    @Test("knob glyphs and blank runs are dropped; an unlabeled segment is an honest gap")
+    @Test("blank runs are dropped; a single letter is retained without contrary visual evidence")
     func filtersAndUnlabeled() async throws {
         let text = FixedText(runs: [RecognizedText(text: "O", pixelBox: CGRect(x: 10, y: 10, width: 8, height: 8)),
                                     RecognizedText(text: "  ", pixelBox: CGRect(x: 40, y: 10, width: 8, height: 8)),
                                     RecognizedText(text: "Mute", pixelBox: CGRect(x: 100, y: 300, width: 40, height: 14))])
         let regions = FixedRegions(boxes: [CGRect(x: 500, y: 300, width: 24, height: 24)])
         let scene = try await ScenePipeline(text: text, regions: regions).perceive(try blank(1000, 500), of: window)
-        #expect(scene.elements.map(\.kind) == [.text, .icon])
+        #expect(scene.elements.map(\.kind) == [.text, .text, .icon])
         let icon = try #require(scene.elements.last)
         #expect(icon.isUnlabeled)
         #expect(icon.label == "(unlabeled)")
