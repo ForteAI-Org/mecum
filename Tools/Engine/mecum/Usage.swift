@@ -17,6 +17,7 @@ enum Usage {
 
       mecum windows <app>                      the window census: what would be driven, what is a pop-up
       mecum scene   <app> [--json]             perceive the interaction window and print the text map
+      mecum peek    [--sections-only] [--labels]    live boxes over the frontmost app; peek --help for options
       mecum act     <app> <target> [options]   resolve the target by name, act, verify, report the outcome
       mecum select  <app> <dropdown> <item> --seat   open and select in one background menu operation
       mecum batch   <app> --window <title> --seat [options] -- <step> --then <step> ...

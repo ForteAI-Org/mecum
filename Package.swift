@@ -163,7 +163,7 @@ let package = Package(
         .library(
             name: "MecumPerception",
             targets: ["PerceptionCore", "VisionText", "PixelSections", "PixelRegions", "WindowServerListing", "Perception", "AccessibilityFacts",
-                      "ScreenCapture"]
+                      "ScreenCapture", "SceneOverlay"]
         ),
         .library(
             name: "MecumEngine",
@@ -257,6 +257,7 @@ let package = Package(
 
         // One still of a window, or of a region with its pop-up, through ScreenCaptureKit: the foreground eye.
         perception("ScreenCapture", ["PerceptionCore"], settings: pure),
+        perception("SceneOverlay", ["PerceptionCore"]),
 
         // MARK: Engine
         // Outcomes, the verification rule, policies and the roles an actuator and a scene source fill. Pure.
@@ -311,7 +312,7 @@ let package = Package(
                            "ScreenCapture", "Engine", "EngineCore", "HIDActuation", "AccessibilityActions",
                            "WorkspaceActivation", "Memory", "FileKnowledge", "LiveScenes",
                            "SeatDriving", "SeatCore", "SeatSession", "PrivateSymbols", "AutomationRuntime",
-                           "ChatCore", "CLIProviders", "FileConversations", "LocalMCP", "AutomationMCP"].map { .target(name: $0) },
+                           "ChatCore", "CLIProviders", "FileConversations", "LocalMCP", "AutomationMCP", "SceneOverlay"].map { .target(name: $0) },
             path: "Tools/Engine/mecum",
             swiftSettings: facility
         ),
@@ -321,6 +322,7 @@ let package = Package(
         perceptionTests("Perception", ["Perception", "PerceptionCore"]),
         perceptionTests("PixelSections", ["PixelSections", "PerceptionCore"]),
         perceptionTests("PixelRegions", ["PixelRegions", "PerceptionCore"]),
+        perceptionTests("SceneOverlay", ["SceneOverlay", "PerceptionCore"]),
 
         // Boundary checks against a running application, gated by MECUM_LIVE_TESTS=1. Named apart from
         // the Driver Live tier on purpose: `make live-tests` filters on `LiveTests` and asserts a count.

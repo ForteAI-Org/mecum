@@ -20,12 +20,13 @@ public enum ProductionPerception {
                       augmentation: AccessibilityAugmenter())
     }
 
-    /// Creates a foreground reader over the production observation adapters.
-    public static func foregroundScenes() -> any SceneProviding {
+    /// Creates a foreground reader. Excluded processes remain absent from popup-region captures,
+    /// allowing an inspection overlay to observe without reading its own rendered boxes.
+    public static func foregroundScenes(excludingProcesses: [pid_t] = []) -> any SceneProviding {
         LiveSceneProvider(
             pipeline: pipeline(),
             windows: WindowServerWindowListing(),
-            capturer: StillCapturer(),
+            capturer: StillCapturer(excludingProcesses: excludingProcesses),
             identity: { RunningApplicationLookup.identity(of: $0) }
         )
     }

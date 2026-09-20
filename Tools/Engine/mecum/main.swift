@@ -40,6 +40,7 @@ Task { @MainActor in
     do {
         switch command {
             case "chat": try await ChatCommand.run(arguments: Array(normalizedArguments.dropFirst()))
+            case "peek": try await PeekCommand.run(arguments: Array(normalizedArguments.dropFirst()))
             case "mcp-bridge":
                 guard normalizedArguments.count == 3, normalizedArguments[1] == "--connection" else {
                     throw UsageError.missing("mcp-bridge --connection <private connection file>")

@@ -6,6 +6,7 @@
 //
 
 import CoreGraphics
+import Foundation
 import ScreenCaptureKit
 
 /// StillCapturer takes one still through ScreenCaptureKit, at the screen's own pixel scale, of a
@@ -16,7 +17,13 @@ import ScreenCaptureKit
 /// Screen Recording must be granted to the process, or every window reads as not shared.
 public struct StillCapturer: Sendable {
 
-    public init() {}
+    private let excludedProcesses: Set<pid_t>
+
+    /// Excludes these owners from screen-region captures. Single-window captures already exclude
+    /// other windows. Useful for a diagnostic overlay that must not feed back into recognition.
+    public init(excludingProcesses: [pid_t] = []) {
+        excludedProcesses = Set(excludingProcesses)
+    }
 
     /// A still of one window, cursor hidden, sized to the window's frame in points times the display's
     /// pixel scale.
@@ -44,7 +51,11 @@ public struct StillCapturer: Sendable {
             throw CaptureFailure.displayNotFound(origin: region.origin)
         }
         let clipped = region.intersection(display.frame)
-        let filter = SCContentFilter(display: display, excludingWindows: [])
+        let excluded = content.windows.filter {
+            guard let owner = $0.owningApplication else { return false }
+            return excludedProcesses.contains(owner.processID)
+        }
+        let filter = SCContentFilter(display: display, excludingWindows: excluded)
         let scale = CGFloat(max(1, filter.pointPixelScale))
         let configuration = SCStreamConfiguration()
         configuration.sourceRect  = clipped.offsetBy(dx: -display.frame.minX, dy: -display.frame.minY)
