@@ -162,4 +162,45 @@ struct ScenePipelineTests {
         let second = try await pipeline.perceive(try blank(1000, 500), of: window)
         #expect(first.token == second.token)
     }
+
+    struct SizedText: TextRecognizing {
+        func recognizeText(in image: CGImage, accuracy: TextRecognitionAccuracy) throws -> [RecognizedText] {
+            [RecognizedText(text: "\(image.width)x\(image.height)", pixelBox: CGRect(x: 1, y: 1, width: 20, height: 8))]
+        }
+    }
+
+    @Test("control regions are cropped before recognition at either backing scale", arguments: [1, 2])
+    func regionBeforeRecognition(scale: Int) async throws {
+        let image = try blank(500 * scale, 200 * scale)
+        let bounds = NormalizedRect(x: 0.2, y: 0.25, width: 0.18, height: 0.1)
+        let result = try await ScenePipeline(text: SizedText()).perceive(image, inside: bounds, of: window)
+        let scene = try #require(result)
+        #expect(scene.viewportPixelSize == ViewportPixelSize(width: 90 * scale, height: 20 * scale))
+        #expect(scene.elements.first?.label == "\(90 * scale)x\(20 * scale)")
+    }
+
+    @Test("invalid or partly outside control regions are refused", arguments: [
+        NormalizedRect(x: -0.1, y: 0, width: 0.3, height: 0.1),
+        NormalizedRect(x: 0.9, y: 0, width: 0.3, height: 0.1),
+        NormalizedRect(x: 0.2, y: 0.2, width: 0, height: 0.1),
+        NormalizedRect(x: .nan, y: 0, width: 0.3, height: 0.1),
+    ])
+    func invalidRegion(bounds: NormalizedRect) async throws {
+        let scene = try await ScenePipeline(text: SizedText()).perceive(try blank(500, 200), inside: bounds, of: window)
+        #expect(scene == nil)
+    }
+
+    @Test("cropped control reads do not mix whole-window accessibility coordinates into the crop")
+    func regionHasNoWholeWindowAugmentation() async throws {
+        let recorder = FixedAugmentation.Recorder()
+        let pipeline = ScenePipeline(text: SizedText(), augmentation: FixedAugmentation(elements: [], seen: recorder))
+        let wholeWindow = ScenePipeline.Window(
+            bundleID: "com.x", appName: "X", title: "New Paths", processID: 42,
+            frame: CGRect(x: 1000, y: 500, width: 500, height: 200)
+        )
+        _ = try await pipeline.perceive(
+            try blank(500, 200), inside: NormalizedRect(x: 0.2, y: 0.25, width: 0.18, height: 0.1), of: wholeWindow
+        )
+        #expect(recorder.calls.isEmpty)
+    }
 }

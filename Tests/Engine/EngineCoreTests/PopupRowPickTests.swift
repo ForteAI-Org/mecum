@@ -65,6 +65,17 @@ struct PopupRowPickTests {
         #expect(plan.delta == -1)
     }
 
+    @Test("a partial scrolling menu moves directly instead of wrapping through unseen rows")
+    func partialMenuDoesNotWrap() throws {
+        let labels = ["AAC Audio", "AIFF", "Animated GIF", "Apple ProRes MXF OP1a", "AS-10", "AS-11",
+                      "DNxHR/DNxHD MXF OP1a", "DPX", "H.264", "H.264 Blu-ray", "HEVC (H.265)", "JPEG", "JPEG 2000 MXF OP1a"]
+        let rows = labels.enumerated().map { [element("text|\($1)", $1, globalY: 1698 + CGFloat($0) * 32)] }
+        let target = try #require(rows.first?.first)
+        let plan = try #require(PopupRowPick.plan(rows: rows, currentValue: "H.264", target: target, wraps: false))
+        #expect(plan.delta == -8)
+        #expect(PopupRowPick.plan(rows: rows, currentValue: "offscreen value", target: target, wraps: false) == nil)
+    }
+
     @Test("type-ahead takes the first word after any glyph")
     func typeAhead() {
         #expect(PopupRowPick.typeAheadPrefix(for: "✓ ProRes 422") == "ProRes")

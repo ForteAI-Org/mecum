@@ -63,7 +63,8 @@ public enum PopupRowPick {
 
     /// Plans the keys from the control's current value and the wanted element, or nil when either row
     /// cannot be found among the pop-up's rows or the list has a single row.
-    public static func plan(rows: [[SceneElement]], currentValue: String, target: SceneElement) -> Plan? {
+    /// Set `wraps` to false for a scrolling menu: unseen rows make a wrap through the visible subset invalid.
+    public static func plan(rows: [[SceneElement]], currentValue: String, target: SceneElement, wraps: Bool = true) -> Plan? {
         guard rows.count >= 2 else { return nil }
         let want = LabelText.normalize(currentValue)
         guard !want.isEmpty,
@@ -71,7 +72,7 @@ public enum PopupRowPick {
               let targetIndex = rows.firstIndex(where: { $0.contains { $0.id == target.id } })
         else { return nil }
         var delta = targetIndex - currentIndex
-        if abs(delta) > rows.count / 2 { delta += delta > 0 ? -rows.count : rows.count }
+        if wraps, abs(delta) > rows.count / 2 { delta += delta > 0 ? -rows.count : rows.count }
         return Plan(
             rowLabels   : rows.map { $0.map(\.label) },
             currentIndex: currentIndex,

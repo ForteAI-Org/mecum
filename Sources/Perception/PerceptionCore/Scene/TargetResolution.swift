@@ -25,7 +25,14 @@ extension SceneSnapshot {
 
     /// Resolves an action target. `preferStateful` narrows a shared name to the elements carrying
     /// state, which is what a toggle verb wants. `section` restricts the search to one panel.
-    public func resolve(target: String, preferStateful: Bool = false, section: String? = nil) -> Resolution {
+    /// `preferNativeControls` distinguishes a click target from a plain-text caption only when
+    /// accessibility supplies an interactive role. Multiple matching controls remain ambiguous.
+    public func resolve(
+        target: String,
+        preferStateful: Bool = false,
+        section: String? = nil,
+        preferNativeControls: Bool = false
+    ) -> Resolution {
         let resolvedSection = section.flatMap { resolveSection(named: $0)?.name }
         func inSection(_ element: SceneElement) -> Bool {
             guard let section, !section.isEmpty else { return true }
@@ -52,6 +59,16 @@ extension SceneSnapshot {
         if preferStateful, byLabel.count > 1 {
             let stateful = byLabel.filter { $0.state != nil }
             if !stateful.isEmpty { byLabel = stateful }
+        }
+        if preferNativeControls, byLabel.count > 1 {
+            let controls = byLabel.filter {
+                $0.kind == .control && AccessibilityAugmentation.interactiveRoles.contains($0.role ?? "")
+            }
+            let onlyControlsAndCaptions = byLabel.allSatisfy {
+                ($0.kind == .control && AccessibilityAugmentation.interactiveRoles.contains($0.role ?? ""))
+                    || ($0.kind == .text && ($0.role == nil || $0.role == "AXStaticText"))
+            }
+            if !controls.isEmpty, onlyControlsAndCaptions { byLabel = controls }
         }
         byLabel = Self.collapseSameRow(byLabel)
         if byLabel.count == 1 { return .found(byLabel[0]) }
@@ -84,11 +101,12 @@ extension SceneSnapshot {
         }
     }
 
-    /// One line listing each candidate's section and position, so a caller can retry with a section.
+    /// One line listing each candidate's section (or exact id when unsectioned) and position.
     public func disambiguation(target: String, limit: Int = 6) -> String {
         candidates(target: target).prefix(limit).map { element in
             let position = String(format: "@%.2f,%.2f", element.bounds.x, element.bounds.y)
-            return "section:'\(element.section ?? "?")' \(position)"
+            let selector = element.section.map { "section:'\($0)'" } ?? "id:'\(element.id)'"
+            return "\(selector) \(position)"
         }.joined(separator: " OR ")
     }
 

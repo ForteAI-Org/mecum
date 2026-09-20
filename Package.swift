@@ -14,6 +14,8 @@
 //   Engine/      how the agent ACTS on what it sees: the outcome vocabulary,
 //                the verification rule, the act cycle, what it remembers, and
 //                the roles an actuator and a store fill.
+//   Integration/ where two layers meet: the Driver's seat filling the Engine's
+//                roles, so the same engine drives a window in the background.
 //
 // The Driver targets come from AgentSeatKit and keep its per-target settings:
 // pure types are nonisolated by default, facilities are main actor by default.
@@ -90,13 +92,15 @@ func perception(
 
 func perceptionTests(
     _ name        : String,
-    _ dependencies: [String]
+    _ dependencies: [String],
+      resources   : [Resource]? = nil
 ) -> Target {
 
     .testTarget(
         name         : "\(name)Tests",
         dependencies : dependencies.map { .target(name: $0) },
         path         : "Tests/Perception/\(name)Tests",
+        resources    : resources,
         swiftSettings: suite
     )
 }
@@ -111,6 +115,20 @@ func engine(
         name         : name,
         dependencies : dependencies.map { .target(name: $0) },
         path         : "Sources/Engine/\(name)",
+        swiftSettings: settings
+    )
+}
+
+func integration(
+    _ name        : String,
+    _ dependencies: [String]       = [],
+      settings    : [SwiftSetting] = facility
+) -> Target {
+
+    .target(
+        name         : name,
+        dependencies : dependencies.map { .target(name: $0) },
+        path         : "Sources/Integration/\(name)",
         swiftSettings: settings
     )
 }
@@ -134,6 +152,9 @@ let package = Package(
     name     : "Mecum",
     platforms: [deployment],
     products : [
+        .library(name: "MecumChat",
+                 targets: ["ChatCore", "CLIProviders", "FileConversations", "LocalMCP",
+                           "AutomationRuntime", "AutomationMCP"]),
         .library(
             name: "MecumDriver",
             targets: ["SeatCore", "PrivateSymbols", "VirtualScreens", "WindowPlacement",
@@ -141,12 +162,13 @@ let package = Package(
         ),
         .library(
             name: "MecumPerception",
-            targets: ["PerceptionCore", "VisionText", "WindowServerListing", "Perception", "AccessibilityFacts"]
+            targets: ["PerceptionCore", "VisionText", "WindowServerListing", "Perception", "AccessibilityFacts",
+                      "ScreenCapture"]
         ),
         .library(
             name: "MecumEngine",
             targets: ["EngineCore", "Engine", "HIDActuation", "AccessibilityActions", "WorkspaceActivation",
-                      "Memory", "FileKnowledge"]
+                      "Memory", "FileKnowledge", "LiveScenes"]
         ),
     ],
     targets: [
@@ -231,6 +253,9 @@ let package = Package(
         // The pipeline: roles in, a scene out. Nonisolated on purpose: recognition must not block the UI.
         perception("Perception", ["PerceptionCore"], settings: pure),
 
+        // One still of a window, or of a region with its pop-up, through ScreenCaptureKit: the foreground eye.
+        perception("ScreenCapture", ["PerceptionCore"], settings: pure),
+
         // MARK: Engine
         // Outcomes, the verification rule, policies and the roles an actuator and a scene source fill. Pure.
         engine("EngineCore", ["PerceptionCore"], settings: pure),
@@ -253,6 +278,42 @@ let package = Package(
         // `KnowledgeStoring` over one JSON file per application, with backups and write-behind.
         engine("FileKnowledge", ["Memory"], settings: pure),
 
+        // `SceneProviding` for a window on the real screen: census, capture, pipeline.
+        engine("LiveScenes", ["EngineCore", "PerceptionCore", "Perception", "ScreenCapture"], settings: pure),
+
+        // MARK: Integration
+        // Where two layers meet. SeatDriving fills the Engine's roles from the Driver's seat: stills of the
+        // adopted window, routed commands inside a Turn, no activation.
+        integration("SeatDriving", ["SeatCore", "SeatSession", "SeatCapture", "SeatInput", "WindowPlacement",
+                                    "EngineCore", "PerceptionCore", "Perception", "AccessibilityActions"],
+                    settings: pure),
+
+        // MARK: Engine tools
+        // Chat contracts exclude processes, persistence, MCP, AppKit and the Driver.
+        .target(name: "ChatCore", path: "Sources/Chat/ChatCore", swiftSettings: pure),
+        .target(name: "CLIProviders", dependencies: ["ChatCore"],
+                path: "Sources/Chat/CLIProviders", swiftSettings: facility),
+        .target(name: "FileConversations", dependencies: ["ChatCore"],
+                path: "Sources/Chat/FileConversations", swiftSettings: pure),
+        .target(name: "LocalMCP", path: "Sources/Chat/LocalMCP", swiftSettings: facility),
+        integration("AutomationRuntime", ["Perception", "VisionText", "WindowServerListing", "AccessibilityFacts",
+                    "ScreenCapture", "Engine", "EngineCore", "HIDActuation", "AccessibilityActions",
+                    "WorkspaceActivation", "Memory", "FileKnowledge", "LiveScenes", "PerceptionCore",
+                    "SeatDriving", "SeatCore", "SeatSession", "PrivateSymbols"]),
+        integration("AutomationMCP", ["AutomationRuntime", "LocalMCP", "EngineCore", "PerceptionCore",
+                                     "PrivateSymbols", "SeatCore", "WindowServerListing"]),
+        // The foreground command line: windows, scene, act, memory. What a model host does, by hand.
+        .executableTarget(
+            name: "mecum",
+            dependencies: ["Perception", "PerceptionCore", "VisionText", "WindowServerListing", "AccessibilityFacts",
+                           "ScreenCapture", "Engine", "EngineCore", "HIDActuation", "AccessibilityActions",
+                           "WorkspaceActivation", "Memory", "FileKnowledge", "LiveScenes",
+                           "SeatDriving", "SeatCore", "SeatSession", "PrivateSymbols", "AutomationRuntime",
+                           "ChatCore", "CLIProviders", "FileConversations", "LocalMCP", "AutomationMCP"].map { .target(name: $0) },
+            path: "Tools/Engine/mecum",
+            swiftSettings: facility
+        ),
+
         // MARK: Perception tests
         perceptionTests("PerceptionCore", ["PerceptionCore"]),
         perceptionTests("Perception", ["Perception", "PerceptionCore"]),
@@ -260,9 +321,19 @@ let package = Package(
         // Boundary checks against a running application, gated by MECUM_LIVE_TESTS=1. Named apart from
         // the Driver Live tier on purpose: `make live-tests` filters on `LiveTests` and asserts a count.
         perceptionTests("PerceptionBoundary",
-                        ["Perception", "PerceptionCore", "VisionText", "AccessibilityFacts", "WindowServerListing"]),
+                        ["Perception", "PerceptionCore", "VisionText", "AccessibilityFacts", "WindowServerListing"],
+                        resources: [.copy("Fixtures/NewPathsMono.png")]),
 
         // MARK: Engine tests
+        .testTarget(name: "ChatTests", dependencies: ["ChatCore", "CLIProviders", "FileConversations", "LocalMCP",
+                                                    "AutomationMCP", "AutomationRuntime", "EngineCore", "PerceptionCore"],
+                    path: "Tests/Chat", swiftSettings: facility),
+        .testTarget(
+            name: "MecumCLITests",
+            dependencies: ["mecum", "EngineCore", "PerceptionCore", "ChatCore"],
+            path: "Tests/Engine/MecumCLITests",
+            swiftSettings: facility
+        ),
         engineTests("EngineCore", ["EngineCore", "PerceptionCore"]),
         engineTests("Engine", ["Engine", "EngineCore", "PerceptionCore"]),
         engineTests("Memory", ["Memory", "EngineCore", "PerceptionCore"],

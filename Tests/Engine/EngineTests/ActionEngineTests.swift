@@ -33,10 +33,14 @@ struct ActionEngineTests {
 
     final class RecordingActuator: Actuating, @unchecked Sendable {
         var gestures: [Gesture] = []
+        var confirmations: [DeliveryEffect] = []
         var failure: (any Error)?
         func perform(_ gesture: Gesture, in processID: pid_t) async throws {
             if let failure { throw failure }
             gestures.append(gesture)
+        }
+        func confirm(_ effect: DeliveryEffect, in processID: pid_t) async {
+            confirmations.append(effect)
         }
     }
 
@@ -126,6 +130,19 @@ struct ActionEngineTests {
 
     // MARK: Resolution and policy
 
+    @Test("a click resolves the native Create button instead of its sentence caption")
+    func createButtonAndCaption() async {
+        let caption = SceneElement(id: "text|create", kind: .text, label: "Create", bounds: rect(0.04, 0.30))
+        let button = SceneElement(id: "control|create", kind: .control, label: "Create",
+                                  bounds: rect(0.86, 0.85), role: "AXButton")
+        let actuator = RecordingActuator()
+        let outcome = await engine(scenes: ScriptedScenes([scene([caption, button])]), actuator: actuator)
+            .act(request("Create", dryRun: true))
+        #expect(outcome.kind == .dryRun)
+        #expect(outcome.message.contains("1010,788"))
+        #expect(actuator.gestures.isEmpty)
+    }
+
     @Test("no scene is an honest miss that says whether a window exists")
     func noScene() async {
         let noWindow = await engine(scenes: ScriptedScenes([]), windows: ScriptedWindows([[]])).act(request("Export"))
@@ -194,12 +211,15 @@ struct ActionEngineTests {
         let record = try #require(observer.records.first)
         #expect(record.effect == .stateFlip(from: .off, to: .on))
         #expect(record.verb == .click)
+        #expect(actuator.confirmations == [.observed], "a landed effect closes the delivery as observed")
     }
 
     @Test("an identical scene is a ghost and says nothing else changed")
     func ghost() async {
-        let outcome = await engine(scenes: ScriptedScenes([scene([export])])).act(request("Export"))
+        let actuator = RecordingActuator()
+        let outcome = await engine(scenes: ScriptedScenes([scene([export])]), actuator: actuator).act(request("Export"))
         #expect(outcome.kind == .actedUnverified)
+        #expect(actuator.confirmations == [.absent], "an identical scene is verified absence")
         #expect(outcome.message.contains("did NOT change"))
         #expect(outcome.message.contains("likely did not register"))
         #expect(outcome.message.contains("Nothing else in X changed"))
@@ -209,8 +229,11 @@ struct ActionEngineTests {
     func repaintWithElsewhere() async {
         let before = scene([export], token: "a"), after = scene([export], token: "b")
         let windows = ScriptedWindows([[mainWindow], [mainWindow], [WindowRow(layer: 0, frame: CGRect(x: 200, y: 200, width: 400, height: 300), title: "Save", number: 2), mainWindow]])
-        let outcome = await engine(scenes: ScriptedScenes([before, after]), windows: windows).act(request("Export"))
+        let actuator = RecordingActuator()
+        let outcome = await engine(scenes: ScriptedScenes([before, after]), actuator: actuator, windows: windows)
+            .act(request("Export"))
         #expect(outcome.kind == .actedUnverified)
+        #expect(actuator.confirmations == [.unknown], "a repaint establishes nothing")
         #expect(outcome.message.contains("nothing structural"))
         #expect(outcome.message.contains("NEW window \"Save\" appeared"))
         #expect(!outcome.message.contains("likely did not register"))
@@ -271,6 +294,7 @@ struct ActionEngineTests {
         let outcome = await engine(scenes: ScriptedScenes([scene([export])]), actuator: actuator).act(request("Export"))
         #expect(outcome.kind == .actedUnverified)
         #expect(outcome.message.contains("delivery failed"))
+        #expect(actuator.confirmations == [.unknown], "a failed delivery is still closed, as unknown")
     }
 
     // MARK: set_toggle

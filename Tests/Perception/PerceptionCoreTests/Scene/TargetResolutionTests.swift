@@ -130,6 +130,36 @@ struct TargetResolutionTests {
         #expect(scene([]).resolve(target: "nope") == .none)
     }
 
+    @Test("click preference uses native controls but keeps explicit IDs and section filters")
+    func nativeControlOverCaption() {
+        let caption = SceneElement(id: "text|create", kind: .text, label: "Create",
+                                   bounds: rect(0.04, 0.30, 0.08, 0.05), section: "sentence")
+        let button = SceneElement(id: "control|create", kind: .control, label: "Create",
+                                  bounds: rect(0.86, 0.85, 0.08, 0.05), role: "AXButton", section: "footer")
+        let s = scene([caption, button])
+        #expect(s.resolve(target: "Create") == .ambiguous(2))
+        #expect(s.resolve(target: "Create", preferNativeControls: true) == .found(button))
+        #expect(s.resolve(target: caption.id, preferNativeControls: true) == .found(caption))
+        #expect(s.resolve(target: "Create", section: "sentence", preferNativeControls: true) == .found(caption))
+    }
+
+    @Test("two native buttons remain ambiguous even with a same-name caption")
+    func duplicateNativeControls() {
+        let caption = SceneElement(id: "caption", kind: .text, label: "Create", bounds: rect(0.04, 0.30, 0.1, 0.05))
+        let first = SceneElement(id: "first", kind: .control, label: "Create", bounds: rect(0.2, 0.5, 0.1, 0.05), role: "AXButton")
+        let second = SceneElement(id: "second", kind: .control, label: "Create", bounds: rect(0.8, 0.85, 0.1, 0.05), role: "AXButton")
+        #expect(scene([caption, first, second]).resolve(target: "Create", preferNativeControls: true) == .ambiguous(2))
+    }
+
+    @Test("an inferred control alone is insufficient to discard another matching label")
+    func inferredControlsAreNotNativeEvidence() {
+        let caption = SceneElement(id: "caption", kind: .text, label: "Create", bounds: rect(0.04, 0.30, 0.1, 0.05))
+        let inferred = SceneElement(id: "inferred", kind: .control, label: "Create", bounds: rect(0.8, 0.85, 0.1, 0.05))
+        #expect(scene([caption, inferred]).resolve(target: "Create", preferNativeControls: true) == .ambiguous(2))
+        #expect(scene([caption, inferred]).disambiguation(target: "Create").contains("id:'caption'"))
+        #expect(!scene([caption, inferred]).disambiguation(target: "Create").contains("section:'?'"))
+    }
+
     @Test("the smallest section and element under a point win")
     func hitTesting() {
         let s = SceneSnapshot(

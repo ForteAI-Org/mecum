@@ -22,6 +22,9 @@ public struct HIDActuator: Actuating {
 
     public init() {}
 
+    /// Events posted at the HID tap carry no receipt, so there is nothing to answer.
+    public func confirm(_ effect: DeliveryEffect, in processID: pid_t) async {}
+
     public func perform(_ gesture: Gesture, in processID: pid_t) async throws {
         guard let source = CGEventSource(stateID: .hidSystemState) else { throw HIDActuationFailure.noEventSource }
         switch gesture {

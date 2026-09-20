@@ -94,6 +94,25 @@ public struct ScenePipeline: Sendable {
         return scene
     }
 
+    /// Reads one region before text recognition and grouping, so nearby captions cannot become
+    /// part of a control's value. Bounds are normalized to the supplied image; the result is local
+    /// to the crop. Invalid or partly outside bounds return nil rather than silently clipping.
+    /// Accessibility augmentation is disabled because its coordinates belong to the whole window.
+    public func perceive(
+        _ image: CGImage,
+        inside bounds: NormalizedRect,
+        of window: Window
+    ) async throws -> SceneSnapshot? {
+        let rect = bounds.cgRect
+        guard [rect.minX, rect.minY, rect.width, rect.height].allSatisfy(\.isFinite),
+              rect.width > 0, rect.height > 0,
+              CGRect(x: 0, y: 0, width: 1, height: 1).contains(rect) else { return nil }
+        let pixels = bounds.pixelBox(in: CGSize(width: image.width, height: image.height)).integral
+        guard let crop = image.cropping(to: pixels) else { return nil }
+        let local = Window(bundleID: window.bundleID, appName: window.appName, title: window.title)
+        return try await perceive(crop, of: local)
+    }
+
     /// Merges harvested elements into a pixel-built scene and recomputes the token. Pure; what
     /// `perceive` calls after the augmenter has answered.
     public static func augmented(_ scene: SceneSnapshot, with harvested: [SceneElement]) -> SceneSnapshot {

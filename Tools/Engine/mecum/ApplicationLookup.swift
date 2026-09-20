@@ -1,0 +1,3 @@
+import AutomationRuntime
+
+typealias ApplicationLookup = RunningApplicationLookup

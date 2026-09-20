@@ -18,6 +18,7 @@ an action is taken, never a coordinate of their own.
 | `WindowServerListing` | `WindowListing` over the window server's on-screen list |
 | `AccessibilityFacts` | `SceneAugmenting` over the live accessibility tree, on the main actor, under a budget |
 | `Perception` | `ScenePipeline`: roles in, a scene out |
+| `ScreenCapture` | `StillCapturer`: one still of a window, or of a screen region holding a window and its pop-up, through ScreenCaptureKit; the foreground eye, where the Seat's capture is the background one |
 
 There is no umbrella module. Link the `MecumPerception` library product; every consumer writes the
 imports it uses. `PerceptionCore` imports Foundation and CoreGraphics only, reads no environment

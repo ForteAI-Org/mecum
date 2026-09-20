@@ -43,7 +43,23 @@ public struct KeyModifiers: OptionSet, Sendable, Equatable {
 ///
 /// A conformer returns once the events have gone out, which says nothing about their effect; the
 /// engine verifies the effect by perceiving again. A conformer that cannot deliver at all throws.
+/// DeliveryEffect is what the engine saw after the gestures it delivered: the effect it looked for
+/// was observed, it was verified that nothing happened, or it could not be established. An actuator
+/// that keeps receipts answers them with this; one that posts and forgets has nothing to answer.
+public enum DeliveryEffect: Sendable, Equatable {
+
+    case observed
+    case absent
+    case unknown
+}
+
 public protocol Actuating: Sendable {
 
+    /// Delivers one gesture to the process and returns when the events have gone out. Says nothing
+    /// about their effect; the engine verifies by perceiving again.
     func perform(_ gesture: Gesture, in processID: pid_t) async throws
+
+    /// Closes the gestures delivered since the last confirmation with what the engine saw. Called
+    /// once per action, after the verdict, and also when delivery itself failed.
+    func confirm(_ effect: DeliveryEffect, in processID: pid_t) async
 }

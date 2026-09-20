@@ -135,7 +135,8 @@ public struct ActionEngine: Sendable {
         let scene = perceived.scene
         let element: SceneElement
         let resolution = scene.resolve(
-            target: request.target, preferStateful: request.verb == .setToggle, section: request.section
+            target: request.target, preferStateful: request.verb == .setToggle, section: request.section,
+            preferNativeControls: request.verb == .click || request.verb == .doubleClick
         )
         switch resolution {
             case .found(let found):
@@ -143,9 +144,8 @@ public struct ActionEngine: Sendable {
             case .ambiguous(let count):
                 return ActOutcome(
                     .ambiguous,
-                    "\(count) elements labeled '\(request.target)' — retry act with the SAME "
-                    + "target "
-                    + "plus a section arg: \(scene.disambiguation(target: request.target))", scene: scene)
+                    "\(count) elements labeled '\(request.target)' — choose an exact element ID or section: "
+                    + scene.disambiguation(target: request.target), scene: scene)
             case .none:
                 let near = scene.grep(goal: request.target).prefix(3)
                     .map { "'\($0.element.label)'" + ($0.element.section.map { " (\($0))" } ?? "") }
@@ -178,6 +178,8 @@ public struct ActionEngine: Sendable {
             try? await dependencies.actuator.perform(.key(code: Key.escape), in: pid)
             await pause(timing.popupDismiss)
             let after = await perceive(pid)?.scene
+            let dismissed = !(await self.surfaces(pid)).hasOpenPopup
+            await dependencies.actuator.confirm(dismissed ? .observed : .unknown, in: pid)
             return ActOutcome(.actedNoop, "a pop-up menu was open and '\(element.label)' is NOT one of its items — "
                 + "closed the menu instead of clicking through it. The scene below is current; act '\(element.label)' "
                     + "again now.",
@@ -228,11 +230,13 @@ public struct ActionEngine: Sendable {
                     if !openedByPress { try await dependencies.actuator.perform(.click(at: point), in: pid) }
             }
         } catch {
+            await dependencies.actuator.confirm(.unknown, in: pid)
             return ActOutcome(.actedUnverified, "\(request.verb.performed) '\(element.label)' — delivery failed: "
                 + "\(error)", scene: nil)
         }
         await pause(timing.clickSettle)
         guard let after = await perceive(pid)?.scene else {
+            await dependencies.actuator.confirm(.unknown, in: pid)
             return ActOutcome(
                 .actedUnverified,
                 "\(request.verb.performed) '\(element.label)' — no scene could be read "
@@ -253,6 +257,13 @@ public struct ActionEngine: Sendable {
         let elsewhere = ElsewhereGuide.forUnverifiedAct(
             app: request.appName, before: censusBefore, after: surfacesAfter.verdicts
         )
+        // A landed effect is observed whether or not it was the expected one; a ghost is verified absence.
+        let delivery: DeliveryEffect = switch verdict {
+            case .landed        : .observed
+            case .ghost         : .absent
+            case .unattributable: .unknown
+        }
+        await dependencies.actuator.confirm(delivery, in: pid)
         switch verdict {
             case .landed(let effect, true):
                 let asExpected = expected == nil ? "" : " (as expected)"
@@ -295,7 +306,10 @@ public struct ActionEngine: Sendable {
             return ActOutcome(.dryRun, "would click '\(element.label)' to set it \(desired.rawValue)")
         }
         do { try await dependencies.actuator.perform(.click(at: point), in: pid) }
-        catch { return ActOutcome(.actedUnverified, "set '\(element.label)' — delivery failed: \(error)") }
+        catch {
+            await dependencies.actuator.confirm(.unknown, in: pid)
+            return ActOutcome(.actedUnverified, "set '\(element.label)' — delivery failed: \(error)")
+        }
         await pause(timing.clickSettle)
         let after = await perceive(pid)?.scene
         let readBack = await dependencies.controls?.toggleState(at: point, in: pid)
@@ -311,6 +325,7 @@ public struct ActionEngine: Sendable {
             effect          : effect,
             windowTitleAfter: after?.windowTitle
         ))
+        await dependencies.actuator.confirm(readBack == desired ? .observed : .unknown, in: pid)
         switch readBack {
             case desired:
                 return ActOutcome(.foundActed, "set '\(element.label)' → \(desired.rawValue)", scene: after)
@@ -348,12 +363,15 @@ public struct ActionEngine: Sendable {
                 }
                 try await dependencies.actuator.perform(.key(code: Key.return), in: pid)
             } catch {
+                await dependencies.actuator.confirm(.unknown, in: pid)
                 return ActOutcome(.actedUnverified, "picking '\(element.label)' — delivery failed: \(error)")
             }
             await pause(timing.popupCommit)
             let stillOpen = await surfaces(pid).hasOpenPopup
             let value = await dependencies.controls?.controlValue(matchingAny: labels, in: pid)
             let after = await perceive(pid)?.scene
+            let picked = value.map { LabelText.normalize($0) == LabelText.normalize(element.label) } ?? false
+            await dependencies.actuator.confirm(picked ? .observed : .unknown, in: pid)
             if let value, LabelText.normalize(value) == LabelText.normalize(element.label) {
                 return ActOutcome(.foundActed, "selected '\(element.label)' in the pop-up (keyboard \(plan.route); the "
                     + "control now reads '\(value)')", scene: after)
@@ -386,6 +404,7 @@ public struct ActionEngine: Sendable {
             await pause(timing.popupArrow)
             if (await surfaces(pid)).popups.count > popupsBefore {
                 let after = await perceive(pid)?.scene
+                await dependencies.actuator.confirm(.observed, in: pid)
                 return ActOutcome(.foundActed, "'\(element.label)' opened a SUBMENU — its items are in the scene "
                     + "below; act the one you want next.", scene: after)
             }
@@ -395,10 +414,13 @@ public struct ActionEngine: Sendable {
                 await pause(timing.popupCommit)
             }
         } catch {
+            await dependencies.actuator.confirm(.unknown, in: pid)
             return ActOutcome(.actedUnverified, "typing '\(typed)' — delivery failed: \(error)")
         }
         let after = await perceive(pid)?.scene
-        if (await surfaces(pid)).hasOpenPopup {
+        let stillOpen = (await surfaces(pid)).hasOpenPopup
+        await dependencies.actuator.confirm(stillOpen ? .unknown : .observed, in: pid)
+        if stillOpen {
             return ActOutcome(.actedUnverified, "typed '\(typed)' but a pop-up is still open — that prefix may not "
                 + "match a row; "
                 + "describe_scene to read the exact item labels, then act the precise one.", scene: after)

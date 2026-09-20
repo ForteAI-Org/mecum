@@ -1184,6 +1184,158 @@ public final class AgentSeat {
 
     // MARK: The contextual menu
 
+    /// Runs a native dropdown inside one Turn. The caller supplies native actions and an
+    /// asynchronous reader; the Seat owns window discovery, observation and mandatory cleanup.
+    /// Returning true means a selection was requested, not that its application effect succeeded.
+    public func useNativePopupMenu(
+        of window: AdoptedWindow,
+        turn: Turn,
+        within deadline: Duration = .milliseconds(1500),
+        opening: @MainActor @Sendable () throws -> Void,
+        choosing choose: @MainActor @Sendable (ContextMenu) async throws -> Bool
+    ) async throws -> PopupMenuReceipt {
+        try await usePopupMenu(of: window, turn: turn, within: deadline,
+                               opening: { _, _ in try opening() }, choosing: choose)
+    }
+
+    /// Opens a pixel-resolved dropdown with one routed left click, then executes the reader's
+    /// keyboard selection while the attested menu still exists. Nil means dismiss without choosing.
+    /// The opener uses the adopted platform; keys are unprepared so they preserve the menu loop.
+    /// The caller supplies pacing and must verify the value afterwards. Commands are never replayed.
+    public func useDropdownMenu(
+        openedAt location: InputLocation,
+        of window: AdoptedWindow,
+        turn: Turn,
+        within deadline: Duration = .milliseconds(1500),
+        keyInterval: Duration,
+        choosing choose: @MainActor @Sendable (ContextMenu) async throws -> [CGKeyCode]?
+    ) async throws -> PopupMenuReceipt {
+        var opening: InputReceipt?
+        var choosing: [InputReceipt] = []
+        let result = try await usePopupMenu(of: window, turn: turn, within: deadline, opening: { target, platform in
+            opening = self.witnessed(try await self.sender.send(
+                .click(location, button: .left), to: target,
+                correlationID: turn.correlationID, platform: platform
+            ))
+        }) { menu in
+            guard let keys = try await choose(menu), !keys.isEmpty else { return false }
+            for (index, key) in keys.enumerated() {
+                try Task.checkCancellation()
+                let liveMenus = self.sensing.menuWindows(ownedBy: window.reference.processID)
+                guard liveMenus.count == 1, let live = liveMenus.first,
+                      live.hasSameIdentity(as: menu.window), live.frame == menu.frame else {
+                    throw InputFailure.currentCoordinateGeometryUnavailable
+                }
+                choosing.append(self.witnessed(try await self.sender.send(
+                    .key(virtualKey: key, text: ""), to: window.reference,
+                    correlationID: turn.correlationID, platform: AppKitPlatform()
+                )))
+                if index < keys.count - 1 { try await Task.sleep(for: keyInterval) }
+            }
+            return true
+        }
+        return PopupMenuReceipt(
+            menu: result.menu, selectionRequested: result.selectionRequested,
+            closedBy: result.closedBy, observation: result.observation,
+            opening: opening, choosing: choosing
+        )
+    }
+
+    /// Shares preflight, menu attestation and mandatory cleanup between native and routed openers.
+    private func usePopupMenu(
+        of window: AdoptedWindow,
+        turn: Turn,
+        within deadline: Duration,
+        opening: @MainActor @Sendable (WindowReference, any InputPlatform) async throws -> Void,
+        choosing choose: @MainActor @Sendable (ContextMenu) async throws -> Bool
+    ) async throws -> PopupMenuReceipt {
+        // Preflight uses the same guard and observation baseline as other Seat actions.
+        // This trace is not an InputReceipt: no Driver event is fabricated for a native request.
+        var trace = InputTraceIdentity.submitted(
+            command: .text(""), window: window.reference, correlationID: turn.correlationID
+        )
+        let record = try preflight(window, turn: turn, traceContext: &trace)
+        let target = record.window.reference
+        guard sensing.menuWindows(ownedBy: target.processID).isEmpty else {
+            throw SessionFailure.contextMenuAlreadyOpen(processID: target.processID)
+        }
+        let previous = state
+        actionInFlight = true
+        transition(to: .acting, reason: .requested)
+        defer {
+            actionInFlight = false
+            restoreActionState(previous, reason: .requested)
+            requestWindowFollow()
+        }
+        let started = ContinuousClock.now
+        var menu: ContextMenu?
+        var requested = false
+        var failure: (any Error)?
+        do {
+            try Task.checkCancellation()
+            try await opening(target, record.platform)
+            _ = await EventLoopWait.until({
+                !self.sensing.menuWindows(ownedBy: target.processID).isEmpty
+            }, timeout: deadline, interval: .milliseconds(30))
+            let appeared = sensing.menuWindows(ownedBy: target.processID)
+            guard let first = appeared.first else {
+                throw SessionFailure.contextMenuNeverOpened(windowNumber: target.windowNumber, within: deadline)
+            }
+            let observed = ContextMenu(window: first, appearedAfter: started.duration(to: .now))
+            menu = observed
+            guard appeared.count == 1 else { throw PopupMenuFailure.ambiguousMenu }
+            guard sensing.virtualDisplayBounds.contains(observed.frame) else {
+                throw InputFailure.currentCoordinateGeometryUnavailable
+            }
+            try Task.checkCancellation()
+            requested = try await choose(observed)
+        } catch { failure = error }
+
+        // Even a native request that timed out may have opened a menu. Never abandon it.
+        if menu == nil, let late = sensing.menuWindows(ownedBy: target.processID).first {
+            menu = ContextMenu(window: late, appearedAfter: started.duration(to: .now))
+        }
+        guard let menu else {
+            // A timed-out native request may deliver late. Cycle the target's preparation
+            // before giving it back, just as the contextual-menu opening timeout does.
+            if let timeout = failure as? SessionFailure, case .contextMenuNeverOpened = timeout {
+                do { try await sender.cyclePreparation(on: target) }
+                catch {
+                    if let cleanup = error as? InputPreparationFailure,
+                       cleanup.progress.neededRecovery != nil { report([.preparationNotRestored]) }
+                    throw error
+                }
+                _ = await EventLoopWait.until(
+                    { self.sensing.menuWindows(ownedBy: target.processID).isEmpty },
+                    timeout: .milliseconds(500), interval: .milliseconds(30)
+                )
+                if let late = sensing.menuWindows(ownedBy: target.processID).first {
+                    report([.contextMenuLeftOpen])
+                    throw SessionFailure.contextMenuNotClosed(menuWindowNumber: late.windowNumber, processID: target.processID)
+                }
+            }
+            if let failure { throw failure }
+            throw SessionFailure.contextMenuNeverOpened(windowNumber: target.windowNumber, within: deadline)
+        }
+        let closedBy = await close(menu, of: target, turn: turn, itemWasChosen: requested)
+        if requested {
+            _ = await EventLoopWait.until(
+                { self.sensing.frontmostProcessID == target.processID },
+                timeout: .milliseconds(800), interval: .milliseconds(30)
+            )
+        }
+        if sensing.frontmostProcessID == target.processID {
+            if let focusRecovery { focusRecovery.activationChanged(to: target.processID, source: .contextMenuPoll) }
+            else { report([.targetActivated]) }
+        }
+        guard let closedBy else {
+            report([.contextMenuLeftOpen])
+            throw SessionFailure.contextMenuNotClosed(menuWindowNumber: menu.window.windowNumber, processID: target.processID)
+        }
+        if let failure { throw failure }
+        return PopupMenuReceipt(menu: menu, selectionRequested: requested, closedBy: closedBy, observation: observer?.observation())
+    }
+
     /// useContextMenu opens the target's own contextual menu with a routed right
     /// click, hands the caller the rectangle the window server drew it at, posts
     /// the click the caller answers with, and **closes the menu whatever
