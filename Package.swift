@@ -242,13 +242,11 @@ let package = Package(
         // What survives of the Lab's own perception after Ronaldo's layer replaced it: only the pieces a
         // later ticket still has to port or decide. Everything else went with T2 and T5.
         //
-        //   CaptureSupport CaptureGate + WindowVisibility — T6 decides them.
         //   Relocation     ScrollPlanner + ScrollTiming, with the one axis enum they need (T7).
         //
         // T5 took the rest: IncrementalOCR became `IncrementalText`, AXPopupReader became
         // `PopupRowReading` and `AccessibilityPopupReader`, and LocatorCore, AXSupport and CVBackend
         // went with them.
-        perception("CaptureSupport", settings: labPerceptionSettings),
         perception("Relocation", settings: labPerceptionSettings),
 
         // MARK: SeatBroker
@@ -284,8 +282,7 @@ let package = Package(
         driverTests("SeatSession", ["SeatSession", "SeatCore", "CursorGuard", "SeatInput"]),
         driverTests("TargetReader", ["TargetReader"]),
 
-        // MARK: Lab locator and broker tests
-        perceptionTests("CaptureSupport", ["CaptureSupport"], settings: labPerceptionSettings),
+        // MARK: Broker tests
         brokerTests(
             "SeatBroker",
             ["SeatBroker", "PerceptionCore", "SeatCore", "SeatCapture",
