@@ -76,10 +76,6 @@ func driverTests(
     )
 }
 
-// The Lab's locator modules keep the isolation policy of the former Core:
-// nonisolated by default, without the upcoming features the layers above opt into.
-let labPerceptionSettings: [SwiftSetting] = [.swiftLanguageMode(.v6)]
-
 func perception(
     _ name        : String,
     _ dependencies: [String]       = [],
@@ -237,17 +233,6 @@ let package = Package(
         
         // Read-only reader of another application's window.
         driver("TargetReader", ["SeatCore", "WindowPlacement"]),
-
-        // MARK: Lab locator
-        // What survives of the Lab's own perception after Ronaldo's layer replaced it: only the pieces a
-        // later ticket still has to port or decide. Everything else went with T2 and T5.
-        //
-        //   Relocation     ScrollPlanner + ScrollTiming, with the one axis enum they need (T7).
-        //
-        // T5 took the rest: IncrementalOCR became `IncrementalText`, AXPopupReader became
-        // `PopupRowReading` and `AccessibilityPopupReader`, and LocatorCore, AXSupport and CVBackend
-        // went with them.
-        perception("Relocation", settings: labPerceptionSettings),
 
         // MARK: SeatBroker
         broker(

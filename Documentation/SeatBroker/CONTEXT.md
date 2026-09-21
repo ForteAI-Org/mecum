@@ -34,10 +34,12 @@ that went out and whose after-frame could not be read keeps its verified effect
 when the surface's own identity still proves it, and is `interruptedAfterPost`
 otherwise, which nothing repeats.
 
-The Lab's own locator modules (`LocatorCore`, `AXSupport`, `CaptureSupport`,
-`OCRSupport`, `CVBackend`, `Relocation`) are leftovers: no source under
-`Sources/SeatBroker` imports one any more and they are no part of any product.
-Deleting their targets is the next ticket.
+The Lab's own locator modules are gone. What they did better lives on in the
+Perception layer as roles (`ControlStateReading`, `PopupRowReading`,
+`IncrementalText`) and in the Engine's `ActOracle`; the rest the layer already
+covered. Scrolling an element into view has no planner any more: `ActionEngine`
+has no scroll verb and this runtime posts a plain scroll through the seat, so a
+scroll role is written when a consumer asks for one.
 
 Brokering a seat is all it does: it names no lease, scheduler, or other
 ownership model of its own. Those responsibilities already have precise owners
