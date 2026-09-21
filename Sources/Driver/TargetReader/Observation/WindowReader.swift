@@ -134,7 +134,41 @@ nonisolated public enum WindowReader {
     /// package once concluded that a background application opens no menu at
     /// all. So the search is the named window's children, or every window's
     /// when no Window ID is given, and the menu bar's own subtree is never
-    /// walked.
+    /// walked. The live suite's AppKit row proves that reading against the
+    /// Fixture, choosing an item by title and watching the menu close, and it is
+    /// the cheaper of the two readings, so it is the one tried first.
+    ///
+    /// ## Where it also is, on a target the window does not lead to
+    ///
+    /// That reading does not hold for Finder on this build. Measured from an
+    /// independent process with a real contextual menu held open on the screen:
+    /// menu window 42344 owned by pid 487, the application listing two AX
+    /// windows, and no `AXMenu` among the children of either. The application
+    /// element's own children were `AXWindow`, `AXMenuBar` and `AXScrollArea`.
+    /// Asking the system wide element what was drawn at the menu's centre,
+    /// (1022, 406), answered an `AXMenuItem` titled `Quick Look` whose parent
+    /// was an `AXMenu` of 35 items, every title readable. So the menu is in the
+    /// accessibility tree and it is simply not reachable from the window, and
+    /// the menu window's own rectangle, which this function already holds, is
+    /// what reaches it. Only when that finds nothing either does the reading
+    /// give up.
+    ///
+    /// ## The titles are the system's language, not the interface's
+    ///
+    /// Those 35 titles came back in English, `Copy` and `Rename`, on a Mac whose
+    /// interface is Italian. A caller matching what the person sees on the
+    /// screen will match nothing, so the title to look for is the English one,
+    /// and an index or a frame is what is left when neither can be assumed.
+    ///
+    /// ## Whose menu it is, checked before it is read
+    ///
+    /// `AXUIElementCopyElementAtPosition` on the system wide element answers
+    /// whatever is drawn at that point, and that can belong to another
+    /// application: a notification, a panel, anything covering those pixels at
+    /// the moment of the reading. Without the process check the seat is handed
+    /// items it did not ask for and clicks one of them in an application nobody
+    /// named, so the element's owning process is read and the fallback is
+    /// refused unless it is `processID`.
     ///
     /// ## A Chromium menu cannot be read, and this says so
     ///
@@ -174,7 +208,74 @@ nonisolated public enum WindowReader {
                 return .items(items(of: child))
             }
         }
+        if let menu = menuDrawn(in: menuWindow.frame, ownedBy: processID) {
+            return .items(items(of: menu))
+        }
         return .drawnOutsideTheAccessibilityTree(frame: menuWindow.frame)
+    }
+
+    /// The `AXMenu` behind the menu window's own rectangle, for a target whose
+    /// window element does not hold one.
+    ///
+    /// The hit test is on the system wide element because that is the only
+    /// element the menu is reachable from, and its answer is whatever owns
+    /// those pixels rather than whatever the caller named, which is what the
+    /// owner check in the walk is for.
+    private static func menuDrawn(in frame: CGRect, ownedBy processID: Int32) -> AXUIElement? {
+        var hit: AXUIElement?
+        guard AXUIElementCopyElementAtPosition(
+            AXUIElementCreateSystemWide(),
+            Float(frame.midX),
+            Float(frame.midY),
+            &hit
+        ) == .success,
+        let hit
+        else { return nil }
+
+        return enclosingMenu(
+            from   : hit,
+            ownedBy: processID,
+            role   : { stringAttribute($0, kAXRoleAttribute as CFString) },
+            owner  : { element in
+                var owner: pid_t = 0
+                return AXUIElementGetPid(element, &owner) == .success ? owner : nil
+            },
+            parent : { parent(of: $0) }
+        )
+    }
+
+    /// The menu an element drawn at a point belongs to, and nothing when it
+    /// belongs to another process or to no menu at all.
+    ///
+    /// The climb is bounded because nothing promises the point is inside a menu:
+    /// measured on Finder the element at the centre was the `AXMenuItem` itself,
+    /// one parent below its `AXMenu`, so the ceiling is generous and it is there
+    /// to end a climb that has nothing to find rather than to reach anything.
+    ///
+    /// The owner is what makes this safe to act on. An element whose process is
+    /// not the one the caller named is refused before a single row is read,
+    /// because the alternative is a list of items from an application nobody
+    /// asked about and a click landing in it.
+    static func enclosingMenu<Element>(
+        from element     : Element,
+        ownedBy processID: Int32,
+        parentLimit      : Int = 8,
+        role             : (Element) -> String?,
+        owner            : (Element) -> Int32?,
+        parent           : (Element) -> Element?
+    ) -> Element? {
+
+        // Every parent of the hit element belongs to the same application, so
+        // the owner is asked once and the climb only reads roles.
+        guard owner(element) == processID else { return nil }
+        var current: Element? = element
+        var climbed           = 0
+        while let node = current, climbed <= parentLimit {
+            if role(node) == kAXMenuRole { return node }
+            current  = parent(node)
+            climbed += 1
+        }
+        return nil
     }
 
     /// One `AXMenu`'s rows, read one element at a time.
@@ -584,6 +685,17 @@ nonisolated public enum WindowReader {
 
     private static func children(of element: AXUIElement) -> [AXUIElement] {
         elements(attribute(element, kAXChildrenAttribute as CFString)) ?? []
+    }
+
+    /// The type is checked rather than assumed: a conditional cast to a
+    /// CoreFoundation type always succeeds and would hide a wrong answer.
+    private static func parent(of element: AXUIElement) -> AXUIElement? {
+        guard let value = attribute(element, kAXParentAttribute as CFString),
+              CFGetTypeID(value) == AXUIElementGetTypeID()
+        else {
+            return nil
+        }
+        return unsafeDowncast(value, to: AXUIElement.self)
     }
 
     // MARK: Reading one value

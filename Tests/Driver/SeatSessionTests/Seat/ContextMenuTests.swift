@@ -61,9 +61,9 @@ struct ContextMenuTests {
 
         sender.onSend = { command in
             switch command {
-                case .click(_, .right):
+                case .click(_, .right, _):
                     if opensAMenu { sensing.menus = [FakeGeometry.menuWindow] }
-                case .click(_, .left):
+                case .click(_, .left, _):
                     if closedBy.contains(.chosenItem) { sensing.menus = [] }
                 case .key(53, _, _, _, _):
                     if closedBy.contains(.escapeKey) { sensing.menus = [] }
@@ -129,6 +129,26 @@ struct ContextMenuTests {
         // and never a claim that nothing happened.
         #expect(context.sender.sent.count == 1)
         #expect(context.seat.state == .ready)
+    }
+
+    @Test("an opening geometry changed during preparation posts no context-menu click")
+    func openingGeometryChangedAtTheFinalBoundaryPostsNothing() async throws {
+        let context = try await Self.ready()
+        let observation = try await observedReference(context.seat)
+
+        // The sender's wait stands for the preparation the platform performs.
+        // The opening callback must read this immediately before its first
+        // post, not before the wait, because the right click cannot be replayed.
+        context.sender.onSendWait = { context.sensing.geometry = nil }
+
+        await #expect(throws: ObservationAdmissionRefusal.geometryChanged) {
+            try await context.seat.withContextMenu(
+                openedAt   : Self.openAt,
+                observation: observation,
+                turn       : context.turn
+            )
+        }
+        #expect(context.sender.sent.isEmpty)
     }
 
     @Test("a failed timeout cleanup stays visible without replaying the opening click")
@@ -217,7 +237,7 @@ struct ContextMenuTests {
         #expect(outcome.cleanup == .verifiedClosed(.chosenItem))
         #expect(context.sender.sent.count == 2, "no teardown event was needed")
 
-        guard case .click(let location, let button) = context.sender.sent[1].command else {
+        guard case .click(let location, let button, _) = context.sender.sent[1].command else {
             Issue.record("the second command was not a click")
             return
         }
@@ -246,11 +266,15 @@ struct ContextMenuTests {
             if case .failure(let reason) = await interaction.observe() { refusal = reason }
         }
 
-        // The shipped source answers exactly this, so a deployment that has not
-        // qualified the menu surface cannot choose an item at all.
+        // The gate belongs to the source and not to the seat, so a source that
+        // answers false still refuses before any effect.
         #expect(refusal == .capabilityUnqualified(.menuSurfaceStill))
         #expect(outcome.insideMenu.isEmpty)
         #expect(outcome.cleanup == .verifiedClosed(.preparationCycle))
+
+        // The shipped source is on the qualified side of that same gate, which
+        // is what lets the chain this suite exercises be reached in a shipment.
+        #expect(SeatCaptureObservationSource(displayGeneration: 1).supports(.menuSurfaceStill))
     }
 
     @Test("an ordinary Command on the parent is refused while a menu is the observation")
@@ -475,7 +499,7 @@ struct ContextMenuTests {
 
         let context = try await Self.ready(closedBy: [.preparationCycle])
         context.sender.refusedCommand = { command in
-            if case .click(_, .left) = command { return InputFailure.invalidLocation }
+            if case .click(_, .left, _) = command { return InputFailure.invalidLocation }
             return nil
         }
 

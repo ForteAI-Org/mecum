@@ -30,14 +30,19 @@ import SeatCore
 /// refused while this is current, which is the rule of ASI-D-019 expressed where
 /// input is admitted rather than in a convention.
 ///
-/// ## What it cannot do here
+/// ## What observing the surface rests on
 ///
-/// Observing the dedicated surface needs a native ability nothing has qualified
-/// on this system, so the shipped source refuses `observe` before any effect
-/// with `capabilityUnqualified(.menuSurfaceStill)`. The parent's Frame is not
-/// offered in its place and the desktop is not a fallback. Choosing an item
-/// consequently cannot be reached in a shipped deployment: the refusal is the
-/// state of the evidence, not a placeholder.
+/// Choosing an item needs a Still of the menu's own surface, because the click
+/// is admitted against that surface and no other. The shipped source refused it
+/// until the ability was qualified, and it is qualified now on the AppKit
+/// family: a filter aimed at a Finder menu answered that menu's frame at its own
+/// origin and filled the buffer with its pixels. `SeatCaptureObservationSource`
+/// carries the numbers.
+///
+/// A source that has not qualified it still refuses `observe` before any effect
+/// with `capabilityUnqualified(.menuSurfaceStill)`, and the parent's Frame is
+/// not offered in its place: the desktop is never a fallback for a surface
+/// nobody could photograph.
 @MainActor
 public final class SeatMenuInteraction {
 

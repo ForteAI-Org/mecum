@@ -37,6 +37,11 @@ nonisolated public struct SeatObservationDelivery: Sendable {
     public let frame    : SeatFrame
     public let reference: SeatObservationReference
 
+    /// The exact capture target that produced `frame`, when a family crop was
+    /// necessary. Consumers that start a live preview reuse it verbatim rather
+    /// than trying to reconstruct a nested modal chain from the leaf role.
+    public let captureTarget: SeatCaptureTarget?
+
     /// The window geometry the sample's own attachments support, which is what a
     /// coordinate in the Frame is converted through.
     public let geometry: WindowGeometryObservation
@@ -51,10 +56,12 @@ nonisolated public struct SeatObservationDelivery: Sendable {
     package init(
         frame    : SeatFrame,
         reference: SeatObservationReference,
-        geometry : WindowGeometryObservation
+        geometry : WindowGeometryObservation,
+        captureTarget: SeatCaptureTarget? = nil
     ) {
         self.frame     = frame
         self.reference = reference
         self.geometry  = geometry
+        self.captureTarget = captureTarget
     }
 }

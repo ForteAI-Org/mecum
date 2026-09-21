@@ -23,9 +23,29 @@ nonisolated public enum ObservedSurfaceRole: Sendable, Equatable {
     /// A contextual menu attributed to the parent it was opened from.
     case transientMenu(parent: WindowIdentity)
 
+    /// A sheet attached to the observed window. The pixels and the geometry are
+    /// the host's, whole and unscaled, and this names the surface the consumer
+    /// is actually operating.
+    ///
+    /// A sheet has no surface of its own to capture: measured on 18/09/2026
+    /// against Slack's attach panel, `SCContentFilter(desktopIndependentWindow:)`
+    /// aimed at the `AXSheet` delivered the host window's pixels scaled into the
+    /// sheet's rectangle with a black column on the right, while the attachment
+    /// and the fallback geometry both declared the content rectangle to be the
+    /// whole buffer, so nothing downstream could see it. The panel's controls
+    /// live in the host's accessibility tree at true screen coordinates, so a
+    /// point taken from that picture landed hundreds of points away.
+    case hostedSheet(sheet: WindowIdentity)
+
     public var isTransientMenu: Bool {
         if case .transientMenu = self { return true }
         return false
+    }
+
+    /// The sheet a hosted observation is of, nil for the other two roles.
+    public var attachedSheet: WindowIdentity? {
+        guard case .hostedSheet(let sheet) = self else { return nil }
+        return sheet
     }
 
     public var parent: WindowIdentity? {

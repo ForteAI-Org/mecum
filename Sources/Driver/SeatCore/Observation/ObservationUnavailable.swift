@@ -18,9 +18,10 @@ nonisolated public enum ObservationCapability: String, Sendable, Equatable {
     case windowStill
 
     /// A Still of the dedicated surface of a transient menu, attributed to the
-    /// parent it was opened from. Not qualified: a filter aimed at a menu window
-    /// has never been shown here to deliver that menu's pixels with usable
-    /// geometry.
+    /// parent it was opened from. A filter aimed at a menu window was shown to
+    /// deliver that menu's pixels with usable geometry on the AppKit family, so
+    /// a source may qualify it; one that has not still answers false and the
+    /// seat refuses with this capability named.
     case menuSurfaceStill
 
     /// An oracle that relates the sample's clock to the caller's, without which
@@ -62,6 +63,21 @@ nonisolated public enum ObservationUnavailable: Sendable, Equatable, Error {
     /// The capture was refused or failed before any sample, with its reason as
     /// text for a report. It is not an incomplete reading: nothing was delivered.
     case captureFailed(reason: String)
+
+    /// The surface the capture would have been aimed at is drawn inside another
+    /// window, and that window is not one the seat holds a capturable record
+    /// for. Both windows are carried so a report names the pair.
+    ///
+    /// A window-scoped modal has no surface of its own: ScreenCaptureKit aimed
+    /// at one answers the host's pixels scaled into the modal's rectangle while
+    /// declaring the content rectangle to be the whole buffer, so nothing
+    /// downstream can see that the picture is of another window. The parentage
+    /// gets one more reading inside the request's own deadline, and this is the
+    /// answer when it is still not there. It is not resolved by cropping or
+    /// stretching that picture, and not by capturing the whole display: a
+    /// display frame cannot carry a window identity and would widen the surface
+    /// the seat is authorized on.
+    case hostedSurfaceUnresolved(surface: WindowIdentity, namedHost: WindowIdentity)
 
     /// A menu interaction is current, so the target's own observation is not the
     /// one to take. The parent is carried for the report.
