@@ -15,7 +15,7 @@ private func scene(_ count: Int) -> SceneObservation {
                         space: CGColorSpaceCreateDeviceRGB(),
                         bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
     let elements = (0..<count).map {
-        SceneElement(index: $0 + 1, id: "e\($0)", kind: "control", label: "E\($0)", role: nil, state: nil,
+        SceneElement(index: $0 + 1, identity: "e\($0)", kind: "control", label: "E\($0)", role: nil, state: nil,
                      bounds: CGRect(x: 0, y: 0, width: 0.1, height: 0.1))
     }
     return SceneObservation(image: ctx.makeImage()!, elements: elements, text: "scene body", token: "t")

@@ -52,7 +52,7 @@ private func element(_ index: Int, id: String, role: String?, state: String? = n
                      label: String = "field", value: String? = nil,
                      x: Double = 0.2, y: Double = 0.2)
     -> SceneObservation.Element {
-    SceneObservation.Element(index: index, id: id, kind: "control", label: label, role: role, state: state, value: value,
+    SceneObservation.Element(index: index, identity: id, kind: "control", label: label, role: role, state: state, value: value,
                  bounds: CGRect(x: x, y: y, width: 0.2, height: 0.1))
 }
 
@@ -125,7 +125,7 @@ private func element(_ index: Int, id: String, role: String?, state: String? = n
 @Test func aTypedFieldIsHeldToItsOwnAccessibilityValue() {
     let field = element(1, id: "f", role: "AXTextField", label: "Name", value: "before")
     #expect(ActOracle.of(.type(element: 1, text: "ciao"), target: field, surface: sheet)
-            == .fieldReads(controlID: field.id, bounds: field.bounds, text: "ciao", beforeValue: "before"))
+            == .fieldReads(controlID: field.identity, bounds: field.bounds, text: "ciao", beforeValue: "before"))
     // Typing into something that is not a field has no value to read back.
     #expect(ActOracle.of(.type(element: 1, text: "ciao"),
                          target: element(1, id: "b", role: "AXButton"), surface: sheet) == nil)

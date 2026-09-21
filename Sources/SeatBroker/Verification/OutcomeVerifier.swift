@@ -84,7 +84,7 @@ extension ActOracle {
         case .type(_, let text):
             guard let target, fieldRoles.contains(target.role ?? "") else { return nil }
             return .fieldReads(
-                controlID  : target.id,
+                controlID  : target.identity,
                 bounds     : target.bounds,
                 text       : text,
                 beforeValue: target.value

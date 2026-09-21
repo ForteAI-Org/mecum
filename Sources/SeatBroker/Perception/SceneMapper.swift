@@ -27,14 +27,14 @@ enum SceneMapper {
                             timing: PerceptionTiming = PerceptionTiming()) -> SceneObservation {
         let elements = scene.elements.enumerated().map { offset, element in
             SceneObservation.Element(
-                index : offset + 1,
-                id    : element.id,
-                kind  : element.kind.rawValue,
-                label : element.label,
-                role  : element.role,
-                state : element.state?.rawValue,
-                value : element.value,
-                bounds: element.bounds.cgRect
+                index   : offset + 1,
+                identity: element.id,
+                kind    : element.kind.rawValue,
+                label   : element.label,
+                role    : element.role,
+                state   : element.state?.rawValue,
+                value   : element.value,
+                bounds  : element.bounds.cgRect
             )
         }
         return SceneObservation(

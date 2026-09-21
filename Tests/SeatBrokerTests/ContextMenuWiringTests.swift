@@ -152,12 +152,12 @@ private let blankImage = CGContext(data: nil, width: 10, height: 10, bitsPerComp
                                    bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!.makeImage()!
 
 private let sceneOfOneElement = SceneObservation(image: blankImage, elements: [
-    SceneElement(index: 1, id: "a", kind: "control", label: "Documenti", role: "AXRow", state: nil,
+    SceneElement(index: 1, identity: "a", kind: "control", label: "Documenti", role: "AXRow", state: nil,
                  bounds: CGRect(x: 0.1, y: 0.2, width: 0.4, height: 0.2)),
 ], text: "", token: "t")
 
 private let sceneOfThreeElements = SceneObservation(image: blankImage, elements: (1...3).map {
-    SceneElement(index: $0, id: "e\($0)", kind: "control", label: "E\($0)", role: nil, state: nil,
+    SceneElement(index: $0, identity: "e\($0)", kind: "control", label: "E\($0)", role: nil, state: nil,
                  bounds: CGRect(x: 0, y: 0, width: 0.1, height: 0.1))
 }, text: "", token: "t")
 

@@ -36,7 +36,13 @@ public final class SeatBroker {
         regionFilter: MediaRegionFilter(),
         sections    : ColorSectionDetector(),
         augmentation: AccessibilityAugmenter(budgetSeconds: 0.35),
-        controlState: PixelControlStateReader()
+        // Off for now, and the owner's call to put back. Measured on one Slack
+        // window of 89 elements, same frame, same scene: perception 2.76 s with
+        // the reader and 1.93 s without it, so it renders the frame again per
+        // mark candidate for about 0.83 s a frame. What it buys is the state of
+        // the switches and checkboxes accessibility did not answer for, which
+        // is a gap and not the common case.
+        controlState: nil
     )
     private let recorder: RunRecorder
     private let ledger = LaunchLedger()

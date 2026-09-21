@@ -71,3 +71,28 @@ private func blankImage() -> CGImage {
     #expect(observation.text.contains("▣ (unsectioned) — 1 elements"))
     #expect(observation.text.contains("[2] text · loose"))
 }
+
+/// Two unlabeled elements in the same coarse cell carry the same Perception
+/// identity, and a list keyed on it draws them as one row. `id` is the index,
+/// which is unique by construction; `identity` still names what a before/after
+/// reading matches on.
+@Test func numbersElementsThatShareOneIdentityApart() {
+    let snapshot = SceneSnapshot(
+        bundleID         : "b",
+        appName          : "App",
+        windowTitle      : "T",
+        viewportPixelSize: ViewportPixelSize(width: 100, height: 50),
+        elements         : [
+            PerceptionCore.SceneElement(id: "?|@2,0", kind: .icon, label: "(unlabeled)",
+                                        bounds: NormalizedRect(x: 0.20, y: 0.1, width: 0.03, height: 0.05),
+                                        isUnlabeled: true),
+            PerceptionCore.SceneElement(id: "?|@2,0", kind: .icon, label: "(unlabeled)",
+                                        bounds: NormalizedRect(x: 0.24, y: 0.1, width: 0.03, height: 0.05),
+                                        isUnlabeled: true),
+        ]
+    )
+    let elements = SceneMapper.observation(from: snapshot, image: blankImage()).elements
+
+    #expect(Set(elements.map(\.id)).count == elements.count)
+    #expect(elements.map(\.identity) == ["?|@2,0", "?|@2,0"])
+}

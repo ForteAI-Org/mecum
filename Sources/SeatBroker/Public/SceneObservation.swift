@@ -68,7 +68,14 @@ public struct SceneObservation: @unchecked Sendable, Identifiable {
 /// observation: it is what an action refers to.
 public struct SceneElement: Sendable, Hashable, Identifiable {
     public let index: Int
-    public let id: String
+    /// Unique inside one observation, which `id` has to be and `identity` is
+    /// not: two unlabeled elements in the same coarse cell share one identity
+    /// key, and a view keyed on that draws them as one row.
+    public var id: Int { index }
+    /// The Perception layer's own key for this element: stable across frames,
+    /// shared between elements a frame cannot tell apart. What a before/after
+    /// reading names its target by, never what a list is keyed on.
+    public let identity: String
     public let kind: String
     public let label: String
     public let role: String?
@@ -78,10 +85,10 @@ public struct SceneElement: Sendable, Hashable, Identifiable {
     /// Normalized to the observation image, origin top-left.
     public let bounds: CGRect
 
-    public init(index: Int, id: String, kind: String, label: String,
+    public init(index: Int, identity: String, kind: String, label: String,
                 role: String?, state: String?, value: String? = nil, bounds: CGRect) {
         self.index = index
-        self.id = id
+        self.identity = identity
         self.kind = kind
         self.label = label
         self.role = role

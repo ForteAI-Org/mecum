@@ -8,9 +8,15 @@ struct RawPlan: Codable, Sendable {
         let target: String
         let text: String?
         /// The number of complete primary-button clicks for a `:click` step.
-        /// Omitted means one; all other verbs require null.
+        /// Omitted means one; all other verbs leave it null.
         var count: Int? = nil
         let reason: String
+
+        /// True only when the count asks for more than one click. Nil, 0 and 1
+        /// all mean the same single press, and a structured-output mode that
+        /// must emit the key fills one of those three on a step with nothing to
+        /// click: refusing them refuses every plan the schema allows.
+        var namesMultipleClicks: Bool { (count ?? 1) >= 2 }
     }
     let status: String
     let reason: String
@@ -62,7 +68,7 @@ enum PlanValidationError: LocalizedError {
         case .invalidClickCount(let count):
             "click count \(count) is outside 1...\(InputCommand.maximumClickCount)."
         case .unexpectedClickCount(let target):
-            "\(target) is not a click step but names a click count."
+            "\(target) is not a click step but names more than one click."
         case .badScrollDelta(let s): "scroll text \"\(s)\" is not a signed integer."
         case .stepsWithoutPlan: "status is not plan but steps are present."
         case .missingApplication: "status is open but \"application\" names nothing."
@@ -193,7 +199,7 @@ enum PlanSchema {
             if keyMatches.count == 1, let match = keyMatches.first,
                let nameRange = Range(match.range(at: 1), in: target),
                let action = SemanticAction.key(chord: String(target[nameRange])) {
-                guard step.count == nil else { throw PlanValidationError.unexpectedClickCount(step.target) }
+                guard !step.namesMultipleClicks else { throw PlanValidationError.unexpectedClickCount(step.target) }
                 guard !forbiddenChords.contains(action) else {
                     throw PlanValidationError.badTarget(step.target)
                 }
@@ -229,11 +235,11 @@ enum PlanSchema {
                 }
                 action = .click(element: index, count: count)
             case "type":
-                guard step.count == nil else { throw PlanValidationError.unexpectedClickCount(step.target) }
+                guard !step.namesMultipleClicks else { throw PlanValidationError.unexpectedClickCount(step.target) }
                 guard let text = step.text, !text.isEmpty else { throw PlanValidationError.missingText(index) }
                 action = .type(element: index, text: text)
             case "menu":
-                guard step.count == nil else { throw PlanValidationError.unexpectedClickCount(step.target) }
+                guard !step.namesMultipleClicks else { throw PlanValidationError.unexpectedClickCount(step.target) }
                 // The title is the whole of what a menu step names: without one
                 // there is nothing to match, so no menu is opened to try.
                 guard let item = step.text?.trimmingCharacters(in: .whitespaces), !item.isEmpty else {
@@ -241,7 +247,7 @@ enum PlanSchema {
                 }
                 action = .menu(element: index, item: item)
             default:
-                guard step.count == nil else { throw PlanValidationError.unexpectedClickCount(step.target) }
+                guard !step.namesMultipleClicks else { throw PlanValidationError.unexpectedClickCount(step.target) }
                 guard let text = step.text?.trimmingCharacters(in: .whitespaces), let delta = Int32(text) else {
                     throw PlanValidationError.badScrollDelta(step.text ?? "")
                 }

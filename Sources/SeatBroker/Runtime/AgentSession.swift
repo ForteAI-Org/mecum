@@ -358,7 +358,7 @@ public final class AgentSession {
 
             let verification = OutcomeVerifier.verify(before: beforeScene, beforeImage: before.image,
                                                       after: afterScene, afterImage: after.image,
-                                                      targetID: targetElement?.id,
+                                                      targetID: targetElement?.identity,
                                                       oracle: oracle,
                                                       surfaceIsGone: driver.surfaceIsGone(surface))
             result = (after, verification)

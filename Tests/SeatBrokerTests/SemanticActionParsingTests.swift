@@ -96,7 +96,7 @@ func controlsUseMecumsPhysicalKeyTable(fixture: (KeyName, String)) throws {
 
 @Test func typingIsTwoObservationBoundCommands() throws {
     let scene = SceneObservation(image: emptyScene.image, elements: [
-        SceneElement(index: 1, id: "field", kind: "control", label: "Name", role: "AXTextField",
+        SceneElement(index: 1, identity: "field", kind: "control", label: "Name", role: "AXTextField",
                      state: nil, bounds: CGRect(x: 0.1, y: 0.2, width: 0.4, height: 0.2)),
     ], text: "", token: "field")
 
