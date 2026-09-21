@@ -13,11 +13,31 @@ An identical scene is a ghost; a changed scene with nothing attributable is a re
 `acted_unverified` with a sentence that says which, because a wrong success costs more rounds than
 an honest miss: it was measured as a model burning turns on a click that never happened.
 
+## Oracles
+
+Some gestures have a second reading that settles what two scenes cannot, and `ActOracle` names the
+three this layer knows: the surface the gesture was aimed at is gone from the window server's list,
+the field reads the value it had with the typed text inserted into it, or the control no longer
+shows the state it had. It is derived before the gesture goes out, from the action and the surface
+it is aimed at, never from the picture, and it is consulted before the scene difference. An oracle
+that holds is `found_acted` however little else moved, and the sentence says which reading decided
+it. An oracle the reading contradicts leaves `acted_unverified` with that contradiction said out
+loud, including where the difference alone would have called the gesture landed: a structural change
+the oracle does not cover is a measurement, not the proof this gesture was for. An action with no
+oracle is `nil` and the two-scene rule is exactly what it was. `OracleEvidence` is what a
+composition root read and nothing it inferred: the after-scene, which `SceneAugmenting` has already
+put the live accessibility value and state on, and whether the window server still lists the
+surface, which is `WindowListing`'s answer in the foreground and the seat's own on the seat. No role
+is written beside it, because both readings already have one. When no after-scene could be taken at
+all, `ActVerification.interrupted` still asks the surface's identity: a Cancel that closed its panel
+stays closed while the focus is coming back, and anything else is uncertain, which is not a failure
+and is never a reason to send the gesture again.
+
 ## Shape
 
 | Module | What it owns |
 |---|---|
-| `EngineCore` | pure types and contracts: `ActOutcome` and its closed kinds, `ActVerification`, `ActionVerb`, `ActionPolicy` and `ActionPermissions`, `ActivationPolicy`, `ActionTiming`, `ActionRequest`, `ElsewhereGuide`, `PopupRowPick`, and the roles `Actuating`, `SceneProviding`, `ControlPressing`, `ApplicationActivating`, `EffectExpecting`, `ActionObserving` |
+| `EngineCore` | pure types and contracts: `ActOutcome` and its closed kinds, `ActVerification` with `ActOracle` and `OracleEvidence`, `ActionVerb`, `ActionPolicy` and `ActionPermissions`, `ActivationPolicy`, `ActionTiming`, `ActionRequest`, `ElsewhereGuide`, `PopupRowPick`, and the roles `Actuating`, `SceneProviding`, `ControlPressing`, `ApplicationActivating`, `EffectExpecting`, `ActionObserving` |
 | `Engine` | `ActionEngine`: the act cycle and the observe side (`describeScene`, `describeSection`, `checkGoal`) over the roles |
 | `HIDActuation` | the foreground `Actuating`: synthetic events at the HID system tap |
 | `AccessibilityActions` | `ControlPressing` over the live accessibility tree: open a dropdown by its own press, read a combo box's value, read a toggle under a point |
@@ -268,7 +288,9 @@ Driver offers is not yet turned on here.
 
 ## Evidence
 
-Unit: `ActVerificationTests` (one test per verdict), `ActionPolicyTests`, `ElsewhereGuideTests`,
+Unit: `ActVerificationTests` (one test per verdict), `ActOracleTests` (11: the three oracles, the exact
+typed-value transition, a landed effect a contradicted oracle demotes, the unchanged no-oracle path and
+the interrupted reading), `ActionPolicyTests`, `ElsewhereGuideTests`,
 `PopupRowPickTests` (Premiere's measured list geometry), and `ActionEngineTests`, which drives the
 whole cycle through doubles that honor the roles: resolution and its misses, the destructive gate,
 dry runs, a landed click, a ghost, a repaint with a window that appeared elsewhere, expectation by

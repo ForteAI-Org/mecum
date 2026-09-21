@@ -1,4 +1,5 @@
 import CoreGraphics
+import EngineCore
 import PerceptionCore
 import SeatCore
 
@@ -18,11 +19,11 @@ public enum ActionOutcome: String, Sendable, Hashable, Codable {
     /// It went out and the reading afterwards found nothing changed.
     case posted
 
-    /// It went out and something moved that the predicate does not cover.
+    /// It went out and something moved that the oracle does not cover.
     /// It is a measurement, not a verification: OCR, a repaint, a caret.
     case sceneChanged
 
-    /// The predicate derived from the action and the surface holds.
+    /// The oracle derived from the action and the surface holds.
     case expectedEffectVerified
 
     /// It went out and the reading that would settle it could not be taken.
@@ -61,36 +62,7 @@ public enum ActionOutcome: String, Sendable, Hashable, Codable {
     }
 }
 
-/// The proof one action on one surface can be held to.
-///
-/// It is derived from the action and from the surface the Command was aimed
-/// at, never from the picture: the picture is what the predicate judges. Each
-/// case names an oracle independent of the scene diff. A `type` is judged on
-/// the field's own accessibility value, a stateful control on its
-/// accessibility state, and the rest on whether the surface the Command was
-/// aimed at still exists.
-///
-/// `unqualified` is the honest answer where this lab has no independent
-/// oracle: a scroll, an arrow key, a chord whose effect lives somewhere the
-/// lab cannot read. Such an action reaches `sceneChanged` and no higher.
-enum ExpectedEffect: Sendable, Equatable {
-
-    /// The surface the Command was aimed at is gone, read from the window
-    /// server by identity. It is the proof of a dismissal, and for a plain
-    /// click on a control with no state of its own it is the only semantic
-    /// proof available here: a click that legitimately does something else
-    /// reads as `sceneChanged`, which is a measurement and not a failure.
-    case surfaceCloses(windowNumber: Int)
-
-    /// The field at these bounds reads this text. Accessibility supplies the
-    /// value, so this never falls back to OCR where a value exists.
-    case fieldReads(controlID: String, bounds: CGRect, text: String, beforeValue: String?)
-
-    /// The control at these bounds no longer reads the state it had.
-    case stateFlips(bounds: CGRect, from: String?)
-
-    /// No oracle this lab can hold the action to.
-    case unqualified
+extension ActOracle {
 
     /// The roles whose value accessibility answers for, so a `type` into one
     /// of them is checked against that value rather than against pixels.
@@ -99,15 +71,22 @@ enum ExpectedEffect: Sendable, Equatable {
     /// The roles that carry their own on/off/mixed state.
     private static let statefulRoles: Set<String> = ["AXCheckBox", "AXRadioButton", "AXDisclosureTriangle"]
 
+    /// Which oracle this action on this surface can be held to, and nil where
+    /// this lab has none: a scroll, an arrow key, a chord whose effect lives
+    /// somewhere nothing here can read. Such an action reaches `sceneChanged`
+    /// and no higher, which is the Engine's two-scene rule and not a verdict.
+    ///
+    /// It is derived from the action and from the surface the Command was
+    /// aimed at, never from the picture: the picture is what the oracle judges.
     static func of(_ action: SemanticAction, target: SceneObservation.Element?,
-                   surface: WindowIdentity) -> ExpectedEffect {
+                   surface: WindowIdentity) -> ActOracle? {
         switch action {
         case .type(_, let text):
-            guard let target, fieldRoles.contains(target.role ?? "") else { return .unqualified }
+            guard let target, fieldRoles.contains(target.role ?? "") else { return nil }
             return .fieldReads(
-                controlID : target.id,
-                bounds    : target.bounds,
-                text      : text,
+                controlID  : target.id,
+                bounds     : target.bounds,
+                text       : text,
                 beforeValue: target.value
             )
         case .click, .menu:
@@ -120,15 +99,20 @@ enum ExpectedEffect: Sendable, Equatable {
             // is somewhere this lab has no independent reading of.
             return name == .escape && modifiers.isEmpty
                 ? .surfaceCloses(windowNumber: surface.windowNumber)
-                : .unqualified
+                : nil
         case .scroll:
-            return .unqualified
+            return nil
         }
     }
 }
 
-/// Before/after: the predicate the action is held to, the Perception layer's
-/// scene difference, the scene token, and a mean pixel delta.
+/// Before/after, as the Engine judges it, in this lab's own vocabulary.
+///
+/// The judgement is `ActVerification`'s: its oracle decides first, its
+/// two-scene rule decides the rest. What is left here is the mapping onto
+/// `ActionOutcome`, which is the shape the lab's reports and the Lab's views
+/// read, plus the two measurements the Engine does not carry: the encoded
+/// scene difference and the mean pixel delta.
 enum OutcomeVerifier {
 
     /// What a Command the seat refused before its first event comes to. It is
@@ -139,87 +123,39 @@ enum OutcomeVerifier {
 
     static func verify(before: SceneSnapshot, beforeImage: CGImage,
                        after: SceneSnapshot, afterImage: CGImage, targetID: String?,
-                       expected: ExpectedEffect, afterElements: [SceneObservation.Element],
-                       surfaceIsGone: Bool) -> VerificationResult {
-        let effect = SceneDifference.effect(before: before, after: after, targetID: targetID)
-        let changed = effect != nil || before.token != after.token
-        let outcome: ActionOutcome = if holds(expected, in: afterElements, surfaceIsGone: surfaceIsGone) {
-            .expectedEffectVerified
-        } else if changed {
-            .sceneChanged
-        } else {
-            .posted
-        }
-        return VerificationResult(outcome: outcome, sceneChanged: changed, effect: effect?.encoded,
+                       oracle: ActOracle?, surfaceIsGone: Bool) -> VerificationResult {
+        let effect  = SceneDifference.effect(before: before, after: after, targetID: targetID)
+        let verdict = ActVerification.verdict(before: before, after: after, effect: effect)
+        let judged  = ActVerification.outcome(
+            for     : verdict,
+            label   : targetID ?? "the target",
+            after   : after,
+            oracle  : oracle,
+            evidence: OracleEvidence(after: after, surfaceIsListed: !surfaceIsGone)
+        )
+        // Only an oracle verifies here. The Engine's two-scene rule may call a
+        // structural change the gesture landing; this lab never promotes a
+        // scene difference to a verification, so without an oracle the ceiling
+        // is `sceneChanged`.
+        let outcome: ActionOutcome = if oracle != nil, judged.isSuccess { .expectedEffectVerified }
+            else if verdict == .ghost { .posted }
+            else { .sceneChanged }
+        return VerificationResult(outcome: outcome, sceneChanged: verdict != .ghost, effect: effect?.encoded,
                                   pixelDifference: FrameDifference.meanPixelDifference(beforeImage, afterImage))
     }
 
     /// What a Command that went out comes to when the reading that would
-    /// settle it could not be taken.
-    ///
-    /// The surface's own identity is still asked, and that is the whole point
-    /// of asking it apart from the picture: a Cancel that closed its panel
-    /// stays a Cancel that closed its panel while the person's focus is still
-    /// coming back, and the run neither loses the effect nor clicks again.
-    static func interrupted(expected: ExpectedEffect, surfaceIsGone: Bool) -> VerificationResult {
-        VerificationResult(
-            outcome: holds(expected, in: nil, surfaceIsGone: surfaceIsGone)
-                ? .expectedEffectVerified : .interruptedAfterPost,
+    /// settle it could not be taken. The surface's own identity still answers,
+    /// so a dismissal whose after-frame was refused keeps its verified effect.
+    static func interrupted(oracle: ActOracle?, surfaceIsGone: Bool) -> VerificationResult {
+        let judged = ActVerification.interrupted(
+            label   : "the target",
+            oracle  : oracle,
+            evidence: OracleEvidence(after: nil, surfaceIsListed: !surfaceIsGone)
+        )
+        return VerificationResult(
+            outcome: judged.isSuccess ? .expectedEffectVerified : .interruptedAfterPost,
             sceneChanged: false, effect: nil, pixelDifference: nil
         )
-    }
-
-    /// Whether the predicate holds. `after` is nil when no scene could be
-    /// perceived, which leaves the closure oracle the only one answering.
-    static func holds(_ expected: ExpectedEffect, in after: [SceneObservation.Element]?,
-                      surfaceIsGone: Bool) -> Bool {
-        switch expected {
-        case .surfaceCloses:
-            surfaceIsGone
-        case .fieldReads(let controlID, let bounds, let text, let beforeValue):
-            after?.contains {
-                $0.id == controlID
-                    && covers($0, bounds)
-                    && typedValueTransition(
-                        before: beforeValue,
-                        after : $0.value,
-                        typed : text
-                    )
-            } ?? false
-        case .stateFlips(let bounds, let from):
-            after?.contains { covers($0, bounds) && $0.state != nil && $0.state != from } ?? false
-        case .unqualified:
-            false
-        }
-    }
-
-    /// Whether an element of the after-scene is the one that was acted on.
-    ///
-    /// It is matched by the stable AX control identity and place. Bounds are normalized to the
-    /// frame, and either centre inside the other rectangle is the match, so a
-    /// control that grew a focus ring is still the same control. Only an
-    /// accessibility-backed element answers: rule 2 makes AX the oracle where
-    /// one exists, and an OCR guess at a field's contents is not one.
-    private static func covers(_ element: SceneObservation.Element, _ bounds: CGRect) -> Bool {
-        element.role?.hasPrefix("AX") == true
-            && (bounds.contains(CGPoint(x: element.bounds.midX, y: element.bounds.midY))
-                || element.bounds.contains(CGPoint(x: bounds.midX, y: bounds.midY)))
-    }
-
-    /// Text input currently clicks then inserts. Without an independently
-    /// observed selection range, a click can put the caret anywhere. The only
-    /// positive oracle is an exact contiguous insertion into the observed old
-    /// value; it preserves raw spaces and line breaks and cannot pass because
-    /// the field already contained the requested substring.
-    private static func typedValueTransition(before: String?, after: String?, typed: String) -> Bool {
-        guard let before, let after, !typed.isEmpty else { return false }
-        guard after != before else { return false }
-        var split = before.startIndex
-        while true {
-            let candidate = String(before[..<split]) + typed + String(before[split...])
-            if after == candidate { return true }
-            guard split < before.endIndex else { return false }
-            split = before.index(after: split)
-        }
     }
 }

@@ -1,4 +1,5 @@
 import AppKit
+import EngineCore
 import Foundation
 import os
 import Perception
@@ -328,7 +329,7 @@ public final class AgentSession {
         // goes out, from the action and from the surface it is aimed at.
         let surface = delivery.reference.role.attachedSheet ?? delivery.reference.recipient
         driver.notePublicSurface(surface)
-        let expected = ExpectedEffect.of(action, target: targetElement, surface: surface)
+        let oracle = ActOracle.of(action, target: targetElement, surface: surface)
         let started = ContinuousClock.now
 
         let turn = try await driver.acquireTurn()
@@ -358,7 +359,7 @@ public final class AgentSession {
             let verification = OutcomeVerifier.verify(before: beforeScene, beforeImage: before.image,
                                                       after: afterScene, afterImage: after.image,
                                                       targetID: targetElement?.id,
-                                                      expected: expected, afterElements: after.elements,
+                                                      oracle: oracle,
                                                       surfaceIsGone: driver.surfaceIsGone(surface))
             result = (after, verification)
         } catch {
@@ -375,7 +376,7 @@ public final class AgentSession {
             // The surface's own identity still answers, so a dismissal whose
             // after-frame was refused keeps its verified effect rather than
             // being lost and clicked again; anything else closes as unknown.
-            let verification = OutcomeVerifier.interrupted(expected: expected,
+            let verification = OutcomeVerifier.interrupted(oracle: oracle,
                                                            surfaceIsGone: driver.surfaceIsGone(surface))
             try? driver.endTurn(
                 turn,

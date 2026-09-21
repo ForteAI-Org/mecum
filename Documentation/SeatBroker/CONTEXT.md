@@ -16,8 +16,23 @@ adds. The pipeline never captures: the frame is the seat's own
 against carries the window server's frame from the seat's
 `WindowGeometryObservation`, never an accessibility one. `SceneMapper` numbers
 the resulting `SceneSnapshot` from one, which is the index a `SemanticAction`
-names and `ActionExecutor` aims the command at, and `OutcomeVerifier` reads
-`SceneDifference` over two snapshots.
+names and `ActionExecutor` aims the command at.
+
+Verification is the Engine's and no longer this lab's. `ActOracle.of` derives
+the oracle from the action and from the surface the Command was aimed at,
+before the first event goes out: a `type` into an accessibility field is held
+to that field's own value, a click on a stateful control to its state, and
+everything else to the closure of the surface, read from the window server by
+identity. `ActVerification` consults that oracle before its scene difference,
+and `OutcomeVerifier` is what is left here: the two measurements the Engine
+does not carry (the encoded `SceneDifference` and the mean pixel delta) and the
+mapping onto `ActionOutcome`, whose `symbol` and `sentence` the Lab shows. An
+action with no oracle, a scroll or most chords, reaches `sceneChanged` and no
+higher: a scene that changed is a measurement, never a verification, and this
+lab does not promote one even where the two-scene rule alone would. A Command
+that went out and whose after-frame could not be read keeps its verified effect
+when the surface's own identity still proves it, and is `interruptedAfterPost`
+otherwise, which nothing repeats.
 
 The Lab's own locator modules (`LocatorCore`, `AXSupport`, `CaptureSupport`,
 `OCRSupport`, `CVBackend`, `Relocation`) are leftovers: no source under

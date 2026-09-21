@@ -258,7 +258,8 @@ let package = Package(
             "SeatBroker",
             ["SeatCore", "PrivateSymbols", "VirtualScreens", "WindowPlacement", "SeatInput",
              "CursorGuard", "SeatCapture", "SeatSession", "TargetReader", "PerceptionCore",
-             "Perception", "VisionText", "PixelRegions", "PixelSections", "AccessibilityFacts"]
+             "Perception", "VisionText", "PixelRegions", "PixelSections", "AccessibilityFacts",
+             "EngineCore"]
         ),
 
         // MARK: Driver tools
@@ -294,7 +295,7 @@ let package = Package(
         brokerTests(
             "SeatBroker",
             ["SeatBroker", "PerceptionCore", "SeatCore", "SeatCapture",
-             "SeatSession", "SeatInput", "TargetReader"]
+             "SeatSession", "SeatInput", "TargetReader", "EngineCore"]
         ),
 
         // Host (TCC, real display) and Live (fixture and reader) tiers, gated by

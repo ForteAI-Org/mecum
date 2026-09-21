@@ -6,6 +6,7 @@
 //
 
 import CoreGraphics
+import EngineCore
 import PerceptionCore
 import SeatCore
 import SeatInput
@@ -55,7 +56,7 @@ private func element(_ index: Int, id: String, role: String?, state: String? = n
                  bounds: CGRect(x: x, y: y, width: 0.2, height: 0.1))
 }
 
-// MARK: A scene that changed is not an effect that was verified
+// MARK: The Engine's judgement, in this lab's vocabulary
 
 @Test func aBackgroundThatRepaintedWithTheDialogStillThereIsNotSuccess() {
     // The Cancel click's own surface still answers to its identity, so the
@@ -64,8 +65,8 @@ private func element(_ index: Int, id: String, role: String?, state: String? = n
         before: scene(background: "12 messaggi"), beforeImage: blankImage(),
         after: scene(background: "14 messaggi"), afterImage: blankImage(),
         targetID: "control|cancel",
-        expected: .surfaceCloses(windowNumber: sheet.windowNumber),
-        afterElements: [], surfaceIsGone: false
+        oracle: .surfaceCloses(windowNumber: sheet.windowNumber),
+        surfaceIsGone: false
     )
     #expect(result.sceneChanged)
     #expect(result.outcome == .sceneChanged)
@@ -78,8 +79,8 @@ private func element(_ index: Int, id: String, role: String?, state: String? = n
         before: scene(background: "12 messaggi"), beforeImage: blankImage(),
         after: scene(background: "12 messaggi"), afterImage: blankImage(),
         targetID: "control|cancel",
-        expected: .surfaceCloses(windowNumber: sheet.windowNumber),
-        afterElements: [], surfaceIsGone: false
+        oracle: .surfaceCloses(windowNumber: sheet.windowNumber),
+        surfaceIsGone: false
     )
     #expect(!result.sceneChanged)
     #expect(result.outcome == .posted)
@@ -90,77 +91,50 @@ private func element(_ index: Int, id: String, role: String?, state: String? = n
         before: scene(background: "12 messaggi"), beforeImage: blankImage(),
         after: scene(background: "12 messaggi"), afterImage: blankImage(),
         targetID: "control|cancel",
-        expected: .surfaceCloses(windowNumber: sheet.windowNumber),
-        afterElements: [], surfaceIsGone: true
+        oracle: .surfaceCloses(windowNumber: sheet.windowNumber),
+        surfaceIsGone: true
     )
     #expect(result.outcome == .expectedEffectVerified)
 }
 
-// MARK: The predicate comes from the action and the surface
+@Test func anActionWithNoOracleNeverReachesVerifiedHoweverMuchTheSceneMoved() {
+    // A scroll has no oracle here, and the Engine's two-scene rule alone is a
+    // measurement: this lab's ceiling for it is `sceneChanged`.
+    let result = OutcomeVerifier.verify(
+        before: scene(background: "12 messaggi"), beforeImage: blankImage(),
+        after: scene(background: "14 messaggi"), afterImage: blankImage(),
+        targetID: "control|cancel", oracle: nil, surfaceIsGone: true
+    )
+    #expect(result.outcome == .sceneChanged)
+    #expect(!result.outcome.isVerified)
+}
+
+// MARK: The oracle comes from the action and the surface
 
 @Test func aClickOnAPlainControlIsHeldToTheClosureOfTheSurfaceItWasAimedAt() {
-    #expect(ExpectedEffect.of(.click(element: 1), target: element(1, id: "b", role: "AXButton"),
-                              surface: sheet) == .surfaceCloses(windowNumber: sheet.windowNumber))
+    #expect(ActOracle.of(.click(element: 1), target: element(1, id: "b", role: "AXButton"),
+                         surface: sheet) == .surfaceCloses(windowNumber: sheet.windowNumber))
     // Escape means dismiss; no other chord has an oracle in this lab.
-    #expect(ExpectedEffect.of(.key(.escape), target: nil, surface: sheet)
+    #expect(ActOracle.of(.key(.escape), target: nil, surface: sheet)
             == .surfaceCloses(windowNumber: sheet.windowNumber))
-    #expect(ExpectedEffect.of(.key(.a, modifiers: .command), target: nil, surface: sheet) == .unqualified)
-    #expect(ExpectedEffect.of(.scroll(element: 1, deltaY: -3),
-                              target: element(1, id: "b", role: "AXButton"), surface: sheet) == .unqualified)
+    #expect(ActOracle.of(.key(.a, modifiers: .command), target: nil, surface: sheet) == nil)
+    #expect(ActOracle.of(.scroll(element: 1, deltaY: -3),
+                         target: element(1, id: "b", role: "AXButton"), surface: sheet) == nil)
 }
 
-@Test func aTypedFieldIsJudgedOnItsAccessibilityValueAndNeverOnPixelsAlone() {
+@Test func aTypedFieldIsHeldToItsOwnAccessibilityValue() {
     let field = element(1, id: "f", role: "AXTextField", label: "Name", value: "before")
-    let expected = ExpectedEffect.of(.type(element: 1, text: "ciao"), target: field, surface: sheet)
-    #expect(expected == .fieldReads(controlID: field.id, bounds: field.bounds, text: "ciao", beforeValue: "before"))
-
-    // The same place, the value accessibility now answers with: verified.
-    #expect(OutcomeVerifier.holds(expected, in: [element(1, id: "f", role: "AXTextField", label: "Name", value: "beforeciao")],
-                                  surfaceIsGone: false))
-    // The same place and the same text, read by OCR with no accessibility
-    // role behind it: not an oracle, so not a verification.
-    #expect(!OutcomeVerifier.holds(expected, in: [element(1, id: "f", role: nil, label: "ciao", value: "ciao")],
-                                   surfaceIsGone: false))
-    // Accessibility answers something else: the typing did not land.
-    #expect(!OutcomeVerifier.holds(expected, in: [element(1, id: "f", role: "AXTextField", label: "Name", value: "before")],
-                                   surfaceIsGone: false))
-    // A matching label is presentation only. The old value already contains
-    // the text, so no observed value transition means no verification.
-    #expect(!OutcomeVerifier.holds(expected, in: [element(1, id: "f", role: "AXTextField", label: "ciao", value: "before")],
-                                   surfaceIsGone: false))
+    #expect(ActOracle.of(.type(element: 1, text: "ciao"), target: field, surface: sheet)
+            == .fieldReads(controlID: field.id, bounds: field.bounds, text: "ciao", beforeValue: "before"))
+    // Typing into something that is not a field has no value to read back.
+    #expect(ActOracle.of(.type(element: 1, text: "ciao"),
+                         target: element(1, id: "b", role: "AXButton"), surface: sheet) == nil)
 }
 
-@Test func aTypedValueMayBeInsertedAtAnyCaretPositionAndKeepsRawWhitespace() {
-    let field = element(1, id: "field-id", role: "AXTextField", label: "Name", value: "ab cd")
-    let mid = ExpectedEffect.of(.type(element: 1, text: "XYZ"), target: field, surface: sheet)
-    #expect(OutcomeVerifier.holds(
-        mid,
-        in: [element(1, id: "field-id", role: "AXTextField", label: "Name", value: "abXYZ cd")],
-        surfaceIsGone: false
-    ))
-
-    let raw = element(1, id: "field-id", role: "AXTextField", label: "Name", value: "left\n right")
-    let spaces = ExpectedEffect.of(.type(element: 1, text: "  "), target: raw, surface: sheet)
-    #expect(OutcomeVerifier.holds(
-        spaces,
-        in: [element(1, id: "field-id", role: "AXTextField", label: "Name", value: "left\n   right")],
-        surfaceIsGone: false
-    ))
-}
-
-@Test func aStatefulControlIsJudgedOnItsOwnStateChanging() {
+@Test func aStatefulControlIsHeldToItsOwnState() {
     let box = element(1, id: "c", role: "AXCheckBox", state: "off", label: "Ricorda")
-    let expected = ExpectedEffect.of(.click(element: 1), target: box, surface: sheet)
-    #expect(expected == .stateFlips(bounds: box.bounds, from: "off"))
-    #expect(OutcomeVerifier.holds(expected, in: [element(1, id: "c", role: "AXCheckBox", state: "on")],
-                                  surfaceIsGone: false))
-    #expect(!OutcomeVerifier.holds(expected, in: [element(1, id: "c", role: "AXCheckBox", state: "off")],
-                                   surfaceIsGone: false))
-}
-
-@Test func anActionWithNoOracleNeverReachesVerified() {
-    #expect(!OutcomeVerifier.holds(.unqualified, in: [element(1, id: "a", role: "AXButton")],
-                                   surfaceIsGone: true))
+    #expect(ActOracle.of(.click(element: 1), target: box, surface: sheet)
+            == .stateFlips(bounds: box.bounds, from: "off"))
 }
 
 // MARK: A refusal is never an executed action
@@ -178,7 +152,7 @@ private func element(_ index: Int, id: String, role: String?, state: String? = n
 @Test @MainActor func aDismissalWhoseAfterFrameWasRefusedKeepsItsVerifiedEffect() {
     // Cancel went out, the panel's identity is gone from the window server,
     // and the focus coming back left no scene to perceive. The effect stands.
-    let kept = OutcomeVerifier.interrupted(expected: .surfaceCloses(windowNumber: sheet.windowNumber),
+    let kept = OutcomeVerifier.interrupted(oracle: .surfaceCloses(windowNumber: sheet.windowNumber),
                                            surfaceIsGone: true)
     #expect(kept.outcome == .expectedEffectVerified)
     #expect(AgentSession.confirmation(of: kept.outcome) == .observed)
@@ -187,7 +161,7 @@ private func element(_ index: Int, id: String, role: String?, state: String? = n
 }
 
 @Test @MainActor func anEffectNobodyCouldSettleIsUncertainAndIsNeverRepeated() {
-    let uncertain = OutcomeVerifier.interrupted(expected: .surfaceCloses(windowNumber: sheet.windowNumber),
+    let uncertain = OutcomeVerifier.interrupted(oracle: .surfaceCloses(windowNumber: sheet.windowNumber),
                                                 surfaceIsGone: false)
     #expect(uncertain.outcome == .interruptedAfterPost)
     #expect(uncertain.outcome.isUncertain)
@@ -196,6 +170,8 @@ private func element(_ index: Int, id: String, role: String?, state: String? = n
     #expect(AgentSession.confirmation(of: uncertain.outcome) == .unknown)
     #expect(!AgentPlanner.continuesPlan(after: uncertain.outcome))
     #expect(uncertain.summary.contains("do not repeat it"))
+    // An action with no oracle at all is uncertain for the same reason.
+    #expect(OutcomeVerifier.interrupted(oracle: nil, surfaceIsGone: true).outcome == .interruptedAfterPost)
 }
 
 @Test @MainActor func onlyAPostedCommandThatChangedNothingLetsAPlanCarryOn() {
