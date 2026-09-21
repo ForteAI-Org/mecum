@@ -240,6 +240,29 @@ struct FullScreenTransferTests {
                 "the window did not go back into the state it was found in")
     }
 
+    @Test("assignment release passes its residual deadline to a late fullscreen return")
+    func assignmentReleaseUsesResidualBudgetForFullScreenReturn() async throws {
+        let sensing = FakeSensing()
+        let placing = FakePlacing()
+        let window  = Self.fullScreenWindow(placing, sensing)
+        let seat    = Self.seat(sensing, placing, restores: true)
+
+        _ = try await seat.adopt(window, platform: AppKitPlatform())
+        placing.fullScreenRequests.removeAll()
+
+        // The two return readings each spend the release's bounded cadence
+        // before the original fullscreen state can be restored. The fake sees
+        // the actual residual passed across the protocol boundary.
+        let report = await seat.releaseAssignment(within: .seconds(1))
+
+        #expect(report.outcome == .released)
+        #expect(report.windows[window.windowNumber] == .returned)
+        let residual = try #require(placing.fullScreenAwaitBudgets.last)
+        #expect(residual > .zero)
+        #expect(residual < .milliseconds(900),
+                "the fullscreen collaborator must not receive a fresh release budget")
+    }
+
     @Test("a window that was never in fullscreen is not put into one by the restore switch")
     func restoreSwitchOnlyAppliesToWhatWasFound() async throws {
 

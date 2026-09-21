@@ -128,6 +128,189 @@ struct ObservationAdmissionTests {
                 "readiness must settle before a Still is requested")
     }
 
+    @Test("a selected standalone panel owns itself after its hidden host enters recovery")
+    func selectedStandalonePanelIsOwnedBeforeDelivery() async throws {
+        let sensing = FakeSensing()
+        let reader  = ControlledSurfaceReader(sensing: sensing)
+        let endpoints = EndpointDiscovery(
+            pointer: { _, _, chain, generation in
+                guard let window = sensing.windowGeometry(of: chain.surface.windowNumber),
+                      let geometry = sensing.windowGeometryObservation(of: window)
+                else { return .failure(.subtreeUnreadable(surface: chain.surface)) }
+                let now = DispatchTime.now().uptimeNanoseconds
+                guard let endpoint = ResolvedInputEndpoint(
+                    kind                  : .pointer,
+                    geometry              : geometry,
+                    evidence              : .attestedSurfaceItself,
+                    relation              : .logicalSurface,
+                    logicalSurface        : chain.surface,
+                    accessibilityProcessID: window.processID,
+                    selectionGeneration   : generation,
+                    resolvedAtNanoseconds : now,
+                    expiresAtNanoseconds  : now &+ 500_000_000
+                ) else { return .failure(.subtreeUnreadable(surface: chain.surface)) }
+                return .success(endpoint)
+            },
+            keyboardContext: { _, chain, _ in .failure(.subtreeUnreadable(surface: chain.surface)) },
+            identity: { sensing.windowGeometry(of: $0)?.identity },
+            focusedWindowNumber: { _ in nil }
+        )
+        let sender  = FakeSender()
+        let source  = ControlledObservationSource(sensing: sensing)
+        let seat    = makeSeat(
+            sensing: sensing,
+            sender : sender,
+            marker : 9_018,
+            reader : reader,
+            source : source,
+            clock  : ControlledContentClock(),
+            endpoints: endpoints
+        )
+        _ = try await seat.adopt(
+            FakeGeometry.reference(frame: FakeGeometry.userSeatWindow.frame),
+            platform: AppKitPlatform()
+        )
+
+        sensing.surfaces = [WindowSurface(
+            reference: FakeGeometry.adoptedWindow, level: 0, isVisible: true
+        )]
+        seat.enableWindowFollowing()
+
+        // `NSOpenPanel.begin` can be an ordinary `AXStandardWindow`: the
+        // window's role does not grant it an invented application-modal claim.
+        // It appeared after the watch's baseline, so the inventory must see it
+        // twice before the normal detected-window transaction owns it.
+        let panel = Self.reference(Self.secondWindowNumber)
+        sensing.additionalWindows[panel.windowNumber] = panel
+        reader.recency = [RecencyClaim(
+            surface              : try #require(panel.identity),
+            signal               : .appeared,
+            provenance           : .qualifiedFrontOrderAttestation,
+            origin               : .application(provenance: .qualifiedRaiseAttribution),
+            observedAtNanoseconds: DispatchTime.now().uptimeNanoseconds
+        )]
+
+        // `begin` hides the document host while its standalone panel becomes
+        // visible. The first follower pass starts the host recovery; the
+        // second agreeing sighting of the selected new panel must own it and
+        // supersede that obsolete recovery.
+        // The host still has an attested retained WindowServer row, as the
+        // native scoped reader supplies for an ordered-out window. An entirely
+        // unknown missing host would correctly keep containment suspended.
+        reader.visibilities[FakeGeometry.windowNumber] = .withdrawnEstablished
+        sensing.surfaces = [WindowSurface(reference: panel, level: 0, isVisible: true)]
+        seat.report([.windowUnavailable], cause: .windowClosure(.absentFromReading))
+        #expect(seat.state == .recovering)
+
+        let delivery = try await observe(seat)
+        let identity = try #require(panel.identity)
+        #expect(delivery.reference.recipient == identity)
+        #expect(seat.session[panel.windowNumber]?.window.reference.identity == identity,
+                "the delivery cannot outlive the ownership record its send needs")
+
+        let admitted = try seat.admitOrdinary(delivery.reference)
+        #expect(admitted.reference.identity == identity,
+                "the ordinary route admits the selected standalone modal instead of failing recipientNotCurrent")
+
+        let point = CGPoint(x: panel.frame.midX, y: panel.frame.midY)
+        let command = InputCommand.click(InputLocation(
+            screenPoint: point,
+            windowPointFromTop: CGPoint(x: panel.frame.width / 2, y: panel.frame.height / 2)
+        ))
+        let turn = try await seat.acquire()
+        let receipt = try await seat.send(command, observation: delivery.reference, turn: turn)
+        #expect(sender.addressed.last?.window.identity == identity,
+                "the post is routed to the held standalone modal")
+        try seat.confirm(receipt, .observed)
+        try seat.release(turn)
+    }
+
+    @Test("logical withdrawal survives the fold that consumed it, but an unreadable new pass does not")
+    func logicalWithdrawalIsScopedAndNotStaleAcrossUnreadablePasses() async throws {
+        let sensing = FakeSensing()
+        let reader  = ControlledSurfaceReader(sensing: sensing)
+        let seat    = makeSeat(sensing: sensing, marker: 9_019, reader: reader)
+        let host    = try await seat.adopt(
+            FakeGeometry.reference(frame: FakeGeometry.userSeatWindow.frame),
+            platform: AppKitPlatform()
+        )
+        let proxy = Self.reference(Self.secondWindowNumber)
+        sensing.additionalWindows[proxy.windowNumber] = proxy
+        let panel = try await seat.adopt(proxy, platform: AppKitPlatform())
+        let identity = try #require(panel.reference.identity)
+
+        // A complete scoped pass positively withdrew the logical panel even
+        // though its WindowServer proxy persisted. `foldCurrentReading` uses
+        // that proof itself, so a later verifier must still see it after the
+        // transition filter has consumed the one retained disposition.
+        reader.withdrawn = [identity]
+        reader.windowNumbers = [host.id]
+        seat.refreshTargetReadings()
+        reader.withdrawn = []
+        #expect(seat.logicalSurfacePresence(of: identity) == .withdrawn)
+
+        // A fresh failed AX pass proves neither revival nor closure; it must
+        // not reuse the retained proof as an answer to a read that did not run.
+        reader.readingFails = true
+        #expect(seat.logicalSurfacePresence(of: identity) == .unreadable)
+    }
+
+    @Test("qualified AX withdrawal closes a logical proxy that WindowServer still lists")
+    func qualifiedVisibilityWithdrawalClosesPersistentProxy() async throws {
+        let sensing = FakeSensing()
+        let reader  = ControlledSurfaceReader(sensing: sensing)
+        let seat    = makeSeat(sensing: sensing, marker: 9_020, reader: reader)
+        _ = try await seat.adopt(
+            FakeGeometry.reference(frame: FakeGeometry.userSeatWindow.frame),
+            platform: AppKitPlatform()
+        )
+        let proxy = Self.reference(Self.secondWindowNumber)
+        sensing.additionalWindows[proxy.windowNumber] = proxy
+        let panel = try await seat.adopt(proxy, platform: AppKitPlatform())
+        let identity = try #require(panel.reference.identity)
+
+        reader.visibilities[panel.id] = .withdrawnEstablished
+        #expect(seat.logicalSurfacePresence(of: identity) == .withdrawn)
+        #expect(seat.reconcileLogicalClosure(of: identity) == .withdrawn)
+        seat.refreshTargetReadings()
+        seat.refreshTargetReadings()
+        #expect(seat.assignmentKit.inventory.surfaces[panel.id] == nil,
+                "the retained off-screen proxy must not become a new held member")
+        #expect(!seat.adoptedWindows.contains { $0.id == panel.id })
+
+        reader.visibilities[panel.id] = .visibleInteractive
+        seat.refreshTargetReadings()
+        #expect(seat.assignmentKit.inventory.surfaces[panel.id]?.identity == identity,
+                "a positively visible reopening is a new logical surface")
+    }
+
+    @Test("hidden, uncertain and child-obscured logical surfaces do not become closures")
+    func nonClosureVisibilityNeverReportsLogicalClosure() async throws {
+        let sensing = FakeSensing()
+        let reader  = ControlledSurfaceReader(sensing: sensing)
+        let seat    = makeSeat(sensing: sensing, marker: 9_021, reader: reader)
+        let host    = try await seat.adopt(
+            FakeGeometry.reference(frame: FakeGeometry.userSeatWindow.frame),
+            platform: AppKitPlatform()
+        )
+        let proxy = Self.reference(Self.secondWindowNumber)
+        sensing.additionalWindows[proxy.windowNumber] = proxy
+        let panel = try await seat.adopt(proxy, platform: AppKitPlatform())
+        let identity = try #require(panel.reference.identity)
+
+        reader.visibilities[panel.id] = .hiddenEstablished
+        #expect(seat.logicalSurfacePresence(of: identity) == .present)
+        reader.visibilities[panel.id] = .minimisedEstablished
+        #expect(seat.logicalSurfacePresence(of: identity) == .present)
+        reader.visibilities[panel.id] = .uncertain
+        #expect(seat.logicalSurfacePresence(of: identity) == .unreadable)
+
+        reader.visibilities.removeValue(forKey: panel.id)
+        reader.windowNumbers = [host.id]
+        reader.obscured[identity] = try #require(host.reference.identity)
+        #expect(seat.logicalSurfacePresence(of: identity) == .present)
+    }
+
     @Test("an observation rereads one transient incomplete inventory")
     func observationRereadsTransientIncompleteInventory() async throws {
 
@@ -606,6 +789,99 @@ struct ObservationAdmissionTests {
         #expect(seat.selectionKit.selected?.surface.windowNumber == first.id,
                 "the selection goes back to the window that is still there")
         #expect(seat.currentTarget?.id == first.id)
+    }
+
+    // MARK: The stage under the observation
+
+    /// A window server reading of a window Stage Manager has stashed, at one of
+    /// the sizes the thumbnail was measured at (90 by 97, and 120 by 121
+    /// elsewhere) whatever the window's own size is.
+    static let thumbnail = FakeGeometry.reference(
+        frame: CGRect(origin: FakeGeometry.windowOrigin, size: CGSize(width: 90, height: 97))
+    )
+
+    /// The staging primitive refusing, which is a fact about the window and not
+    /// about this suite: what the seat does with it is decided by the throw.
+    private enum StagingRefused: Error { case refused }
+
+    @Test("a stashed target is brought back on stage before it is observed")
+    func aStashedTargetIsStagedBeforeItIsObserved() async throws {
+
+        let sensing = FakeSensing()
+        let placing = FakePlacing()
+        let seat    = makeSeat(sensing: sensing, placing: placing, marker: 910)
+        let window  = try await seat.adopt(
+            FakeGeometry.reference(frame: FakeGeometry.userSeatWindow.frame),
+            platform: AppKitPlatform()
+        )
+        let stagesBefore = placing.stages
+
+        // The application raised another of its windows, so Stage Manager
+        // stashed this one and the window server publishes the thumbnail.
+        sensing.geometry = Self.thumbnail
+        placing.onStage  = { sensing.geometry = FakeGeometry.adoptedWindow }
+
+        let delivery = try await observe(seat)
+        #expect(placing.stages == stagesBefore + 1, "brought back once, and only once")
+        #expect(seat.isStaged(window))
+        #expect(delivery.reference.recipient == window.reference.identity)
+        #expect(delivery.geometry.window.frame.size == FakeGeometry.windowSize,
+                "what the agent is shown is the window, never its thumbnail")
+    }
+
+    @Test("an observation of a target that cannot be staged is refused")
+    func aTargetThatCannotBeStagedIsRefused() async throws {
+
+        let sensing = FakeSensing()
+        let placing = FakePlacing()
+        let seat    = makeSeat(sensing: sensing, placing: placing, marker: 911)
+        _ = try await seat.adopt(
+            FakeGeometry.reference(frame: FakeGeometry.userSeatWindow.frame),
+            platform: AppKitPlatform()
+        )
+        sensing.geometry   = Self.thumbnail
+        placing.stageError = StagingRefused.refused
+
+        seat.refreshTargetReadings()
+        switch await seat.observe() {
+            case .success:
+                Issue.record("a thumbnail was delivered as the agent's own scene")
+            case .failure(let reason):
+                guard case .captureFailed = reason else {
+                    Issue.record(Comment(rawValue: "the refusal was \(reason)"))
+                    return
+                }
+        }
+    }
+
+    @Test("a Command whose target read back as stashed is refused before it is posted")
+    func aStashedTargetRefusesTheCommand() async throws {
+
+        let sensing = FakeSensing()
+        let placing = FakePlacing()
+        let sender  = FakeSender()
+        let seat    = makeSeat(
+            sensing: sensing,
+            placing: placing,
+            sender : sender,
+            marker : 912
+        )
+        _ = try await seat.adopt(
+            FakeGeometry.reference(frame: FakeGeometry.userSeatWindow.frame),
+            platform: AppKitPlatform()
+        )
+
+        // The staging primitive answers success and the window server never
+        // agrees, which is the shape a stash that nobody noticed has.
+        sensing.geometry = Self.thumbnail
+        let reference    = try await observedReference(seat)
+        seat.refreshTargetReadings()
+
+        let turn = try await seat.acquire()
+        await #expect(throws: SeatInterruption(issues: [.windowStashed])) {
+            try await seat.send(Self.click, observation: reference, turn: turn)
+        }
+        #expect(sender.sent.isEmpty, "nothing is posted into a window that is a thumbnail")
     }
 
     // MARK: What this build has not qualified

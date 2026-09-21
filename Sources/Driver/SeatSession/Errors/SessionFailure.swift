@@ -8,6 +8,41 @@
 import Foundation
 import SeatCore
 
+/// AssignmentUse is what the seat is in the middle of when a handback of the
+/// Assigned Application is refused. Every case is transient: the consumer waits
+/// for the thing named to finish and asks again.
+///
+/// It is the window follow pass's stand down list minus the reasons that belong
+/// to the follower. Ending an assignment underneath a Command is the same class
+/// of hazard as moving a window underneath one, so the same facts refuse. The
+/// person's own recent intent is not in it, because a handback moves nothing and
+/// reads nothing of theirs. A contextual menu interaction is not in it either:
+/// one is only ever opened under a Turn, and `turnHeld` is what answers while
+/// that Turn is out.
+nonisolated public enum AssignmentUse: String, Sendable, Equatable {
+
+    /// The seat is being torn down, and the teardown ends the assignment itself.
+    case seatTearingDown
+
+    /// A Command is in flight. It is named before `turnHeld` because it is the
+    /// more precise of the two facts about the same hold.
+    case commandInFlight
+
+    /// A Turn is out. The holder gives the seat back first: an assignment ended
+    /// underneath a hold would leave that holder with input authority revoked
+    /// halfway through its own exclusive use.
+    case turnHeld
+
+    /// An adoption is in flight, so a window of the instance is on its way in.
+    case adoptionInFlight
+
+    /// A window transfer is in flight, so a window is between two frames.
+    case windowTransferInFlight
+
+    /// A focus restore was requested and not yet verified.
+    case focusRecoveryRestoring
+}
+
 /// SessionFailure is how `SeatHost` and `AgentSeat` refuse. Structured cases
 /// with the fields a report needs, no prose: the sentence for the person is the
 /// consumer's, and the consumer is the one that knows the language.
@@ -69,6 +104,39 @@ nonisolated public enum SessionFailure: Error, Sendable, Equatable {
     /// The window is not one this seat adopted.
     case windowNotAdopted(windowNumber: Int)
 
+    /// `releaseAssignedApplication` was asked for while nothing was assigned.
+    ///
+    /// A second handback is a refusal and not a silent success, for the same
+    /// reason `AssignmentLifecycle.release` answers nil rather than nothing: a
+    /// consumer that believes it gave an application back has to be told when it
+    /// did not, and a seat that was never entrusted with one has nothing to give.
+    case applicationNotAssigned
+
+    /// `releaseAssignedApplication` was refused because the seat is in the
+    /// middle of something the assignment is the authority for.
+    case assignmentStillInUse(AssignmentUse)
+
+    /// `releaseAssignedApplication` was refused because a return owed by an
+    /// earlier assignment is still unverified. It is
+    /// `SeatCoherentState.outstandingReturns` read as a refusal.
+    ///
+    /// Stacking a second obligation on the first would bury it: the pending
+    /// surfaces are held by Window ID, and a number the window server handed out
+    /// again keeps the older entry rather than replacing it. So the older
+    /// obligation is finished first.
+    case returnsStillOutstanding(windowNumbers: [Int])
+
+    /// `releaseAssignedApplication` was refused because the seat still holds
+    /// windows of the assigned instance: its own Adopted Windows, a failed move
+    /// whose restoration is still owed, or a surface the assignment still counts
+    /// as a member.
+    ///
+    /// Giving the application back first would strand them. The assignment is
+    /// what entrusts their return, and the return obligation a handback leaves
+    /// behind cannot be completed after the assignment has ended. So the
+    /// consumer releases each window with `release(_:_:)` and asks again.
+    case assignedWindowsStillHeld(windowNumbers: [Int])
+
     /// A wait that needs the caller to be turning its own AppKit event loop
     /// ran out of time. A virtual display only makes progress while
     /// `NSApplication` pumps (ADR 0007), so a caller that cannot pump gets a
@@ -104,4 +172,22 @@ nonisolated public enum SessionFailure: Error, Sendable, Equatable {
     /// Not a degradation and not a retry: a caller that wants this behaviour
     /// turns `transfersFullScreenWindows` on and reads what it costs.
     case fullScreenTransferDisabled(windowNumber: Int)
+
+    /// Nothing the seat has established says what draws the surface this
+    /// Command is addressed to, so no measured recipe covers it and nothing was
+    /// posted. It is the explicit `unknown` of `SurfaceInputClassification`,
+    /// and it exists because the alternative was a universal default that
+    /// addressed a native panel's recipe to a web view and the other way round.
+    case surfaceFamilyUnclassified(windowNumber: Int)
+
+    /// The window is larger than the Virtual Display and the adaptation that
+    /// would make it fit did not take: the application either refused the size
+    /// or has a minimum of its own above the display. It is the one refusal
+    /// left after the seat has tried, and it names both sizes because what a
+    /// caller does about it depends on the difference.
+    ///
+    /// What the window is owed is unaffected: nothing was recorded, and a
+    /// window whose adaptation did take is adopted at the new size and still
+    /// returned to the frame it was found at.
+    case windowDoesNotFit(windowNumber: Int, size: CGSize, bounds: CGSize)
 }

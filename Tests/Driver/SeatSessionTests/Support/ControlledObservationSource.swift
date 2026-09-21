@@ -49,6 +49,15 @@ final class ControlledObservationSource: ObservedSurfaceSourcing, @unchecked Sen
     /// a superseded moment would share with one of the current moment.
     private(set) var barriers: [UInt64] = []
 
+    /// Hosted-sheet crops requested by the production path. This makes a test
+    /// distinguish the explicit union capture from the old host-only fallback.
+    private(set) var requestedRegions: [(
+        host: WindowIdentity,
+        children: [WindowIdentity],
+        screenRect: CGRect,
+        sourceWindowFrame: CGRect
+    )] = []
+
     /// True to answer a Frame of a window the caller did not ask for, so the
     /// qualifier's identity check can be seen refusing.
     var answersWrongIdentity: WindowIdentity?
@@ -79,6 +88,35 @@ final class ControlledObservationSource: ObservedSurfaceSourcing, @unchecked Sen
         deadlineNanoseconds: UInt64
     ) async throws -> SeatFrame {
         try await capture(identity, barrier: observationBarrier)
+    }
+
+    func captureWindowRegionStill(
+        host                : WindowIdentity,
+        children            : [WindowIdentity],
+        displayID           : CGDirectDisplayID,
+        screenRect          : CGRect,
+        sourceWindowFrame   : CGRect,
+        observationBarrier  : UInt64,
+        deadlineNanoseconds : UInt64
+    ) async throws -> SeatFrame {
+        requestedRegions.append((host, children, screenRect, sourceWindowFrame))
+        requested.append(host)
+        barriers.append(observationBarrier)
+        await duringCapture?()
+        if let permanentFailure { throw permanentFailure }
+        if failuresBeforeSuccess > 0 {
+            failuresBeforeSuccess -= 1
+            throw ObservationUnavailable.captureFailed(reason: "controlled attempt refused")
+        }
+        guard let frame = makeControlledFrame(
+            of                : answersWrongIdentity ?? host,
+            screenRect        : screenRect,
+            sourceWindowFrame : sourceWindowFrame,
+            malformed         : answersMalformedGeometry
+        ) else {
+            throw ObservationUnavailable.captureFailed(reason: "could not construct the controlled region frame")
+        }
+        return frame
     }
 
     private func capture(_ identity: WindowIdentity, barrier: UInt64) async throws -> SeatFrame {
@@ -126,6 +164,7 @@ final class ControlledObservationSource: ObservedSurfaceSourcing, @unchecked Sen
 nonisolated func makeControlledFrame(
     of identity: WindowIdentity,
     screenRect : CGRect,
+    sourceWindowFrame: CGRect? = nil,
     receivedAt : UInt64 = 1,
     malformed  : Bool = false
 ) -> SeatFrame? {
@@ -156,6 +195,7 @@ nonisolated func makeControlledFrame(
     let geometry  = FrameGeometryObservation(
         source              : .window(identity),
         screenRect          : screenRect,
+        sourceWindowFrame   : sourceWindowFrame,
         contentRectInSurface: malformed
             ? CGRect(x: 0, y: 0, width: screenRect.width * 4, height: screenRect.height)
             : CGRect(origin: .zero, size: screenRect.size),

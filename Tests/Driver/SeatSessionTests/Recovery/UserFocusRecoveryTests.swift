@@ -100,6 +100,272 @@ struct UserFocusRecoveryTests {
         fixture.recovery.stop()
     }
 
+    @Test("a window raised between Turns names its outcome instead of leaving the seat silent")
+    func activationOutsideATurnOpensAnEpisode() async throws {
+        let fixture = Harness()
+        // The person is in their own window, and the watch keeps it current.
+        fixture.sensing.frontmostProcessID = Self.user.processID
+        fixture.recovery.activationChanged(to: Self.user.processID)
+
+        // No Turn is held and no Command ran: this is the dialog the driven
+        // application raises by itself, which used to reach no armed recovery.
+        fixture.activateTarget()
+        #expect(fixture.gate.isPaused, "the gate closes before any validation or private call")
+        #expect(fixture.reports.first?.outcome == .restoring)
+        #expect(fixture.reports.last?.outcome == .waitingForUser)
+        #expect(fixture.reports.last?.detail
+            == "No prepared action was held when this activation arrived",
+            "the miss is named: the preparation belongs to the input path")
+        #expect(fixture.requested.isEmpty, "an unprepared destination is never asked for")
+
+        // The person coming back is still what reopens the gate, and it reopens
+        // nothing else.
+        fixture.returnUser()
+        #expect(!fixture.gate.isPaused)
+        fixture.recovery.stop()
+    }
+
+    @Test("a refresh arms the activation an application raises by itself, once")
+    func refreshArmsAnActivationOutsideATurn() async throws {
+        let fixture = Harness()
+        // No Turn, no operation and no Command: the beat's refresh is the only
+        // thing that ran, and the person's application is the front one while
+        // it does. This is the popup that used to meet a named miss.
+        await fixture.recovery.refreshPreparation()
+        #expect(fixture.sensing.snapshotReadCount == 1)
+
+        fixture.activateTarget()
+        #expect(fixture.requested == [Self.user], "the refreshed evidence survives the episode it opens")
+        #expect(fixture.reports.first?.outcome == .restoring)
+        #expect(fixture.sensing.snapshotReadCount == 1, "the urgent path enumerates nothing")
+
+        fixture.returnUser()
+        #expect(fixture.reports.last?.outcome == .restored)
+        #expect(!fixture.gate.isPaused)
+
+        // The budget is untouched: this is still one operation, and its one
+        // automatic request is spent however fresh the next preparation is.
+        await fixture.recovery.refreshPreparation()
+        fixture.activateTarget()
+        #expect(fixture.requested.count == 1)
+        #expect(fixture.reports.last?.detail
+            == "The one automatic request of this episode was already spent")
+        fixture.recovery.stop()
+    }
+
+    @Test("a refresh stores nothing when any guard of a preparation fails", arguments: 0..<6)
+    func refreshKeepsEveryGuard(_ variant: Int) async throws {
+        let fixture = Harness()
+        switch variant {
+        // The constraint the whole feature turns on: once the driven
+        // application has the front, no preparation can be built at all.
+        case 0: fixture.sensing.frontmostProcessID = FakeGeometry.targetPID
+        case 1: fixture.sensing.userMayBeSwitchingApplications = true
+        case 2: fixture.sensing.userWindowIsPhysical = false
+        case 3: fixture.sensing.fenceIsActive = false
+        case 4: fixture.identityUnavailable = true
+        default: fixture.sensing.preparedSnapshot = nil
+        }
+        // Twice, because the second beat is the one that reuses whatever
+        // destination the first left in hand instead of deriving it again.
+        await fixture.recovery.refreshPreparation()
+        await fixture.recovery.refreshPreparation()
+
+        // The guards go back to passing, so what the activation meets is the
+        // absent preparation and never a live refusal standing in for it.
+        fixture.sensing.userMayBeSwitchingApplications = false
+        fixture.sensing.fenceIsActive = true
+        fixture.identityUnavailable = false
+        fixture.activateTarget()
+        #expect(fixture.requested.isEmpty)
+        #expect(fixture.gate.isPaused)
+        #expect(fixture.reports.last?.detail
+            == "No prepared action was held when this activation arrived")
+        fixture.recovery.stop()
+    }
+
+    @Test("the beat derives the destination on a focus signal and never once a second for nothing")
+    func beatDerivesTheDestinationOnlyOnASignal() async throws {
+        let fixture = Harness()
+        await fixture.recovery.refreshPreparation()
+        let firstBeat = fixture.sensing.userWindowReadCount
+        #expect(firstBeat > 0, "the first beat holds no destination, so it derives one")
+
+        // Nothing signalled in between, so the person's focused window is the
+        // one already in hand and their application is asked nothing.
+        await fixture.recovery.refreshPreparation()
+        await fixture.recovery.refreshPreparation()
+        #expect(fixture.sensing.userWindowReadCount == firstBeat)
+        #expect(fixture.sensing.snapshotReadCount == 3,
+                "the snapshot is what expires, so every beat still renews it")
+
+        // The notification the watch delivers when the person moves within
+        // their own application. The beat after it derives again.
+        fixture.recovery.userWindowChanged()
+        let afterSignal = fixture.sensing.userWindowReadCount
+        await fixture.recovery.refreshPreparation()
+        #expect(fixture.sensing.userWindowReadCount > afterSignal)
+        fixture.recovery.stop()
+    }
+
+    @Test("an activation is armed by a beat that reused the destination it already held")
+    func reusedDestinationStillArmsAnActivation() async throws {
+        let fixture = Harness()
+        await fixture.recovery.refreshPreparation()
+        let firstBeat = fixture.sensing.userWindowReadCount
+        await fixture.recovery.refreshPreparation()
+        #expect(fixture.sensing.userWindowReadCount == firstBeat)
+
+        // The popup the driven application raises by itself, arriving on the
+        // evidence of a beat that derived nothing of its own.
+        fixture.activateTarget()
+        #expect(fixture.requested == [Self.user])
+        fixture.returnUser()
+        #expect(fixture.reports.last?.outcome == .restored)
+        #expect(!fixture.gate.isPaused)
+        fixture.recovery.stop()
+    }
+
+    @Test("a destination that turned invalid with no signal behind it is refused at the activation")
+    func silentlyInvalidDestinationIsRefusedByTheSnapshot() async throws {
+        let fixture = Harness()
+        await fixture.recovery.refreshPreparation()
+
+        // The person drags their own window over the virtual display's area.
+        // No focus notification describes that, so the beat keeps the
+        // destination and the snapshot prepared beside it is what refuses.
+        let moved = Self.user.replacingFrame(FakeGeometry.virtual)
+        fixture.sensing.additionalWindows[Self.user.windowNumber] = moved
+        fixture.sensing.focusRecoverySnapshot = FocusRecoverySnapshot(topologyIsValid: true,
+            virtualBounds: FakeGeometry.virtual, physicalBounds: [FakeGeometry.physical],
+            windows: [moved, Self.other, FakeGeometry.adoptedWindow])
+        await fixture.recovery.refreshPreparation()
+
+        fixture.activateTarget()
+        #expect(fixture.requested.isEmpty)
+        #expect(fixture.gate.isPaused)
+        #expect(fixture.reports.last?.detail == "The prepared user window is absent or invalid")
+        fixture.recovery.stop()
+    }
+
+    @Test("a beat that derived nothing derives again instead of waiting for the next signal")
+    func anEmptyDerivationIsRetriedOnTheNextBeat() async throws {
+        let fixture = Harness()
+        // What a 50 ms accessibility timeout in the person's application looks
+        // like from here: the read answers nothing and leaves nothing in hand.
+        fixture.sensing.focusedUserWindow = nil
+        await fixture.recovery.refreshPreparation()
+        let firstBeat = fixture.sensing.userWindowReadCount
+
+        fixture.sensing.focusedUserWindow = Self.user
+        await fixture.recovery.refreshPreparation()
+        #expect(fixture.sensing.userWindowReadCount > firstBeat)
+
+        fixture.activateTarget()
+        #expect(fixture.requested == [Self.user], "the retried beat armed this activation")
+        fixture.recovery.stop()
+    }
+
+    @Test("a refreshed preparation expires at the same age as a prepared one")
+    func refreshedPreparationExpires() async throws {
+        let fixture = Harness()
+        await fixture.recovery.refreshPreparation()
+        fixture.time += UserFocusRecovery.preparationLifetimeNanoseconds + 1
+        fixture.activateTarget()
+        #expect(fixture.requested.isEmpty)
+        #expect(fixture.gate.isPaused)
+        #expect(fixture.reports.last?.detail
+            == "The prepared action expired: 1250.0 ms old, and the limit is 1250.0 ms")
+        fixture.recovery.stop()
+    }
+
+    @Test("a refresh during a held Turn leaves the Turn exactly as it is")
+    func refreshDuringAHoldChangesNothing() async throws {
+        let fixture = Harness()
+        fixture.recovery.beginHold()
+        try await fixture.recovery.prepareBeforeAction()
+        await fixture.recovery.refreshPreparation()
+        fixture.activateTarget()
+        #expect(fixture.requested == [Self.user])
+        fixture.returnUser()
+        #expect(fixture.reports.last?.outcome == .restored)
+        #expect(!fixture.gate.isPaused)
+
+        // And a refresh while the seat waits for the person rearms nothing:
+        // the episode is open, its request is spent, and a reading taken now
+        // would only describe a seat the person has not come back to.
+        fixture.recovery.beginHold()
+        try await fixture.recovery.prepareBeforeAction()
+        fixture.activateTarget()
+        fixture.time += UserFocusRecovery.verificationWindowNanoseconds
+        fixture.recovery.verify()
+        let reads = fixture.sensing.snapshotReadCount
+        await fixture.recovery.refreshPreparation()
+        #expect(fixture.sensing.snapshotReadCount == reads)
+        #expect(fixture.gate.isPaused)
+        fixture.recovery.stop()
+    }
+
+    @Test("one automatic attempt for the whole operation, however many activations arrive")
+    func oneRequestPerOperation() async throws {
+        let fixture = Harness()
+        fixture.recovery.beginOperation()
+        // Out of Turn only the input path builds a preparation, so the test
+        // builds the one this operation would otherwise miss on.
+        try await fixture.recovery.prepareBeforeAction()
+        fixture.activateTarget()
+        #expect(fixture.requested.count == 1)
+
+        // The focus verified, and the operation is still the same operation:
+        // the second window it raises does not buy a second request.
+        fixture.returnUser()
+        #expect(!fixture.gate.isPaused)
+        try await fixture.recovery.prepareBeforeAction()
+        fixture.activateTarget()
+        #expect(fixture.requested.count == 1)
+        #expect(fixture.reports.last?.detail
+            == "The one automatic request of this episode was already spent")
+        #expect(fixture.gate.isPaused)
+        fixture.recovery.stop()
+    }
+
+    @Test("the episode ends with the operation, and ending it opens no other")
+    func episodeEndsWithTheOperation() async throws {
+        let fixture = Harness()
+        fixture.recovery.beginOperation()
+        try await fixture.recovery.prepareBeforeAction()
+        fixture.recovery.endOperation()
+
+        await #expect(throws: InputFailure.inputPaused([.holdEnded])) {
+            try await fixture.recovery.prepareBeforeAction()
+        }
+        // The next activation is the next operation: it may ask once, and what
+        // the ended episode prepared is not there to authorize it.
+        fixture.activateTarget()
+        #expect(fixture.requested.isEmpty)
+        #expect(fixture.reports.last?.detail
+            == "No prepared action was held when this activation arrived")
+        fixture.recovery.stop()
+    }
+
+    @Test("a transfer inside a held Turn neither rearms the Turn nor disarms it")
+    func operationInsideAHoldChangesNothing() async throws {
+        let fixture = Harness()
+        fixture.recovery.beginHold()
+        try await fixture.recovery.prepareBeforeAction()
+
+        // The bracket of a window transfer, opened and closed inside the Turn.
+        fixture.recovery.beginOperation()
+        fixture.recovery.endOperation()
+
+        fixture.activateTarget()
+        #expect(fixture.requested == [Self.user], "the Turn's preparation survived the transfer")
+        fixture.returnUser()
+        #expect(fixture.reports.last?.outcome == .restored)
+        #expect(!fixture.gate.isPaused)
+        fixture.recovery.stop()
+    }
+
     @Test("one request per activation: never twice inside an episode, once again after it")
     func oneRequestPerActivation() async throws {
         let fixture = Harness()
@@ -176,12 +442,15 @@ struct UserFocusRecoveryTests {
         #expect(fixture.reports.last?.outcome == .cancelled)
     }
 
-    @Test("an idle target activation is left to the user")
+    @Test("an idle target activation is answered rather than ignored, and asks for nothing")
     func idle() {
         let fixture = Harness()
+        // The episode opens with nothing prepared and no user window ever
+        // observed. It names that and asks for no destination it does not have.
         fixture.activateTarget()
         #expect(fixture.requested.isEmpty)
-        #expect(!fixture.gate.isPaused)
+        #expect(fixture.gate.isPaused)
+        #expect(fixture.reports.last?.outcome == .waitingForUser)
         fixture.recovery.stop()
     }
 
@@ -263,8 +532,36 @@ struct UserFocusRecoveryTests {
         #expect(fixture.gate.isPaused)
         #expect(fixture.sensing.snapshotReadCount == 1)
         #expect(fixture.reports.last?.detail
-            == "The prepared action expired: 1000.0 ms old, and the limit is 1000.0 ms")
+            == "The prepared action expired: 1250.0 ms old, and the limit is 1250.0 ms")
         fixture.recovery.stop()
+    }
+
+    /// The lifetime is 1.25 s because the heartbeat that rebuilds a preparation
+    /// is 1 s: at 1 s a preparation stamped on one beat was exactly at its
+    /// expiry on the next. Both sides of the boundary are pinned here, and so is
+    /// the number, because the whole point of the value is that it exceeds 1 s.
+    @Test("a preparation is usable at exactly its lifetime and expired one nanosecond later")
+    func lifetimeBoundary() async throws {
+        #expect(UserFocusRecovery.preparationLifetimeNanoseconds == 1_250_000_000)
+
+        let atTheLimit = Harness()
+        atTheLimit.recovery.beginHold()
+        try await atTheLimit.recovery.prepareBeforeAction()
+        atTheLimit.time += UserFocusRecovery.preparationLifetimeNanoseconds
+        atTheLimit.activateTarget()
+        #expect(atTheLimit.requested == [Self.user])
+        atTheLimit.recovery.stop()
+
+        let pastIt = Harness()
+        pastIt.recovery.beginHold()
+        try await pastIt.recovery.prepareBeforeAction()
+        pastIt.time += UserFocusRecovery.preparationLifetimeNanoseconds + 1
+        pastIt.activateTarget()
+        #expect(pastIt.requested.isEmpty)
+        #expect(pastIt.gate.isPaused)
+        #expect(pastIt.reports.last?.detail
+            == "The prepared action expired: 1250.0 ms old, and the limit is 1250.0 ms")
+        pastIt.recovery.stop()
     }
 
     @Test("a window adopted after the preparation disarms it, and the refusal names both sets")
@@ -593,6 +890,51 @@ struct UserFocusRecoveryTests {
         fixture.recovery.stop()
     }
 
+    @Test("only a request in flight and unverified reads as restoring, and the gate reads neither")
+    func restoringIsTheNarrowHalfOfPaused() async throws {
+        let fixture = Harness()
+        fixture.recovery.beginHold()
+        try await fixture.recovery.prepareBeforeAction()
+        fixture.activateTarget()
+        #expect(fixture.requested == [Self.user])
+        #expect(fixture.recovery.isRestoring, "the request returned 0 and the readings are owed")
+        #expect(fixture.gate.isPaused)
+
+        // The 250 ms the verification is given. Past it the episode is open and
+        // the seat is waiting for a person who may not be at the keyboard.
+        fixture.time += UserFocusRecovery.verificationWindowNanoseconds
+        #expect(fixture.recovery.isPaused)
+        #expect(!fixture.recovery.isRestoring)
+        #expect(fixture.gate.isPaused, "and the input stop does not read the difference")
+
+        fixture.returnUser()
+        #expect(!fixture.recovery.isPaused)
+        #expect(!fixture.recovery.isRestoring)
+        #expect(!fixture.gate.isPaused)
+        fixture.recovery.stop()
+    }
+
+    @Test("a miss, a throw and a refusal are all the seat waiting, never restoring",
+          arguments: 0..<3)
+    func everyUnaskedOrRefusedRequestIsWaiting(_ variant: Int) async throws {
+        let fixture = Harness()
+        switch variant {
+        case 1: fixture.restoreFailure = .inputPaused([.destinationNotPrepared])
+        case 2: fixture.restoreCode = 1
+        default: break
+        }
+        fixture.recovery.beginHold()
+        // Variant 0 prepares nothing, so the activation arrives on a miss.
+        if variant != 0 { try await fixture.recovery.prepareBeforeAction() }
+        fixture.activateTarget()
+
+        #expect(fixture.recovery.isPaused)
+        #expect(!fixture.recovery.isRestoring)
+        #expect(fixture.reports.last?.outcome == .waitingForUser)
+        #expect(fixture.gate.isPaused, "the input stop is closed in this state too")
+        fixture.recovery.stop()
+    }
+
     @MainActor
     private final class Harness {
         let sensing = FakeSensing()
@@ -603,6 +945,9 @@ struct UserFocusRecoveryTests {
         var identityUnavailable = false
         var requested: [WindowReference] = []
         var restoreFailure: InputFailure?
+        /// What the request answers. Non-zero is the refusal, which is the one
+        /// way into the waiting state that neither a miss nor a throw reaches.
+        var restoreCode: Int32 = 0
         var request = UserFocusRequestTiming()
         var reports: [UserFocusRecoveryReport] = []
         var time: UInt64 = 1_000_000_000
@@ -612,7 +957,7 @@ struct UserFocusRecoveryTests {
                 #expect(gate.isPaused, "The restoration call must never precede the input stop")
                 requested.append(window)
                 if let restoreFailure { throw restoreFailure }
-                return 0
+                return restoreCode
             }, now: { [unowned self] in time },
             requestTiming: { [unowned self] in request },
             prepareDestination: { [unowned self] destination, targets in

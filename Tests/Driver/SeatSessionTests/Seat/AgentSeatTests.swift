@@ -191,6 +191,37 @@ struct AgentSeatTests {
         #expect(KeyHold.shared.held(processID: processID).isEmpty)
     }
 
+    @Test("a reported cause is published with its own Issue and with no other")
+    func reportedCauseTravelsWithItsIssue() async throws {
+        let (seat, _) = try await Self.adopted(
+            processID: FakeGeometry.distinctProcessID()
+        )
+
+        var published: [(SeatIssue, SeatIssueCause?)] = []
+        let listening = Task { @MainActor in
+            for await event in seat.events {
+                if case .issueDetected(let issue, let cause) = event {
+                    published.append((issue, cause))
+                }
+            }
+        }
+        defer { listening.cancel() }
+
+        // The batch carries a window closure and a display change. Attaching
+        // the closure to the display would be the misreport, so it does not.
+        seat.report(
+            [.windowUnavailable, .displayChanged],
+            cause: .windowClosure(.absentFromReading)
+        )
+
+        for _ in 0 ..< 20 { await Task.yield() }
+        #expect(published.first { $0.0 == .windowUnavailable }?.1
+            == .windowClosure(.absentFromReading))
+        #expect(published.first { $0.0 == .displayChanged }?.1 == nil)
+        #expect(SeatIssueCause.windowClosure(.absentFromReading).issue == .windowUnavailable)
+        #expect(!ClosureEvidence.absentFromReading.provesClosure)
+    }
+
     @Test("a seat going terminal with nothing held stays quiet about keys")
     func terminalSeatWithNoKeysIsQuiet() async throws {
         let (seat, _) = try await Self.adopted(

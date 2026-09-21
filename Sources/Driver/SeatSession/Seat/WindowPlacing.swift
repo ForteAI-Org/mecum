@@ -80,6 +80,15 @@ nonisolated public protocol WindowPlacing: Sendable {
     /// of consuming it.
     func awaitFullScreen(_ wanted: Bool, of window: WindowReference) async throws -> WindowReference
 
+    /// The caller's residual operation budget. A release must not let the
+    /// native fullscreen poll start a fresh five-second wait after earlier
+    /// restitution already spent almost all of its deadline.
+    func awaitFullScreen(
+        _ wanted: Bool,
+        of window: WindowReference,
+        within deadline: Duration
+    ) async throws -> WindowReference
+
     /// True while the window's Space is the one on screen. Leaving fullscreen
     /// then costs the person a Space change there and back.
     func spaceIsOnScreen(for window: WindowReference) -> Bool
@@ -110,6 +119,15 @@ extension WindowPlacing {
             wanted      : wanted,
             lastFrame   : nil
         )
+    }
+
+    public nonisolated func awaitFullScreen(
+        _ wanted: Bool,
+        of window: WindowReference,
+        within deadline: Duration
+    ) async throws -> WindowReference {
+        guard deadline > .zero else { throw CancellationError() }
+        return try await awaitFullScreen(wanted, of: window)
     }
 
     /// Conservative on purpose: a witness that cannot see the Space says it is
@@ -164,7 +182,8 @@ nonisolated public protocol CommandSending: Sendable {
         to window    : WindowReference,
         correlationID: Int64,
         platform     : any InputPlatform,
-        traceContext : InputTraceContext
+        traceContext : InputTraceContext,
+        beforeFirstPost: @escaping @Sendable () async throws -> Void
     ) async throws -> InputReceipt
 
     /// Sends a batch with one distinct trace context per Command.
@@ -201,9 +220,11 @@ extension CommandSending {
         to window    : WindowReference,
         correlationID: Int64,
         platform     : any InputPlatform,
-        traceContext : InputTraceContext
+        traceContext : InputTraceContext,
+        beforeFirstPost: @escaping @Sendable () async throws -> Void = {}
     ) async throws -> InputReceipt {
         do {
+            try await beforeFirstPost()
             return try await send(
                 command,
                 to           : window,
@@ -250,18 +271,26 @@ extension CommandSending {
 /// protocol witness has to be a value the seat can hold.
 nonisolated public struct SystemWindowPlacing: WindowPlacing {
 
+    /// The elements the relocator already resolved for this seat's windows,
+    /// so that the second and every later placement call on a window proves
+    /// one element instead of searching the application's whole window list.
+    /// It lives here and not on `WindowRelocator`, which is a `nonisolated`
+    /// enum of statics: a cache there would be shared by every seat in the
+    /// process and would be a data race besides.
+    private let elementCache = WindowElementCache()
+
     public init() {}
 
     public func frame(of window: WindowReference) throws -> CGRect? {
-        try WindowRelocator.frame(of: window)
+        try WindowRelocator.frame(of: window, cache: elementCache)
     }
 
     public func move(_ window: WindowReference, to origin: CGPoint) throws {
-        try WindowRelocator.move(window, to: origin)
+        try WindowRelocator.move(window, to: origin, cache: elementCache)
     }
 
     public func resize(_ window: WindowReference, to size: CGSize) throws {
-        try WindowRelocator.resize(window, to: size)
+        try WindowRelocator.resize(window, to: size, cache: elementCache)
     }
 
     public func stage(
@@ -269,7 +298,12 @@ nonisolated public struct SystemWindowPlacing: WindowPlacing {
         expectedSize : CGSize,
         within bounds: CGRect
     ) async throws -> WindowReference {
-        try await WindowRelocator.stage(window, expectedSize: expectedSize, within: bounds)
+        try await WindowRelocator.stage(
+            window,
+            expectedSize: expectedSize,
+            within      : bounds,
+            cache       : elementCache
+        )
     }
 
     public func recover(
@@ -289,18 +323,31 @@ nonisolated public struct SystemWindowPlacing: WindowPlacing {
     }
 
     public func fullScreen(of window: WindowReference) throws -> WindowRelocator.FullScreenReading {
-        try WindowRelocator.fullScreen(of: window)
+        try WindowRelocator.fullScreen(of: window, cache: elementCache)
     }
 
     public func requestFullScreen(_ wanted: Bool, of window: WindowReference) throws {
-        try WindowRelocator.requestFullScreen(wanted, of: window)
+        try WindowRelocator.requestFullScreen(wanted, of: window, cache: elementCache)
     }
 
     public func awaitFullScreen(
         _ wanted: Bool,
         of window: WindowReference
     ) async throws -> WindowReference {
-        try await WindowRelocator.awaitFullScreen(wanted, of: window)
+        try await WindowRelocator.awaitFullScreen(wanted, of: window, cache: elementCache)
+    }
+
+    public func awaitFullScreen(
+        _ wanted: Bool,
+        of window: WindowReference,
+        within deadline: Duration
+    ) async throws -> WindowReference {
+        let nanoseconds = deadline.wholeNanoseconds
+        guard nanoseconds > 0 else { throw CancellationError() }
+        let seconds = Double(nanoseconds) / 1_000_000_000
+        return try await WindowRelocator.awaitFullScreen(
+            wanted, of: window, timeout: seconds, cache: elementCache
+        )
     }
 
     public func spaceIsOnScreen(for window: WindowReference) -> Bool {

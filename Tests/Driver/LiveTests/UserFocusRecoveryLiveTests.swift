@@ -169,7 +169,8 @@ struct UserFocusRecoveryLiveTests {
             #expect(report.timing.preparedIdentityNanoseconds > 0)
             #expect(report.timing.ownerLookupNanoseconds == 0)
             #expect(report.timing.psnLookupNanoseconds == 0)
-            #expect(report.timing.preparedSnapshotAgeNanoseconds <= 1_000_000_000)
+            #expect(report.timing.preparedSnapshotAgeNanoseconds
+                        <= AssignmentFocusCoordinator.preparationLifetimeNanoseconds)
             #expect((report.timing.firstKeyNanoseconds > 0) == usesKeyRecords)
             #expect((report.timing.secondKeyNanoseconds > 0) == usesKeyRecords)
             #expect(report.activatingProcessID == target.processID)

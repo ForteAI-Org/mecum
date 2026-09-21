@@ -66,10 +66,17 @@ struct AppWindowFollowTests {
         placing : FakePlacing,
         sender  : FakeSender = FakeSender(),
         marker  : Int64      = 7_001,
-        baseline: [WindowSurface] = []
+        baseline: [WindowSurface] = [],
+        reader  : ControlledSurfaceReader? = nil
     ) async throws -> (seat: AgentSeat, adopted: AdoptedWindow) {
 
-        let seat    = makeSeat(sensing: sensing, placing: placing, sender: sender, marker: marker)
+        let seat = makeSeat(
+            sensing: sensing,
+            placing: placing,
+            sender : sender,
+            marker : marker,
+            reader : reader
+        )
         let adopted = try await seat.adopt(FakeGeometry.userSeatWindow, platform: AppKitPlatform())
 
         sensing.surfaces = [surface(FakeGeometry.adoptedWindow)] + baseline
@@ -129,6 +136,7 @@ struct AppWindowFollowTests {
         _ condition   : @MainActor () -> Bool,
         within seconds: Double = 20
     ) async -> Bool {
+        ProcessKeepAlive.start()
         let deadline = Date().addingTimeInterval(seconds)
         while Date() < deadline {
             if condition() { return true }
@@ -152,6 +160,7 @@ struct AppWindowFollowTests {
     /// Lets the seat's own tasks run for a while without waiting for anything
     /// in particular, for a row whose assertion is that nothing happened.
     static func pause(_ seconds: Double = 0.4) async {
+        ProcessKeepAlive.start()
         let deadline = Date().addingTimeInterval(seconds)
         while Date() < deadline { await EventLoopWait.sleep(.milliseconds(30)) }
     }
@@ -169,6 +178,15 @@ struct AppWindowFollowTests {
         }
     }
 
+    /// The windows the seat adopted without taking the target, each with the
+    /// target it left where it was.
+    static func heldWithoutTarget(_ log: MultiWindowTests.EventLog) -> [(Int, Int?)] {
+        log.events.compactMap {
+            guard case .windowAdoptedNotTargeted(let window, let target) = $0 else { return nil }
+            return (window.windowNumber, target)
+        }
+    }
+
     // MARK: A window that arrives
 
     @Test("a second window of the driven process is found and brought in")
@@ -183,14 +201,19 @@ struct AppWindowFollowTests {
         await Self.pass(seat)
 
         #expect(seat.adoptedWindows.count == 2)
-        #expect(seat.currentTarget?.id == Self.secondWindowNumber)
-        #expect(seat.targetHistory == [first.id, Self.secondWindowNumber])
-        #expect(sensing.virtualDisplayBounds.contains(
-            try #require(seat.currentTarget).reference.frame
-        ))
+        #expect(seat.targetHistory == [first.id])
+        let brought = try #require(
+            seat.adoptedWindows.first { $0.id == Self.secondWindowNumber }
+        )
+        #expect(sensing.virtualDisplayBounds.contains(brought.reference.frame))
+
+        // The seat's own default is Chromium and the window it already holds
+        // was adopted as AppKit, so this says which of the two was read.
+        #expect(seat.session[Self.secondWindowNumber]?.platform is AppKitPlatform,
+                "a transferred window is driven as the application it belongs to, not as the default")
 
         await log.drain()
-        #expect(log.targetChanges.last?.reason == .detected,
+        #expect(Self.heldWithoutTarget(log).map(\.0) == [Self.secondWindowNumber],
                 "a window the seat found itself is not a window the consumer asked for")
         #expect(Self.refusals(log).isEmpty)
     }
@@ -209,9 +232,57 @@ struct AppWindowFollowTests {
         await Self.pass(seat)
 
         #expect(seat.adoptedWindows.count == 2, "the window the application opened is adopted")
-        #expect(sensing.virtualDisplayBounds.contains(
-            try #require(seat.currentTarget).reference.frame
-        ), "and it is brought onto the seat's own display")
+        let brought = try #require(
+            seat.adoptedWindows.first { $0.id == Self.secondWindowNumber }
+        )
+        #expect(sensing.virtualDisplayBounds.contains(brought.reference.frame),
+                "and it is brought onto the seat's own display")
+    }
+
+    @Test("a window born on the virtual display is adopted where it stands and can be given back")
+    func aWindowBornInsideTheSeatIsAdoptedWithoutAMove() async throws {
+        let sensing = FakeSensing()
+        let placing = FakePlacing()
+        let (seat, _) = try await Self.followingSeat(sensing: sensing, placing: placing)
+        let log = MultiWindowTests.EventLog(seat)
+        defer { log.stop() }
+
+        // macOS opens a new window where the application's active one is, and
+        // that one is the window the agent is working in, inside the seat.
+        let born = Self.offer(
+            Self.secondWindowNumber,
+            to   : sensing,
+            placing,
+            frame: CGRect(
+                x     : FakeGeometry.virtual.minX + 300,
+                y     : FakeGeometry.virtual.minY + 200,
+                width : 700,
+                height: 500
+            )
+        )
+        let movesBefore = placing.moves.count
+        await Self.pass(seat)
+
+        #expect(placing.moves.count == movesBefore,
+                "a window already in the seat needs no move and must not be given one")
+        #expect(seat.adoptedWindows.map(\.id).contains(born.windowNumber),
+                "and it is an Adopted Window, which is what a consumer's release loop iterates")
+        #expect(seat.session[born.windowNumber]?.platform is AppKitPlatform,
+                "and it is driven as its own application, the same as the window it was opened from")
+
+        await log.drain()
+        #expect(Self.refusals(log).isEmpty)
+
+        let adopted = try #require(seat.adoptedWindows.first { $0.id == born.windowNumber })
+        let outcome = await seat.release(adopted)
+        #expect(outcome == .returned)
+        #expect(!seat.adoptedWindows.map(\.id).contains(born.windowNumber))
+
+        // And a released window is not taken again by the next pass: the
+        // inventory still agrees with the frame it is standing at.
+        await Self.pass(seat)
+        #expect(!seat.adoptedWindows.map(\.id).contains(born.windowNumber),
+                "an owner that gave a window back must not take it straight back")
     }
 
     @Test("observation settles an outside popup through the owned transfer path")
@@ -220,7 +291,7 @@ struct AppWindowFollowTests {
         let sensing = FakeSensing()
         let placing = FakePlacing()
         let sender  = FakeSender()
-        let (seat, _) = try await Self.followingSeat(
+        let (seat, first) = try await Self.followingSeat(
             sensing: sensing,
             placing: placing,
             sender : sender,
@@ -261,8 +332,9 @@ struct AppWindowFollowTests {
         let delivery = try await observe(seat)
         #expect(placing.moves.count == movesBeforePopup + 1)
         #expect(seat.adoptedWindows.map(\.id).contains(popup.windowNumber))
-        #expect(seat.currentTarget?.id == popup.windowNumber)
-        #expect(delivery.reference.recipient.windowNumber == popup.windowNumber)
+        #expect(seat.currentTarget?.id == first.id,
+                "the popup is settled and held, and the target stays where it was")
+        #expect(delivery.reference.recipient.windowNumber == first.id)
         #expect(seat.state == .ready)
 
         let turn = try await seat.acquire()
@@ -547,8 +619,9 @@ struct AppWindowFollowTests {
             marker : 7_010
         )
 
-        // What Stage Manager publishes to the window server, measured at 90 by
-        // 97 points, against the body the window itself still reports.
+        // What Stage Manager publishes to the window server, one of the sizes it
+        // was measured at (90 by 97, and 120 by 121 elsewhere), against the body
+        // the window itself still reports.
         let thumbnail = CGRect(x: 40, y: 700, width: 90, height: 97)
         _ = Self.offer(
             Self.secondWindowNumber,
@@ -818,5 +891,481 @@ struct AppWindowFollowTests {
         await Self.pause(0.3)
         #expect(seat.state == .failed)
         #expect(sensing.surfaceReadCount == after)
+    }
+
+    // MARK: The two suspensions of a focus recovery
+
+    /// The person's window, on the physical display and outside the virtual
+    /// bounds, which is what makes it a destination a recovery may restore to.
+    static let userWindow = FakeGeometry.reference(
+        frame       : CGRect(x: 100, y: 100, width: 600, height: 500),
+        processID   : FakeGeometry.userPID,
+        windowNumber: 801
+    )
+
+    /// A real recovery paused on a request that went out and came back with
+    /// code 0, reading a clock the row moves by hand: the only way to sit in the
+    /// state where something is genuinely in flight, and to leave it 250 ms
+    /// later without a row that waits 250 ms and flakes under contention.
+    static func restoringRecovery(
+        _ sensing: FakeSensing,
+        _ gate   : InputCommandGate,
+        now      : @escaping () -> UInt64
+    ) async throws -> UserFocusRecovery {
+
+        sensing.additionalWindows[userWindow.windowNumber] = userWindow
+        sensing.focusedUserWindow     = userWindow
+        sensing.frontmostProcessID    = FakeGeometry.userPID
+        sensing.focusRecoverySnapshot = FocusRecoverySnapshot(
+            topologyIsValid: true,
+            virtualBounds  : FakeGeometry.virtual,
+            physicalBounds : [FakeGeometry.physical],
+            windows        : [userWindow, FakeGeometry.adoptedWindow]
+        )
+        let recovery = UserFocusRecovery(
+            sensing: sensing,
+            gate   : gate,
+            adopted: { [FakeGeometry.adoptedWindow] },
+            restore: { _ in 0 },
+            now    : now,
+            changed: { _ in }
+        )
+        recovery.beginHold()
+        try await recovery.prepareBeforeAction()
+        sensing.frontmostProcessID = FakeGeometry.targetPID
+        recovery.activationChanged(to: FakeGeometry.targetPID)
+        return recovery
+    }
+
+    @Test("a request in flight freezes the follower, and the 250 ms that ends it unfreezes it")
+    func onlyAnUnverifiedRequestFreezesTheFollower() async throws {
+        let sensing = FakeSensing()
+        let placing = FakePlacing()
+        let sender  = FakeSender()
+        let (seat, _) = try await Self.followingSeat(
+            sensing: sensing,
+            placing: placing,
+            sender : sender,
+            marker : 7_020
+        )
+        var clock: UInt64 = 1_000_000_000
+        let recovery = try await Self.restoringRecovery(sensing, sender.gate, now: { clock })
+        defer { recovery.stop() }
+        seat.focusRecovery = recovery
+        _ = Self.offer(Self.secondWindowNumber, to: sensing, placing)
+
+        // The request went out and the two agreeing readings are still owed:
+        // nothing may read or move a window underneath it, by either path.
+        #expect(recovery.isRestoring)
+        let scansBefore = seat.windowFollowScanCount
+        await Self.pass(seat, 3)
+        seat.heartbeat()
+        await Self.pause(0.3)
+        #expect(seat.windowFollowScanCount == scansBefore,
+                "neither the pass nor the heartbeat reads while a request is unverified")
+        #expect(seat.adoptedWindows.count == 1)
+        #expect(sender.gate.isPaused)
+
+        // The 250 ms passed with no verification. Nothing is in flight, the
+        // episode is still open, and the person may not be at the keyboard.
+        clock += UserFocusRecovery.verificationWindowNanoseconds
+        #expect(recovery.isPaused, "the gate's own reading is unchanged")
+        #expect(!recovery.isRestoring)
+        await Self.pass(seat)
+        #expect(seat.adoptedWindows.count == 2,
+                "the window the application opened is brought in while the seat waits")
+
+        // The input stop is the same stop it was, throughout both states.
+        #expect(sender.gate.isPaused)
+        #expect(sender.gate.pauseCauses == [.focusRecovery])
+    }
+
+    @Test("a recovery that asked for nothing leaves the follower running, heartbeat included")
+    func waitingForTheUserLeavesTheFollowerRunning() async throws {
+        let sensing = FakeSensing()
+        let placing = FakePlacing()
+        let sender  = FakeSender()
+        let (seat, _) = try await Self.followingSeat(
+            sensing: sensing,
+            placing: placing,
+            sender : sender,
+            marker : 7_021
+        )
+        let recovery = UserFocusRecovery(
+            sensing: sensing,
+            gate   : sender.gate,
+            adopted: { [FakeGeometry.adoptedWindow] },
+            restore: { _ in 0 },
+            changed: { _ in }
+        )
+        defer { recovery.stop() }
+        seat.focusRecovery = recovery
+
+        // The dialog the application raised between Turns: the activation
+        // reaches a recovery with nothing prepared, so no request is made.
+        sensing.frontmostProcessID = FakeGeometry.targetPID
+        recovery.activationChanged(to: FakeGeometry.targetPID)
+        #expect(recovery.isPaused)
+        #expect(!recovery.isRestoring, "no request was made, so none is in flight")
+        #expect(sender.gate.isPaused, "and the input stop is closed all the same")
+
+        // The wake-up path on its own, with no pass driven by hand: the beat
+        // used to return before it and freeze the follower independently.
+        _ = Self.offer(Self.secondWindowNumber, to: sensing, placing)
+        let scansBefore = seat.windowFollowScanCount
+        seat.heartbeat()
+        #expect(await Self.settle { seat.windowFollowScanCount > scansBefore },
+                "the beat used to return before the follow and freeze it independently")
+
+        // The transfer itself is driven, the way every row in this suite drives
+        // it: a scheduled burst is a wake-up and never a deterministic outcome.
+        await Self.pass(seat)
+        #expect(seat.adoptedWindows.count == 2)
+        #expect(sender.gate.pauseCauses == [.focusRecovery],
+                "moving a window never reopened input, and still does not")
+    }
+
+    // MARK: A detection is a hold, and the nucleus decides the target
+
+    /// The auxiliary surface of the live failure, measured at 33 by 10 points,
+    /// born inside the seat while the agent was working in the real window.
+    static let auxiliaryFrame = CGRect(
+        x     : FakeGeometry.virtual.minX + 300,
+        y     : FakeGeometry.virtual.minY + 200,
+        width : 33,
+        height: 10
+    )
+
+    @Test("a detected surface the nucleus refuses is held, and the target keeps its observation")
+    func aRefusedDetectedSurfaceIsHeldAndNotTargeted() async throws {
+        let sensing = FakeSensing()
+        let placing = FakePlacing()
+        let reader  = ControlledSurfaceReader(sensing: sensing)
+        let (seat, first) = try await Self.followingSeat(
+            sensing: sensing,
+            placing: placing,
+            marker : 7_030,
+            reader : reader
+        )
+        let reference = try await observedReference(seat)
+        let log       = MultiWindowTests.EventLog(seat)
+        defer { log.stop() }
+
+        // What the driven application opened inside the seat: a surface nobody
+        // operates, which the selection nucleus refuses as a target.
+        reader.roles[Self.secondWindowNumber] = .tooltip
+        let auxiliary = Self.offer(
+            Self.secondWindowNumber,
+            to   : sensing,
+            placing,
+            frame: Self.auxiliaryFrame
+        )
+        await Self.pass(seat)
+
+        #expect(seat.adoptedWindows.map(\.id).contains(auxiliary.windowNumber),
+                "the surface is held, so the release loop and the handback still own it")
+        #expect(seat.currentTarget?.id == first.id,
+                "and the operating target stays where the consumer left it")
+
+        await log.drain()
+        #expect(!log.targetChanges.contains { $0.to == auxiliary.windowNumber })
+
+        let admitted = try seat.admitOrdinary(reference)
+        #expect(admitted.id == first.id,
+                "the observation the agent is holding outlives a detection it never asked for")
+    }
+
+    @Test("a detected surface with no role at all is held, and the target keeps its observation")
+    func aSurfaceWithoutARoleIsHeldAndNotTargeted() async throws {
+        let sensing = FakeSensing()
+        let placing = FakePlacing()
+        let reader  = ControlledSurfaceReader(sensing: sensing)
+        let (seat, first) = try await Self.followingSeat(
+            sensing: sensing,
+            placing: placing,
+            marker : 7_033,
+            reader : reader
+        )
+        let reference = try await observedReference(seat)
+        let log       = MultiWindowTests.EventLog(seat)
+        defer { log.stop() }
+
+        // The live failure, in the form the reader now answers it with: Finder's
+        // empty 66 by 20 AXDialog produces no role claim at all.
+        reader.rolesNotRead.insert(Self.secondWindowNumber)
+        let auxiliary = Self.offer(
+            Self.secondWindowNumber,
+            to   : sensing,
+            placing,
+            frame: Self.auxiliaryFrame
+        )
+        await Self.pass(seat)
+
+        #expect(seat.adoptedWindows.map(\.id).contains(auxiliary.windowNumber),
+                "a surface with no role is still held, like one whose role is refused")
+        #expect(seat.currentTarget?.id == first.id,
+                "and the operating target stays where the consumer left it")
+
+        await log.drain()
+        #expect(!log.targetChanges.contains { $0.to == auxiliary.windowNumber })
+
+        let admitted = try seat.admitOrdinary(reference)
+        #expect(admitted.id == first.id,
+                "the observation taken before the detection outlives it")
+    }
+
+    @Test("a detected window the nucleus would select is held, and the target still does not move")
+    func anEligibleDetectedWindowDoesNotTakeTheTarget() async throws {
+        let sensing = FakeSensing()
+        let placing = FakePlacing()
+        let (seat, first) = try await Self.followingSeat(
+            sensing: sensing,
+            placing: placing,
+            marker : 7_031,
+            reader : ControlledSurfaceReader(sensing: sensing)
+        )
+        let observation = try await observedReference(seat)
+        let log = MultiWindowTests.EventLog(seat)
+        defer { log.stop() }
+
+        // The traffic light overlay's situation exactly: a surface the reader
+        // answers a selectable role for, born while the agent is working.
+        let window = Self.offer(Self.secondWindowNumber, to: sensing, placing)
+        await Self.pass(seat)
+
+        #expect(seat.adoptedWindows.map(\.id).contains(window.windowNumber),
+                "it is held, so the release loop and the handback still own it")
+        #expect(seat.currentTarget?.id == first.id)
+        #expect(seat.targetHistory == [first.id])
+
+        await log.drain()
+        #expect(!log.targetChanges.contains { $0.to == window.windowNumber },
+                "the seat never moves the target by itself")
+
+        // And the consumer hears about the window anyway, or multi window
+        // support would be useless rather than safe.
+        let held = Self.heldWithoutTarget(log)
+        #expect(held.count == 1)
+        #expect(held.first?.0 == window.windowNumber)
+        #expect(held.first?.1 == first.id)
+
+        let admitted = try seat.admitOrdinary(observation)
+        #expect(admitted.id == first.id,
+                "the observation the agent is holding outlives a detection it never asked for")
+    }
+
+    @Test("a held surface that becomes a candidate later still does not take the target")
+    func aHeldSurfaceDoesNotTakeTheTargetWhenItQualifies() async throws {
+        let sensing = FakeSensing()
+        let placing = FakePlacing()
+        let reader  = ControlledSurfaceReader(sensing: sensing)
+        let (seat, first) = try await Self.followingSeat(
+            sensing: sensing,
+            placing: placing,
+            marker : 7_032,
+            reader : reader
+        )
+        let log = MultiWindowTests.EventLog(seat)
+        defer { log.stop() }
+
+        reader.roles[Self.secondWindowNumber] = .tooltip
+        let auxiliary = Self.offer(
+            Self.secondWindowNumber,
+            to   : sensing,
+            placing,
+            frame: Self.auxiliaryFrame
+        )
+        await Self.pass(seat)
+        #expect(seat.currentTarget?.id == first.id)
+
+        // The back door: a qualified recency drops the standing choice inside
+        // the nucleus, and the fold that follows it would move the target.
+        reader.roles[Self.secondWindowNumber] = .dialog
+        reader.recency = [RecencyClaim(
+            surface              : try #require(auxiliary.identity),
+            signal               : .returnedToFront,
+            provenance           : .qualifiedFrontOrderAttestation,
+            origin               : .application(provenance: .qualifiedRaiseAttribution),
+            observedAtNanoseconds: DispatchTime.now().uptimeNanoseconds
+        )]
+        seat.refreshTargetReadings()
+
+        #expect(seat.currentTarget?.id == first.id,
+                "the window the consumer is working in is still the one the seat operates")
+        #expect(seat.seatGuard?.target.hasSameIdentity(as: first.reference) == true)
+        await log.drain()
+        #expect(!log.targetChanges.contains { $0.to == auxiliary.windowNumber })
+    }
+
+    @Test("the seat follows the nucleus only where its own target stopped qualifying")
+    func theSeatFollowsTheNucleusWhenItsTargetIsGone() async throws {
+        let sensing = FakeSensing()
+        let placing = FakePlacing()
+        let reader  = ControlledSurfaceReader(sensing: sensing)
+        let (seat, first) = try await Self.followingSeat(
+            sensing: sensing,
+            placing: placing,
+            marker : 7_037,
+            reader : reader
+        )
+        let log = MultiWindowTests.EventLog(seat)
+        defer { log.stop() }
+
+        let window = Self.offer(Self.secondWindowNumber, to: sensing, placing)
+        await Self.pass(seat)
+        #expect(seat.currentTarget?.id == first.id)
+
+        // The one move the seat still makes on its own: the window it was
+        // operating is minimised, so the nucleus would not select it any more.
+        reader.visibilities[first.id] = .minimisedEstablished
+        seat.refreshTargetReadings()
+
+        #expect(seat.currentTarget?.id == window.windowNumber)
+        await log.drain()
+        let change = try #require(log.targetChanges.last)
+        #expect(change.to == window.windowNumber)
+        #expect(change.from == first.id)
+        #expect(change.reason == .detected)
+    }
+
+    @Test("the consumer moves the target onto a held detected window with switchTarget")
+    func switchTargetMovesOntoADetectedWindow() async throws {
+        let sensing = FakeSensing()
+        let placing = FakePlacing()
+        let (seat, first) = try await Self.followingSeat(
+            sensing: sensing,
+            placing: placing,
+            marker : 7_038,
+            reader : ControlledSurfaceReader(sensing: sensing)
+        )
+        let log = MultiWindowTests.EventLog(seat)
+        defer { log.stop() }
+
+        let window = Self.offer(Self.secondWindowNumber, to: sensing, placing)
+        await Self.pass(seat)
+        #expect(seat.currentTarget?.id == first.id)
+
+        let held = try #require(seat.adoptedWindows.first { $0.id == window.windowNumber })
+        _ = try await seat.switchTarget(to: held)
+
+        #expect(seat.currentTarget?.id == window.windowNumber)
+        await log.drain()
+        let change = try #require(log.targetChanges.last)
+        #expect(change.to == window.windowNumber)
+        #expect(change.from == first.id)
+        #expect(change.reason == .requested,
+                "the consumer asked for it, which is the whole difference")
+    }
+
+    // MARK: A surface that goes away, and whose observation goes with it
+
+    /// Takes a window off the fake window server the way a destruction does:
+    /// no row for its Window ID anywhere, and the positive proof of closure a
+    /// pass reports for an identity it named in its own request.
+    static func destroy(
+        _ identity: WindowIdentity,
+        in sensing: FakeSensing,
+        _ reader  : ControlledSurfaceReader
+    ) {
+        sensing.additionalWindows[identity.windowNumber] = nil
+        sensing.surfaces = sensing.surfaces?.filter {
+            $0.reference.windowNumber != identity.windowNumber
+        }
+        reader.destroyed = [identity]
+    }
+
+    @Test("a held surface destroyed under the agent leaves the target's observation alone")
+    func aDestroyedHeldSurfaceKeepsTheTargetsObservation() async throws {
+        let sensing = FakeSensing()
+        let placing = FakePlacing()
+        let sender  = FakeSender()
+        let reader  = ControlledSurfaceReader(sensing: sensing)
+        let (seat, first) = try await Self.followingSeat(
+            sensing: sensing,
+            placing: placing,
+            sender : sender,
+            marker : 7_034,
+            reader : reader
+        )
+
+        // The live failure's surface: Finder publishes it whenever a window of
+        // its is raised, no role is read for it, and it is gone under a second.
+        reader.rolesNotRead.insert(Self.secondWindowNumber)
+        let auxiliary = Self.offer(
+            Self.secondWindowNumber,
+            to   : sensing,
+            placing,
+            frame: Self.auxiliaryFrame
+        )
+        await Self.pass(seat)
+        #expect(seat.currentTarget?.id == first.id)
+
+        let observation = try await observedReference(seat)
+        Self.destroy(try #require(auxiliary.identity), in: sensing, reader)
+        seat.refreshTargetReadings()
+
+        #expect(seat.coherentState.hasCurrentObservation,
+                "another window's destruction is not this window's target change")
+
+        let turn    = try await seat.acquire()
+        let receipt = try await seat.send(Self.click, observation: observation, turn: turn)
+        #expect(sender.sent.count == 1,
+                "the agent's Command on the window it is working in is admitted")
+        try seat.confirm(receipt, .observed)
+        _ = await seat.concludeObservation()
+        try seat.release(turn)
+    }
+
+    @Test("the observed window going away does end its observation")
+    func theObservedWindowGoingAwayEndsItsObservation() async throws {
+        let sensing = FakeSensing()
+        let placing = FakePlacing()
+        let reader  = ControlledSurfaceReader(sensing: sensing)
+        let (seat, first) = try await Self.followingSeat(
+            sensing: sensing,
+            placing: placing,
+            marker : 7_035,
+            reader : reader
+        )
+        _ = try await observedReference(seat)
+        #expect(seat.coherentState.hasCurrentObservation)
+
+        // The application stops scoping the very window the observation is of,
+        // which is the closure the scoping must never stop ending.
+        reader.withdrawn = [try #require(first.reference.identity)]
+        seat.refreshTargetReadings()
+
+        #expect(!seat.coherentState.hasCurrentObservation)
+        #expect(seat.coherentState.lastInvalidation == .targetChanged)
+    }
+
+    @Test("releasing a window nobody is observing leaves the target's observation alone")
+    func releasingAnUnobservedWindowKeepsTheObservation() async throws {
+        let sensing = FakeSensing()
+        let placing = FakePlacing()
+        let reader  = ControlledSurfaceReader(sensing: sensing)
+        let (seat, first) = try await Self.followingSeat(
+            sensing: sensing,
+            placing: placing,
+            marker : 7_036,
+            reader : reader
+        )
+        reader.roles[Self.secondWindowNumber] = .tooltip
+        let auxiliary = Self.offer(
+            Self.secondWindowNumber,
+            to   : sensing,
+            placing,
+            frame: Self.auxiliaryFrame
+        )
+        await Self.pass(seat)
+
+        let observation = try await observedReference(seat)
+        let held = try #require(seat.adoptedWindows.first { $0.id == auxiliary.windowNumber })
+        let outcome = await seat.release(held)
+        #expect(outcome == .returned)
+
+        let admitted = try seat.admitOrdinary(observation)
+        #expect(admitted.id == first.id,
+                "a consumer giving back a window it never observed keeps the agent's observation")
     }
 }

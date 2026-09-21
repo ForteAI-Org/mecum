@@ -91,8 +91,23 @@ nonisolated public struct SeatHostConfiguration: Sendable {
     /// it is never repeated. A window the seat already holds that leaves the
     /// display is put back. A window that cannot be moved, one that does not
     /// fit, and one whose application keeps putting it back all produce
-    /// `windowTransferRefused` with the reason; a transfer that worked produces
-    /// `targetChanged` with reason `.detected`.
+    /// `windowTransferRefused` with the reason.
+    ///
+    /// **A transfer that worked never moves the operating target.** It produces
+    /// `windowAdoptedNotTargeted`, and the window is held, owned, contained and
+    /// released like any other, with the target left exactly where it was. The
+    /// consumer moves it with `switchTarget(to:)` or not at all.
+    ///
+    /// Three rules tried to tell a window worth operating from a surface the
+    /// system draws, by window level, then by accessibility subrole, then by
+    /// whether the surface had anything in it, and all three were defeated by
+    /// the same one: the overlay macOS puts over every window, measured at 66
+    /// by 20 points six points inside its window's top-left corner, an
+    /// `AXWindow` with subrole `AXDialog` that is movable, raisable, titled
+    /// "Window", and that acquires a child eighteen milliseconds after it is
+    /// born. Nothing readable separates it from a save panel. So the seat
+    /// stopped guessing what a window is and stopped moving the target on its
+    /// own, which is the one answer that does not need the question answered.
     ///
     /// **Giving control back.** The person's deliberate input stands the watch
     /// down for as long as it lasts: a pass is skipped while a Command or a

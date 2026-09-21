@@ -24,6 +24,20 @@ nonisolated enum AppWindowChange: Equatable {
     /// list, and came back.
     case reappeared(WindowReference)
 
+    /// A window of a driven process the seat does not hold, seen twice at the
+    /// same frame **inside** the Virtual Display, that was not there when the
+    /// seat took control.
+    ///
+    /// It is its own case because it answers a different question from
+    /// `appeared`: macOS opens a new window where the application's active
+    /// window is, so a window opened while the agent works in the seat is born
+    /// inside it. It needs no move, and it still needs an owner, because a
+    /// window nobody adopted is a held member no release loop iterates and the
+    /// handback refuses for it. One case rather than an `appeared` carrying a
+    /// flag, so that the caller cannot spend a transfer attempt on a window
+    /// that needs no transfer.
+    case appearedInVirtualDisplay(WindowReference)
+
     /// A window the seat holds whose frame is no longer inside the Virtual
     /// Display.
     case leftVirtualDisplay(WindowReference)
@@ -243,9 +257,14 @@ nonisolated struct AppWindowInventory {
             record.agreed       = true
             known[windowNumber] = record
 
-            guard isPrimed, isTransferable(surface, menuLevel: menuLevel),
-                  !virtualBounds.contains(surface.reference.frame)
-            else { continue }
+            guard isPrimed, isTransferable(surface, menuLevel: menuLevel) else { continue }
+
+            guard !virtualBounds.contains(surface.reference.frame) else {
+                // Inside already, so nothing to move and still something to
+                // own. A return and a reappearance are the same act here.
+                changes.append(.appearedInVirtualDisplay(surface.reference))
+                continue
+            }
 
             changes.append(
                 record.hasReturned ? .reappeared(surface.reference)

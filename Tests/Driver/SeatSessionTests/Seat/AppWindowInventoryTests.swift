@@ -187,13 +187,69 @@ struct AppWindowInventoryTests {
         #expect(Self.fold(&inventory, [[successor], [successor]]).isEmpty)
     }
 
-    @Test("a window already inside the virtual display is not transferred to it again")
-    func aWindowAlreadyOnTheDisplay() {
+    @Test("a contextual menu that opens inside the virtual display is still left alone")
+    func aMenuInsideTheDisplayIsNotACandidate() {
         var inventory = AppWindowInventory()
         Self.fold(&inventory, [[Self.surface(700)]])
 
-        let inside = Self.surface(701, frame: FakeGeometry.adoptedWindow.frame)
-        #expect(Self.fold(&inventory, [[inside], [inside]]).isEmpty)
+        // The one surface that opens inside the seat by design: `useContextMenu`
+        // owns it whole and a second owner adopting it loses the tracking loop.
+        let menu    = Self.surface(701, frame: FakeGeometry.adoptedWindow.frame, level: Self.menuLevel)
+        let reading = [Self.surface(700), menu]
+
+        #expect(Self.fold(&inventory, [reading, reading]).isEmpty)
+    }
+
+    @Test("a window already inside the virtual display at the baseline is still never taken")
+    func aBaselinedWindowInsideTheDisplayIsNeverTaken() {
+        var inventory = AppWindowInventory()
+        let inside    = Self.surface(700, frame: FakeGeometry.adoptedWindow.frame)
+        inventory.baseline(surfaces: [inside], processes: Self.driven)
+
+        #expect(Self.fold(&inventory, [[inside], [inside]]).isEmpty,
+                "everything present when the seat took control is the person's")
+    }
+
+    // MARK: A window born inside the seat
+
+    @Test("a window that appears inside the virtual display is offered for ownership, not for a move")
+    func aWindowBornInsideTheDisplay() {
+        var inventory = AppWindowInventory()
+        Self.fold(&inventory, [[Self.surface(700)]])
+
+        // Where macOS puts a new window: next to the application's active one,
+        // which is the window the agent is working in, inside the seat.
+        let inside  = Self.surface(701, frame: FakeGeometry.adoptedWindow.frame)
+        let reading = [Self.surface(700), inside]
+
+        #expect(Self.fold(&inventory, [reading]).isEmpty, "one reading is still a sighting")
+        #expect(inventory.hasPendingCandidate)
+        #expect(Self.fold(&inventory, [reading]) == [.appearedInVirtualDisplay(inside.reference)])
+
+        // Nothing was moved, so the whole budget is still there for the day the
+        // window does leave the display.
+        for attempt in 1...AppWindowInventory.maximumAttempts {
+            let allowed = inventory.mayAttempt(701)
+            #expect(allowed, "attempt \(attempt) was spent on a window that needed no transfer")
+        }
+    }
+
+    @Test("a window that appears outside the virtual display is still a transfer")
+    func aWindowBornOutsideIsStillATransfer() {
+        var inventory = AppWindowInventory()
+        Self.fold(&inventory, [[Self.surface(700)]])
+
+        let outside = Self.surface(701, frame: Self.physical.offsetBy(dx: 20, dy: 20))
+        let reading = [Self.surface(700), outside]
+        #expect(Self.fold(&inventory, [reading, reading]) == [.appeared(outside.reference)])
+    }
+
+    @Test("a window the seat already holds is judged by where it is, never offered again")
+    func aHeldWindowInsideIsNotOfferedAgain() {
+        var inventory = AppWindowInventory()
+        let home      = Self.surface(700, frame: FakeGeometry.adoptedWindow.frame)
+
+        #expect(Self.fold(&inventory, [[home], [home], [home]], adopted: [700]).isEmpty)
     }
 
     // MARK: The windows the seat holds
@@ -297,7 +353,7 @@ struct AppWindowInventoryTests {
     private static func windowNumber(_ change: AppWindowChange) -> Int {
         switch change {
             case .appeared(let window), .reappeared(let window),
-                 .leftVirtualDisplay(let window):
+                 .appearedInVirtualDisplay(let window), .leftVirtualDisplay(let window):
                 window.windowNumber
             case .vanished(let windowNumber):
                 windowNumber

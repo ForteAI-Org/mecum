@@ -127,7 +127,16 @@ final class FakeSensing: SeatSensing, @unchecked Sendable {
     var fenceIsActive               = true
     var cursorLocation: CGPoint?    = CGPoint(x: 700, y: 500)
     var frontmostProcessID: Int32?  = FakeGeometry.userPID
-    var focusedUserWindow: WindowReference?
+    var preparedUserWindow: WindowReference?
+
+    /// How many times the person's focused window was derived. It is the live
+    /// pair of accessibility round trips into their application, so a test that
+    /// cares about the cost of a beat counts this the way it counts snapshots.
+    var userWindowReadCount = 0
+    var focusedUserWindow: WindowReference? {
+        get { userWindowReadCount += 1; return preparedUserWindow }
+        set { preparedUserWindow = newValue }
+    }
     var preparedSnapshot: FocusRecoverySnapshot?
     var snapshotReadCount = 0
     var focusRecoverySnapshot: FocusRecoverySnapshot? {
@@ -352,6 +361,11 @@ final class FakePlacing: WindowPlacing, @unchecked Sendable {
     var fullScreenRequestError: (any Error)?
     var fullScreenAwaitError  : (any Error)?
 
+    /// The budget the release handed to its native fullscreen collaborator.
+    /// A test uses this to prove that a late restitution step receives the
+    /// residual deadline rather than starting the collaborator's own timeout.
+    var fullScreenAwaitBudgets: [Duration] = []
+
     func fullScreen(of window: WindowReference) throws -> WindowRelocator.FullScreenReading {
         fullScreenStates[window.windowNumber] ?? .writable(false)
     }
@@ -369,6 +383,16 @@ final class FakePlacing: WindowPlacing, @unchecked Sendable {
         if let fullScreenAwaitError { throw fullScreenAwaitError }
         guard let normalFrameAfterExit, !wanted else { return window }
         return window.replacingFrame(normalFrameAfterExit)
+    }
+
+    func awaitFullScreen(
+        _ wanted: Bool,
+        of window: WindowReference,
+        within deadline: Duration
+    ) async throws -> WindowReference {
+        fullScreenAwaitBudgets.append(deadline)
+        guard deadline > .zero else { throw CancellationError() }
+        return try await awaitFullScreen(wanted, of: window)
     }
 
     func spaceIsOnScreen(for window: WindowReference) -> Bool {
@@ -402,6 +426,12 @@ class FakeSender: CommandSending, @unchecked Sendable {
     /// Every Command that went out, with the marker it was stamped with.
     var sent: [(command: InputCommand, correlationID: Int64)] = []
 
+    /// The window and the recipe every Command was addressed with, in the same
+    /// order. They are what the driver keys its identity check, its routed
+    /// fields, its `postToPid` and its hold registry on, so a test that asks
+    /// where a gesture went asks here.
+    var addressed: [(window: WindowReference, platform: any InputPlatform)] = []
+
     var error: (any Error)?
 
     /// True to answer with a Receipt that says the Preparation was not undone,
@@ -422,12 +452,45 @@ class FakeSender: CommandSending, @unchecked Sendable {
         if let refusal = refusedCommand?(command) { throw refusal }
 
         sent.append((command, correlationID))
+        addressed.append((window, platform))
         onSend?(command)
         await onSendWait?()
         // Distinguishable by posting time, as two real Receipts are: `confirm`
         // matches a Receipt by its whole value, so two identical ones would let
         // an out of order confirmation pass unnoticed.
         return receipt(for: window, index: sent.count)
+    }
+
+    /// The production boundary waits for preparation, then validates the
+    /// endpoint immediately before the first event. Keeping that ordering in
+    /// the fake makes a stale-endpoint regression exercise the actual seam
+    /// instead of the compatibility extension, which invokes the callback too
+    /// early to model a queued driver.
+    func send(
+        _ command    : InputCommand,
+        to window    : WindowReference,
+        correlationID: Int64,
+        platform     : any InputPlatform,
+        traceContext : InputTraceContext,
+        beforeFirstPost: @escaping @Sendable () async throws -> Void
+    ) async throws -> InputReceipt {
+        do {
+            try gate.check()
+            if let error { throw error }
+            if let refusal = refusedCommand?(command) { throw refusal }
+
+            await onSendWait?()
+            try await beforeFirstPost()
+            try gate.check()
+
+            sent.append((command, correlationID))
+            addressed.append((window, platform))
+            onSend?(command)
+            return receipt(for: window, index: sent.count)
+        } catch {
+            recordCompletedTrace(traceContext.completed(at: DispatchTime.now().uptimeNanoseconds))
+            throw error
+        }
     }
 
     func sendSequence(
@@ -515,7 +578,8 @@ func makeSeat(
     reader : ControlledSurfaceReader? = nil,
     source : ControlledObservationSource? = nil,
     clock  : ControlledContentClock? = nil,
-    profile: ObservationProfile = .initialLab
+    profile: ObservationProfile = .initialLab,
+    endpoints: EndpointDiscovery = .shipping
 ) -> AgentSeat {
 
     // `KeyHold` is process wide and keyed by owner and PID, so a test that
@@ -532,6 +596,7 @@ func makeSeat(
         surfaceReader        : reader ?? ControlledSurfaceReader(sensing: sensing),
         observationSource    : source ?? ControlledObservationSource(sensing: sensing),
         contentClock         : clock  ?? ControlledContentClock(),
-        observationProfile   : profile
+        observationProfile   : profile,
+        endpoints            : endpoints
     )
 }

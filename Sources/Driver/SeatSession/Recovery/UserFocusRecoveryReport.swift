@@ -5,6 +5,14 @@ import SeatCore
 nonisolated public struct UserFocusRecoveryReport: Sendable, Equatable {
     public enum Outcome: String, Sendable {
         case restoring, restored, waitingForUser, userTookControl, cancelled
+
+        /// The transition that was opened for a closure spent everything it had
+        /// and the focus is still not back. It is a precise end and not a
+        /// stopped seat: the person returning still ends the episode and the
+        /// explicit panic is still available, but nothing automatic will ask
+        /// again, because the alternative is a seat fighting the application or
+        /// the person for as long as either keeps going.
+        case unrecoverable
     }
 
     public let outcome: Outcome

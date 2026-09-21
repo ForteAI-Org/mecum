@@ -27,8 +27,9 @@ struct SeatWindowSessionTests {
                 reference    : reference,
                 originalFrame: CGRect(origin: CGPoint(x: 100, y: 100), size: size)
             ),
-            platform: AppKitPlatform(),
-            isStaged: true
+            platform  : AppKitPlatform(),
+            isStaged  : true,
+            operationalSize: size
         )
     }
 
@@ -86,6 +87,39 @@ struct SeatWindowSessionTests {
         #expect(session[1]?.isStaged == true, "A window still at full size is still on stage")
     }
 
+    @Test("with no window excluded every held record is read back")
+    func stagingIsReadBackForEveryRecord() {
+        var session = Self.session([1, 2])
+        let thumbnail = CGSize(width: 90, height: 97)
+
+        session.refreshStaging { _ in thumbnail }
+        #expect(session[1]?.isStaged == false)
+        #expect(session[2]?.isStaged == false, "the window nobody excluded is read like the rest")
+    }
+
+    @Test("a window shrunk to fit the display is not a stashed window")
+    func aShrunkWindowIsNotAStash() {
+        var session = SeatWindowSession()
+        let shrunk  = CGSize(width: 400, height: 300)
+
+        // What it is owed on its return is the frame it had before the seat
+        // shrank it, and comparing a reading with that would stash it forever.
+        var record = Self.record(1, size: shrunk)
+        record = WindowRecord(
+            window    : AdoptedWindow(
+                reference    : record.window.reference,
+                originalFrame: CGRect(origin: CGPoint(x: 100, y: 100), size: FakeGeometry.windowSize)
+            ),
+            platform  : AppKitPlatform(),
+            isStaged  : true,
+            operationalSize: shrunk
+        )
+        session.adopt(record)
+
+        session.refreshStaging { _ in shrunk }
+        #expect(session[1]?.isStaged == true)
+    }
+
     @Test("a window the server cannot read keeps the staging it had")
     func unreadableWindowKeepsItsStaging() {
         var session = Self.session([1, 2])
@@ -96,6 +130,89 @@ struct SeatWindowSessionTests {
         session[1]?.isStaged = false
         session.refreshStaging(besides: 2) { _ in nil }
         #expect(session[1]?.isStaged == false)
+    }
+
+    /// The oracle is the resize itself and not the predicate: 800 by 600 read
+    /// back at 780 by 580 and at 900 by 700 is a window somebody resized, and
+    /// neither reading is evidence of a stash.
+    @Test("a resize of 20 to 100 points is not staging evidence either way")
+    func aResizeIsNotStagingEvidence() {
+        var session = Self.session([1, 2])
+
+        for size in [CGSize(width: 780, height: 580), CGSize(width: 900, height: 700)] {
+            session[1]?.isStaged = true
+            session.refreshStaging(besides: 2) { _ in size }
+            #expect(session[1]?.isStaged == true, "a resized window on stage stays on stage")
+
+            session[1]?.isStaged = false
+            session.refreshStaging(besides: 2) { _ in size }
+            #expect(session[1]?.isStaged == false, "and a stashed one is not staged by a reading")
+        }
+    }
+
+    /// The two thumbnails measured live, against the window they were measured
+    /// on: a 1291 by 949 pt window published as 164 by 180, and the 90 by 97
+    /// reading of a window of the fixture's size.
+    @Test("a real thumbnail is still the positive evidence of a stash")
+    func aThumbnailIsStillAStash() {
+        var session = Self.session([1])
+        session.refreshStaging { _ in CGSize(width: 90, height: 97) }
+        #expect(session[1]?.isStaged == false)
+
+        var wide = SeatWindowSession()
+        let full = CGSize(width: 1_291, height: 949)
+        wide.adopt(Self.record(1, size: full))
+        wide.refreshStaging { _ in CGSize(width: 164, height: 180) }
+        #expect(wide[1]?.isStaged == false)
+    }
+
+    @Test("an accepted geometry becomes the operational size and keeps the obligations")
+    func acceptedGeometryKeepsObligations() {
+        var session = SeatWindowSession()
+        let owed    = CGRect(origin: CGPoint(x: 100, y: 100), size: FakeGeometry.windowSize)
+        let sheet   = AdoptedWindow(
+            reference    : Self.record(1).window.reference,
+            originalFrame: owed,
+            title        : "a sheet",
+            owesNoReturn : true
+        )
+        session.adopt(WindowRecord(
+            window         : sheet,
+            platform       : AppKitPlatform(),
+            isStaged       : false,
+            operationalSize: FakeGeometry.windowSize
+        ))
+
+        let resized = FakeGeometry.reference(
+            frame       : CGRect(origin: FakeGeometry.windowOrigin,
+                                 size  : CGSize(width: 880, height: 640)),
+            windowNumber: 1
+        )
+        session.acceptGeometry(resized)
+
+        #expect(session[1]?.operationalSize == CGSize(width: 880, height: 640))
+        #expect(session[1]?.isStaged == true)
+        #expect(session[1]?.window.owesNoReturn == true)
+        #expect(session[1]?.window.originalFrame == owed, "what it is owed does not move")
+        #expect(session[1]?.window.title == "a sheet")
+
+        // And the record now reads as on stage at the size it is standing at,
+        // which is the whole point of the two moving together.
+        session.refreshStaging { _ in CGSize(width: 880, height: 640) }
+        #expect(session[1]?.isStaged == true)
+    }
+
+    @Test("a reading of another lifetime of the window id accepts nothing")
+    func acceptedGeometryNeedsTheSameIdentity() {
+        var session = Self.session([1])
+        let other   = FakeGeometry.reference(
+            frame       : CGRect(origin: FakeGeometry.windowOrigin,
+                                 size  : CGSize(width: 880, height: 640)),
+            windowNumber: 1,
+            lifetime    : 2
+        )
+        session.acceptGeometry(other)
+        #expect(session[1]?.operationalSize == FakeGeometry.windowSize)
     }
 
     @Test("the processes behind the windows are counted once each")

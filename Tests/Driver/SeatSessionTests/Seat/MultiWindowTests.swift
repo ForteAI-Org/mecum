@@ -57,6 +57,7 @@ struct MultiWindowTests {
             until condition: @MainActor () -> Bool,
             within seconds : Double = 60
         ) async -> Bool {
+            ProcessKeepAlive.start()
             let deadline = Date().addingTimeInterval(seconds)
             while Date() < deadline {
                 if condition() { return true }
@@ -272,6 +273,28 @@ struct MultiWindowTests {
         #expect(seat.isStaged(windows[0]), "Not readable is not evidence of stashed")
     }
 
+    @Test("a fold reads every held window's staging back, with no staging of its own")
+    func aFoldReadsTheStagingBack() async throws {
+        let sensing = FakeSensing()
+        let placing = FakePlacing()
+        let (seat, windows) = try await Self.seat(sensing: sensing, placing: placing)
+        #expect(seat.isStaged(windows[0]))
+        let stagesBefore = placing.stages
+
+        // Stage Manager stashes a window whenever another window of the same
+        // application is raised, and nobody tells the seat.
+        sensing.geometry = FakeGeometry.reference(
+            frame: CGRect(origin: FakeGeometry.windowOrigin, size: CGSize(width: 90, height: 97))
+        )
+        seat.refreshTargetReadings()
+        #expect(!seat.isStaged(windows[0]), "staging is read at every fold and never remembered")
+        #expect(placing.stages == stagesBefore, "reading a stash is not answering it")
+
+        sensing.geometry = nil
+        seat.refreshTargetReadings()
+        #expect(!seat.isStaged(windows[0]), "an unreadable window keeps the value it had")
+    }
+
     // MARK: The pause
 
     @Test("a transfer holds input closed and resolves only its own cause")
@@ -298,6 +321,44 @@ struct MultiWindowTests {
 
         sender.gate.resume(.focusRecovery)
         #expect(!sender.gate.isPaused)
+    }
+
+    @Test("a transfer outside a Turn is the focus episode, and the episode ends with it")
+    func transferIsTheFocusEpisodeOutsideATurn() async throws {
+        let sensing = FakeSensing()
+        let placing = FakePlacing()
+        let sender  = FakeSender()
+        let (seat, windows) = try await Self.seat(
+            sensing: sensing,
+            placing: placing,
+            sender : sender,
+            also   : [Self.secondWindowNumber]
+        )
+        let recovery = UserFocusRecovery(
+            sensing: sensing,
+            gate   : sender.gate,
+            adopted: { [] },
+            restore: { _ in 0 },
+            changed: { _ in }
+        )
+        seat.focusRecovery = recovery
+
+        // No Turn is held, so the transfer is the only thing that can arm it.
+        await #expect(throws: InputFailure.inputPaused([.holdEnded])) {
+            try await recovery.prepareBeforeAction()
+        }
+        placing.onStageWait = {
+            await #expect(throws: Never.self, "the operation armed the recovery") {
+                try await recovery.prepareBeforeAction()
+            }
+        }
+
+        _ = try await seat.switchTarget(to: windows[0])
+
+        await #expect(throws: InputFailure.inputPaused([.holdEnded]),
+                      "and the operation ended its episode with it") {
+            try await recovery.prepareBeforeAction()
+        }
     }
 
     @Test("a refused transfer leaves the gate exactly as it found it")
@@ -522,8 +583,12 @@ struct MultiWindowTests {
         #expect(seat.state == .recovering)
         #expect(seat.currentTarget?.id == windows[1].id, "A recovery in flight is not a destruction")
 
-        let handedOver = await EventLog.settle { seat.currentTarget?.id == windows[0].id }
-        #expect(handedOver)
+        // The budget is five measured seconds of an unreadable window, so a
+        // wait that ends without the handover has to say what it measured.
+        let handedOver = await RecoveryWait.settle(seat) {
+            seat.currentTarget?.id == windows[0].id
+        }
+        #expect(handedOver.satisfied, "\(handedOver)")
         #expect(seat.state == .ready)
         #expect(seat.adoptedWindows.map(\.id) == [windows[0].id])
 
@@ -539,8 +604,8 @@ struct MultiWindowTests {
         sensing.geometry = nil
         seat.report([.windowUnavailable])
 
-        let failed = await EventLog.settle { seat.state == .failed }
-        #expect(failed)
+        let failed = await RecoveryWait.settle(seat) { seat.state == .failed }
+        #expect(failed.satisfied, "\(failed)")
         #expect(seat.currentTarget != nil, "Nothing was handed over, so nothing was forgotten either")
     }
 
@@ -550,7 +615,7 @@ struct MultiWindowTests {
     func detectedWindowWaitsForTheBoundary() async throws {
         let sensing = FakeSensing()
         let sender  = FakeSender()
-        let (seat, _) = try await Self.seat(sensing: sensing, sender: sender)
+        let (seat, windows) = try await Self.seat(sensing: sensing, sender: sender)
         let turn = try await seat.acquire()
 
         let reference = Self.reference(Self.secondWindowNumber)
@@ -575,7 +640,8 @@ struct MultiWindowTests {
 
         let adopted = try await started.value?.value
         #expect(adopted?.id == reference.windowNumber)
-        #expect(seat.currentTarget?.id == reference.windowNumber)
+        #expect(seat.currentTarget?.id == windows[0].id,
+                "The window is held at the boundary, and the target is not moved onto it")
         #expect(sender.sent.count == 1, "The Command that opened the window is never repeated")
 
         try seat.confirm(receipt, .observed)

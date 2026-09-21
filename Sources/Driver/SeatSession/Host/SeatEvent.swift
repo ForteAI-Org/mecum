@@ -192,10 +192,12 @@ nonisolated public enum SeatEvent: Sendable, Equatable {
     /// The seat moved.
     case seatStateChanged(from: SeatState, to: SeatState, reason: SeatTransitionReason)
 
-    /// One Issue was detected. `cause` is present when the watchdog found it,
-    /// and names which of the eight invariants broke: the Issue set is coarse
-    /// (three values for eight causes) and a report needs the cause.
-    case issueDetected(SeatIssue, cause: WatchdogViolation?)
+    /// One Issue was detected. `cause` is present when the finer fact behind
+    /// the Issue was established, and nil when nothing established it: the Issue
+    /// set is coarse and a report needs the cause, but a guessed cause is worse
+    /// than none. `SeatIssueCause` carries the argument for keeping it here
+    /// rather than inside `SeatIssue`.
+    case issueDetected(SeatIssue, cause: SeatIssueCause?)
 
     /// What the fence's tap latched since the last drain, published on every
     /// heartbeat that finds something. This is the consumer of the fence's
@@ -227,9 +229,31 @@ nonisolated public enum SeatEvent: Sendable, Equatable {
     /// than about the window.
     case targetChangeRefused(windowNumber: Int, state: SeatState, issues: [SeatIssue])
 
+    /// The seat found a window of the driven application and adopted it, and
+    /// the operating target did **not** move. `target` is the Window ID the
+    /// seat is still operating, nil when it has none.
+    ///
+    /// This is the only announcement of such a window, and it is how a consumer
+    /// learns a window it never asked for exists at all: it is an Adopted
+    /// Window like any other, it is on the Virtual Display, the release loop and
+    /// the handback own it, and nothing is observed or sent on it. A consumer
+    /// that wants to work in it says so with `switchTarget(to:)`, which is the
+    /// only way the target moves onto it.
+    ///
+    /// The seat does not decide, because it cannot: the system surface that
+    /// made three previous rules fail is a 66 by 20 point `AXWindow` with
+    /// subrole `AXDialog` that no readable attribute separates from a dialog a
+    /// person operates. `window` carries the reference it was adopted at, size
+    /// included, which is what a consumer needs to tell one from the other.
+    case windowAdoptedNotTargeted(window: WindowReference, target: Int?)
+
     /// A window of a driven application was found on a physical display and
-    /// **not** brought onto the Virtual Display, with the reason. A successful
-    /// transfer arrives as `targetChanged` with reason `.detected` instead.
+    /// **not** brought onto the Virtual Display, with the reason.
+    ///
+    /// A transfer that worked arrives as `windowAdoptedNotTargeted`, never as
+    /// `targetChanged`: the window is held like any other and the operating
+    /// target stays where it is, whatever the selection nucleus makes of the
+    /// window.
     case windowTransferRefused(
         windowNumber: Int,
         processID   : Int32,

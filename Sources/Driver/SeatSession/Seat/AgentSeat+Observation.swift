@@ -5,11 +5,15 @@
 //  Created by Eliomar Alejandro Rodriguez Ferrer on 16/09/2026.
 //
 
+import ApplicationServices
+import AppKit
 import CoreGraphics
 import Dispatch
 import os
 import SeatCapture
 import SeatCore
+import SeatInput
+import WindowPlacement
 
 /// MenuContext is the interaction currently scoping what the seat may send: the
 /// parent it belongs to, the menu surface it observes, the generation that makes
@@ -38,6 +42,117 @@ nonisolated struct MenuContext {
     var receipts: [InputReceipt] = []
 }
 
+/// The explicitly attested family ScreenCaptureKit must composite for a hosted
+/// sheet. `surface` remains the host identity, while `screenRect` is the exact
+/// crop used for pixel-to-screen mapping.
+nonisolated private struct HostedCaptureRegion: Equatable {
+    let host: WindowIdentity
+    let children: [WindowIdentity]
+    let screenRect: CGRect
+    let sourceWindowFrame: CGRect
+}
+
+/// The current scoped lifetime evidence for a logical surface. A remote helper
+/// may deliberately remain in WindowServer after its AppKit panel has closed,
+/// so callers deciding a dialog outcome must use this witness before treating
+/// public WindowServer absence as a closure.
+public enum LogicalSurfacePresence: Sendable, Equatable {
+    case present
+    case withdrawn
+    case destroyed
+    case replaced
+    case unreadable
+}
+
+/// EndpointDiscovery is the two readings the seat needs to address a Command at
+/// a window it holds no record for: the descent that finds the recipient, and
+/// the window server identity that says the recipient is still the same one.
+///
+/// It is one injected value because both readings are of the live system and
+/// neither can be composed in the Unit tier: there is no panel on the screen to
+/// descend and no window server row to read. A suite substitutes the decision
+/// the readings would have reached, which is what makes the whole routing table
+/// provable without a window.
+@MainActor
+struct EndpointDiscovery {
+
+    var pointer: (
+        _ assignedProcessID  : Int32,
+        _ point              : CGPoint,
+        _ chain              : DialogEndpointResolver<AXUIElement>.SurfaceChain,
+        _ selectionGeneration: UInt64
+    ) -> Result<ResolvedInputEndpoint, InputEndpointRefusal>
+
+    /// The keyboard's reading, which takes no point: it descends from the
+    /// application's focused node and not from anywhere the pointer has been.
+    var keyboardContext: (
+        _ assignedProcessID  : Int32,
+        _ chain              : DialogEndpointResolver<AXUIElement>.SurfaceChain,
+        _ selectionGeneration: UInt64
+    ) -> Result<ResolvedInputEndpoint, InputEndpointRefusal>
+
+    var identity: (Int) -> WindowIdentity?
+
+    /// The window the internal focus is in at the boundary, which is what
+    /// retires a keyboard context whose focus moved.
+    var focusedWindowNumber: (Int32) -> Int?
+
+    /// A remote WindowServer owner may use the AppKit panel recipe only when it
+    /// identifies as the platform panel service. A distinct PID establishes a
+    /// transport relation, not a backend or an input capability.
+    var qualifiedAppKitPanelService: (WindowIdentity) -> Bool = { _ in false }
+
+    /// Window-level keys need no focused control when a complete reading proves
+    /// that the selected ordinary window has no foreign content underneath it.
+    var ordinaryKeyboardContext: (
+        Int32, DialogEndpointResolver<AXUIElement>.SurfaceChain, UInt64
+    ) -> Result<ResolvedInputEndpoint, InputEndpointRefusal> = { _, chain, _ in
+        .failure(.subtreeUnreadable(surface: chain.surface))
+    }
+
+    /// A modal proxy may expose focus only on its descendants. The complete
+    /// scoped reading must identify one keyboard window before it can be used.
+    var focusedDescendantKeyboardContext: (
+        Int32, DialogEndpointResolver<AXUIElement>.SurfaceChain, UInt64
+    ) -> Result<ResolvedInputEndpoint, InputEndpointRefusal> = { _, chain, _ in
+        .failure(.subtreeUnreadable(surface: chain.surface))
+    }
+
+    /// The readings the shipping seat takes.
+    static let shipping = EndpointDiscovery(
+        pointer: { processID, point, chain, generation in
+            DialogEndpointResolver<AXUIElement>
+                .accessibility(assignedProcessID: processID)
+                .pointerEndpoint(at: point, within: chain, selectionGeneration: generation)
+        },
+        keyboardContext: { processID, chain, generation in
+            DialogEndpointResolver<AXUIElement>
+                .accessibility(assignedProcessID: processID)
+                .keyboardContext(within: chain, selectionGeneration: generation)
+        },
+        identity: { WindowServerProbe.identity(of: $0) },
+        focusedWindowNumber: {
+            DialogEndpointResolver<AXUIElement>
+                .accessibility(assignedProcessID: $0)
+                .focusedNodeWindowNumber()
+        },
+        qualifiedAppKitPanelService: { identity in
+            NSRunningApplication(processIdentifier: pid_t(identity.processID))?.bundleIdentifier
+                == "com.apple.appkit.xpc.openAndSavePanelService"
+        },
+        ordinaryKeyboardContext: { processID, chain, generation in
+            DialogEndpointResolver<AXUIElement>
+                .accessibility(assignedProcessID: processID)
+                .ordinaryKeyboardContext(within: chain, selectionGeneration: generation)
+        },
+        focusedDescendantKeyboardContext: { processID, chain, generation in
+            DialogEndpointResolver<AXUIElement>
+                .accessibility(assignedProcessID: processID)
+                .focusedDescendantKeyboardContext(within: chain, selectionGeneration: generation)
+        }
+    )
+}
+
 // MARK: - Assignment and selection, composed rather than modelled again
 
 extension AgentSeat {
@@ -55,6 +170,10 @@ extension AgentSeat {
     /// Window ID. A second window of the same instance changes nothing; a window
     /// of a different instance is refused by the lifecycle, which is what keeps
     /// one seat to one entrusted application.
+    ///
+    /// One at a time and not one ever: the consumer gives the instance back with
+    /// `releaseAssignedApplication`, and the next window handed over here opens
+    /// the next assignment under the next generation.
     func takeOverInstance(of window: WindowReference) {
 
         guard let identity = window.identity else { return }
@@ -80,12 +199,60 @@ extension AgentSeat {
     /// a target transfer, and before an observation. Two folds that agree are
     /// what verify a surface, which is why the observation path folds again
     /// rather than trusting the fold the adoption made.
+    ///
+    /// It is also where every held window's staging is read back, for the same
+    /// reason and from the same reading: `isStaged` written once at adoption
+    /// describes the moment of the adoption, and Stage Manager stashes a window
+    /// long after it without telling anybody.
     func foldCurrentReading(at now: UInt64 = DispatchTime.now().uptimeNanoseconds) {
 
         guard assignmentKit.lifecycle.isAssigned else { return }
         let snapshot = surfaceReader.snapshot(ownedBy: session.processIDs)
-        let reading  = snapshot.inventory
+        var reading  = snapshot.inventory
         let claims   = snapshot.claims
+
+        if reading.completeness.isQualified {
+            for claim in claims.visibilities {
+                switch claim.state {
+                    case .withdrawnEstablished:
+                        logicalClosureEvidence[claim.surface] = .withdrawn
+                    case .visibleInteractive:
+                        logicalClosureEvidence[claim.surface] = nil
+                        reconciledLogicalClosures.remove(claim.surface)
+                    case .hiddenEstablished, .minimisedEstablished, .uncertain:
+                        break
+                }
+            }
+            for identity in snapshot.destroyedByWindowServer {
+                logicalClosureEvidence[identity] = .destroyed
+            }
+            for identity in snapshot.withdrawnByApplication {
+                logicalClosureEvidence[identity] = .withdrawn
+            }
+            // A retained off-screen proxy is still a WindowServer row after
+            // its logical panel closes. Re-ingesting that row would invent a
+            // new held member and an obligation on every subsequent pass.
+            let stillWithdrawn = Set(claims.visibilities.compactMap { claim in
+                claim.state == .withdrawnEstablished ? claim.surface : nil
+            }).intersection(reconciledLogicalClosures)
+            reading = SurfaceInventoryReading(
+                rows: reading.rows.filter { row in
+                    row.surface.reference.identity.map { !stillWithdrawn.contains($0) } ?? true
+                },
+                completeness: reading.completeness
+            )
+        }
+
+        // Before the fold, so the destroyed member is gone from membership for
+        // this pass instead of spending another pass of its containment budget.
+        for identity in snapshot.destroyedByWindowServer {
+            AgentSeat.observationLog.info("""
+                the window server confirmed window \(identity.windowNumber, privacy: .public) \
+                was destroyed: ending its containment wait
+                """)
+            noteSurfaceGone(identity.windowNumber, evidence: .windowServerConfirmedDestruction)
+            _ = dropDestroyedRecord(identity.windowNumber)
+        }
 
         selectionKit.ingest(
             reading,
@@ -108,8 +275,90 @@ extension AgentSeat {
                 the application withdrew window \(identity.windowNumber, privacy: .public),                 which the window server still shows: confirming its closure
                 """)
             noteSurfaceGone(identity.windowNumber, evidence: .applicationWithdrewTheWindow)
+            _ = dropDestroyedRecord(identity.windowNumber)
         }
+
+        // Stage Manager stashes a window whenever another window of the same
+        // application is raised, and it tells nobody: so staging is read here.
+        session.refreshStaging { sensing.windowGeometry(of: $0)?.frame.size }
         synchronizeSessionTargetWithSelection()
+    }
+
+    /// Reads the assigned application's own scoped surface evidence for one
+    /// logical identity without changing selection or declaring a closure.
+    ///
+    /// The reader's retained result is essential here. A hidden parent that a
+    /// child still attests is not withdrawn, and an unavailable or incomplete
+    /// pass cannot establish an absence. Only an explicit application
+    /// withdrawal or the reader's named WindowServer destruction proof returns
+    /// a closed state.
+    public func logicalSurfacePresence(of identity: WindowIdentity) -> LogicalSurfacePresence {
+        guard let assignment = assignmentKit.lifecycle.current,
+              assignment.instance == identity.process,
+              session.processIdentities.contains(identity.process)
+        else { return .unreadable }
+
+        let snapshot = surfaceReader.snapshot(ownedBy: session.processIDs)
+        guard snapshot.inventory.completeness.isQualified else { return .unreadable }
+
+        if let visibility = snapshot.claims.visibilities.first(where: { $0.surface == identity }) {
+            switch visibility.state {
+                case .withdrawnEstablished:
+                    logicalClosureEvidence[identity] = .withdrawn
+                    return .withdrawn
+                case .visibleInteractive:
+                    logicalClosureEvidence[identity] = nil
+                    reconciledLogicalClosures.remove(identity)
+                    return .present
+                case .hiddenEstablished, .minimisedEstablished:
+                    return .present
+                case .uncertain:
+                    return .unreadable
+            }
+        }
+
+        switch snapshot.retained[identity] {
+            case .destroyed?:
+                logicalClosureEvidence[identity] = .destroyed
+                return .destroyed
+            case .withdrawn?:
+                logicalClosureEvidence[identity] = .withdrawn
+                return .withdrawn
+            case .unrelated?:       return .replaced
+            case .obscuredByChild?: return .present
+            case .temporarilyUnreadable?: return .unreadable
+            case nil: break
+        }
+
+        if snapshot.inventory.rows.contains(where: { $0.surface.reference.identity == identity }) {
+            return .present
+        }
+        if snapshot.inventory.rows.contains(where: {
+            $0.surface.reference.windowNumber == identity.windowNumber
+                && $0.surface.reference.identity != identity
+        }) {
+            return .replaced
+        }
+        if let closure = logicalClosureEvidence[identity] { return closure }
+        return .unreadable
+    }
+
+    /// Reconciles a logical panel only on positive scoped closure evidence.
+    /// This releases the held record before the next focus/release pass; an
+    /// unreadable or merely hidden proxy remains untouched.
+    @discardableResult
+    public func reconcileLogicalClosure(of identity: WindowIdentity) -> LogicalSurfacePresence {
+        let presence = logicalSurfacePresence(of: identity)
+        let evidence: ClosureEvidence
+        switch presence {
+            case .withdrawn: evidence = .applicationWithdrewTheWindow
+            case .destroyed: evidence = .windowServerConfirmedDestruction
+            case .present, .replaced, .unreadable: return presence
+        }
+        reconciledLogicalClosures.insert(identity)
+        noteSurfaceGone(identity.windowNumber, evidence: evidence)
+        _ = dropDestroyedRecord(identity.windowNumber)
+        return presence
     }
 
     /// Keeps the seat's operating-window record aligned with a qualified
@@ -125,19 +374,46 @@ extension AgentSeat {
     /// would undo the consumer's own target change and strand the selection the
     /// gate reports on. A transition that is still waiting for its window to be
     /// adopted keeps its generation unaligned and is applied at a later fold.
+    ///
+    /// It yields `targetChanged` with reason `detected`, which is what this move
+    /// is to a consumer: the seat followed the application, and nothing on the
+    /// consumer's side asked for it or was expecting it. It is the only event
+    /// for this move, and the adoption that moves a target itself is the only
+    /// event for that one. Without it the preview and the consumer kept
+    /// composing Commands for a window the seat had already left.
+    ///
+    /// ## And it never carries a detected window onto the target
+    ///
+    /// A detected adoption does not take the target any more, and this path
+    /// would otherwise have taken it for the same window a moment later by
+    /// another route: a qualified recency drops the nucleus's standing choice,
+    /// and a surface that raised itself is then the most recent candidate.
+    /// Measured as a row of `AppWindowFollowTests` before this gate existed.
+    ///
+    /// So the seat follows the nucleus only onto a window it has operated
+    /// before, which is the application moving between the consumer's own
+    /// windows, or when the window it is operating stopped being one the
+    /// nucleus would select at all, which is the target being gone. A window
+    /// the seat adopted by itself and never operated is neither, and the
+    /// consumer reaches it with `switchTarget(to:)`.
     private func synchronizeSessionTargetWithSelection() {
 
         guard let selected = selectionKit.selected else { return }
-        let generation = selectionKit.selectionGeneration
         guard session.currentTargetNumber != selected.surface.windowNumber else {
-            alignedSelectionGeneration = generation
+            alignedSelectionGeneration = selectionKit.selectionGeneration
             return
         }
+        guard session.targetHistory.contains(selected.surface.windowNumber)
+                || operatingTargetStoppedQualifying()
+        else { return }
+
+        let generation = selectionKit.selectionGeneration
         guard generation != alignedSelectionGeneration,
               let record = session[selected.surface.windowNumber],
               record.window.reference.identity == selected.surface
         else { return }
 
+        let displaced = session.currentTargetNumber
         alignedSelectionGeneration = generation
         session.makeCurrent(selected.surface.windowNumber)
         if record.isStaged { stagedWindowNumber = selected.surface.windowNumber }
@@ -150,6 +426,349 @@ extension AgentSeat {
         }
         observationIssuer.invalidate(.targetChanged)
         outstandingGeometry = nil
+        eventChannel.yield(
+            .targetChanged(
+                from  : displaced,
+                to    : record.window.reference,
+                reason: .detected
+            )
+        )
+        publishCoherentState()
+    }
+
+    /// Whether the window the seat is operating stopped being one the nucleus
+    /// would select: no target at all, a target it no longer holds a record
+    /// for, or a surface that is no longer a candidate because it was hidden,
+    /// minimised or withdrawn.
+    ///
+    /// It is what lets the seat leave a target that is gone for a window it has
+    /// never operated. A target that is still a candidate is the consumer's to
+    /// move and nobody else's.
+    ///
+    /// ## A modal block is not a target that is gone
+    ///
+    /// A sheet the driven application puts up over the target removes the target
+    /// from the candidates, and this used to read that as the target being gone
+    /// and hand the session to the sheet. Measured on 18/09/2026 with Slack's
+    /// attach panel: window 45288 was the target, sheet 46128 appeared, the
+    /// session moved onto the sheet and every Command already decided on 45288
+    /// was refused mid action as "the observation is no longer current". The
+    /// window the consumer was working in had not gone anywhere, and it comes
+    /// back the moment the sheet closes. So a target that is only modally
+    /// blocked stays the target, and the sheet is reached through its host's
+    /// picture instead, which is what `observationPicture(for:)` does.
+    private func operatingTargetStoppedQualifying() -> Bool {
+
+        guard let number   = session.currentTargetNumber,
+              let identity = session[number]?.window.reference.identity
+        else { return true }
+        guard !selectionKit.status().candidates.contains(identity) else { return false }
+        return !selectionKit.isModallyBlocked(identity)
+    }
+
+    /// Which surface one observation of `selected` takes its pixels and its
+    /// geometry from, and the role that says so.
+    ///
+    /// A window-scoped modal is drawn inside the window it blocks and has no
+    /// surface of its own to capture, so the picture is the host's, whole and
+    /// unscaled, and the reference carries the sheet as the operating surface.
+    /// See `ObservedSurfaceRole.hostedSheet` for the reading this rests on.
+    ///
+    /// A modal whose host the seat holds no record for keeps its own picture:
+    /// there is nothing to aim at instead, and substituting a window the seat
+    /// cannot address would be worse than the black band.
+    ///
+    /// ## The stack, not the step above
+    ///
+    /// A dialog opened from inside a panel has a sheet for a host, and a sheet
+    /// has no surface of its own to capture either, so one step up would aim
+    /// the capture at the next proxy and deliver exactly the band this is here
+    /// to avoid. The walk climbs to the outermost window the seat holds a
+    /// record for. It terminates on the attested relations alone, which the
+    /// selection nucleus already refuses to let close a loop, and the visited
+    /// set bounds it whatever those relations say.
+    func observationPicture(
+        for selected: WindowIdentity
+    ) -> (surface: WindowIdentity, role: ObservedSurfaceRole) {
+
+        var visited: Set<WindowIdentity> = [selected]
+        var current = selected
+        var outermost: WindowIdentity?
+
+        while let host = selectionKit.attachedHost(of: current),
+              visited.insert(host).inserted,
+              session[host.windowNumber]?.window.reference.identity == host {
+            outermost = host
+            current   = host
+        }
+        guard let outermost else { return (selected, .ordinaryTarget) }
+        return (outermost, .hostedSheet(sheet: selected))
+    }
+
+    /// The window `surface` is drawn inside while the seat cannot aim a capture
+    /// at that window, nil when the surface has pixels of its own.
+    ///
+    /// It is asked of the surface the picture settled on, which is what makes
+    /// one question cover the two ways the climb ends short. A modal whose host
+    /// the seat never took stops the climb at the first step; a dialog nested in
+    /// a panel whose own host the seat never took stops it at the panel, and the
+    /// panel is a proxy exactly as the dialog is. Either way the surface still
+    /// names a host, and what ScreenCaptureKit returns for it is the host's
+    /// picture in that surface's rectangle.
+    ///
+    /// The named host comes from the modal scope the application declared, not
+    /// from the blocks in force among the members: a host that is not a member
+    /// is the case this exists for, and `attachedHost(of:)` is silent about it
+    /// by design.
+    func unresolvedModalHost(of surface: WindowIdentity) -> WindowIdentity? {
+        selectionKit.namedModalHost(of: surface)
+    }
+
+    /// Where one Command decided on a hosted sheet observation is addressed,
+    /// together with the surface record the seat holds for it.
+    ///
+    /// `nil` is "there is nothing to redirect", which is an ordinary target. A
+    /// thrown `InputEndpointRefusal` is a modal surface whose recipient could
+    /// not be attested, and it is never answered by posting to the host
+    /// instead.
+    ///
+    /// ## The two contracts are resolved from different evidence
+    ///
+    /// A mouse gesture is decided by its point, and a key is not: it goes to
+    /// the key window and its first responder, so its context is the focused
+    /// node of the topmost modal surface and never the last place the pointer
+    /// went. The keyboard branch therefore asks the discovery for no point at
+    /// all, and records the focused node's own window on the endpoint so a
+    /// focus that moves afterwards retires it.
+    ///
+    /// ## One resolution for the whole gesture
+    ///
+    /// The point that resolves it is the Command's **first**, which is the
+    /// point of the down. A drag is one Command, its press, its steps and its
+    /// release are rebased onto that one endpoint together, and there is no
+    /// second resolution anywhere that could hand the release to another
+    /// process while the button is down.
+    ///
+    /// ## The geometry rule
+    ///
+    /// The picture and its `FrameGeometryObservation` are the host's, so a
+    /// consumer's `InputLocation(pixelPoint:observedIn:)` already yields a true
+    /// screen point and a window point measured from the host's origin: a point
+    /// anywhere in that picture is admissible. The screen point is what is
+    /// kept; only the window point is measured again, from the endpoint's own
+    /// origin, which is what the routed process reads.
+    ///
+    /// The surface rectangle is read here and now, not taken from the record
+    /// the adoption wrote: a record kept from the adoption describes the frame
+    /// the sheet was at. The endpoint's own geometry is read by the discovery
+    /// between two agreeing identity readings, and it is that reading, not the
+    /// record, that becomes the reference handed to the driver. The driver
+    /// reads the same window again before its first post and compares with
+    /// `WindowCoordinateValidator.requireUnchanged`, so a surface that moved in
+    /// between refuses rather than being clicked where it used to be.
+    ///
+    /// ## A point outside the modal surface is refused
+    ///
+    /// It used to fall back to the host. The host is the window the modal is
+    /// blocking: delivering it the events aimed past its own dialog is the one
+    /// thing a modal relation means must not happen.
+    func inputEndpoint(
+        for command: InputCommand,
+        observation: SeatObservationReference
+    ) throws -> (endpoint: ResolvedInputEndpoint, surface: AdoptedWindow)? {
+
+        // Capture role says where the pixels came from. It is deliberately not
+        // the authority for input: an application-modal panel can have its own
+        // pixels while still being a logical modal surface with remote content.
+        // The observation's surface is the only fallback logical surface. A
+        // failed speculative descent over a normal window remains its existing
+        // route, while a modal relation continues to fail closed.
+        let modalSurface = attestedModalSurface(for: observation)
+        let hasAttestedModalRelation = modalSurface != nil
+        let sheet = modalSurface ?? observation.surface
+
+        let host = selectionKit.attachedHost(of: sheet)
+            ?? selectionKit.namedModalHost(of: sheet)
+            ?? sheet
+        guard let record = session[sheet.windowNumber],
+              record.window.reference.identity == sheet,
+              let instance = assignmentKit.lifecycle.current?.instance
+        else { throw InputEndpointRefusal.subtreeUnreadable(surface: sheet) }
+
+        guard let geometry = sensing.windowGeometryObservation(of: record.window.reference),
+              geometry.window.identity == sheet
+        else { throw InputEndpointRefusal.geometryUnavailable(windowNumber: sheet.windowNumber) }
+
+        let chain = DialogEndpointResolver<AXUIElement>.SurfaceChain(
+            host        : host,
+            surface     : sheet,
+            surfaceFrame: geometry.window.frame
+        )
+        var outcome: Result<ResolvedInputEndpoint, InputEndpointRefusal>
+        if let point = command.firstMouseScreenPoint {
+            guard geometry.window.frame.contains(point) else {
+                throw InputEndpointRefusal.pointOutsideSurface
+            }
+            outcome = endpoints.pointer(
+                instance.processID,
+                point,
+                chain,
+                observation.selectionGeneration
+            )
+        } else {
+            outcome = endpoints.keyboardContext(
+                instance.processID,
+                chain,
+                observation.selectionGeneration
+            )
+            if case .failure(.subtreeUnreadable) = outcome {
+                outcome = hasAttestedModalRelation
+                    ? endpoints.focusedDescendantKeyboardContext(
+                        instance.processID, chain, observation.selectionGeneration
+                    )
+                    : endpoints.ordinaryKeyboardContext(
+                        instance.processID, chain, observation.selectionGeneration
+                    )
+            }
+        }
+        switch outcome {
+            case .success(let endpoint):
+                return (endpoint, record.window)
+
+            case .failure(.noNodeAtPoint) where !hasAttestedModalRelation:
+                // A normal application window may have no auxiliary endpoint
+                // under a point; its already-held surface remains the route.
+                return nil
+
+            case .failure(let refusal):
+                AgentSeat.observationLog.info("""
+                    the input endpoint discovery refused: \
+                    \(String(describing: refusal), privacy: .public)
+                    """)
+                throw refusal
+        }
+    }
+
+    /// The one modal-relation predicate shared by endpoint discovery and focus
+    /// recovery. Capture may observe an ordinary surface, so it cannot decide
+    /// whether a successful speculative endpoint is a dialog closure.
+    func attestedModalSurface(for observation: SeatObservationReference) -> WindowIdentity? {
+        if let sheet = observation.role.attachedSheet { return sheet }
+        let surface = observation.surface
+        guard selectionKit.namedModalHost(of: surface) != nil
+                || selectionKit.isApplicationModal(surface)
+        else { return nil }
+        return surface
+    }
+
+    /// Why a resolved endpoint may no longer be used, read against the world as
+    /// it is at the boundary before the driver builds.
+    ///
+    /// The identity is asked of the window server directly and not of the
+    /// sensing reader, because the sensing reader answers from the public window
+    /// list and the recipient can be a window that list does not enumerate.
+    ///
+    /// A keyboard context is asked one thing more: where the internal focus is
+    /// now. Its own window can be alive, unchanged and still the wrong place to
+    /// type, which is what a focus that moved between the resolution and the
+    /// boundary means.
+    func endpointInvalidation(of endpoint: ResolvedInputEndpoint) -> InputEndpointInvalidation? {
+        let focused: Int?
+        if endpoint.evidence == .focusedSurfaceDescendant {
+            guard let instance = assignmentKit.lifecycle.current?.instance,
+                  let record = session[endpoint.logicalSurface.windowNumber],
+                  record.window.reference.identity == endpoint.logicalSurface,
+                  let geometry = sensing.windowGeometryObservation(of: record.window.reference),
+                  geometry.window.identity == endpoint.logicalSurface,
+                  selectionKit.namedModalHost(of: endpoint.logicalSurface) != nil
+                    || selectionKit.isApplicationModal(endpoint.logicalSurface)
+            else { return .focusedNodeChanged }
+
+            let generation = selectionKit.selected?.generation ?? .max
+            let chain = DialogEndpointResolver<AXUIElement>.SurfaceChain(
+                host: selectionKit.attachedHost(of: endpoint.logicalSurface)
+                    ?? selectionKit.namedModalHost(of: endpoint.logicalSurface)
+                    ?? endpoint.logicalSurface,
+                surface: endpoint.logicalSurface,
+                surfaceFrame: geometry.window.frame
+            )
+            // A newly exposed direct focused control can replace the subtree
+            // proof, but it must still name the same attested recipient.
+            var reading = endpoints.keyboardContext(instance.processID, chain, generation)
+            if case .failure(.subtreeUnreadable) = reading {
+                reading = endpoints.focusedDescendantKeyboardContext(
+                    instance.processID, chain, generation
+                )
+            }
+            guard case .success(let current) = reading,
+                  current.kind == .keyboardContext,
+                  current.logicalSurface == endpoint.logicalSurface,
+                  current.relation == endpoint.relation,
+                  current.identity == endpoint.identity,
+                  current.geometry.window.frame == endpoint.geometry.window.frame,
+                  current.geometry.scaleFactor == endpoint.geometry.scaleFactor,
+                  current.selectionGeneration == endpoint.selectionGeneration,
+                  current.focusedNodeWindowNumber == endpoint.identity.windowNumber
+            else { return .focusedNodeChanged }
+            focused = current.focusedNodeWindowNumber
+        } else if endpoint.evidence == .focusedWindowWithoutFocusedControl {
+            guard let instance = assignmentKit.lifecycle.current?.instance else {
+                return .focusedNodeChanged
+            }
+            let generation = selectionKit.selected?.generation ?? .max
+            let chain = DialogEndpointResolver<AXUIElement>.SurfaceChain(
+                host: endpoint.logicalSurface,
+                surface: endpoint.logicalSurface,
+                surfaceFrame: endpoint.geometry.window.frame
+            )
+
+            switch endpoints.keyboardContext(instance.processID, chain, generation) {
+            case .success(let current):
+                // A control may materialize while the command gate is settling.
+                // It replaces the absence proof only when it resolves back to
+                // this exact ordinary window. A remote descendant, a new
+                // geometry, or a different selection still retires the route.
+                guard current.kind == .keyboardContext,
+                      current.evidence == .attestedSurfaceItself,
+                      current.relation == .logicalSurface,
+                      current.logicalSurface == endpoint.logicalSurface,
+                      current.identity == endpoint.identity,
+                      current.geometry.window.frame == endpoint.geometry.window.frame,
+                      current.geometry.scaleFactor == endpoint.geometry.scaleFactor,
+                      current.selectionGeneration == endpoint.selectionGeneration,
+                      current.focusedNodeWindowNumber == endpoint.identity.windowNumber
+                else { return .focusedNodeChanged }
+                focused = current.focusedNodeWindowNumber
+
+            case .failure:
+                guard case .success(let current) = endpoints.ordinaryKeyboardContext(
+                    instance.processID, chain, generation
+                ),
+                current.kind == .keyboardContext,
+                current.evidence == .focusedWindowWithoutFocusedControl,
+                current.relation == .logicalSurface,
+                current.logicalSurface == endpoint.logicalSurface,
+                current.identity == endpoint.identity,
+                current.geometry.window.frame == endpoint.geometry.window.frame,
+                current.geometry.scaleFactor == endpoint.geometry.scaleFactor,
+                current.selectionGeneration == endpoint.selectionGeneration,
+                current.focusedNodeWindowNumber == endpoint.identity.windowNumber
+                else { return .focusedNodeChanged }
+                focused = current.focusedNodeWindowNumber
+            }
+        } else {
+            focused = endpoint.kind == .keyboardContext
+                ? assignmentKit.lifecycle.current
+                    .flatMap { endpoints.focusedWindowNumber($0.instance.processID) }
+                : nil
+        }
+        return endpoint.invalidation(
+            at                     : DispatchTime.now().uptimeNanoseconds,
+            selectionGeneration    : selectionKit.selected?.generation ?? .max,
+            logicalSurface         : selectionKit.selected?.surface,
+            currentIdentity        : endpoints.identity(endpoint.identity.windowNumber),
+            focusedNodeWindowNumber: focused
+        )
     }
 
     /// Folds one more reading through both nuclei on request.
@@ -184,6 +803,33 @@ extension AgentSeat {
     /// Records that a surface the seat held is gone, on the seat's own proof of
     /// it: an explicit release or a destruction the recovery established. An
     /// absence from a reading is not this, and does not reach here.
+    ///
+    /// The closure is confirmed to the selection nucleus whichever surface it
+    /// was: forgetting a closed window is not scoped to the observed one, and a
+    /// surface nobody observes still has to stop being a candidate and stop
+    /// spending its containment budget.
+    ///
+    /// The observation is the other half, and it is scoped to the surface the
+    /// outstanding reference was issued for. The driven application publishes
+    /// auxiliary surfaces of its own, held and released here like any window,
+    /// and Finder's 66 by 20 point dialog is one: it is destroyed under a
+    /// second, and invalidating on it ended the agent's observation of the
+    /// window it was actually working in, reported as a target change that
+    /// never happened. `outstandingGeometry` describes that same observation,
+    /// so it is cleared on this condition and on no other.
+    ///
+    /// The comparison is by Window ID, which is what a closure carries, and not
+    /// by the whole identity the reference holds. Identity is what settles
+    /// whether a reference may act, and this settles whether one stops acting:
+    /// an id the system handed out again can only end an observation that has
+    /// to be taken again anyway, and never keep a dead one current.
+    ///
+    /// A hosted sheet is where the recipient and the operated surface are two
+    /// different windows: the reference carries the host as its surface, so the
+    /// nested dialog the agent was working in could close and leave its own
+    /// observation current over a picture of the window underneath. Both are
+    /// asked here, which is what makes the parent's context a new observation
+    /// rather than the child's last one.
     func noteSurfaceGone(
         _ windowNumber: Int,
         evidence      : ClosureEvidence = .windowServerConfirmedDestruction
@@ -192,23 +838,72 @@ extension AgentSeat {
             of      : windowNumber,
             evidence: evidence
         )
+        // A dialog the seat was closing stopped being listed, which an Electron
+        // panel does before it completes: the short protection starts here.
+        focusRecovery?.noteClosureSurfaceGone(windowNumber)
+        let outstanding = observationIssuer.outstanding
+        let operated = outstanding?.role.attachedSheet ?? outstanding?.recipient
+        guard outstanding?.recipient.windowNumber == windowNumber
+                || operated?.windowNumber == windowNumber
+        else { return }
         observationIssuer.invalidate(.targetChanged)
         outstandingGeometry = nil
+    }
+
+    /// Lets go of an adopted window the window server proved destroyed, when it
+    /// is not the one the seat is operating.
+    ///
+    /// The operating target has a second proof of its own, the recovery episode
+    /// that spends its whole budget, and it keeps it. Every other record is a
+    /// claim on a window that no longer exists, and the claim outlives the
+    /// window: `windowsStillHeld` reads these records, so a destroyed dialog
+    /// left among them refuses the handback of the entire assignment, and the
+    /// focus recovery's snapshot of the adopted windows cannot come back valid
+    /// while one of them cannot be read at all. That is the cycle this closes,
+    /// from the side that has the proof.
+    /// It is not private because the coordinated release of a whole assignment
+    /// drops the operating target too: there is no recovery episode left to
+    /// keep it for when every window is on its way out.
+    @discardableResult
+    func dropDestroyedRecord(_ windowNumber: Int) -> Bool {
+
+        guard session[windowNumber] != nil else { return false }
+        let successor = session.forget(windowNumber)
+        if stagedWindowNumber == windowNumber { stagedWindowNumber = nil }
+        if let successor,
+           let record = session[successor] {
+            seatGuard = SeatGuard(
+                target       : record.window.reference,
+                displayID    : displayID,
+                displayBounds: sensing.virtualDisplayBounds
+            )
+        } else if seatGuard?.target.windowNumber == windowNumber {
+            seatGuard = nil
+        }
+        releaseLedger[windowNumber] = .vanished
+        eventChannel.yield(.windowReleased(windowNumber: windowNumber, outcome: .vanished))
+        return true
     }
 
     /// Ends the assignment and the observation half together. Input authority
     /// goes first, before any window moves, and the restitution the release left
     /// behind stays an explicit obligation rather than a success.
     func endAssignmentAndObservation(reason: ObservationInvalidation) {
+        logicalClosureEvidence.removeAll()
+        reconciledLogicalClosures.removeAll()
         guard assignmentKit.lifecycle.isAssigned else {
             observationIssuer.invalidate(reason)
             outstandingGeometry = nil
+            keyboardRecipients.removeAll()
             return
         }
         _ = assignmentKit.release()
         observationIssuer.invalidate(reason)
         outstandingGeometry = nil
         menuContext = nil
+        // The recipients belong to the assignment that resolved them. The
+        // stranded report above this has already read them.
+        keyboardRecipients.removeAll()
     }
 }
 
@@ -257,7 +952,7 @@ extension AgentSeat {
         // effector before the follower. Then fold only once more inside the
         // capture request's existing deadline. A changing or incomplete
         // inventory still reaches the ordinary fail-closed gate.
-        if selectionNeedsConfirmingReading() {
+        if selectionNeedsConfirmingReading() || selectedSurfaceNeedsOwnership() {
             await settleWindowFollowingForObservation(until: deadlineNanoseconds)
             await Task.yield()
             guard !Task.isCancelled else {
@@ -282,6 +977,12 @@ extension AgentSeat {
             }
             return .failure(.noSelectedTarget)
         }
+        let selectedPicture = observationPicture(for: selected.surface)
+        guard session[selectedPicture.surface.windowNumber]?.window.reference.identity
+                == selectedPicture.surface
+        else {
+            return .failure(.suspended([.containmentNotVerified(blocks: ["selected surface is not owned"])]))
+        }
         guard !monitorHealth.blocksInput else {
             return .failure(.suspended([.monitorSharedFault]))
         }
@@ -300,14 +1001,85 @@ extension AgentSeat {
         guard observationSource.supports(.windowStill) else {
             return .failure(.capabilityUnqualified(.windowStill))
         }
+        if let refusal = await stageStashedTarget(
+            selected.surface,
+            within: deadlineNanoseconds
+        ) {
+            return .failure(refusal)
+        }
+        // Source, represented frame and generation settle together here. A
+        // surface still naming a host has no pixels of its own to publish.
+        var chosen  = selected
+        var picture = observationPicture(for: chosen.surface)
+        if unresolvedModalHost(of: picture.surface) != nil {
+            guard DispatchTime.now().uptimeNanoseconds < deadlineNanoseconds else {
+                return .failure(.captureDeadlineExpired(attemptsSpent: 0))
+            }
+            foldCurrentReading()
+            guard let settled = selectionKit.selected else { return .failure(.noSelectedTarget) }
+            chosen  = settled
+            picture = observationPicture(for: chosen.surface)
+            if let host = unresolvedModalHost(of: picture.surface) {
+                AgentSeat.observationLog.info("""
+                    window \(picture.surface.windowNumber, privacy: .public) is drawn inside \
+                    window \(host.windowNumber, privacy: .public), which is not a window this \
+                    seat can capture: refusing rather than publishing the modal's own picture
+                    """)
+                return .failure(.hostedSurfaceUnresolved(
+                    surface  : picture.surface,
+                    namedHost: host
+                ))
+            }
+        }
+        let region: HostedCaptureRegion?
+        if case .hostedSheet = picture.role {
+            guard let resolved = hostedCaptureRegion(for: picture.surface, role: picture.role)
+            else { return .failure(.evidenceInsufficient(.absent(.geometryMissing))) }
+            region = resolved
+        } else {
+            region = nil
+        }
         return await captureAndIssue(
-            surface            : selected.surface,
-            role               : .ordinaryTarget,
+            surface            : picture.surface,
+            role               : picture.role,
+            region             : region,
             instance           : assignment.instance,
-            selectionGeneration: selected.generation,
+            selectionGeneration: chosen.generation,
             deadlineNanoseconds: deadlineNanoseconds,
             isMenu             : false
         )
+    }
+
+    /// Brings the Selected Target back on stage when the fold read it as a Stage
+    /// Manager thumbnail, and answers the refusal when it cannot.
+    ///
+    /// What a capture of a stashed window delivers is the thumbnail, whose size
+    /// is no constant: measured at 90 by 97 points and at 120 by 121. The agent
+    /// would be shown that as its own scene and would decide coordinates on it,
+    /// whatever it measured. So the stash is answered before the
+    /// capture, once, inside the request's own deadline, and never by handing
+    /// the pixels over with a note.
+    ///
+    /// A staging that fails is `captureFailed`: nothing was sampled and nothing
+    /// was delivered, which is exactly what that case says, and `stage` has
+    /// already reported `windowStashed` as the Issue. No case is added here,
+    /// because none was missing.
+    private func stageStashedTarget(
+        _ surface      : WindowIdentity,
+        within deadline: UInt64
+    ) async -> ObservationUnavailable? {
+
+        guard let record = session[surface.windowNumber], !record.isStaged else { return nil }
+        guard DispatchTime.now().uptimeNanoseconds < deadline else {
+            return .captureDeadlineExpired(attemptsSpent: 0)
+        }
+        do { _ = try await stage(record.window) }
+        catch {
+            return .captureFailed(
+                reason: "the stashed target could not be staged: \(String(describing: error))"
+            )
+        }
+        return nil
     }
 
     /// True when one more reading can establish evidence that deliberately
@@ -339,6 +1111,19 @@ extension AgentSeat {
         }
     }
 
+    /// A selected surface can already be geometrically confirmed while the
+    /// follower has not registered it as a held member. Joining that lifecycle
+    /// before issuing an observation prevents a later `recipientNotCurrent`
+    /// after the picture was handed out. Native standalone panels can be
+    /// `AXStandardWindow` with `AXModal = 0`, so this keeps the observed role
+    /// separate from the narrowly-attested recovery relation below.
+    private func selectedSurfaceNeedsOwnership() -> Bool {
+        guard let selected = selectionKit.selected,
+              case .ordinaryTarget = observationPicture(for: selected.surface).role
+        else { return false }
+        return session[selected.surface.windowNumber]?.window.reference.identity != selected.surface
+    }
+
     /// True while this generation is the interaction the seat is scoping by.
     func menuContextIsCurrent(_ generation: UInt64) -> Bool {
         guard let context = menuContext, context.generation == generation else { return false }
@@ -349,8 +1134,9 @@ extension AgentSeat {
     ///
     /// The capture budget is the tighter of the 5 s request budget and what is
     /// left of the 180 s interaction, and neither of them is renewed by this
-    /// call. On this build the source does not support the capability, so the
-    /// refusal is the answer.
+    /// call. A source that has not qualified the menu surface refuses here
+    /// before any effect, with the capability named; the shipped one has
+    /// qualified it on the AppKit family.
     func observeMenuSurface(
         generation: UInt64
     ) async -> Result<SeatObservationDelivery, ObservationUnavailable> {
@@ -381,6 +1167,7 @@ extension AgentSeat {
     private func captureAndIssue(
         surface            : WindowIdentity,
         role               : ObservedSurfaceRole,
+        region             : HostedCaptureRegion? = nil,
         instance           : ProcessIdentity,
         selectionGeneration: UInt64,
         deadlineNanoseconds: UInt64,
@@ -388,6 +1175,15 @@ extension AgentSeat {
     ) async -> Result<SeatObservationDelivery, ObservationUnavailable> {
 
         let barrier = observationIssuer.barrier
+        let captureTarget = region.map {
+            SeatCaptureTarget.attestedWindowRegion(
+                host              : $0.host,
+                children          : $0.children,
+                displayID         : displayID,
+                screenRect        : $0.screenRect,
+                sourceWindowFrame : $0.sourceWindowFrame
+            )
+        }
         var attempts = 0
         var lastFailure: ObservationUnavailable = .captureDeadlineExpired(attemptsSpent: 0)
 
@@ -407,11 +1203,23 @@ extension AgentSeat {
                         deadlineNanoseconds: deadlineNanoseconds
                     )
                 } else {
-                    frame = try await observationSource.captureWindowStill(
-                        of                 : surface,
-                        observationBarrier : barrier,
-                        deadlineNanoseconds: deadlineNanoseconds
-                    )
+                    if let region {
+                        frame = try await observationSource.captureWindowRegionStill(
+                            host                : region.host,
+                            children            : region.children,
+                            displayID           : displayID,
+                            screenRect          : region.screenRect,
+                            sourceWindowFrame   : region.sourceWindowFrame,
+                            observationBarrier  : barrier,
+                            deadlineNanoseconds : deadlineNanoseconds
+                        )
+                    } else {
+                        frame = try await observationSource.captureWindowStill(
+                            of                 : surface,
+                            observationBarrier : barrier,
+                            deadlineNanoseconds: deadlineNanoseconds
+                        )
+                    }
                 }
             } catch let unavailable as ObservationUnavailable {
                 if case .capabilityUnqualified = unavailable { return .failure(unavailable) }
@@ -436,6 +1244,18 @@ extension AgentSeat {
                 isMenu             : isMenu
             ) {
                 return .failure(refusal)
+            }
+            if let region,
+               hostedCaptureRegion(for: surface, role: role) != region {
+                return .failure(.suspended([.observationSuperseded(
+                    observed: selectionGeneration,
+                    current : selectionKit.selectionGeneration
+                )]))
+            }
+            if let region,
+               frame.geometry.screenRect != region.screenRect
+                    || frame.geometry.sourceWindowFrame != region.sourceWindowFrame {
+                return .failure(.evidenceInsufficient(.invalid(.geometryMalformed)))
             }
 
             switch sampleQualifier.qualify(frame, of: surface, atNanoseconds: arrivedAt) {
@@ -462,7 +1282,8 @@ extension AgentSeat {
                         SeatObservationDelivery(
                             frame    : qualified.frame,
                             reference: reference,
-                            geometry : qualified.geometry
+                            geometry : qualified.geometry,
+                            captureTarget: captureTarget
                         )
                     )
             }
@@ -493,8 +1314,11 @@ extension AgentSeat {
         }
         guard isMenu else {
             foldCurrentReading()
-            guard let selected = selectionKit.selected, selected.surface == surface,
-                  selected.generation == selectionGeneration
+            // The operating surface is the selected one; `surface` is where the
+            // pixels came from, which for a hosted sheet is its host.
+            guard let selected = selectionKit.selected,
+                  selected.generation == selectionGeneration,
+                  observationPicture(for: selected.surface) == (surface, role)
             else {
                 return .suspended([.observationSuperseded(
                     observed: selectionGeneration,
@@ -510,6 +1334,49 @@ extension AgentSeat {
               DispatchTime.now().uptimeNanoseconds < context.deadlineNanoseconds
         else { return .menuContextRevoked }
         return nil
+    }
+
+    /// Reads the complete, already-attested host chain immediately before and
+    /// after a hosted-sheet capture. Every member has to retain its identity
+    /// and finite geometry; a missing proxy is never replaced by a convenient
+    /// ordinary window.
+    private func hostedCaptureRegion(
+        for host: WindowIdentity,
+        role: ObservedSurfaceRole
+    ) -> HostedCaptureRegion? {
+        guard case .hostedSheet(let logical) = role,
+              let hostReading = sensing.windowGeometry(of: host.windowNumber),
+              hostReading.identity == host,
+              hostReading.frame.hasFinitePositiveArea
+        else { return nil }
+
+        var children: [WindowIdentity] = []
+        var frames = [hostReading.frame]
+        var visited: Set<WindowIdentity> = [host]
+        var current = logical
+        while current != host {
+            guard visited.insert(current).inserted,
+                  let reading = sensing.windowGeometry(of: current.windowNumber),
+                  reading.identity == current,
+                  reading.frame.hasFinitePositiveArea
+            else { return nil }
+            children.append(current)
+            frames.append(reading.frame)
+            guard let parent = selectionKit.attachedHost(of: current)
+                    ?? selectionKit.namedModalHost(of: current)
+            else { return nil }
+            current = parent
+        }
+        let crop = frames.reduce(hostReading.frame) { $0.union($1) }
+        guard crop.hasFinitePositiveArea,
+              sensing.virtualDisplayBounds.contains(crop)
+        else { return nil }
+        return HostedCaptureRegion(
+            host              : host,
+            children          : children,
+            screenRect        : crop,
+            sourceWindowFrame : hostReading.frame
+        )
     }
 }
 
@@ -555,7 +1422,9 @@ extension AgentSeat {
         guard let geometry = outstandingGeometry else {
             return .noCurrentObservation(observationIssuer.lastInvalidation ?? .never)
         }
-        guard reference.role == role else {
+        // Only the kind has to match here. The exact role is compared against
+        // the live tree below, where a sheet that closed is a role that changed.
+        guard reference.role.isTransientMenu == role.isTransientMenu else {
             if case .transientMenu(let parent) = reference.role {
                 return .ordinaryCommandDuringMenu(parent: parent)
             }
@@ -563,14 +1432,17 @@ extension AgentSeat {
         }
 
         let liveSurface     : WindowIdentity
+        let liveRole        : ObservedSurfaceRole
         let selectionMoment : UInt64
 
-        switch role {
-            case .ordinaryTarget:
+        switch reference.role {
+            case .ordinaryTarget, .hostedSheet:
                 guard let selected = selectionKit.selected else {
                     return .recipientNotCurrent(reference.recipient)
                 }
-                liveSurface     = selected.surface
+                let picture     = observationPicture(for: selected.surface)
+                liveSurface     = picture.surface
+                liveRole        = picture.role
                 selectionMoment = selected.generation
 
             case .transientMenu:
@@ -578,6 +1450,7 @@ extension AgentSeat {
                       DispatchTime.now().uptimeNanoseconds < context.deadlineNanoseconds
                 else { return .menuContextRevoked }
                 liveSurface     = context.menuIdentity
+                liveRole        = reference.role
                 selectionMoment = selectionKit.selectionGeneration
         }
 
@@ -591,7 +1464,7 @@ extension AgentSeat {
             selectionGeneration     : selectionMoment,
             geometryVersion         : geometry.version,
             observedFrame           : reading.frame,
-            role                    : role,
+            role                    : liveRole,
             frameAgeLimitNanoseconds: observationProfile.frameAgeLimitNanoseconds
         )
         return observationIssuer.admit(

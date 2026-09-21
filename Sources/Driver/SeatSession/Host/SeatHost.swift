@@ -371,7 +371,7 @@ public final class SeatHost {
         guard !violations.isEmpty else { return }
 
         for violation in violations {
-            eventChannel.yield(.issueDetected(violation.issue, cause: violation))
+            eventChannel.yield(.issueDetected(violation.issue, cause: .watchdog(violation)))
         }
 
         failClosed(violations.map(\.issue))

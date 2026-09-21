@@ -87,6 +87,10 @@ public final class AgentSeat {
 
     private static let log = Logger(subsystem: "dev.forte.AgentSeatKit", category: "Session")
 
+    /// How long `confirmPlacement` waits for two agreeing readings, as an
+    /// absolute monotonic budget rather than a number of laps.
+    private static let placementConfirmationNanoseconds: UInt64 = 2_000_000_000
+
     // MARK: The state, which used to be seventeen properties of a view controller
 
     /// Where the seat is. Reading it is always allowed; acting on it is what
@@ -109,7 +113,9 @@ public final class AgentSeat {
     private let placing  : any WindowPlacing
     private let sender   : any CommandSending
     private let fence    : CursorFence?
-    private let displayID: CGDirectDisplayID
+    /// The display whose virtual-seat bounds qualified this assignment. Capture
+    /// uses the same display to crop an attested hosted-sheet family.
+    let displayID: CGDirectDisplayID
     private let expectedMainDisplayID: CGDirectDisplayID
     private let defaultPlatform      : any InputPlatform
 
@@ -123,16 +129,47 @@ public final class AgentSeat {
     private var adoptionRestorations: [Int: WindowReleaseOutcome] = [:]
     private var adoptionInFlight = false
     var isTearingDown = false
+
+    /// True for the length of one coordinated assignment release, so nothing
+    /// inside it restages a predecessor of a window that is on its way out.
+    private var isReleasingAssignment = false
+
+    /// What the seat answered for every window it has let go, by Window ID.
+    ///
+    /// The audit's last two lines were a warning about one auxiliary surface
+    /// and then a teardown that reported no window at all: the per-window
+    /// answers were given before the teardown and the final report started from
+    /// nothing. It is kept here so the two agree, and it is the seat's whole
+    /// life rather than one assignment because that is what the teardown
+    /// report's own field says it is.
+    var releaseLedger: [Int: WindowReleaseOutcome] = [:]
+
     private var adoptionWaiters: [CheckedContinuation<Void, Never>] = []
     var stagedWindowNumber         : Int?
     private var posted             : [PostedCommand] = []
+    /// Positive scoped closure proof outlives the transition filter's one
+    /// emitted pass. It is keyed by the complete lifetime identity and is
+    /// cleared only when that same identity is positively observed again.
+    /// An unavailable fresh read never consults it.
+    var logicalClosureEvidence: [WindowIdentity: LogicalSurfacePresence] = [:]
+    var reconciledLogicalClosures: Set<WindowIdentity> = []
     private var observer           : SeatObserver?
     private var observationSoFar   : SeatObservation?
     private var recoveryBudget     = RecoveryPolicy()
     private var recoveryEpisode    = 0
     private var recoveryTask       : Task<Void, Never>?
     private var wasDegradedBeforeRecovery = false
-    private var focusRecovery: UserFocusRecovery?
+
+    /// The running recovery's plan as its last reading left it: how long the
+    /// window has been unreadable, how long the episode has lasted and how
+    /// many readings that took. It is what tells a wait that did not end the
+    /// way it expected whether the loop was starved or the budget really had
+    /// not expired, which are the two explanations a lap count cannot separate.
+    private(set) var recoveryProgress: WindowRecoveryPlan?
+    /// Installed only by `enableFocusRecovery`, on a host configured for it. It
+    /// is not private because the private facility it needs cannot be composed
+    /// in the unit tier, so a suite installs one over the fakes instead.
+    var focusRecovery: UserFocusRecovery?
     private var focusWatch: UserFocusWatch?
     private var focusRecoveryWasDegraded = false
     private var actionInFlight = false
@@ -153,6 +190,26 @@ public final class AgentSeat {
     let surfaceReader    : any AssignedSurfaceReading
     let observationSource: any ObservedSurfaceSourcing
     let sampleQualifier  : FrameSampleQualifier
+
+    /// How a gesture's recipient is discovered and revalidated. See
+    /// `EndpointDiscovery`.
+    let endpoints: EndpointDiscovery
+
+    /// The process the keys of one logical surface are actually posted to, by
+    /// the surface's Window ID.
+    ///
+    /// A key Command over a hosted panel is addressed to the panel's content,
+    /// which is another process, and that is the process the hold registry is
+    /// keyed by: what went down went down there. The seat's own accounting of
+    /// held keys covers the adopted windows' processes, and a recipient of
+    /// another process is not among them, so it is recorded here as soon as one
+    /// is resolved.
+    ///
+    /// It is deliberately not dropped when the helper goes: a key held inside a
+    /// process that then closes is exactly the case the stranded report exists
+    /// for, and forgetting the PID with the window would make the seat stop
+    /// counting it. The assignment ending is what clears it.
+    var keyboardRecipients: [Int: Int32] = [:]
 
     /// The finite positive budgets this seat observes and admits under.
     public let observationProfile: ObservationProfile
@@ -263,8 +320,10 @@ public final class AgentSeat {
         surfaceReader        : (any AssignedSurfaceReading)? = nil,
         observationSource    : any ObservedSurfaceSourcing = UnqualifiedObservationSource(),
         contentClock         : any ContentClockQualifying = UnqualifiedContentClock(),
-        observationProfile   : ObservationProfile = .initialLab
+        observationProfile   : ObservationProfile = .initialLab,
+        endpoints            : EndpointDiscovery = .shipping
     ) {
+        self.endpoints             = endpoints
         self.sensing               = sensing
         self.placing               = placing
         self.sender                = sender
@@ -364,7 +423,8 @@ public final class AgentSeat {
             phase    : phase,
             layout   : needsLayout ? KeyboardLayoutReader.current() : nil,
             owner    : turn.correlationID,
-            processID: observation.recipient.processID
+            processID: await keyboardRecipientProcessID(of: observation)
+                ?? observation.recipient.processID
         )
         return try await send(
             resolved.command,
@@ -373,6 +433,22 @@ public final class AgentSeat {
             platform        : platform,
             layoutGeneration: resolved.layoutGeneration
         )
+    }
+
+    /// The process this observation's keys were last posted to, nil when none
+    /// has been resolved for its surface yet.
+    ///
+    /// It is what a release of a held character has to be asked of: the press
+    /// was recorded under the recipient's PID, and asking the surface's own
+    /// process instead would find nothing held and resolve the character again
+    /// under whatever layout is installed now. The first Command on a surface
+    /// is a press, which holds nothing yet, so falling back to the observation's
+    /// own recipient there costs the resolution nothing.
+    private func keyboardRecipientProcessID(
+        of observation: SeatObservationReference
+    ) -> Int32? {
+        guard let sheet = observation.role.attachedSheet else { return nil }
+        return keyboardRecipients[sheet.windowNumber]
     }
 
     /// The pieces a string is delivered in, as Commands, decided and never sent.
@@ -437,15 +513,26 @@ public final class AgentSeat {
     /// forced transition to `failed`, and a second opinion about the next state
     /// is the last thing that path needs.
     private func reportStrandedKeys() {
-        let stranded = session.processIDs.reduce(0) { total, processID in
+        let stranded = recipientProcessIDs.reduce(0) { total, processID in
             total + KeyHold.shared.releaseEveryOwner(processID: processID).count
         }
         guard stranded > 0 else { return }
         eventChannel.yield(.issueDetected(.keysNotReleased, cause: nil))
     }
 
-    /// How many keys **this Turn** is still holding across every adopted
-    /// window's process.
+    /// Every process this seat's Commands can have left a key down in: the
+    /// adopted windows' own, and the remote recipients keys were posted to.
+    ///
+    /// The second set is what the adopted windows do not answer for. A panel's
+    /// content belongs to a service, its PID is in no record of the session,
+    /// and a key held there is as real as one held in the driven application.
+    private var recipientProcessIDs: Set<Int32> {
+        session.processIDs.union(keyboardRecipients.values)
+    }
+
+    /// How many keys **this Turn** is still holding across every process this
+    /// seat can have posted to, which includes the remote recipients and not
+    /// only the adopted windows' own.
     ///
     /// Scoped to the Turn and not to the process: another holder's keys on the
     /// same application are that holder's to release, and refusing this release
@@ -453,7 +540,7 @@ public final class AgentSeat {
     /// mid-gesture. The processes are a Set because two windows of one
     /// application are one process and would otherwise be counted twice.
     private func heldKeyCount(of turn: Turn) -> Int {
-        session.processIDs.reduce(0) { total, processID in
+        recipientProcessIDs.reduce(0) { total, processID in
             total + KeyHold.shared.held(
                 owner    : turn.correlationID,
                 processID: processID
@@ -510,12 +597,17 @@ public final class AgentSeat {
     ///
     /// It posts nothing and repeats nothing. In particular it never repeats the
     /// Command that opened the window it is adopting.
+    ///
+    /// `takenInPlace` is the window that was born on the Virtual Display: it is
+    /// already where an adoption would put it, so the transaction owns it where
+    /// it stands and writes no geometry at all.
     @discardableResult
     package func integrateDetectedWindow(
         _ window       : WindowReference,
         platform       : any InputPlatform = ChromiumPlatform(),
         title          : String = "",
         restoringTo    : CGRect? = nil,
+        takenInPlace   : Bool = false,
         within deadline: Duration = .seconds(2)
     ) async throws -> AdoptedWindow {
 
@@ -525,15 +617,20 @@ public final class AgentSeat {
         guard await awaitCommandBoundary(within: deadline), mayAdmit(window) else {
             throw SessionFailure.seatNotReady(state)
         }
+        // A selected successor that qualified this narrow admission supersedes
+        // the recovery of the hidden predecessor before the transaction starts.
+        // Every other detected window leaves that recovery untouched.
+        supersedeLostHostRecovery(for: window)
         beginTransfer()
         defer { endTransfer() }
 
         return try await adoptionTransaction(
             window,
-            platform   : platform,
-            title      : title,
-            reason     : .detected,
-            restoringTo: restoringTo
+            platform    : platform,
+            title       : title,
+            reason      : .detected,
+            restoringTo : restoringTo,
+            takenInPlace: takenInPlace
         )
     }
 
@@ -553,8 +650,60 @@ public final class AgentSeat {
     /// true instead of failing on the first look.
     private func mayAdmit(_ window: WindowReference) -> Bool {
         !isTearingDown && !adoptionInFlight && pendingAdoptions.isEmpty
-            && (state == .unavailable || state.acceptsCommands)
+            // A selected application-modal surface can be already inside the
+            // seat while the direct containment effector has suspended input.
+            // Its own detected-window transaction is the qualified way to
+            // establish the missing held record; admitting that one exact
+            // surface does not reopen ordinary command admission.
+            && (state == .unavailable || state.acceptsCommands
+                || selectedContainmentRecoveryMayAdmit(window)
+                || selectedModalRecoveryMayAdmit(window))
             && session[window.windowNumber] == nil
+    }
+
+    private func selectedContainmentRecoveryMayAdmit(_ window: WindowReference) -> Bool {
+        guard containmentOnlyFollowWait,
+              let identity = window.identity,
+              selectionKit.selected?.surface == identity
+        else { return false }
+        return sensing.virtualDisplayBounds.contains(window.frame)
+    }
+
+    /// A newly selected, attested surface may replace a host that disappeared
+    /// while opening it. Native `NSOpenPanel.begin` reports `AXStandardWindow`
+    /// with `AXModal = 0`, so this is deliberately about the exact selected
+    /// successor rather than an inferred application-modal role. Taking that
+    /// one surface through the normal ownership transaction is safe; admitting
+    /// a general recovery candidate would move a window while a real focus or
+    /// user-intent stop is in force.
+    private func selectedModalRecoveryMayAdmit(_ window: WindowReference) -> Bool {
+        guard state == .recovering,
+              recoveryTrigger == [.windowUnavailable],
+              let identity = window.identity,
+              selectionKit.selected?.surface == identity,
+              let member = assignmentKit.inventory.surfaces[identity.windowNumber],
+              member.identity == identity,
+              member.origin == .bornDuringAssignment,
+              !sensing.userMayBeSwitchingApplications,
+              focusRecovery?.isRestoring != true,
+              !inputPauseReasons.contains(.focusRecovery),
+              !inputPauseReasons.contains(.focusRecoveryStopped)
+        else { return false }
+        return session[window.windowNumber]?.window.reference.identity != identity
+    }
+
+    /// The selected, attested surface is the only successor allowed to
+    /// supersede a recovery of a hidden host. The recovery was about a window
+    /// that no longer exists in the application scope; leaving its task alive
+    /// after the panel has become the exact selected surface lets it later fail
+    /// the seat for that obsolete host.
+    func supersedeLostHostRecovery(for window: WindowReference) {
+        guard selectedModalRecoveryMayAdmit(window), recoveryTrigger == [.windowUnavailable] else { return }
+        recoveryTask?.cancel()
+        recoveryTask     = nil
+        recoveryEpisode &+= 1
+        recoveryTrigger  = []
+        recoveryProgress = nil
     }
 
     /// MW-03: takes a window out of native fullscreen so that it can be moved
@@ -633,6 +782,30 @@ public final class AgentSeat {
         return identifiers.prefix(Int(count)).first { CGDisplayBounds($0).contains(centre) }
     }
 
+    /// The window server's rectangle for a window that is still at the frame
+    /// it is owed, or `nil` when the server cannot be shown to be describing
+    /// that frame at all.
+    ///
+    /// The guard is the whole value of the reading: a Stage Manager thumbnail
+    /// is a fraction of the window's size, measured at 90 by 97 points and at
+    /// 120 by 121 rather than at any one number, and a window shrunk to fit the
+    /// display is owed a frame it no longer has, and in both cases the server's
+    /// rectangle is not the one a return has to land on. `crossSourceTolerance`
+    /// is the right comparison here because this is the cross-source question,
+    /// and the comparison is always against the window's own size, never a
+    /// literal thumbnail size.
+    private func serverFrameOwed(_ owed: CGRect, of window: WindowReference) -> CGRect? {
+        guard let reading = sensing.windowGeometry(of: window.windowNumber),
+              reading.hasSameIdentity(as: window),
+              VirtualWindowPlacementCheck.framesMatch(
+                  reading.frame,
+                  owed,
+                  tolerance: VirtualWindowPlacementCheck.crossSourceTolerance
+              )
+        else { return nil }
+        return reading.frame
+    }
+
     private func adoptionTransaction(
         _ inbound  : WindowReference,
         platform   : any InputPlatform,
@@ -641,16 +814,39 @@ public final class AgentSeat {
         /// What the window is owed on its return, when that is not the frame it
         /// is being adopted from: a window shrunk to fit the Virtual Display is
         /// adopted at its new size and still owes the person the old one.
-        restoringTo: CGRect? = nil
+        restoringTo: CGRect? = nil,
+        /// True for a window that is already inside the Virtual Display, which
+        /// is taken in where it stands: nothing is written, and the two
+        /// readings that confirm every adoption confirm this one too.
+        takenInPlace: Bool = false
     ) async throws -> AdoptedWindow {
 
         // The fullscreen exit happens before anything is recorded, because the
         // normal frame this whole transaction is written in terms of does not
         // exist until the window has left fullscreen.
         let prepared      = try await leaveFullScreenForAdoption(inbound)
-        let window        = prepared.window
+        var window        = prepared.window
         let wasFullScreen = prepared.wasFullScreen
         let homeDisplay   = displayContaining(window.frame)
+        let bounds        = sensing.virtualDisplayBounds
+
+        // A window larger than the display is adapted, not refused, and still
+        // owes the frame it arrived at. Beside the fullscreen exit because it
+        // is the same preparation: the frame the transaction is written in.
+        var adapted: CGRect?
+        if !takenInPlace, restoringTo == nil,
+           window.frame.width > bounds.width || window.frame.height > bounds.height {
+            try checkAdoptionMayContinue()
+            guard let shrunk = shrinkToFit(window, body: window.frame, within: bounds) else {
+                throw SessionFailure.windowDoesNotFit(
+                    windowNumber: window.windowNumber,
+                    size        : window.frame.size,
+                    bounds      : bounds.size
+                )
+            }
+            adapted = window.frame
+            window  = window.replacingFrame(shrunk)
+        }
 
         lastAdoptionFailure = nil
         adoptionInFlight = true
@@ -669,65 +865,97 @@ public final class AgentSeat {
         // Centring a thumbnail's size and then staging it is how a window ends
         // up hanging off the bottom of the display, which the confirmation then
         // refuses; clamping costs one `min` and removes the whole class.
-        let bounds = sensing.virtualDisplayBounds
-        let origin = CGPoint(
+        let origin = takenInPlace ? window.frame.origin : CGPoint(
             x: min(max(bounds.minX, bounds.midX - window.frame.width  / 2),
                    max(bounds.minX, bounds.maxX - window.frame.width)),
             y: min(max(bounds.minY, bounds.midY - window.frame.height / 2),
                    max(bounds.minY, bounds.maxY - window.frame.height))
         )
 
+        // Both sources of the same window, in the same place, before anything
+        // moves: the return is verified against the window server, so the
+        // server's own rectangle is what it has to be compared with.
+        let owed              = restoringTo ?? adapted ?? window.frame
+        let originalOnServer  = serverFrameOwed(owed, of: window)
+        // Read here, while the tree still holds the relation: a sheet has no
+        // destination of its own and the frame it was born at is not one.
+        let owesNoReturn = window.identity.map {
+            selectionKit.attachedHost(of: $0) != nil
+        } ?? false
+
         let pending = AdoptedWindow(
-            reference        : window,
-            originalFrame    : restoringTo ?? window.frame,
-            title            : title,
-            originalDisplayID: homeDisplay,
-            wasFullScreen    : wasFullScreen
+            reference          : window,
+            originalFrame      : owed,
+            title              : title,
+            originalDisplayID  : homeDisplay,
+            wasFullScreen      : wasFullScreen,
+            originalServerFrame: originalOnServer,
+            owesNoReturn       : owesNoReturn
         )
         pendingAdoptions[window.windowNumber] = pending
         adoptionRestorations[window.windowNumber] = nil
         do {
-            try placing.move(window, to: origin)
+            // A window born on the display is already at `origin`, so the one
+            // write this transaction makes is the one it does not need.
+            if !takenInPlace { try placing.move(window, to: origin) }
             try checkAdoptionMayContinue()
 
             let placed = try await confirmPlacement(of: window, expectedOrigin: origin, within: bounds)
             let record = WindowRecord(
-                window  : AdoptedWindow(
-                    reference        : placed,
-                    originalFrame    : restoringTo ?? window.frame,
-                    title            : title,
-                    originalDisplayID: homeDisplay,
-                    wasFullScreen    : wasFullScreen
-                ),
+                window  : pending.withReference(placed),
                 platform: platform,
-                // Staged or stashed is read off the size: a window Stage Manager
-                // stashed reads as a thumbnail, 90 by 97 points when measured,
-                // so the size is what separates the two.
-                isStaged: VirtualWindowPlacementCheck.framesMatch(
-                    CGRect(origin: .zero, size: placed.frame.size),
-                    CGRect(origin: .zero, size: window.frame.size)
-                )
+                // Staged or stashed is read off the size: a stashed window reads
+                // as a thumbnail of no fixed size, 90 by 97 points and 120 by
+                // 121 when measured, so the comparison is against the window's
+                // own size and never a literal. `placed` is the window
+                // server's and `window` the application's, so the wider
+                // cross-source tolerance: MarkEdit's 3 pt read as stashed.
+                isStaged: SeatWindowSession.readsAsStaged(
+                    serverSize: placed.frame.size,
+                    fullSize  : window.frame.size
+                ),
+                operationalSize: window.frame.size
             )
 
             try checkAdoptionMayContinue()
             pendingAdoptions[window.windowNumber] = nil
-            let displaced = session.currentTargetNumber
-            session.adopt(record)
+            session.hold(record)
             if record.isStaged { stagedWindowNumber = record.window.id }
             windowInventory.clearAttempts(of: record.window.id)
             refreshWindowFollowing()
-
-            seatGuard = SeatGuard(
-                target       : placed,
-                displayID    : displayID,
-                displayBounds: bounds
-            )
 
             transition(to: previous == .degraded ? .degraded : .ready, reason: .requested)
             // The instance is handed over to the assignment nucleus here, at the
             // one moment the seat knows it is driving it, and the observation of
             // whatever was current before stops being current with the target.
             takeOverInstance(of: placed)
+
+            guard adoptionTakesTheTarget(reason) else {
+                eventChannel.yield(
+                    .windowAdoptedNotTargeted(
+                        window: placed,
+                        target: session.currentTargetNumber
+                    )
+                )
+                // The reading this path used to take on its way to the nucleus
+                // is still taken: a surface seen once is not a verified member.
+                foldCurrentReading()
+                publishCoherentState()
+                return record.window
+            }
+            guard session.currentTargetNumber != record.window.id else {
+                // Already the target, so there is no move to make and none to
+                // announce. One move, one event.
+                publishCoherentState()
+                return record.window
+            }
+            let displaced = session.currentTargetNumber
+            session.makeCurrent(record.window.id)
+            seatGuard = SeatGuard(
+                target       : placed,
+                displayID    : displayID,
+                displayBounds: bounds
+            )
             observationIssuer.invalidate(.targetChanged)
             outstandingGeometry = nil
             selectExplicitly(placed)
@@ -740,6 +968,7 @@ public final class AgentSeat {
             if case .placementNotConfirmed(_, let lastFrame) = error as? DisplayFailure { observed = lastFrame }
             else { observed = sensing.windowGeometry(of: window.windowNumber)?.frame }
             let rollback = await restorePendingAdoption(pending)
+                ?? (outcome: .refused, error: nil)
             let restoration = rollback.outcome
             adoptionRestorations[window.windowNumber] = restoration
             if restoration == .returned || restoration == .vanished {
@@ -762,6 +991,32 @@ public final class AgentSeat {
         }
     }
 
+    /// Whether the window an adoption has just recorded becomes the operating
+    /// target, or is only held.
+    ///
+    /// The consumer's own `adopt` always takes it: the consumer chose that
+    /// window and the seat is to drive it. **A detection never takes it**, and
+    /// that is the rule rather than a threshold, a level, a subrole or a child
+    /// count, because three of those were tried and all three failed live.
+    ///
+    /// What defeated them is the traffic light overlay macOS draws over every
+    /// window it raises: 66 by 20 points, `AXWindow` with subrole `AXDialog`,
+    /// position settable, `AXRaise` supported, a new Window ID each time, born
+    /// with no accessibility children and measured twice gaining one within 18
+    /// ms. It became the target, invalidated the agent's outstanding
+    /// observation, retargeted its capture and was destroyed a moment later. No
+    /// readable attribute separates it from a dialog a person operates, so
+    /// nothing here can decide, and the seat stops deciding.
+    ///
+    /// The window is still adopted: held, handed to the assignment nucleus,
+    /// contained and released through the same lifecycle. The consumer hears
+    /// about it as `windowAdoptedNotTargeted` and moves the target with
+    /// `switchTarget(to:)` if it wants it. The only move the seat still makes
+    /// on its own is the takeover after the current target is proved gone.
+    private func adoptionTakesTheTarget(_ reason: SeatTargetChange) -> Bool {
+        reason != .detected
+    }
+
     /// stage brings a stashed window back to full size on the Virtual Display,
     /// without activating its application.
     ///
@@ -781,7 +1036,14 @@ public final class AgentSeat {
         do {
             staged = try await placing.stage(
                 record.window.reference,
-                expectedSize: record.window.originalFrame.size,
+                // What full size means for this window is the size the seat
+                // took it in at, never what it is owed on its return: a window
+                // shrunk to fit the Virtual Display owes the person the frame
+                // it had before, and waiting for that frame here is waiting for
+                // a size the window will not have until it goes home. It is the
+                // same reading `refreshStaging` compares against, and the two
+                // disagreeing is what left a shrunk window unstageable.
+                expectedSize: record.operationalSize,
                 within      : sensing.virtualDisplayBounds
             )
         } catch {
@@ -799,13 +1061,7 @@ public final class AgentSeat {
         }
 
         current.isStaged = true
-        current.window   = AdoptedWindow(
-            reference        : staged,
-            originalFrame    : current.window.originalFrame,
-            title            : current.window.title,
-            originalDisplayID: current.window.originalDisplayID,
-            wasFullScreen    : current.window.wasFullScreen
-        )
+        current.window   = current.window.withReference(staged)
         session[window.id] = current
         stagedWindowNumber = window.id
 
@@ -852,6 +1108,7 @@ public final class AgentSeat {
         let successor = session.forget(window.id)
         refreshWindowFollowing()
         noteSurfaceGone(window.id)
+        releaseLedger[window.id] = outcome
         eventChannel.yield(.windowReleased(windowNumber: window.id, outcome: outcome))
 
         // An explicit release is one of the two proofs that the target is gone,
@@ -866,7 +1123,11 @@ public final class AgentSeat {
     /// the current one was proved gone.
     private func takeOverAfterLostTarget(_ successor: Int?) async {
 
-        guard !isTearingDown, let successor, session[successor] != nil else { return }
+        // A coordinated release is a teardown of the assignment: every window
+        // is on its way out, so staging one of them again is work against the
+        // person for exactly as long as it takes to release it too.
+        guard !isTearingDown, !isReleasingAssignment,
+              let successor, session[successor] != nil else { return }
         do { _ = try await transferTarget(to: successor, reason: .predecessor) }
         catch {
             Self.log.error("""
@@ -874,6 +1135,495 @@ public final class AgentSeat {
                 \(String(describing: error), privacy: .public)
                 """)
         }
+    }
+
+    // MARK: The assigned application
+
+    /// releaseAssignedApplication gives the Assigned Application back: the
+    /// consumer has finished with this instance, and the seat may be entrusted
+    /// with another one.
+    ///
+    /// ## Why it has to be said rather than inferred
+    ///
+    /// `AssignmentEnd` is a closed set of three, and neither the end of a Turn
+    /// nor the last window closing is in it: a Turn is exclusive use between two
+    /// safe points, and an application between two documents legitimately has
+    /// nothing on screen. So the only thing that means "I have finished with
+    /// this application" is the consumer saying it, and this is where it is
+    /// said. Nothing here counts windows.
+    ///
+    /// After it returns the next adoption hands its own instance over:
+    /// `AssignmentLifecycle.accept` refuses only while something is assigned or
+    /// the seat is stopped, and its generation separates the two assignments so
+    /// that a record made under the first authorises nothing under the second.
+    ///
+    /// ## What it refuses
+    ///
+    /// Everything the seat still has a claim on, each before any effect:
+    /// nothing is released, invalidated or moved by a refusal. An application
+    /// cannot be given back while a Turn, a Command, an adoption, a transfer or
+    /// an unverified focus restore is in flight, while a return owed by an
+    /// earlier assignment is unfinished, or while the seat still holds windows
+    /// of the instance. That last one is what keeps the handback's own return
+    /// obligation empty: `SeatAssignmentKit.release` turns the surfaces the seat
+    /// owes a return into pending returns, and after the assignment has ended
+    /// nothing can complete them, so a successful handback is one that leaves
+    /// none. The two read the one claim, which is why neither of them counts
+    /// members: a window of the instance the seat never touched is not held, and
+    /// an application that has one open, which Finder always does, is given back
+    /// like any other.
+    ///
+    /// ## The invalidation reason
+    ///
+    /// `.lifecycleChanged` and not a reason of its own: its doc is "the
+    /// assignment ended or another instance was handed over", which is exactly
+    /// what this is, and which of the three ends it was is already
+    /// `AssignmentLifecycle.lastEnd`, answered as `.explicitRelease`.
+    public func releaseAssignedApplication() throws {
+
+        guard let assignment = assignmentKit.lifecycle.current else {
+            throw SessionFailure.applicationNotAssigned
+        }
+        if let use = assignmentUseInFlight() {
+            throw SessionFailure.assignmentStillInUse(use)
+        }
+        let outstanding = assignmentKit.restitution.outstanding
+        guard outstanding.isEmpty else {
+            throw SessionFailure.returnsStillOutstanding(windowNumbers: outstanding)
+        }
+        let held = windowsStillHeld(of: assignment.instance)
+        guard held.isEmpty else {
+            throw SessionFailure.assignedWindowsStillHeld(windowNumbers: held)
+        }
+
+        // Routed through the one coordinated end rather than duplicated: it
+        // revokes input authority, invalidates the observation and clears both.
+        endAssignmentAndObservation(reason: .lifecycleChanged)
+        publishCoherentState()
+    }
+
+    /// releaseAssignment closes **every** obligation of the current assignment
+    /// and then gives the application back, in one operation the consumer can
+    /// ask for without knowing what the seat is holding.
+    ///
+    /// ## Why it exists
+    ///
+    /// `releaseAssignedApplication` refuses over `pendingAdoptions` and over
+    /// held members, and neither of those is anything the consumer can reach:
+    /// it returns the Adopted Windows it knows about and is then refused over a
+    /// surface it was never told of. Live, one leftover window kept the whole
+    /// assignment bound and the person could not move on to a second
+    /// application. So the set is closed here, where the registers are, and the
+    /// consumer stops keeping a copy of them.
+    ///
+    /// ## What it closes, in order
+    ///
+    /// The reconciliation first, because it is the part that writes nothing:
+    /// the Window IDs the window server proved destroyed leave every register,
+    /// and a window already standing at the frame it is owed is let go without
+    /// being moved again. Then the rollbacks of failed adoptions, then the
+    /// Adopted Windows, then the members the seat moved in and never adopted.
+    /// A surface owing no return is carried by the same paths and moved by
+    /// none of them.
+    ///
+    /// ## What it will not do
+    ///
+    /// It touches only the assigned instance: a window of another assignment
+    /// is not this operation's to move, and every step filters on the attested
+    /// process lifetime rather than on a PID. It waits for a Command boundary
+    /// instead of interrupting one, so a gesture already admitted keeps its
+    /// release. It is idempotent: a second call with nothing assigned answers
+    /// `nothingAssigned` and repeats whatever is still owed. And it never
+    /// invents a destination: a window born on the Virtual Display stays a
+    /// named obligation with the identity that survives a reused Window ID.
+    ///
+    /// ## The deadline
+    ///
+    /// `within` bounds the whole operation. Running out of it, or being
+    /// cancelled, stops before the next surface and leaves the assignment
+    /// standing: it is what entrusts the return of whatever is still out
+    /// there, and ending it would leave obligations nothing can discharge.
+    /// Asking again resumes from what is left.
+    @discardableResult
+    public func releaseAssignment(
+        within deadline: Duration = .seconds(10)
+    ) async -> AssignmentReleaseReport {
+
+        // A zero or negative budget is already expired. Keep that fact as the
+        // common absolute deadline so the normal obligation accounting still
+        // names every untouched surface without converting a signed duration to
+        // an enormous unsigned wait.
+        let limit = Self.absoluteDeadline(after: deadline)
+            ?? DispatchTime.now().uptimeNanoseconds
+
+        // A Command already admitted is atomic and an adoption in flight is a
+        // window on its way in: both finish before anything is given back.
+        guard await awaitCommandBoundary(until: limit) else {
+            return AssignmentReleaseReport(
+                outcome    : .cancelled,
+                obligations: outstandingObligations()
+            )
+        }
+        while adoptionInFlight, Self.mayContinue(until: limit) {
+            await EventLoopWait.sleep(Self.boundedPause(.milliseconds(10), until: limit))
+        }
+        guard !adoptionInFlight else {
+            return AssignmentReleaseReport(
+                outcome    : .cancelled,
+                obligations: outstandingObligations()
+            )
+        }
+
+        guard let assignment = assignmentKit.lifecycle.current else {
+            return AssignmentReleaseReport(
+                outcome    : .nothingAssigned,
+                obligations: outstandingObligations()
+            )
+        }
+        if let use = assignmentUseInFlight() {
+            return AssignmentReleaseReport(outcome: .refused(use))
+        }
+
+        let instance = assignment.instance
+        isReleasingAssignment = true
+        // One cause for the whole operation: between two returns the gate would
+        // otherwise reopen on a window the next step is about to move.
+        beginTransfer()
+        defer {
+            endTransfer()
+            isReleasingAssignment = false
+        }
+
+        var windows: [Int: WindowReleaseOutcome] = [:]
+
+        // Recorded as each surface is answered for: a refused return forgets its
+        // record, so a register read at the end would say nothing is owed.
+        var owed: [Int: AssignmentObligation] = [:]
+        func note(_ reference: WindowReference, _ frame: CGRect?, _ reason: AssignmentObligationReason) {
+            guard let identity = reference.identity else { return }
+            owed[identity.windowNumber] = AssignmentObligation(
+                identity : identity,
+                owedFrame: frame,
+                reason   : reason
+            )
+        }
+
+        let reconciled = reconcileBeforeRelease(of: instance)
+        for number in reconciled {
+            if let outcome = releaseLedger[number] { windows[number] = outcome }
+        }
+
+        var stopped = false
+        for number in pendingAdoptions.keys.sorted() {
+            guard let pending = pendingAdoptions[number],
+                  pending.reference.identity?.process == instance else { continue }
+            guard Self.mayContinue(until: limit) else { stopped = true; break }
+            guard let restoration = await restorePendingAdoption(pending, until: limit) else {
+                stopped = true
+                break
+            }
+            let outcome = restoration.outcome
+            windows[number]              = outcome
+            releaseLedger[number]        = outcome
+            adoptionRestorations[number] = outcome
+            if outcome == .returned || outcome == .vanished { pendingAdoptions[number] = nil }
+            else { note(pending.reference, pending.originalFrame, .restorationOwed) }
+        }
+
+        if !stopped {
+            for window in adoptedWindows
+            where window.reference.identity?.process == instance {
+                guard Self.mayContinue(until: limit) else { stopped = true; break }
+                guard let outcome = await releaseForAssignment(window, until: limit) else {
+                    stopped = true
+                    break
+                }
+                windows[window.id] = outcome
+                if outcome != .returned, outcome != .vanished {
+                    note(window.reference, window.originalFrame, .returnRefused)
+                }
+            }
+        }
+
+        if !stopped {
+            for member in assignmentKit.inventory.heldMembers
+            where member.identity.process == instance && session[member.windowNumber] == nil {
+                guard Self.mayContinue(until: limit) else { stopped = true; break }
+                // A surface born on the Virtual Display has no place of its own
+                // in the User Seat, and this kit does not invent one.
+                guard member.origin == .preexisting else {
+                    note(member.reference, nil, .noDestinationInUserSeat)
+                    continue
+                }
+                guard let outcome = await returnHeldMember(member, until: limit) else {
+                    stopped = true
+                    break
+                }
+                windows[member.windowNumber] = outcome
+                if outcome != .returned, outcome != .vanished {
+                    note(member.reference, member.originalFrame, .returnRefused)
+                }
+            }
+        }
+
+        if stopped {
+            // The assignment stays, deliberately. Everything still held is
+            // named so the next call knows what it is resuming.
+            for window in adoptedWindows
+            where window.reference.identity?.process == instance
+                    && windows[window.id] == nil && !window.owesNoReturn {
+                note(window.reference, window.originalFrame, .notAttempted)
+            }
+            for pending in pendingAdoptions.values
+            where pending.reference.identity?.process == instance
+                    && windows[pending.id] == nil {
+                note(pending.reference, pending.originalFrame, .notAttempted)
+            }
+            for member in assignmentKit.inventory.heldMembers
+            where member.identity.process == instance && session[member.windowNumber] == nil
+                    && windows[member.windowNumber] == nil && owed[member.windowNumber] == nil {
+                let owedItsFrame = member.origin == .preexisting
+                note(member.reference, owedItsFrame ? member.originalFrame : nil, .notAttempted)
+            }
+            publishCoherentState()
+            return AssignmentReleaseReport(
+                outcome    : .cancelled,
+                windows    : windows,
+                reconciled : reconciled,
+                obligations: owed.keys.sorted().compactMap { owed[$0] }
+            )
+        }
+
+        // The same coordinated end the handback uses. What the returns did not
+        // finish becomes the restitution ledger's, which outlives the assignment.
+        endAssignmentAndObservation(reason: .lifecycleChanged)
+        publishCoherentState()
+        for obligation in outstandingObligations() { owed[obligation.windowNumber] = obligation }
+
+        return AssignmentReleaseReport(
+            outcome    : .released,
+            windows    : windows,
+            reconciled : reconciled,
+            obligations: owed.keys.sorted().compactMap { owed[$0] }
+        )
+    }
+
+    private static func mayContinue(until limit: UInt64?) -> Bool {
+        guard let limit else { return true }
+        return !Task.isCancelled && DispatchTime.now().uptimeNanoseconds < limit
+    }
+
+    private static func remainingDuration(until limit: UInt64?) -> Duration? {
+        guard let limit else { return nil }
+        let now = DispatchTime.now().uptimeNanoseconds
+        guard now < limit else { return .zero }
+        return .nanoseconds(Int64(clamping: limit - now))
+    }
+
+    private static func boundedPause(_ duration: Duration, until limit: UInt64?) -> Duration {
+        remainingDuration(until: limit).map { min(duration, $0) } ?? duration
+    }
+
+    /// Makes one non-wrapping monotonic deadline. A zero or negative Duration
+    /// cannot be converted to an unsigned nanosecond count and therefore never
+    /// becomes an accidentally unbounded release budget.
+    private static func absoluteDeadline(after duration: Duration) -> UInt64? {
+        let nanoseconds = duration.wholeNanoseconds
+        guard nanoseconds > 0, let delta = UInt64(exactly: nanoseconds) else { return nil }
+        let now = DispatchTime.now().uptimeNanoseconds
+        let (deadline, overflow) = now.addingReportingOverflow(delta)
+        return overflow ? UInt64.max : deadline
+    }
+
+    /// What the release found already settled, before it writes anything.
+    ///
+    /// Two facts and no others. A Window ID the window server was asked for by
+    /// identity and answered no row at all is closed, and it leaves every
+    /// register including the operating target's: the recovery episode that
+    /// would otherwise keep that record is for a seat that goes on working, and
+    /// this one is giving the whole application back. A window already standing
+    /// at the frame it is owed is let go on the terms of a completed return.
+    ///
+    /// Neither writes geometry. That is what the phantom leftovers cost live:
+    /// the windows had gone home and the seat was still refusing over records
+    /// that described them.
+    private func reconcileBeforeRelease(of instance: ProcessIdentity) -> [Int] {
+
+        var settled: Set<Int> = []
+
+        let snapshot = surfaceReader.snapshot(ownedBy: session.processIDs)
+        var destroyed = Set(snapshot.destroyedByWindowServer)
+        if snapshot.inventory.completeness.isQualified {
+            let currentNumbers = Set(snapshot.inventory.rows.map { $0.surface.reference.windowNumber })
+            for (identity, presence) in logicalClosureEvidence
+            where presence == .destroyed && !currentNumbers.contains(identity.windowNumber) {
+                destroyed.insert(identity)
+            }
+        }
+        for identity in destroyed where identity.process == instance {
+            let number = identity.windowNumber
+            if let current = session[number]?.window.reference.identity, current != identity { continue }
+            if let pending = pendingAdoptions[number]?.reference.identity, pending != identity { continue }
+            noteSurfaceGone(number, evidence: .windowServerConfirmedDestruction)
+            if dropDestroyedRecord(number) { settled.insert(number) }
+            if pendingAdoptions[number] != nil {
+                pendingAdoptions[number]      = nil
+                adoptionRestorations[number]  = .vanished
+                releaseLedger[number]         = .vanished
+                settled.insert(number)
+            }
+        }
+
+        // One reading is enough because nothing is moved on the strength of it,
+        // and it is the oracle the return itself is confirmed with.
+        for window in adoptedWindows
+        where window.reference.identity?.process == instance && !window.owesNoReturn {
+            guard let reading = sensing.windowGeometry(of: window.id),
+                  (try? originalFrameMatches(window, server: reading)) == true else { continue }
+            letGoOfSettledRecord(window.id)
+            settled.insert(window.id)
+        }
+        return settled.sorted()
+    }
+
+    /// Lets go of a record the reconciliation found already home, on the terms
+    /// of a return that is complete and without writing any geometry.
+    private func letGoOfSettledRecord(_ windowNumber: Int) {
+
+        _ = session.forget(windowNumber)
+        if stagedWindowNumber == windowNumber { stagedWindowNumber = nil }
+        refreshWindowFollowing()
+        noteSurfaceGone(windowNumber)
+        releaseLedger[windowNumber] = .returned
+        eventChannel.yield(.windowReleased(windowNumber: windowNumber, outcome: .returned))
+    }
+
+    /// Gives back a surface the seat moved into the display and never adopted:
+    /// a contained helper of the assigned application.
+    ///
+    /// It goes home through the seat's own placing, the way an Adopted Window
+    /// does, because the nucleus's own effector is unqualified on this build
+    /// and answers every request with a refusal. The record is built from what
+    /// the inventory attested and from nothing else: the frame the surface was
+    /// first seen at is what it is owed, the title stays empty so the
+    /// structural recovery path refuses instead of matching some other window,
+    /// and no window server rectangle is claimed for a reading that never
+    /// took one.
+    private func returnHeldMember(
+        _ member: AssignedSurface,
+        until limit: UInt64? = nil
+    ) async -> WindowReleaseOutcome? {
+
+        let window = AdoptedWindow(
+            reference        : member.reference,
+            originalFrame    : member.originalFrame,
+            originalDisplayID: member.originalDisplayID
+        )
+        beginTransfer()
+        let outcome = await returnToUserSeat(window, .returnToUserSeat, until: limit)
+        endTransfer()
+        guard Self.mayContinue(until: limit) else { return nil }
+        releaseLedger[window.id] = outcome
+        eventChannel.yield(.windowReleased(windowNumber: window.id, outcome: outcome))
+        if outcome == .returned || outcome == .vanished { noteSurfaceGone(window.id) }
+        return outcome
+    }
+
+    /// Assignment release keeps one monotonic budget. A return that crosses it
+    /// may have written geometry, but its record remains held for a later
+    /// reconciliation instead of being silently discarded as completed.
+    private func releaseForAssignment(
+        _ window: AdoptedWindow,
+        until limit: UInt64
+    ) async -> WindowReleaseOutcome? {
+        guard Self.mayContinue(until: limit) else { return nil }
+        if stagedWindowNumber == window.id { stagedWindowNumber = nil }
+        beginTransfer()
+        let outcome = await returnToUserSeat(window, .returnToUserSeat, until: limit)
+        endTransfer()
+        guard Self.mayContinue(until: limit) else { return nil }
+        let successor = session.forget(window.id)
+        refreshWindowFollowing()
+        noteSurfaceGone(window.id)
+        releaseLedger[window.id] = outcome
+        eventChannel.yield(.windowReleased(windowNumber: window.id, outcome: outcome))
+        await takeOverAfterLostTarget(successor)
+        return outcome
+    }
+
+    /// Everything the restitution ledger still has open, as obligations. It
+    /// outlives the assignment, which is why a second call can still describe
+    /// what the first one left.
+    private func outstandingObligations() -> [AssignmentObligation] {
+
+        assignmentKit.restitution.outstanding.compactMap { number in
+            guard let surface = assignmentKit.restitution.pending[number] else { return nil }
+            let isOwedItsFrame = surface.origin == .preexisting
+            return AssignmentObligation(
+                identity : surface.identity,
+                owedFrame: isOwedItsFrame ? surface.originalFrame : nil,
+                reason   : isOwedItsFrame ? .returnRefused : .noDestinationInUserSeat
+            )
+        }
+    }
+
+    /// What the seat is in the middle of that the assignment is the authority
+    /// for, nil when it is between things.
+    private func assignmentUseInFlight() -> AssignmentUse? {
+        if isTearingDown                      { return .seatTearingDown }
+        if actionInFlight                     { return .commandInFlight }
+        if turns.current != nil               { return .turnHeld }
+        if adoptionInFlight                   { return .adoptionInFlight }
+        if transfersInFlight != 0             { return .windowTransferInFlight }
+        if focusRecovery?.isRestoring == true { return .focusRecoveryRestoring }
+        return nil
+    }
+
+    /// Every window of this instance the seat still has a claim on, in Window ID
+    /// order, from the three records that each hold part of the answer: the
+    /// Adopted Windows, a failed move whose restoration the host still owes, and
+    /// the assignment members the seat owes a return.
+    ///
+    /// The held members are in it because they are exactly what a release turns
+    /// into the return obligation, and an adopted window is in it a moment
+    /// before the next reading makes it one of them. Membership is not a claim:
+    /// every window of the assigned application is a member whether the seat
+    /// touched it or not, so counting members here refused the handback of any
+    /// application that had a window open at all.
+    ///
+    /// Filtering by instance is the point: a window of another instance is not
+    /// this assignment's to answer for, and a handback must leave it exactly
+    /// where it is.
+    ///
+    /// A surface the adoption recorded as owing no return is left out of all
+    /// three. A sheet is drawn inside the window it blocks and goes wherever
+    /// that window goes: the seat owns it and holds a platform for it, and
+    /// refusing the handback over it would strand the instance on a surface
+    /// nothing public can give back. `AssignedSurfaceInventory` drops the same
+    /// claim on its own side, so the third set never carries it either.
+    private func windowsStillHeld(of instance: ProcessIdentity) -> [Int] {
+
+        var numbers = Set(
+            session.records.values
+                .filter { $0.window.reference.identity?.process == instance }
+                .map(\.window.id)
+        )
+        numbers.formUnion(
+            pendingAdoptions.values
+                .filter { $0.reference.identity?.process == instance }
+                .map(\.id)
+        )
+        numbers.formUnion(
+            assignmentKit.inventory.heldMembers
+                .filter { $0.identity.process == instance }
+                .map(\.windowNumber)
+        )
+        let owedNothing = Set(
+            (session.records.values.map(\.window) + Array(pendingAdoptions.values))
+                .filter(\.owesNoReturn)
+                .map(\.id)
+        )
+        return numbers.subtracting(owedNothing).sorted()
     }
 
     // MARK: The current target
@@ -968,13 +1718,7 @@ public final class AgentSeat {
             throw SeatInterruption(issues: [.windowUnavailable])
         }
 
-        session[windowNumber]?.window = AdoptedWindow(
-            reference        : reading,
-            originalFrame    : confirmed.window.originalFrame,
-            title            : confirmed.window.title,
-            originalDisplayID: confirmed.window.originalDisplayID,
-            wasFullScreen    : confirmed.window.wasFullScreen
-        )
+        session[windowNumber]?.window = confirmed.window.withReference(reading)
         session.makeCurrent(windowNumber)
         seatGuard = SeatGuard(
             target       : reading,
@@ -1019,11 +1763,17 @@ public final class AgentSeat {
     /// arrive: measured as a transfer that timed out against its own send.
     private func awaitCommandBoundary(within deadline: Duration) async -> Bool {
 
-        let limit = DispatchTime.now().uptimeNanoseconds + UInt64(deadline.wholeNanoseconds)
-        while actionInFlight, DispatchTime.now().uptimeNanoseconds < limit {
-            await EventLoopWait.sleep(.milliseconds(10))
+        guard let limit = Self.absoluteDeadline(after: deadline) else { return !actionInFlight }
+        return await awaitCommandBoundary(until: limit)
+    }
+
+    /// Waits under a deadline that its caller already fixed, so an earlier wait
+    /// cannot silently grant the next release phase a fresh full budget.
+    private func awaitCommandBoundary(until limit: UInt64) async -> Bool {
+        while actionInFlight, Self.mayContinue(until: limit) {
+            await EventLoopWait.sleep(Self.boundedPause(.milliseconds(10), until: limit))
         }
-        return !actionInFlight
+        return !actionInFlight && !Task.isCancelled
     }
 
     /// The stop the sender honours at command boundaries, when it has one. The
@@ -1031,6 +1781,19 @@ public final class AgentSeat {
     /// installed only for a host that restores user focus, and a window
     /// transfer has to close the gate in both configurations.
     private var commandGate: InputCommandGate? { sender.inputCommandGate }
+
+    /// Why the gate is holding Commands back right now, sorted, and empty when
+    /// it is holding none.
+    ///
+    /// Reading it grants nothing and decides nothing: admission is still the
+    /// gate's own check at the point input is posted. It exists because
+    /// `state` does not answer this question. The person's own stop closes the
+    /// gate and leaves the seat `ready`, so a consumer that shows a seat state
+    /// and reads only `state` tells the person input is going out when nothing
+    /// is, which is the one reading a status indicator must never get wrong.
+    public var inputPauseReasons: [InputPauseReason] {
+        (commandGate?.pauseCauses ?? []).map(\.reason).sorted()
+    }
 
     /// One cause for however many transfers are open.
     ///
@@ -1040,14 +1803,28 @@ public final class AgentSeat {
     /// transfer's end would otherwise reopen input while the outer one is still
     /// moving a window. Counting here and not in the gate keeps the gate's rule
     /// the simple one: closed while any cause stands.
+    ///
+    /// The transfer is also the focus episode of an operation outside a Turn:
+    /// one delivery or containment, opened once and ended once whatever it
+    /// moves. The activation of an application that raised a window usually
+    /// arrives before the seat has detected it, so that activation opens the
+    /// episode itself and this finds it already open; what the bracket owns in
+    /// every case is its end. Inside a Turn both calls stand down: the Turn's
+    /// episode is the one that counts.
     private func beginTransfer() {
         transfersInFlight += 1
-        if transfersInFlight == 1 { commandGate?.pause(.windowTransfer) }
+        if transfersInFlight == 1 {
+            commandGate?.pause(.windowTransfer)
+            focusRecovery?.beginOperation()
+        }
     }
 
     private func endTransfer() {
         transfersInFlight -= 1
-        if transfersInFlight == 0 { commandGate?.resume(.windowTransfer) }
+        if transfersInFlight == 0 {
+            commandGate?.resume(.windowTransfer)
+            focusRecovery?.endOperation()
+        }
     }
 
     // MARK: The action
@@ -1112,11 +1889,24 @@ public final class AgentSeat {
         guard !observation.role.isTransientMenu else {
             throw ObservationAdmissionRefusal.menuContextRevoked
         }
-        let window = try admitOrdinary(observation)
+        let admitted = try admitOrdinary(observation)
+        // The picture may be the host's while the Command is over a modal drawn
+        // inside it: a gesture goes to the window under the point of the down,
+        // and a key to the window the observed internal focus is in.
+        let resolvedGesture = try inputEndpoint(for: command, observation: observation)
+        let endpoint        = resolvedGesture?.endpoint
+        if let endpoint, endpoint.kind == .keyboardContext {
+            keyboardRecipients[endpoint.logicalSurface.windowNumber] = endpoint.identity.processID
+        }
+        let window          = resolvedGesture?.surface ?? admitted
+        let routed          = endpoint.map { command.rebased(onto: $0.geometry) } ?? command
+        // The current reference of the endpoint's own reading, never the record
+        // the adoption wrote with the frame the surface used to be at.
+        let recipient       = endpoint?.geometry.window ?? window.reference
 
         var traceContext = InputTraceIdentity.submitted(
-            command      : command,
-            window       : window.reference,
+            command      : routed,
+            window       : recipient,
             correlationID: turn.correlationID
         )
         traceContext.beginExecution(at: DispatchTime.now().uptimeNanoseconds)
@@ -1131,13 +1921,45 @@ public final class AgentSeat {
             throw error
         }
 
-        let resolved = platform ?? record.platform
+        // The recipe comes from what the seat established about the surface and
+        // from what this Command needs. One that qualifies none refuses.
+        let classification = SurfaceInputClassification.of(
+            observation,
+            endpoint: endpoint,
+            remoteAppKitPanelServiceQualified: endpoint.map {
+                endpoints.qualifiedAppKitPanelService($0.identity)
+            } ?? false
+        )
+        guard let resolved = platform ?? classification.platform(
+            for                : routed,
+            ofDrivenApplication: record.platform
+        ) else {
+            sender.recordCompletedTrace(
+                traceContext.completed(at: DispatchTime.now().uptimeNanoseconds)
+            )
+            throw SessionFailure.surfaceFamilyUnclassified(
+                windowNumber: observation.role.attachedSheet?.windowNumber
+                    ?? recipient.windowNumber
+            )
+        }
+        // A Command on a modal surface can close it, and closing it is what
+        // takes the focus. See `UserFocusRecovery.expectClosure`.
+        if let sheet = attestedModalSurface(for: observation)
+            ?? endpoint.flatMap({ $0.relation == .remoteContent ? $0.logicalSurface : nil }) {
+            focusRecovery?.expectClosure(
+                dialog : sheet,
+                helpers: endpoint.map { [$0.geometry.window] } ?? []
+            )
+        }
         let previous = state
         actionInFlight = true
         transition(to: .acting, reason: .requested)
         defer {
             actionInFlight = false
             restoreActionState(previous, reason: .requested)
+            // An expectation whose Command never prepared belongs to nothing.
+            // The transition itself outlives this: the steal follows the post.
+            focusRecovery?.dropClosureExpectation()
             // A window opened by the Command that has just finished is looked
             // for here, at the boundary, rather than a beat later.
             requestWindowFollow()
@@ -1154,17 +1976,40 @@ public final class AgentSeat {
                 )
                 throw refusal
             }
+            // The other half of the attestation rule: what the driver cannot
+            // read is that the surface and the selection are still these.
+            if let endpoint, let retired = endpointInvalidation(of: endpoint) {
+                restoreActionState(previous, reason: .cancelled)
+                sender.recordCompletedTrace(
+                    traceContext.completed(at: DispatchTime.now().uptimeNanoseconds)
+                )
+                throw retired
+            }
             traceContext.beginQueue(at: DispatchTime.now().uptimeNanoseconds)
             let receipt = try await sender.send(
-                command,
-                to           : record.window.reference,
+                routed,
+                to           : recipient,
                 correlationID: turn.correlationID,
                 platform     : resolved,
-                traceContext : traceContext
+                traceContext : traceContext,
+                beforeFirstPost: { [weak self] in
+                    try await MainActor.run {
+                        guard let self else { throw CancellationError() }
+                        if let refusal = self.admissionRefusal(for: observation, expecting: .ordinaryTarget) {
+                            throw refusal
+                        }
+                        if let endpoint, let retired = self.endpointInvalidation(of: endpoint) {
+                            throw retired
+                        }
+                    }
+                }
             )
             // The Command is complete, so the observation it was decided on is
             // no longer current. It is not a fault: the reason says so.
             noteObservationConsumed()
+            // The post is its own fact. A closure that went out stays out while
+            // the recovery is still running, and nothing posts it again.
+            focusRecovery?.noteClosureCommandPosted()
 
             let traced = receipt.trace == nil
                 ? receipt.replacingTrace(
@@ -1473,11 +2318,16 @@ public final class AgentSeat {
                 processID: observation.recipient.processID
             )
         }
-        let window = try admitOrdinary(observation)
+        let admitted        = try admitOrdinary(observation)
+        let rightClick      = InputCommand.click(location, button: .right)
+        let resolvedGesture = try inputEndpoint(for: rightClick, observation: observation)
+        let endpoint        = resolvedGesture?.endpoint
+        let window          = resolvedGesture?.surface ?? admitted
+        let opener          = endpoint.map { rightClick.rebased(onto: $0.geometry) } ?? rightClick
 
         var openingTrace = InputTraceIdentity.submitted(
-            command      : .click(location, button: .right),
-            window       : window.reference,
+            command      : opener,
+            window       : endpoint?.geometry.window ?? window.reference,
             correlationID: turn.correlationID
         )
         openingTrace.beginExecution(at: DispatchTime.now().uptimeNanoseconds)
@@ -1490,7 +2340,27 @@ public final class AgentSeat {
             )
             throw error
         }
-        let target   = record.window.reference
+        // The menu belongs to the process the click reaches, so the oracle that
+        // watches for it watches that one and not the window the pixels are of.
+        let target = endpoint?.geometry.window ?? record.window.reference
+        let classification = SurfaceInputClassification.of(
+            observation,
+            endpoint: endpoint,
+            remoteAppKitPanelServiceQualified: endpoint.map {
+                endpoints.qualifiedAppKitPanelService($0.identity)
+            } ?? false
+        )
+        guard let openerPlatform = classification.platform(
+            for                : opener,
+            ofDrivenApplication: record.platform
+        ) else {
+            sender.recordCompletedTrace(
+                openingTrace.completed(at: DispatchTime.now().uptimeNanoseconds)
+            )
+            throw SessionFailure.surfaceFamilyUnclassified(
+                windowNumber: observation.role.attachedSheet?.windowNumber ?? target.windowNumber
+            )
+        }
         let previous = state
         actionInFlight = true
         transition(to: .acting, reason: .requested)
@@ -1519,14 +2389,32 @@ public final class AgentSeat {
                 restoreActionState(previous, reason: .cancelled)
                 throw refusal
             }
+            if let endpoint, let retired = endpointInvalidation(of: endpoint) {
+                restoreActionState(previous, reason: .cancelled)
+                throw retired
+            }
             openingTrace.beginQueue(at: DispatchTime.now().uptimeNanoseconds)
             opening = witnessed(
                 try await sender.send(
-                    .click(location, button: .right),
+                    opener,
                     to           : target,
                     correlationID: turn.correlationID,
-                    platform     : record.platform,
-                    traceContext : openingTrace
+                    platform     : openerPlatform,
+                    traceContext : openingTrace,
+                    beforeFirstPost: { [weak self] in
+                        try await MainActor.run {
+                            guard let self else { throw CancellationError() }
+                            if let refusal = self.admissionRefusal(
+                                for: observation,
+                                expecting: .ordinaryTarget
+                            ) {
+                                throw refusal
+                            }
+                            if let endpoint, let retired = self.endpointInvalidation(of: endpoint) {
+                                throw retired
+                            }
+                        }
+                    }
                 )
             )
         } catch {
@@ -1939,11 +2827,12 @@ public final class AgentSeat {
     /// background, and nothing publishes that in a form the seat can wait on.
     func heartbeat() {
 
-        if focusRecovery?.isPaused == true { return }
-
-        // The window watch's periodic half rides this beat instead of adding
-        // a timer: it is the net behind the accessibility wake-up.
+        // The window watch's periodic half rides this beat instead of adding a
+        // timer, and the pass's own stand-down decides whether it may run.
         requestWindowFollow()
+        refreshFocusPreparation()
+
+        if focusRecovery?.isPaused == true { return }
 
         guard state == .waiting, let target = seatGuard?.target else { return }
 
@@ -1992,10 +2881,13 @@ public final class AgentSeat {
         if adoptionInFlight {
             await withCheckedContinuation { adoptionWaiters.append($0) }
         }
-        var outcomes = adoptionRestorations
+        // Seeded with what the seat has already answered for, so the final
+        // report carries the windows a coordinated release closed instead of
+        // starting from nothing and saying none was ever held.
+        var outcomes = releaseLedger.merging(adoptionRestorations) { _, restoration in restoration }
         for id in pendingAdoptions.keys.sorted() {
             guard let window = pendingAdoptions[id] else { continue }
-            outcomes[id] = await restorePendingAdoption(window).outcome
+            outcomes[id] = (await restorePendingAdoption(window))?.outcome ?? .refused
         }
         pendingAdoptions.removeAll()
         adoptionRestorations.removeAll()
@@ -2031,7 +2923,10 @@ public final class AgentSeat {
     func enableWindowFollowing() {
 
         guard windowWatch == nil, !isTearingDown else { return }
-        windowWatch = AppWindowWatch(created: { [weak self] in self?.requestWindowFollow() })
+        windowWatch = AppWindowWatch(created: { [weak self] in
+            self?.requestWindowFollow()
+            self?.refreshFocusPreparation()
+        })
         refreshWindowFollowing()
     }
 
@@ -2109,10 +3004,12 @@ public final class AgentSeat {
     ///
     /// The refusals in front are the whole coordination story. Nothing is read
     /// or moved while a Command or a contextual menu action is in flight, while
-    /// an adoption is already running, or while a focus recovery holds the
-    /// seat: the pass is skipped and the next wake-up finds the same window,
-    /// which is why a detection during a menu action never waits for the menu
-    /// action to end.
+    /// an adoption is already running, or while a focus request is in flight and
+    /// unverified: the pass is skipped and the next wake-up finds the same
+    /// window, which is why a detection during a menu action never waits for the
+    /// menu action to end. A recovery that is only waiting for the person is not
+    /// a refusal: it ends when they act, and standing the pass down on it would
+    /// leave the application's popup on their own display until then.
     ///
     /// The last two refusals are the person's. A physical click or application
     /// switch observed in the last third of a second is deliberate input, read
@@ -2126,15 +3023,26 @@ public final class AgentSeat {
     /// survive the contention is a wait long enough to hide a defect.
     func runWindowFollowPass() async {
 
-        if let standDown = windowFollowStandDown() {
+        let scope = windowFollowScope()
+        if let held = scope.heldBackReason {
             // Once per distinct reason: the pass runs on a cadence, and a line
             // per tick would bury the reason it is reporting.
-            if standDown != lastWindowFollowStandDown {
-                lastWindowFollowStandDown = standDown
+            if held != lastWindowFollowStandDown {
+                lastWindowFollowStandDown = held
+                let did = scope.isStandDown ? "stood down" : "reconciles only"
                 Self.log.info("""
-                    the window follow pass stood down: \(standDown, privacy: .public)
+                    the window follow pass \(did, privacy: .public): \(held, privacy: .public)
                     """)
             }
+            if scope.isStandDown { return }
+            // Reconciliation is what the suspension does not stop: a reading
+            // and the registers it settles, with nothing moved, adopted or
+            // given back. Without it a window that really went away stays in
+            // the registers for as long as the person keeps the focus, and the
+            // recovery that is waiting for those registers waits on the pass
+            // that is waiting for the recovery.
+            foldCurrentReading()
+            publishCoherentState()
             return
         }
         lastWindowFollowStandDown = nil
@@ -2153,10 +3061,15 @@ public final class AgentSeat {
         windowFollowPassInFlight = true
         defer { windowFollowPassInFlight = false }
         windowFollowScanCount += 1
+        let surfaces = sensing.windowSurfaces(ownedBy: Set(processes.map(\.processID)))
+        // The level is the reading's and is kept for the evidence line: it is
+        // not carried by a change, and re-reading it per candidate would cost.
+        let levels = Dictionary(
+            (surfaces ?? []).map { ($0.reference.windowNumber, $0.level) },
+            uniquingKeysWith: { first, _ in first }
+        )
         let changes = windowInventory.changes(
-            surfaces : sensing.windowSurfaces(
-                ownedBy: Set(processes.map(\.processID))
-            ),
+            surfaces : surfaces,
             processes: processes,
             adopted  : Set(session.records.keys),
             within   : sensing.virtualDisplayBounds,
@@ -2164,20 +3077,39 @@ public final class AgentSeat {
         )
 
         for change in changes {
-            guard !isTearingDown, state.acceptsCommands else { return }
+            guard !isTearingDown else { return }
             switch change {
 
                 case .appeared(let window), .reappeared(let window):
-                    await transferDetectedWindow(window)
+                    guard state.acceptsCommands || containmentOnlyFollowWait
+                            || selectedModalRecoveryMayAdmit(window)
+                    else {
+                        windowInventory.offerAgain(window.windowNumber)
+                        continue
+                    }
+                    await transferDetectedWindow(window, level: levels[window.windowNumber])
+
+                case .appearedInVirtualDisplay(let window):
+                    guard state.acceptsCommands || containmentOnlyFollowWait
+                            || selectedModalRecoveryMayAdmit(window)
+                    else {
+                        windowInventory.offerAgain(window.windowNumber)
+                        continue
+                    }
+                    await ownWindowBornInSeat(window, level: levels[window.windowNumber])
 
                 case .leftVirtualDisplay(let window):
+                    guard state.acceptsCommands || containmentOnlyFollowWait
+                    else { continue }
                     returnAdoptedWindow(window)
 
                 case .vanished(let windowNumber):
+                    guard state.acceptsCommands || containmentOnlyFollowWait
+                    else { continue }
                     // One missing reading is not a destruction, and the proof
                     // is the recovery budget, which is the target's own.
                     if session.currentTargetNumber == windowNumber {
-                        report([.windowUnavailable])
+                        report([.windowUnavailable], cause: .windowClosure(.absentFromReading))
                     }
             }
         }
@@ -2233,11 +3165,13 @@ public final class AgentSeat {
     /// with no window element behind its Window ID has nothing to write
     /// `AXPosition` on, which is the ordinary shape of an external popup, and
     /// saying so costs one reading instead of a failed move and a rollback.
-    private func transferDetectedWindow(_ candidate: WindowReference) async {
+    private func transferDetectedWindow(_ candidate: WindowReference, level: Int?) async {
 
         guard let fresh = sensing.windowGeometry(of: candidate.windowNumber),
               fresh.hasSameIdentity(as: candidate)
         else { return }
+
+        noteDetectedSurface(fresh, level: level)
 
         // MW-03's three answers, decided before an attempt is spent, because
         // two of them are permanent facts about the window and the third is
@@ -2312,7 +3246,7 @@ public final class AgentSeat {
         do {
             _ = try await integrateDetectedWindow(
                 fresh.replacingFrame(adopting),
-                platform   : defaultPlatform,
+                platform   : platformForDetected(fresh),
                 restoringTo: owed
             )
         } catch {
@@ -2322,6 +3256,108 @@ public final class AgentSeat {
                 \(String(describing: error), privacy: .public)
                 """)
         }
+    }
+
+    /// Takes ownership of a window that was born on the Virtual Display,
+    /// exactly where it stands.
+    ///
+    /// macOS opens a new window where the application's active window is, so a
+    /// window the driven application opens while the agent works in the seat is
+    /// born inside it. The reading finds it in the seat and it becomes a held
+    /// member, and without an adoption it is a held member nobody owns: no
+    /// consumer release loop iterates it, containment has no move to make for a
+    /// window already contained, and `releaseAssignedApplication` then refuses
+    /// for a window that is genuinely stranded on a display the person cannot
+    /// see. This is the owner that was missing.
+    ///
+    /// Nothing is moved and no attempt is spent. The attempt budget bounds an
+    /// application that keeps putting its own window back after a transfer, and
+    /// there is no transfer here to disagree with.
+    ///
+    /// What the window is owed on its return is the frame it was born at, which
+    /// is on the Virtual Display: a window opened during an assignment has no
+    /// place in the User Seat to go back to, and the destination is the
+    /// consumer's, exactly as `SurfaceOrigin.bornDuringAssignment` says.
+    package func ownWindowBornInSeat(_ candidate: WindowReference, level: Int?) async {
+
+        guard let fresh = sensing.windowGeometry(of: candidate.windowNumber),
+              fresh.hasSameIdentity(as: candidate)
+        else { return }
+
+        // Before the platform is chosen and before the adoption records what
+        // this surface owes: both read the tree, and only a fold reads it.
+        foldCurrentReading()
+        noteDetectedSurface(fresh, level: level)
+
+        do {
+            _ = try await integrateDetectedWindow(
+                fresh,
+                platform    : platformForDetected(fresh),
+                takenInPlace: true
+            )
+        } catch {
+            refuseTransfer(fresh, Self.refusal(for: error))
+            Self.log.error("""
+                window \(fresh.windowNumber, privacy: .public) was born on the virtual display \
+                and could not be adopted: \(String(describing: error), privacy: .public)
+                """)
+        }
+    }
+
+    /// The platform a window the follower found is driven with: the one the
+    /// seat already holds for that same application, and the configuration's
+    /// own default when this is the first window of it.
+    ///
+    /// Both detection entries ask this, because they are the same decision.
+    /// They used to disagree, one taking the host's default and the other a
+    /// hardcoded `ChromiumPlatform`, and neither had anything to do with the
+    /// application the window belongs to: a dialog opened by a native
+    /// application was prepared with the Chromium recipe, which makes that
+    /// application believe it is active and takes the focus off the person.
+    ///
+    /// ## A sheet is not AppKit by rule any more
+    ///
+    /// A surface published as a modal attached to one of the application's
+    /// windows used to be answered with `AppKitPlatform` here, whatever the
+    /// application was. The role says which window blocks which and says
+    /// nothing about the toolkit behind the one the events reach: Electron
+    /// presents web content through `beginSheet`, and Qt draws a file dialog
+    /// with the native panel or with its own widgets. So the window keeps its
+    /// own application's family, and what a Command on a modal surface is
+    /// actually posted with is decided per Command from the endpoint the
+    /// gesture attests. See `SurfaceInputClassification`.
+    func platformForDetected(_ window: WindowReference) -> any InputPlatform {
+        session.platform(drivingSameInstanceAs: window) ?? defaultPlatform
+    }
+
+    /// Says what a detected surface is before anything is adopted: the Window
+    /// ID, the size in points, the window server level, and the verdict the
+    /// selection nucleus holds for it.
+    ///
+    /// This is the whole evidence of a detection nobody asked for. An auxiliary
+    /// surface measured at 33 by 10 points took the operating target on a live
+    /// run and none of those facts was recorded anywhere, so the refusal that
+    /// followed described the observation and never the window that broke it.
+    /// One line per candidate and not per pass: a seat finding nothing stays
+    /// silent.
+    private func noteDetectedSurface(_ window: WindowReference, level: Int?) {
+
+        let verdict: String
+        if let identity = window.identity, assignmentKit.lifecycle.isAssigned {
+            let status = selectionKit.status()
+            verdict = status.candidates.contains(identity)
+                ? "a candidate"
+                : status.ineligible[identity].map { String(describing: $0) } ?? "not a member yet"
+        } else {
+            verdict = window.identity == nil ? "an unattested identity" : "no assignment yet"
+        }
+        Self.log.info("""
+            window \(window.windowNumber, privacy: .public) was detected at \
+            \(Int(window.frame.width), privacy: .public) by \
+            \(Int(window.frame.height), privacy: .public) pt, level \
+            \(level.map { "\($0)" } ?? "unread", privacy: .public), and the selection \
+            nucleus holds it as \(verdict, privacy: .public)
+            """)
     }
 
     /// Why a detected window stayed where it is, keeping the fullscreen answers
@@ -2435,6 +3471,13 @@ public final class AgentSeat {
 
     /// Everything that has to be true before an event goes out, in the order it
     /// has to be true in.
+    ///
+    /// The stash is answered before the guard of Core, because it is the finer
+    /// fact about the same reading: a window Stage Manager stashed also reads at
+    /// a geometry the record disagrees with, and answering that first would
+    /// report `geometryChanged` and send a bounded recovery after a window that
+    /// only has to be staged. Every fold reads staging back, so the flag this
+    /// reads is the window server's answer and not the adoption's memory.
     private func preflight(
         _ window    : AdoptedWindow,
         turn        : Turn,
@@ -2453,15 +3496,24 @@ public final class AgentSeat {
 
         guard !isTearingDown, state.acceptsCommands else { throw SessionFailure.seatNotReady(state) }
 
-        // Recovery follows the requested adopted window. The display baseline
-        // remains the one already recorded by the seat.
-        if let baseline = seatGuard {
+        // Recovery follows the requested adopted window, never a surface that
+        // owes no return: closing a sheet is the ordinary end of using one.
+        if let baseline = seatGuard, !record.window.owesNoReturn {
             seatGuard = SeatGuard(
                 target       : record.window.reference,
                 displayID    : baseline.displayID,
                 displayBounds: baseline.displayBounds
             )
         }
+        guard record.isStaged else {
+            // The window is a Stage Manager thumbnail. Posting into a thumbnail
+            // sends the events to coordinates the window does not occupy, so
+            // this is a refusal and not a silent stage: staging is half a
+            // second of animation and the caller has to know it happened.
+            report([.windowStashed])
+            throw SeatInterruption(issues: [.windowStashed])
+        }
+
         let verificationStart = DispatchTime.now().uptimeNanoseconds
         let issues = currentIssues(for: record)
         traceContext.recordWindowVerification(
@@ -2471,15 +3523,6 @@ public final class AgentSeat {
         guard issues.isEmpty else {
             report(issues)
             throw SeatInterruption(issues: issues)
-        }
-
-        guard record.isStaged else {
-            // The window is a Stage Manager thumbnail. Posting into a thumbnail
-            // sends the events to coordinates the window does not occupy, so
-            // this is a refusal and not a silent stage: staging is half a
-            // second of animation and the caller has to know it happened.
-            report([.windowStashed])
-            throw SeatInterruption(issues: [.windowStashed])
         }
 
         beginObservationIfNeeded(for: record, turn: turn)
@@ -2539,6 +3582,7 @@ public final class AgentSeat {
             restore: { try restorer.restore($0) },
             requestTiming: { restorer.timing },
             prepareDestination: { try restorer.prepare($0, targets: $1) },
+            renewDestination: { try restorer.renewDestination($0) },
             isFrontmost: { restorer.isFrontmost(processID: $0) },
             changed: { [weak self] report in self?.focusRecoveryChanged(report) })
         focusRecovery = recovery
@@ -2577,6 +3621,23 @@ public final class AgentSeat {
             })
     }
 
+    /// Closes the input gate because the person said stop, and leaves it
+    /// closed. It is the first act of a panic and not part of the teardown.
+    ///
+    /// Panic used to reach the gate only through the teardown, which a run in
+    /// flight is given a bounded moment to unwind before: for the whole of that
+    /// moment the gate was open and whatever the run tried next was admitted.
+    /// The cause is terminal, so nothing reopens it, and it is deliberately not
+    /// on the recovery's fast lane: this stops Commands, it activates nothing,
+    /// returns no window and takes no display down.
+    ///
+    /// The Command already admitted stays atomic. The gate stops the next one,
+    /// so a key or button that is down still gets its release.
+    public func stopAdmittingCommands() {
+        commandGate?.pause(.deliberateStop)
+        focusRecovery?.endClosureTransition()
+    }
+
     func stopFocusRecovery() {
         focusWatch?.stop()
         focusWatch = nil
@@ -2584,9 +3645,43 @@ public final class AgentSeat {
         focusRecovery = nil
     }
 
+    /// Asks the recovery to rebuild its preparation, on the two signals that
+    /// can still precede a driven application taking the front: the
+    /// accessibility notification that one of them created a window, and the
+    /// heartbeat that is the net under an application family whose
+    /// notification never comes. It adds no clock of its own.
+    ///
+    /// A seat holding no window is skipped, because no application it drives
+    /// can raise a popup it would have to answer, and the refresh is a window
+    /// server enumeration that would otherwise run once a second for nothing.
+    ///
+    /// The task is what keeps the enumeration off this actor, and the
+    /// recovery's own single-flight guard is what makes a task that arrives
+    /// while one is running cost an early return instead of a second reading.
+    private func refreshFocusPreparation() {
+
+        guard let focusRecovery, !isTearingDown, state != .failed,
+              !adoptedWindows.isEmpty else { return }
+
+        Task { @MainActor [weak focusRecovery] in await focusRecovery?.refreshPreparation() }
+    }
+
     private func focusRecoveryChanged(_ report: UserFocusRecoveryReport) {
         lastFocusRecovery = report
         eventChannel.yield(.userFocusRecoveryChanged(report))
+        // The event carries this to a consumer that subscribes, and the one the
+        // kit ships does not: it reads `lastFocusRecovery` only once, at the
+        // moment a Command has already failed. So a recovery that ran and one
+        // that never started look identical from outside, which is the whole
+        // difference between "the seat gave your focus back" and "the seat sat
+        // there". It is one line and it belongs in the same log as the
+        // transitions it explains.
+        Self.log.info("""
+            user focus recovery: \(String(describing: report.outcome), privacy: .public), \
+            destination \(report.destination.map { "window \($0.windowNumber)" } ?? "none", privacy: .public), \
+            activated by process \(report.activatingProcessID, privacy: .public), \
+            \(report.detail, privacy: .public)
+            """)
         guard state != .failed else { return }
         switch report.outcome {
         case .restoring:
@@ -2599,7 +3694,9 @@ public final class AgentSeat {
                 transition(to: actionInFlight ? .acting : (focusRecoveryWasDegraded ? .degraded : .ready),
                            reason: .recovered)
             }
-        case .waitingForUser, .cancelled:
+        // The seat stays where it is on all three: `unrecoverable` says nothing
+        // automatic asks again, not that the seat stopped.
+        case .waitingForUser, .cancelled, .unrecoverable:
             break
         }
     }
@@ -2647,6 +3744,12 @@ public final class AgentSeat {
     /// A Stage Manager thumbnail may remain physical after AXPosition, so it
     /// must be staged before containment can be confirmed. Missing transitional
     /// readings do not bypass that step when the thumbnail becomes readable.
+    ///
+    /// The budget is the two seconds twenty readings at the 100 ms cadence were
+    /// meant to be, written as the absolute deadline it always was. Twenty laps
+    /// are two seconds only while every wait costs what it asks for: on a
+    /// delayed main actor they are however long the actor took, and the limit
+    /// the failure quotes has to be the one the caller waited.
     private func confirmPlacement(
         of window     : WindowReference,
         expectedOrigin: CGPoint,
@@ -2657,7 +3760,10 @@ public final class AgentSeat {
         var last    : WindowReference?
         var didAttemptStage = false
 
-        for _ in 0..<20 {
+        let deadline = DispatchTime.now().uptimeNanoseconds
+            + Self.placementConfirmationNanoseconds
+
+        while DispatchTime.now().uptimeNanoseconds < deadline {
             try checkAdoptionMayContinue()
             await EventLoopWait.step(.milliseconds(100))
             try checkAdoptionMayContinue()
@@ -2673,8 +3779,12 @@ public final class AgentSeat {
                 throw SeatInterruption(issues: [.identityChanged])
             }
 
+            // Reads smaller than the body by more than the offset between the
+            // two sources, so it is the thumbnail and not MarkEdit's 3 pt.
+            let slack = VirtualWindowPlacementCheck.crossSourceTolerance
             if !didAttemptStage,
-               reading.frame.width < window.frame.width - 2 || reading.frame.height < window.frame.height - 2 {
+               reading.frame.width  < window.frame.width  - slack
+                || reading.frame.height < window.frame.height - slack {
                 didAttemptStage = true
                 let requested = window.replacingFrame(
                     CGRect(origin: expectedOrigin, size: window.frame.size)
@@ -2712,13 +3822,23 @@ public final class AgentSeat {
     /// Restore only the attempted PID/Window ID on unchanged physical topology.
     /// Missing geometry is unknown, never evidence that a live window vanished.
     /// Cleanup ignores task cancellation and needs two matching original frames.
-    private func restorePendingAdoption(_ window: AdoptedWindow) async -> (outcome: WindowReleaseOutcome, error: (any Error)?) {
+    private func restorePendingAdoption(
+        _ window: AdoptedWindow,
+        until limit: UInt64? = nil
+    ) async -> (outcome: WindowReleaseOutcome, error: (any Error)?)? {
         var writeError: (any Error)?
+        // The same obligation `returnToUserSeat` reads, on the path that rolls
+        // an adoption back. A sheet is owed nothing, and the frame it was born
+        // at is not a destination: writing it back there would move a surface
+        // nobody placed, independently of the host it is drawn inside.
+        guard Self.mayContinue(until: limit) else { return nil }
+        guard !window.owesNoReturn else { return (.returned, writeError) }
         guard sensing.isActive(processID: window.reference.processID) != nil else { return (.vanished, writeError) }
         guard sensing.physicalTopologyIsUnchanged else { return (.refused, writeError) }
         var previousMatched = false
         var requested = false
         for _ in 0..<10 {
+            guard Self.mayContinue(until: limit) else { return nil }
             guard sensing.isActive(processID: window.reference.processID) != nil else { return (.vanished, writeError) }
             guard sensing.physicalTopologyIsUnchanged else { return (.refused, writeError) }
             if let reading = sensing.windowGeometry(of: window.id) {
@@ -2727,7 +3847,7 @@ public final class AgentSeat {
                 do { matches = try originalFrameMatches(window, server: reading) }
                 catch { writeError = error; return (.refused, writeError) }
                 if matches, previousMatched {
-                    return (await finishReturn(of: window), writeError)
+                    return (await finishReturn(of: window, until: limit), writeError)
                 }
                 previousMatched = matches
                 if !matches, !requested {
@@ -2736,7 +3856,8 @@ public final class AgentSeat {
                     catch { writeError = error }
                 }
             } else { previousMatched = false }
-            await EventLoopWait.step(.milliseconds(100))
+            await EventLoopWait.step(Self.boundedPause(.milliseconds(100), until: limit))
+            guard Self.mayContinue(until: limit) else { return nil }
         }
         return (.refused, writeError)
     }
@@ -2774,17 +3895,30 @@ public final class AgentSeat {
     /// In that case require the same server identity, unchanged topology and
     /// the exact AX body at the original physical origin. Callers require two
     /// consecutive matches; an AX frame alone never confirms a virtual move.
+    ///
+    /// The first comparison is server against server whenever the adoption
+    /// could record the window server's own original rectangle, so the
+    /// systematic offset between the two sources never enters it. Without that
+    /// rectangle it is the old cross-source comparison and takes the wider
+    /// tolerance, which is what left MarkEdit's window on the virtual display
+    /// at 2 pt: its two sources differ by 3.
     private func originalFrameMatches(
         _ window: AdoptedWindow,
         server  : WindowReference
     ) throws -> Bool {
         guard server.hasSameIdentity(as: window.reference),
               sensing.physicalTopologyIsUnchanged else { return false }
-        if VirtualWindowPlacementCheck.framesMatch(server.frame, window.originalFrame) { return true }
+        if let recorded = window.originalServerFrame {
+            if VirtualWindowPlacementCheck.framesMatch(server.frame, recorded) { return true }
+        } else if VirtualWindowPlacementCheck.framesMatch(
+            server.frame,
+            window.originalFrame,
+            tolerance: VirtualWindowPlacementCheck.crossSourceTolerance
+        ) { return true }
         let frame = server.frame
         guard frame.width > 0, frame.height > 0,
-              frame.width < window.originalFrame.width - 2,
-              frame.height < window.originalFrame.height - 2,
+              frame.width  < window.originalFrame.width  - VirtualWindowPlacementCheck.crossSourceTolerance,
+              frame.height < window.originalFrame.height - VirtualWindowPlacementCheck.crossSourceTolerance,
               !sensing.virtualDisplayBounds.intersects(frame),
               sensing.fenceContainsPhysicalPoint(CGPoint(
                   x: window.originalFrame.midX,
@@ -2796,10 +3930,16 @@ public final class AgentSeat {
 
     private func returnToUserSeat(
         _ window: AdoptedWindow,
-        _ mode  : ReleaseMode
+        _ mode  : ReleaseMode,
+        until limit: UInt64? = nil
     ) async -> WindowReleaseOutcome {
 
+        guard Self.mayContinue(until: limit) else { return .refused }
         guard mode == .returnToUserSeat else { return .leftOnVirtualDisplay }
+
+        // A surface with no destination of its own is already wherever it
+        // belongs, so its return is complete before it starts.
+        guard !window.owesNoReturn else { return .returned }
 
         guard sensing.isActive(processID: window.reference.processID) != nil else {
             return .vanished
@@ -2813,7 +3953,7 @@ public final class AgentSeat {
            transfersFullScreenWindows {
             do {
                 try placing.requestFullScreen(false, of: window.reference)
-                _ = try await placing.awaitFullScreen(false, of: window.reference)
+                _ = try await awaitFullScreen(false, of: window.reference, until: limit)
             } catch {
                 Self.log.error("""
                     window \(window.id, privacy: .public) could not be taken out of fullscreen                     for its return: \(String(describing: error), privacy: .public)
@@ -2826,6 +3966,7 @@ public final class AgentSeat {
 
         var previousMatched = false
         for _ in 0..<3 {
+            guard Self.mayContinue(until: limit) else { return .refused }
             guard sensing.physicalTopologyIsUnchanged else { return .refused }
             do {
                 if !previousMatched { try restoreOriginalGeometry(of: window) }
@@ -2844,7 +3985,8 @@ public final class AgentSeat {
                 )
             }
 
-            await EventLoopWait.step(.milliseconds(150))
+            await EventLoopWait.step(Self.boundedPause(.milliseconds(150), until: limit))
+            guard Self.mayContinue(until: limit) else { return .refused }
 
             guard let reading = sensing.windowGeometry(of: window.id) else {
                 previousMatched = false
@@ -2854,7 +3996,7 @@ public final class AgentSeat {
 
             do {
                 let matches = try originalFrameMatches(window, server: reading)
-                if matches && previousMatched { return await finishReturn(of: window) }
+                if matches && previousMatched { return await finishReturn(of: window, until: limit) }
                 previousMatched = matches
             } catch { return .refused }
         }
@@ -2881,13 +4023,23 @@ public final class AgentSeat {
     /// window comes back at full size on its own display in both states and
     /// sits behind the person's front window, at front to back index 1 to 3 of
     /// 15. Being findable is the seat's business; being on top is the person's.
-    private func finishReturn(of window: AdoptedWindow) async -> WindowReleaseOutcome {
+    private func finishReturn(
+        of window: AdoptedWindow,
+        until limit: UInt64? = nil
+    ) async -> WindowReleaseOutcome {
 
+        guard Self.mayContinue(until: limit) else { return .refused }
         guard window.wasFullScreen, restoresFullScreenOnRelease else { return .returned }
         do {
             try placing.requestFullScreen(true, of: window.reference)
-            _ = try await placing.awaitFullScreen(true, of: window.reference)
+            _ = try await awaitFullScreen(true, of: window.reference, until: limit)
+        } catch is CancellationError {
+            // The fullscreen restitution is still owed. Calling it returned
+            // would let a bounded release clear the only record of a late
+            // transition.
+            return .refused
         } catch {
+            guard Self.mayContinue(until: limit) else { return .refused }
             // The window is home and usable; only the fullscreen state it was
             // found in is missing. That is reported, not turned into a refusal
             // of a return that did happen.
@@ -2896,6 +4048,26 @@ public final class AgentSeat {
                 """)
         }
         return .returned
+    }
+
+    /// Uses the release's one absolute deadline around a cancellable fullscreen
+    /// transition. The placement collaborator owns the native wait; checking
+    /// both sides prevents a completed late transition from letting release
+    /// consume a fresh budget or clear its still-held obligation.
+    private func awaitFullScreen(
+        _ wanted: Bool,
+        of window: WindowReference,
+        until limit: UInt64?
+    ) async throws -> WindowReference {
+        guard Self.mayContinue(until: limit) else { throw CancellationError() }
+        let settled: WindowReference
+        if let remaining = Self.remainingDuration(until: limit) {
+            settled = try await placing.awaitFullScreen(wanted, of: window, within: remaining)
+        } else {
+            settled = try await placing.awaitFullScreen(wanted, of: window)
+        }
+        guard Self.mayContinue(until: limit) else { throw CancellationError() }
+        return settled
     }
 
     // MARK: Issues, transitions, recovery
@@ -2914,7 +4086,13 @@ public final class AgentSeat {
     /// together with a critical one must never soften it, and the precedence
     /// that decides which one wins lives in `SeatStateMachine` rather than at
     /// every call site.
-    public func report(_ issues: [SeatIssue]) {
+    ///
+    /// `cause` is the finer fact behind the batch when one was established, and
+    /// it is published with each Issue the cause belongs to and with no other:
+    /// a batch carrying a window closure and a display change must not attach
+    /// the closure to the display. Nothing decides on it, it is what a report
+    /// says.
+    public func report(_ issues: [SeatIssue], cause: SeatIssueCause? = nil) {
 
         guard !issues.isEmpty, state != .failed else { return }
 
@@ -2924,7 +4102,9 @@ public final class AgentSeat {
         observationIssuer.invalidate(.suspensionRaised)
         outstandingGeometry = nil
 
-        for issue in issues { eventChannel.yield(.issueDetected(issue, cause: nil)) }
+        for issue in issues {
+            eventChannel.yield(.issueDetected(issue, cause: cause?.issue == issue ? cause : nil))
+        }
         turns.recordIssue()
 
         let next = SeatStateMachine.next(from: state, issues: issues)
@@ -2969,20 +4149,104 @@ public final class AgentSeat {
             """)
     }
 
-    /// Why a follow pass is not running now, nil when it is. Naming them is what
-    /// turns "the window was never brought in" into a fact with a cause.
-    private func windowFollowStandDown() -> String? {
-        if windowWatch == nil                        { return "there is no window watch" }
-        if isTearingDown                             { return "the seat is tearing down" }
-        if !state.acceptsCommands                    { return "the seat is \(state.rawValue)" }
-        if actionInFlight                            { return "a Command is in flight" }
-        if adoptionInFlight                          { return "an adoption is in flight" }
-        if transfersInFlight != 0                    { return "a transfer is in flight" }
-        if windowFollowPassInFlight                  { return "a pass is already running" }
-        if focusRecovery?.isPaused == true           { return "focus recovery is restoring" }
-        if sensing.userMayBeSwitchingApplications    { return "the person's own intent is recent" }
-        if session.processIdentities.isEmpty         { return "the seat holds no process" }
-        return nil
+    /// How much of a follow pass may run now.
+    ///
+    /// The third case is the whole reason this is not a boolean: input
+    /// suspended for focus stops the seat acting on the world and does not stop
+    /// it reading the world. Naming each reason is what turns "the window was
+    /// never brought in" into a fact with a cause.
+    private enum WindowFollowScope {
+
+        /// Read and move: the ordinary pass.
+        case full
+
+        /// Read and settle the registers, move nothing. It is what a seat
+        /// suspended for the person's focus may still do.
+        case reconciliationOnly(reason: String)
+
+        case standDown(reason: String)
+
+        var isStandDown: Bool {
+            if case .standDown = self { return true }
+            return false
+        }
+
+        /// The reason the full pass is not running, nil when it is.
+        var heldBackReason: String? {
+            switch self {
+                case .full:                            nil
+                case .reconciliationOnly(let reason):   reason
+                case .standDown(let reason):           reason
+            }
+        }
+    }
+
+    private func windowFollowScope() -> WindowFollowScope {
+        if windowWatch == nil                     { return .standDown(reason: "there is no window watch") }
+        if isTearingDown                          { return .standDown(reason: "the seat is tearing down") }
+        if actionInFlight                         { return .standDown(reason: "a Command is in flight") }
+        if adoptionInFlight                       { return .standDown(reason: "an adoption is in flight") }
+        if transfersInFlight != 0                 { return .standDown(reason: "a transfer is in flight") }
+        if windowFollowPassInFlight               { return .standDown(reason: "a pass is already running") }
+        if sensing.userMayBeSwitchingApplications { return .standDown(reason: "the person's own intent is recent") }
+        if session.processIdentities.isEmpty      { return .standDown(reason: "the seat holds no process") }
+
+        // The two focus suspensions, and only those two: every other state that
+        // refuses Commands refuses the reading with it, as it did before.
+        if focusRecovery?.isRestoring == true {
+            return .reconciliationOnly(reason: "a focus request is in flight and unverified")
+        }
+        if state == .waiting, !containmentOnlyFollowWait {
+            return .reconciliationOnly(reason: "the seat is waiting for the person")
+        }
+        if !state.acceptsCommands,
+           !containmentOnlyFollowWait,
+           !recoverySuccessorFollowMayProceed {
+            return .standDown(reason: "the seat is \(state.rawValue)")
+        }
+        return .full
+    }
+
+    /// A newly discovered modal can itself be the one uncontained surface that
+    /// suspended the seat. Its existing detected-window transaction is the
+    /// qualified way to settle that condition, so this narrowly permits that
+    /// transaction while every focus, deliberate-stop and user-intent wait
+    /// remains reconciliation-only or stopped.
+    var containmentOnlyFollowWait: Bool {
+        guard state == .waiting else { return false }
+        // `operability()` without an offered observation necessarily reports
+        // `.observationMissing`. That fact describes the request we are about
+        // to make and must not turn an otherwise containment-only wait into a
+        // permanent stand-down.
+        let causes = selectionKit.operability().causes.filter { $0 != .observationMissing }
+        guard !causes.isEmpty else { return false }
+        return causes.allSatisfy {
+            if case .containmentNotVerified = $0 { return true }
+            return false
+        }
+    }
+
+    /// The second window-server reading of a newly selected successor is part
+    /// of recovering the host that disappeared while opening it. The follower
+    /// remains the owner: it still requires `AppWindowInventory`'s two
+    /// sightings and therefore cannot adopt a window that happened to be in
+    /// the baseline before the assignment. This only permits that reading and
+    /// its exact selected candidate while the old target's recovery is the
+    /// single `windowUnavailable` episode.
+    private var recoverySuccessorFollowMayProceed: Bool {
+        guard state == .recovering,
+              recoveryTrigger == [.windowUnavailable],
+              let selected = selectionKit.selected,
+              let member = assignmentKit.inventory.surfaces[selected.surface.windowNumber],
+              member.identity == selected.surface,
+              member.origin == .bornDuringAssignment,
+              session[selected.surface.windowNumber]?.window.reference.identity != selected.surface,
+              !sensing.userMayBeSwitchingApplications,
+              focusRecovery?.isRestoring != true,
+              !inputPauseReasons.contains(.focusRecovery),
+              !inputPauseReasons.contains(.focusRecoveryStopped)
+        else { return false }
+        return true
     }
 
     /// The recovery episode: wait for whatever is in flight, then read the
@@ -2999,11 +4263,27 @@ public final class AgentSeat {
         // and nobody established what it did. Recovering would put the seat
         // back to work on a state nobody knows, and the next Command could be
         // the same action twice.
+        //
+        // A geometry Issue after a verified closure is the one case where
+        // something was established: see `closureGeometryEffect`.
+        var confirmation = worstConfirmation
+        if issues == [.geometryChanged],
+           case .hostMoved(let before, let after)? =
+               closureGeometryEffect(of: seatGuard.target) {
+            confirmation = .observed
+            Self.log.info("""
+                window \(seatGuard.target.windowNumber, privacy: .public) moved from \
+                \(Int(before.minX), privacy: .public),\(Int(before.minY), privacy: .public) to \
+                \(Int(after.minX), privacy: .public),\(Int(after.minY), privacy: .public) pt \
+                across a verified closure, at the same size and on the same display: the \
+                movement is the known effect, and the dialog is not driven again
+                """)
+        }
         do {
             try recoveryBudget.begin(
                 issues        : issues,
                 inputWasPosted: !posted.isEmpty,
-                confirmation  : worstConfirmation
+                confirmation  : confirmation
             )
         } catch let interruption as SeatInterruption {
             transition(to: .failed, reason: .issues(interruption.issues))
@@ -3023,6 +4303,7 @@ public final class AgentSeat {
 
         recoveryTask = Task { @MainActor [weak self] in
             await self?.runRecovery(episode: episode, record: record, seatGuard: seatGuard)
+            guard self?.recoveryEpisode == episode else { return }
             self?.recoveryTask = nil
         }
     }
@@ -3038,22 +4319,26 @@ public final class AgentSeat {
         // longest a Command can take, the Command counts as `unknown` and the
         // budget above turns that into a failed seat.
         await waitForCommandInFlight()
+        guard !Task.isCancelled, episode == recoveryEpisode else { return }
 
         var plan = WindowRecoveryPlan(
             target        : seatGuard.target,
             expectedOrigin: seatGuard.target.frame.origin,
             displayBounds : sensing.virtualDisplayBounds
         )
+        recoveryProgress = plan
 
-        while !Task.isCancelled, state == .recovering {
+        while !Task.isCancelled, episode == recoveryEpisode, state == .recovering {
 
             await EventLoopWait.sleep(plan.cadence)
-            guard !Task.isCancelled, state == .recovering else { return }
+            guard !Task.isCancelled, episode == recoveryEpisode, state == .recovering else { return }
 
             let step = plan.step(
                 server        : sensing.windowGeometry(of: record.window.id),
-                targetIsActive: sensing.isActive(processID: record.window.reference.processID)
+                targetIsActive: sensing.isActive(processID: record.window.reference.processID),
+                at            : DispatchTime.now().uptimeNanoseconds
             )
+            recoveryProgress = plan
 
             eventChannel.yield(.recoveryProgressed(episode: episode, step: step))
 
@@ -3075,6 +4360,30 @@ public final class AgentSeat {
                 case .relocate(let origin):
                     try? placing.move(record.window.reference, to: origin)
 
+                case .resize(let size):
+                    // The adaptation, from inside the episode that verifies it:
+                    // the readings that follow say whether the write took.
+                    do { try placing.resize(record.window.reference, to: size) }
+                    catch {
+                        Self.log.info("""
+                            window \(record.window.id, privacy: .public) would not be adapted to \
+                            \(Int(size.width), privacy: .public) by \
+                            \(Int(size.height), privacy: .public) pt: \
+                            \(String(describing: error), privacy: .public)
+                            """)
+                    }
+
+                case .acceptResize(let resized):
+                    acceptOperationalGeometry(resized)
+                    transition(
+                        to    : SeatStateMachine.resolved(
+                            from       : state,
+                            wasDegraded: wasDegradedBeforeRecovery
+                        ),
+                        reason: .recovered
+                    )
+                    return
+
                 case .fail(let issue):
                     eventChannel.yield(.issueDetected(issue, cause: nil))
                     if await handedOverAfterDestruction(of: record) { return }
@@ -3083,6 +4392,68 @@ public final class AgentSeat {
                     return
             }
         }
+    }
+
+    /// Takes a reading the recovery accepted as the window's operational
+    /// geometry from now on.
+    ///
+    /// Three things move together and that is the whole of it: the held record,
+    /// which keeps its identity, its provenance and what it owes because the
+    /// reading goes in through `withReference`; the guard, which is what every
+    /// later comparison is made against; and the observation, which is dropped
+    /// so that the coordinates computed over the old frame cannot be handed
+    /// back with a Command. The generation the consumer's reference carries
+    /// advances with that invalidation, which is what makes an old reference
+    /// refused rather than merely stale.
+    ///
+    /// What the window is owed on its return is not among them.
+    private func acceptOperationalGeometry(_ resized: WindowReference) {
+
+        guard let record = session[resized.windowNumber],
+              record.window.reference.hasSameIdentity(as: resized)
+        else { return }
+
+        session.acceptGeometry(resized)
+
+        if let existing = seatGuard, existing.target.hasSameIdentity(as: resized) {
+            seatGuard = SeatGuard(
+                target       : resized,
+                displayID    : existing.displayID,
+                displayBounds: existing.displayBounds
+            )
+        }
+        observationIssuer.invalidate(.geometryChanged)
+        outstandingGeometry = nil
+
+        Self.log.info("""
+            window \(resized.windowNumber, privacy: .public) settled at \
+            \(Int(resized.frame.width), privacy: .public) by \
+            \(Int(resized.frame.height), privacy: .public) pt: it is the operating geometry now, \
+            and the coordinates taken before it are refused
+            """)
+    }
+
+    /// What the seat measured of one window's frame across a dialog closure it
+    /// verified, and nil when this is not that situation.
+    ///
+    /// The frame before comes from the closure transition, which attested it
+    /// before the Command went out; the frame after is read now. Nothing on
+    /// this path posts anything: a dialog whose closure was verified is not
+    /// cancelled a second time to recover a frame, and what the classification
+    /// decides is only which recovery the seat may run.
+    private func closureGeometryEffect(of target: WindowReference) -> ClosureGeometryEffect? {
+
+        guard let focusRecovery, focusRecovery.closureSurfaceIsGone,
+              let before = focusRecovery.closureSurfacesBefore.first(where: {
+                  $0.hasSameIdentity(as: target)
+              })
+        else { return nil }
+
+        return ClosureGeometryEffect.classify(
+            before: before,
+            after : sensing.windowGeometry(of: target.windowNumber),
+            within: sensing.virtualDisplayBounds
+        )
     }
 
     /// The second and last proof that the target was destroyed: a recovery that
