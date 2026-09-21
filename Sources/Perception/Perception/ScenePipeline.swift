@@ -17,8 +17,10 @@ import PerceptionCore
 /// doubles. Recognition, icon segmentation and native reads run concurrently; section detection
 /// then receives text bounds. CPU work runs off the caller's actor, including AppKit's main actor.
 /// Accessibility is an optional augmentation stage taken at construction: pixels build the whole
-/// scene, and the stage only adds. Other optional stages (control state reading, taught icon labels,
-/// learned structure) are later roles, absent here on purpose rather than defaulted to a silent no-op.
+/// scene, and the stage only adds. Control state reading is a second optional stage of the same
+/// shape, asked last so an application that answered for itself always wins. The remaining stages
+/// (taught icon labels, learned structure) are later roles, absent here on purpose rather than
+/// defaulted to a silent no-op.
 public struct ScenePipeline: Sendable {
 
     /// What the pipeline needs about the window besides its pixels.
@@ -59,18 +61,21 @@ public struct ScenePipeline: Sendable {
     private let regionFilter: (any VisualRegionFiltering)?
     private let sections: (any SectionDetecting)?
     private let augmentation: (any SceneAugmenting)?
+    private let controlState: (any ControlStateReading)?
     private let accuracy: TextRecognitionAccuracy
 
     /// Creates a pipeline over its roles. A nil region segmenter supplies no icon candidates. A nil
     /// region filter leaves media classification to the caller; otherwise filtering receives OCR
     /// barriers before grouping. A nil section detector uses only caller-provided panels. A nil
-    /// augmenter leaves the pixel scene.
+    /// augmenter leaves the pixel scene. A nil control state reader leaves every control whose
+    /// state no application reported silent, which is what the scene said before the role existed.
     public init(
         text        : any TextRecognizing,
         regions     : (any RegionSegmenting)? = nil,
         regionFilter: (any VisualRegionFiltering)? = nil,
         sections    : (any SectionDetecting)? = nil,
         augmentation: (any SceneAugmenting)? = nil,
+        controlState: (any ControlStateReading)? = nil,
         accuracy    : TextRecognitionAccuracy = .accurate
     ) {
         self.text         = text
@@ -78,6 +83,7 @@ public struct ScenePipeline: Sendable {
         self.regionFilter = regionFilter
         self.sections     = sections
         self.augmentation = augmentation
+        self.controlState = controlState
         self.accuracy     = accuracy
     }
 
@@ -111,7 +117,68 @@ public struct ScenePipeline: Sendable {
         )
         let nativeElements = try await harvested
         try Task.checkCancellation()
-        return Self.augmented(scene, with: nativeElements)
+        let merged = Self.augmented(scene, with: nativeElements)
+        guard let controlState else { return merged }
+        return Self.stated(merged, from: image, segments: visual.icons, reader: controlState)
+    }
+
+    /// Asks the control state reader about every switch, checkbox and radio the grouper's candidate
+    /// passes find in the same segments the scene was built from, and writes what it commits to onto
+    /// the elements that still carry no state.
+    ///
+    /// Last on purpose, after augmentation: an element accessibility already spoke for is skipped, so
+    /// pixels only ever fill a gap. A reading is claimed by the smallest stateless element it covers,
+    /// and a reading no element covers is dropped rather than attached to the panel around it.
+    private static func stated(
+        _ scene  : SceneSnapshot,
+        from image: CGImage,
+        segments : [CGRect],
+        reader   : any ControlStateReading
+    ) -> SceneSnapshot {
+        var readings: [(box: CGRect, state: ControlState)] = []
+        for mark in ElementGrouper.markCandidates(segments: segments, isMarkShaped: reader.isMarkShaped) {
+            guard let state = reader.state(of: ControlCandidate(box: mark, shape: .mark), in: image) else {
+                continue
+            }
+            readings.append((mark, state))
+        }
+        // A confirmed mark leaves the switch pass's input: its dot would otherwise be read as a knob.
+        let rest = segments.filter { segment in
+            !readings.contains { $0.box.insetBy(dx: -1, dy: -1).contains(segment) }
+        }
+        for candidate in ElementGrouper.toggleCandidates(segments: rest, isToggleShaped: reader.isToggleShaped) {
+            // Geometry that already saw which side the knob is on beats any pixel read.
+            let read = candidate.inferredState ?? reader.state(
+                of: ControlCandidate(box: candidate.rect, shape: .toggle, isAssumed: candidate.isAssumed),
+                in: image
+            )
+            guard let read else { continue }
+            readings.append((candidate.rect, read))
+        }
+        guard !readings.isEmpty else { return scene }
+        let size = CGSize(width: image.width, height: image.height)
+        var elements = scene.elements
+        for reading in readings {
+            let owner = elements.indices
+                .filter { index in
+                    guard elements[index].state == nil else { return false }
+                    let box = elements[index].bounds.pixelBox(in: size)
+                    let overlap = box.intersection(reading.box)
+                    return !overlap.isNull && overlap.area >= 0.5 * min(box.area, reading.box.area)
+                }
+                .min { elements[$0].bounds.area < elements[$1].bounds.area }
+            guard let owner else { continue }
+            elements[owner].state = reading.state
+        }
+        return SceneSnapshot(
+            bundleID         : scene.bundleID,
+            appName          : scene.appName,
+            windowTitle      : scene.windowTitle,
+            viewportPixelSize: scene.viewportPixelSize,
+            elements         : elements,
+            sections         : scene.sections,
+            commands         : scene.commands
+        )
     }
 
     private func augmentationElements(for window: Window) async throws -> [SceneElement] {

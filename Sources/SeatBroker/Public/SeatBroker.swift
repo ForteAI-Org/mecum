@@ -2,6 +2,7 @@ import AccessibilityFacts
 import AppKit
 import Foundation
 import Perception
+import PixelControlState
 import PixelRegions
 import PixelSections
 import VisionText
@@ -19,8 +20,10 @@ public final class SeatBroker {
     /// The one place the Perception layer is composed: Vision for text through
     /// the lab's best-effort wrapper, the pixel segmenter and its media filter
     /// for regions, the colour section detector for panels, and the
-    /// accessibility tree as the stage that only ever adds. It captures
-    /// nothing: every frame comes from the seat.
+    /// accessibility tree as the stage that only ever adds. The pixel control
+    /// state reader speaks last, for the switches and checkboxes no
+    /// application answered for. It captures nothing: every frame comes from
+    /// the seat.
     ///
     /// The accessibility budget is 0.35 s rather than the augmenter's own
     /// 1.5 s. Electron trees are deep and slow to walk, and the budget is the
@@ -32,7 +35,8 @@ public final class SeatBroker {
         regions     : ConnectedComponentSegmenter(),
         regionFilter: MediaRegionFilter(),
         sections    : ColorSectionDetector(),
-        augmentation: AccessibilityAugmenter(budgetSeconds: 0.35)
+        augmentation: AccessibilityAugmenter(budgetSeconds: 0.35),
+        controlState: PixelControlStateReader()
     )
     private let recorder: RunRecorder
     private let ledger = LaunchLedger()

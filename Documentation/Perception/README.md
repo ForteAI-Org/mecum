@@ -17,6 +17,7 @@ an action is taken, never a coordinate of their own.
 | `VisionText` | `TextRecognizing` over Apple Vision, tuned for UI labels |
 | `WindowServerListing` | `WindowListing` over the window server's on-screen list |
 | `AccessibilityFacts` | `SceneAugmenting` over the live accessibility tree, on the main actor, under a budget |
+| `PixelControlState` | `ControlStateReading` over pixels: a switch's knob side, a checkbox or radio's mark, or nothing at all |
 | `Perception` | `ScenePipeline`: roles in, a scene out |
 | `ScreenCapture` | `StillCapturer`: one still of a window, or of a screen region holding a window and its pop-up, through ScreenCaptureKit; the foreground eye, where the Seat's capture is the background one |
 
@@ -65,10 +66,15 @@ scene.resolve(target: "Export")               // .found, .ambiguous(n) or .none
   a second facet of the same control (a tab's radio button and its combo box) is skipped, never
   allowed to overwrite the first one's state. The deadline is a closure the caller supplies; the
   algorithm reads no clock.
+- `ControlStateReading` fills a gap, it never overrules. The pipeline asks it last, after the
+  augmentation stage, and writes a state only onto an element that still carries none, so an
+  application that answered for itself always wins. A reading no element covers is dropped rather
+  than attached to the panel around it, and a reader that will not commit leaves the control silent.
 - `ScenePipeline` reads no environment and keeps no state between calls. A nil segmenter yields a
   text-only scene; a nil augmenter leaves the scene as the pixels built it; an augmenter runs only
-  when the window names its process and frame. A recognizer that cannot run fails the perception;
-  an empty window is a scene with no elements.
+  when the window names its process and frame; a nil control state reader leaves the scene exactly
+  as it was before that role existed. A recognizer that cannot run fails the perception; an empty
+  window is a scene with no elements.
 
 ## Failure
 
@@ -97,10 +103,10 @@ purpose: `make live-tests` filters on `LiveTests` and asserts a count.
 
 ## Not here yet, in porting order
 
-Switch and checkbox state reading from pixels, taught icon labels, the learned structure that
-rescues a remembered switch slot, section detection from pixels, content-region suppression,
-incremental recognition. Each arrives as a role the pipeline takes at construction, never as a
-default that silently succeeds. A `FrameCapturing` role the Seat's frames fill is the first place
+Taught icon labels, the learned structure that rescues a remembered switch slot, section detection
+from pixels, content-region suppression, incremental recognition. Each arrives as a role the
+pipeline takes at construction, never as a default that silently succeeds.
+A `FrameCapturing` role the Seat's frames fill is the first place
 this layer and Driver meet. Accessibility actions (pressing, selecting a menu row, the Go-to-Folder
 navigator) and the off-view probe belong to the Engine layer, over an acting role.
 
@@ -112,6 +118,7 @@ navigator) and the off-view probe belong to the Engine layer, over an acting rol
 | `LocatorCore/SceneComposer.swift` | `PerceptionCore/Composition/SceneComposer.swift` |
 | `LocatorCore/SceneDiff.swift` | `PerceptionCore/Difference/*` (typed `SceneEffect`) |
 | `LocatorCore/ElementGrouper.swift` | `PerceptionCore/Grouping/ElementGrouper.swift` |
+| `CVBackend/ToggleStateReader.swift` | `PixelControlState/PixelControlStateReader.swift` |
 | `LocatorCore/PopupRowSegmenter.swift` | `PerceptionCore/Popup/PopupRowSegmenter.swift` |
 | `LocatorCore/Coordinates.swift` | `PerceptionCore/Geometry/WindowCoordinateContext.swift` |
 | `LocatorCore/KnowledgeBase.swift` (`KnowledgeText`) | `PerceptionCore/Text/LabelText.swift` |

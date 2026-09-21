@@ -193,7 +193,8 @@ let package = Package(
         ),
         .library(
             name: "MecumPerception",
-            targets: ["PerceptionCore", "VisionText", "PixelSections", "PixelRegions", "WindowServerListing", "Perception", "AccessibilityFacts",
+            targets: ["PerceptionCore", "VisionText", "PixelSections", "PixelRegions", "PixelControlState",
+                      "WindowServerListing", "Perception", "AccessibilityFacts",
                       "ScreenCapture", "SceneOverlay"]
         ),
         .library(
@@ -241,16 +242,15 @@ let package = Package(
         // What survives of the Lab's own perception after Ronaldo's layer replaced it: only the pieces a
         // later ticket still has to port or decide. Everything else went with T2.
         //
-        //   LocatorCore    SceneElement + the AX/geometry/grouping vocabulary the four files below need.
+        //   LocatorCore    SceneElement + the AX/geometry vocabulary the three files below need.
         //   AXSupport      the AX engine AXPopupReader reads the open menu through (T5).
         //   CaptureSupport CaptureGate + WindowVisibility — T6 decides them.
-        //   CVBackend      ToggleStateReader (T4 → a `ControlStateReading` role) and the
-        //                  tile-diff / hash / template-match kernels IncrementalOCR uses (T5).
+        //   CVBackend      the tile-diff / hash / template-match kernels IncrementalOCR uses (T5).
         //   Relocation     AXPopupReader + IncrementalOCR (T5), ScrollPlanner + ScrollTiming (T7).
         perception("LocatorCore", settings: labPerceptionSettings),
         perception("AXSupport", ["LocatorCore"], settings: labPerceptionSettings),
         perception("CaptureSupport", settings: labPerceptionSettings),
-        perception("CVBackend", ["LocatorCore"], settings: labPerceptionSettings),
+        perception("CVBackend", settings: labPerceptionSettings),
         perception("Relocation", ["LocatorCore", "AXSupport", "CVBackend"], settings: labPerceptionSettings),
 
         // MARK: SeatBroker
@@ -258,8 +258,8 @@ let package = Package(
             "SeatBroker",
             ["SeatCore", "PrivateSymbols", "VirtualScreens", "WindowPlacement", "SeatInput",
              "CursorGuard", "SeatCapture", "SeatSession", "TargetReader", "PerceptionCore",
-             "Perception", "VisionText", "PixelRegions", "PixelSections", "AccessibilityFacts",
-             "EngineCore"]
+             "Perception", "VisionText", "PixelRegions", "PixelSections", "PixelControlState",
+             "AccessibilityFacts", "EngineCore"]
         ),
 
         // MARK: Driver tools
@@ -287,10 +287,9 @@ let package = Package(
         driverTests("TargetReader", ["TargetReader"]),
 
         // MARK: Lab locator and broker tests
-        perceptionTests("LocatorCore", ["LocatorCore"], settings: labPerceptionSettings),
         perceptionTests("AXSupport", ["AXSupport", "LocatorCore"], settings: labPerceptionSettings),
         perceptionTests("CaptureSupport", ["CaptureSupport"], settings: labPerceptionSettings),
-        perceptionTests("CVBackend", ["CVBackend", "LocatorCore"], settings: labPerceptionSettings),
+        perceptionTests("CVBackend", ["CVBackend"], settings: labPerceptionSettings),
         perceptionTests("Relocation", ["Relocation", "LocatorCore"], settings: labPerceptionSettings),
         brokerTests(
             "SeatBroker",
@@ -314,6 +313,9 @@ let package = Package(
         perception("VisionText", ["PerceptionCore"], settings: pure),
         perception("PixelSections", ["PerceptionCore"], settings: pure),
         perception("PixelRegions", ["PerceptionCore"], settings: pure),
+
+        // `ControlStateReading` over pixels: a switch's knob side, a checkbox or radio's mark.
+        perception("PixelControlState", ["PerceptionCore"], settings: pure),
 
         // The window server's window list behind `WindowListing`.
         perception("WindowServerListing", ["PerceptionCore"], settings: pure),
@@ -391,6 +393,7 @@ let package = Package(
         perceptionTests("Perception", ["Perception", "PerceptionCore"]),
         perceptionTests("PixelSections", ["PixelSections", "PerceptionCore"]),
         perceptionTests("PixelRegions", ["PixelRegions", "PerceptionCore"]),
+        perceptionTests("PixelControlState", ["PixelControlState", "PerceptionCore"]),
         perceptionTests("SceneOverlay", ["SceneOverlay", "PerceptionCore"]),
 
         // Boundary checks against a running application, gated by MECUM_LIVE_TESTS=1. Named apart from
