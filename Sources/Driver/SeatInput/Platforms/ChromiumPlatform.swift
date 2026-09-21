@@ -58,7 +58,7 @@ nonisolated public struct ChromiumPlatform: InputPlatform {
     /// `AgentSeat.withContextMenu` closes with the cycle it must not use to open.
     public func preparation(for command: InputCommand) -> Preparation {
         switch command {
-            case .click(_, .right)          : .none
+            case .click(_, .right, _)          : .none
             case .click, .drag, .insertText : .internalAppKitState
             case .key, .text, .scroll       : .none
         }

@@ -70,6 +70,33 @@ struct InputPlatformTests {
         }
     }
 
+    /// The keyboard recipe for a window of another process drawn inside a modal
+    /// surface. Changing only the recipient left Escape without effect, so the
+    /// remote owner is prepared and its key window named before the events; the
+    /// mouse on the same endpoint needed none of it.
+    @Test("the remote keyboard recipe prepares every Command that carries keys, and no mouse one")
+    func remoteKeyboardPreparesTheKeys() {
+        let platform = RemoteKeyboardPlatform()
+
+        #expect(platform.preparation(for: .key(virtualKey: 53, text: "")) == .internalAppKitState)
+        #expect(platform.preparation(for: .text("Z")) == .internalAppKitState)
+        #expect(platform.preparation(for: .insertText("Zz")) == .internalAppKitState)
+
+        #expect(platform.preparation(for: .click(Self.anywhere)) == .none)
+        #expect(platform.preparation(for: .scroll(Self.anywhere, deltaY: -6)) == .none)
+    }
+
+    @Test("the remote keyboard settle is the recipe's own, and not the shared default")
+    func remoteKeyboardCarriesItsOwnSettle() {
+        let platform = RemoteKeyboardPlatform()
+
+        for command in Self.commands {
+            #expect(platform.preparationSettle(for: command) == .milliseconds(50))
+        }
+        #expect(platform.preparationSettle(for: .key(virtualKey: 53, text: ""))
+            != AppKitPlatform().preparationSettle(for: .key(virtualKey: 53, text: "")))
+    }
+
     @Test("universal is the Chromium policy, which is the safe superset")
     func universalIsChromium() {
         let universal: any InputPlatform = .universal

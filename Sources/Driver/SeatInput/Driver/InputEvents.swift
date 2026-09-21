@@ -24,9 +24,9 @@ nonisolated package struct PreparedEvent {
     /// for an event that is not routed to a window.
     package let windowPointFromTop: CGPoint?
 
-    /// The pause after this event is posted, from the platform's pacing. Zero
-    /// for everything but a drag: a click is a plain down and up with nothing
-    /// in between.
+    /// The pause after this event is posted. A single click has no pause;
+    /// repeated clicks pause only between complete pairs, and drags use
+    /// the platform's pacing.
     package let delayAfterPostingMicroseconds: UInt32
 
     package init(
@@ -296,26 +296,40 @@ nonisolated package enum InputEvents {
                 into           : &events
             )
 
-        case .click(let location, let button):
+        case .click(let location, let button, let count):
+            guard (1...InputCommand.maximumClickCount).contains(count) else {
+                throw InputFailure.invalidClickCount(
+                    requested: count,
+                    maximum: InputCommand.maximumClickCount
+                )
+            }
             guard location.isFinite else { throw InputFailure.invalidLocation }
             // Which two event types a button presses is the button's own answer,
             // and CoreGraphics writes their raw values into the record's type
             // byte itself: nothing here stamps 0x03 or 0x04 by hand.
             let types = button.eventTypes
-            guard
-                let down = mouseEvent(
-                    types.down, at: location.screenPoint, button: button, source: source
-                ),
-                let up = mouseEvent(
-                    types.up, at: location.screenPoint, button: button, source: source
-                )
-            else {
-                throw InputFailure.eventCreationFailed
+            for ordinal in 1...count {
+                guard
+                    let down = mouseEvent(
+                        types.down, at: location.screenPoint, button: button, source: source
+                    ),
+                    let up = mouseEvent(
+                        types.up, at: location.screenPoint, button: button, source: source
+                    )
+                else {
+                    throw InputFailure.eventCreationFailed
+                }
+                mark(down, correlationID: correlationID, isMouse: true)
+                mark(up, correlationID: correlationID, isMouse: true)
+                down.setIntegerValueField(.mouseEventClickState, value: Int64(ordinal))
+                up.setIntegerValueField(.mouseEventClickState, value: Int64(ordinal))
+                events.append(PreparedEvent(event: down, windowPointFromTop: location.windowPointFromTop))
+                events.append(PreparedEvent(
+                    event: up,
+                    windowPointFromTop: location.windowPointFromTop,
+                    delayAfterPostingMicroseconds: ordinal == count ? 0 : 50_000
+                ))
             }
-            mark(down, correlationID: correlationID, isMouse: true)
-            mark(up,   correlationID: correlationID, isMouse: true)
-            events.append(PreparedEvent(event: down, windowPointFromTop: location.windowPointFromTop))
-            events.append(PreparedEvent(event: up,   windowPointFromTop: location.windowPointFromTop))
 
         case .drag(let path, let modifiers):
             guard path.count >= 3 else { throw InputFailure.invalidDragPath(pointCount: path.count) }

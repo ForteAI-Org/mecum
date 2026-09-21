@@ -91,6 +91,9 @@ nonisolated public enum InputFailure: Error, Sendable, Equatable {
     /// numbers say which it was.
     case invalidRepeatCount(requested: Int, maximum: Int)
 
+    /// The click train is empty or exceeds the bounded atomic command.
+    case invalidClickCount(requested: Int, maximum: Int)
+
     /// The platform asked for `.flagsChanged` on a build where the modifier
     /// transition record has not been verified.
     ///

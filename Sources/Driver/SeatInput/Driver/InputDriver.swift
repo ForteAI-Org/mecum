@@ -128,14 +128,16 @@ public actor InputDriver {
         to window    : WindowReference,
         correlationID: Int64,
         platform     : any InputPlatform,
-        traceContext : InputTraceContext
+        traceContext : InputTraceContext,
+        beforeFirstPost: @escaping @Sendable () async throws -> Void = {}
     ) async throws -> InputReceipt {
         try await performSend(
             command,
             to           : window,
             correlationID: correlationID,
             platform     : platform,
-            traceContext : traceContext
+            traceContext : traceContext,
+            beforeFirstPost: beforeFirstPost
         )
     }
 
@@ -144,7 +146,8 @@ public actor InputDriver {
         to window    : WindowReference,
         correlationID: Int64,
         platform     : any InputPlatform,
-        traceContext suppliedTraceContext: InputTraceContext
+        traceContext suppliedTraceContext: InputTraceContext,
+        beforeFirstPost: @escaping @Sendable () async throws -> Void
     ) async throws -> InputReceipt {
 
         var traceContext = suppliedTraceContext
@@ -193,6 +196,7 @@ public actor InputDriver {
             )
 
             guard platform.preparation(for: command) == .internalAppKitState else {
+                try await beforeFirstPost()
                 let receipt = try engine.post(
                     command,
                     to           : window,
@@ -281,6 +285,11 @@ public actor InputDriver {
                 through: DispatchTime.now().uptimeNanoseconds
             )
 
+            // This is intentionally the final suspension before `engine.post`.
+            // The validator belongs to the seat, which owns the logical modal
+            // relation and selection generation. Once it returns, construction
+            // and the first post remain synchronous on this driver actor.
+            try await beforeFirstPost()
             let receipt = try engine.post(
                 command,
                 to           : window,

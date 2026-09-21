@@ -21,7 +21,7 @@ nonisolated package enum WindowCoordinateValidator {
         switch command {
         case .key, .text, .insertText:
             return
-        case .click(let location, _), .scroll(let location, _):
+        case .click(let location, _, _), .scroll(let location, _):
             guard location.observedGeometry != nil else {
                 throw InputFailure.coordinateObservationMissing
             }
@@ -40,8 +40,8 @@ nonisolated package enum WindowCoordinateValidator {
         case .key, .text, .insertText:
             return command
 
-        case .click(let location, let button):
-            return .click(try validate(location, against: current), button: button)
+        case .click(let location, let button, let count):
+            return .click(try validate(location, against: current), button: button, count: count)
 
         case .drag(let points, let modifiers):
             let validated = try points.map { try validate($0, against: current) }

@@ -55,6 +55,49 @@ struct InputEventsTests {
 
     // MARK: click
 
+    @Test("a click train preserves each complete pair and native click count", arguments: [1, 2, 3, 32])
+    func repeatedClicksCarryTheirOrdinal(count: Int) throws {
+        let events = try build(.click(location(300, 400), count: count))
+        #expect(events.count == count * 2)
+        #expect(events.map { $0.event.getIntegerValueField(.mouseEventClickState) }
+            == (1...count).flatMap { [Int64($0), Int64($0)] })
+        #expect(events.map(\.event.type)
+            == (1...count).flatMap { _ in [CGEventType.leftMouseDown, .leftMouseUp] })
+        #expect(events.allSatisfy { $0.windowPointFromTop == CGPoint(x: 200, y: 200) })
+        #expect(events.last?.delayAfterPostingMicroseconds == 0)
+        if count > 1 {
+            #expect(events.dropLast().filter { $0.event.type == .leftMouseUp }
+                .allSatisfy { $0.delayAfterPostingMicroseconds > 0 })
+        }
+    }
+
+    @Test("an invalid click count builds nothing", arguments: [Int.min, -1, 0, 33, Int.max])
+    func invalidClickCountRefusesBeforeConstruction(count: Int) throws {
+        var events: [PreparedEvent] = []
+        let source = try makeSource()
+        #expect(throws: InputFailure.invalidClickCount(
+            requested: count,
+            maximum: InputCommand.maximumClickCount
+        )) {
+            try InputEvents.append(
+                .click(location(300, 400), count: count),
+                source: source,
+                pacing: .realistic,
+                correlationID: 7,
+                into: &events
+            )
+        }
+        #expect(events.isEmpty)
+    }
+
+    @Test("right double click carries right button events and counts")
+    func rightDoubleClick() throws {
+        let events = try build(.click(location(300, 400), button: .right, count: 2))
+        #expect(events.map(\.event.type)
+            == [.rightMouseDown, .rightMouseUp, .rightMouseDown, .rightMouseUp])
+        #expect(events.map { $0.event.getIntegerValueField(.mouseEventClickState) } == [1, 1, 2, 2])
+    }
+
     @Test("a click is a bare down and up, both routed, with no pause between them")
     func clickIsBareDownAndUp() throws {
         let events = try build(.click(location(300, 400)))

@@ -97,8 +97,10 @@ nonisolated package final class InputEngine {
         identityReader          : @escaping (Int, SymbolTable, FacilityGate) -> WindowIdentity? = {
             WindowServerProbe.identity(of: $0, table: $1, validatedBy: $2)
         },
+        // The recipient is not always a window the public list enumerates: an
+        // out of process panel's content is not, and the events have to reach it.
         geometryReader          : @escaping (WindowReference, Bool) -> WindowGeometryObservation? = {
-            WindowGeometryProbe.observation(
+            RemoteWindowProbe.recipientGeometry(
                 of                   : $0,
                 allowUnvalidatedBuild: $1
             )

@@ -31,6 +31,9 @@ nonisolated public enum InputPauseReason: String, Sendable, Equatable, CaseItera
     /// Focus recovery stopped. Terminal: nothing resolves it.
     case focusRecoveryStopped
 
+    /// The person stopped the seat. Terminal: nothing resolves it.
+    case deliberateStop
+
     // MARK: The recovery's pre-action preparation
 
     /// The hold that admitted input is over, so there is no action to prepare.

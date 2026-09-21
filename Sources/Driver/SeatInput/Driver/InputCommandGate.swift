@@ -32,12 +32,20 @@ nonisolated public final class InputCommandGate: Sendable {
         /// so a seat whose recovery went away never posts again.
         case focusRecoveryStopped
 
+        /// The person stopped the seat themselves. Terminal like the one above,
+        /// and closed before any teardown begins: a panic that tore down first
+        /// left the gate open for whatever the run in flight tried next. The
+        /// Command already admitted stays atomic, so a release is never
+        /// abandoned halfway by this.
+        case deliberateStop
+
         /// How this cause is reported to a consumer.
         package var reason: InputPauseReason {
             switch self {
                 case .focusRecovery       : .focusRecovery
                 case .windowTransfer      : .windowTransfer
                 case .focusRecoveryStopped: .focusRecoveryStopped
+                case .deliberateStop      : .deliberateStop
             }
         }
     }

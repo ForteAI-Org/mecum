@@ -13,6 +13,7 @@ package final class UserFocusRestorer {
     private let setFrontProcess: SymbolABI.SetFrontProcess
     private let getFrontProcess: SymbolABI.GetFrontProcess
     private var preparedDestination: AppKitStatePreparation.Participant?
+
     private var preparedTargets: [Int32: AppKitStatePreparation.Participant.SerialNumber] = [:]
 
     package init(allowUnvalidatedBuild: Bool, usesKeyRecords: Bool = false, table: SymbolTable = .shared) throws {
@@ -37,13 +38,44 @@ package final class UserFocusRestorer {
     package func prepare(_ window: WindowReference, targets: [WindowReference]) throws {
         preparedDestination = nil
         preparedTargets = [:]
-        let destination = try preparation.participant(for: window)
+        let destination = try participant(for: window)
         var serialNumbers: [Int32: AppKitStatePreparation.Participant.SerialNumber] = [:]
         for target in targets where serialNumbers[target.processID] == nil {
-            serialNumbers[target.processID] = try preparation.participant(for: target).serialNumber
+            serialNumbers[target.processID] = try participant(for: target).serialNumber
         }
         preparedDestination = destination
         preparedTargets = serialNumbers
+    }
+
+    /// Refreshes only the destination participant. The target-process PSNs
+    /// were retained while their surfaces were still attested, and remain the
+    /// evidence for a closure transition after a remote content window closes.
+    /// Re-resolving that dead window would replace a lifetime binding with a
+    /// failed lookup (or, worse, a new owner of its recycled Window ID).
+    package func renewDestination(_ window: WindowReference) throws {
+        preparedDestination = try participant(for: window)
+    }
+
+    /// Binds the private owner and PSN readings back to the full WindowServer
+    /// identity that selected the destination. `participant(for:)` can resolve
+    /// a newly reused window between the recovery geometry read and this call;
+    /// accepting its owner would activate a stranger.
+    private func participant(
+        for window: WindowReference
+    ) throws -> AppKitStatePreparation.Participant {
+        guard let expected = window.identity else {
+            throw InputFailure.inputPaused([.destinationNotPrepared])
+        }
+        let resolved = try preparation.participant(for: window)
+        guard resolved.processID == expected.processID,
+              Int(resolved.windowNumber) == expected.windowNumber,
+              resolved.ownerConnectionID == expected.ownerConnectionID,
+              resolved.serialNumber.high == expected.process.serialNumberHigh,
+              resolved.serialNumber.low == expected.process.serialNumberLow
+        else {
+            throw InputFailure.inputPaused([.destinationNotPrepared])
+        }
+        return resolved
     }
 
     package func isFrontmost(processID: Int32) -> Bool {

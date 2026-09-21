@@ -62,7 +62,7 @@ struct WindowCoordinateValidatorTests {
             against: current
         )
 
-        guard case .click(let location, _) = validated else {
+        guard case .click(let location, _, _) = validated else {
             Issue.record("Expected a click")
             return
         }
@@ -96,6 +96,27 @@ struct WindowCoordinateValidatorTests {
             CGPoint(x: 750, y: 960),
         ])
         #expect(points.allSatisfy { $0.observedGeometry == current })
+    }
+
+    @Test("translation preserves a repeated click's button and count")
+    func repeatedClickTranslation() throws {
+        let observed = try Self.observation()
+        let current = try Self.observation(
+            frame: CGRect(x: 700, y: 900, width: 400, height: 300),
+            sequence: 2
+        )
+        let command = try WindowCoordinateValidator.validate(
+            .click(Self.location(in: observed), button: .right, count: 3),
+            against: current
+        )
+        guard case .click(let location, let button, let count) = command else {
+            Issue.record("Expected a click")
+            return
+        }
+        #expect(count == 3)
+        #expect(button == .right)
+        #expect(location.screenPoint == CGPoint(x: 740, y: 960))
+        #expect(location.observedGeometry == current)
     }
 
     @Test("a translation after event construction is refused before posting")

@@ -137,16 +137,20 @@ public enum InputCommand: Sendable, Equatable {
     /// any particular input method would do with the event first.
     case insertText(String)
 
-    /// One press and release at the same point, with no `mouseMoved` primer and
-    /// no pause between them: measured as sufficient on the fixture and on
-    /// Chromium renderers.
+    /// One or more presses at the same point, with a matched release for each.
+    /// `count` must be in `1...maximumClickCount`. Two forms a double click;
+    /// larger values carry successively increasing native click counts.
+    /// The whole train is one Command and is never retried or split.
     ///
     /// The button defaults to the left one, so a caller that never asked the
     /// question keeps the click it had. A right click is the same two events
     /// with the other type, and it is delivered by the same recipe with one
     /// difference the caller does not choose: no Preparation, because the
     /// restore closes the menu the click just opened.
-    case click(InputLocation, button: MouseButton = .left)
+    case click(InputLocation, button: MouseButton = .left, count: Int = 1)
+
+    /// The largest click train admitted as one atomic Command.
+    public static let maximumClickCount = 32
 
     /// A press, the intermediate moves and a release along `points`, paced by
     /// the platform. The path is given whole so the driver can validate the
@@ -182,6 +186,54 @@ public enum InputCommand: Sendable, Equatable {
         switch self {
             case .click, .drag, .scroll  : true
             case .key, .text, .insertText: false
+        }
+    }
+
+    /// The screen point of the first mouse location this Command carries, nil
+    /// for the keyboard Commands that carry none.
+    ///
+    /// It is what decides which window a gesture belongs to, the same way a
+    /// real drag belongs to the window that received its press: a later point
+    /// outside that window is refused where every out of frame point is.
+    package var firstMouseScreenPoint: CGPoint? {
+        switch self {
+            case .click(let location, _, _) : location.screenPoint
+            case .scroll(let location, _): location.screenPoint
+            case .drag(let points, _)    : points.first?.screenPoint
+            case .key, .text, .insertText: nil
+        }
+    }
+
+    /// The same Command with every mouse point expressed in another window's
+    /// frame: the screen points are carried through unchanged and the window
+    /// points are measured again from that window's origin.
+    ///
+    /// Nothing is recomputed here and no point is moved. A window point is only
+    /// ever read by the process the event is routed to, so it has to be
+    /// measured from the window it is routed to, and re-expressing it is what
+    /// keeps the two halves of `InputLocation` describing one place.
+    package func rebased(onto geometry: WindowGeometryObservation) -> InputCommand {
+
+        func rebase(_ location: InputLocation) -> InputLocation {
+            InputLocation(
+                screenPoint       : location.screenPoint,
+                windowPointFromTop: CGPoint(
+                    x: location.screenPoint.x - geometry.window.frame.minX,
+                    y: location.screenPoint.y - geometry.window.frame.minY
+                ),
+                observedIn        : geometry
+            )
+        }
+
+        switch self {
+            case .click(let location, let button, let count):
+                return .click(rebase(location), button: button, count: count)
+            case .scroll(let location, let deltaY):
+                return .scroll(rebase(location), deltaY: deltaY)
+            case .drag(let points, let modifiers):
+                return .drag(points: points.map(rebase), modifiers: modifiers)
+            case .key, .text, .insertText:
+                return self
         }
     }
 }
