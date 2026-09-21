@@ -87,9 +87,13 @@ struct AppWindowFollowTests {
         size        : CGSize
     ) {
         placing.onMove = { origin in
+            // The size the window really has now, not the one it had when the
+            // row was written: a window the seat shrank arrives at its new size,
+            // and the window server reports what it is.
+            let current = (placing.bodyFrames[windowNumber] ?? placing.bodyFrame)?.size ?? size
             sensing.additionalWindows[windowNumber] = reference(
                 windowNumber,
-                frame: CGRect(origin: origin, size: size)
+                frame: CGRect(origin: origin, size: current)
             )
         }
     }
@@ -189,6 +193,92 @@ struct AppWindowFollowTests {
         #expect(log.targetChanges.last?.reason == .detected,
                 "a window the seat found itself is not a window the consumer asked for")
         #expect(Self.refusals(log).isEmpty)
+    }
+
+    @Test("a window opened while the driven application is active is still brought in")
+    func activeApplicationDoesNotStandThePassDown() async throws {
+        let sensing = FakeSensing()
+        let placing = FakePlacing()
+        let (seat, _) = try await Self.followingSeat(sensing: sensing, placing: placing)
+
+        // What a dialog looks like from here: the application opened a window
+        // and took the focus doing it. The person did nothing.
+        sensing.targetIsActive = true
+        sensing.userMayBeSwitchingApplications = false
+        _ = Self.offer(Self.secondWindowNumber, to: sensing, placing)
+        await Self.pass(seat)
+
+        #expect(seat.adoptedWindows.count == 2, "the window the application opened is adopted")
+        #expect(sensing.virtualDisplayBounds.contains(
+            try #require(seat.currentTarget).reference.frame
+        ), "and it is brought onto the seat's own display")
+    }
+
+    @Test("observation settles an outside popup through the owned transfer path")
+    func observationSettlesOutsidePopup() async throws {
+
+        let sensing = FakeSensing()
+        let placing = FakePlacing()
+        let sender  = FakeSender()
+        let (seat, _) = try await Self.followingSeat(
+            sensing: sensing,
+            placing: placing,
+            sender : sender,
+            marker : 7_002
+        )
+        let movesBeforePopup = placing.moves.count
+        let popup = Self.offer(Self.secondWindowNumber, to: sensing, placing)
+        placing.onMove = { origin in
+            let moved = Self.reference(
+                Self.secondWindowNumber,
+                frame: CGRect(origin: origin, size: popup.frame.size)
+            )
+            sensing.additionalWindows[Self.secondWindowNumber] = moved
+            sensing.surfaces = sensing.surfaces?.map { surface in
+                surface.reference.windowNumber == Self.secondWindowNumber
+                    ? Self.surface(moved)
+                    : surface
+            }
+        }
+
+        // Reproduce the order seen in the Lab: the assignment reader discovers
+        // the popup before the asynchronous window follower gets its second
+        // agreeing reading. The default assignment effector refuses the direct
+        // move, so observation has to join the seat's owned transfer path.
+        seat.refreshTargetReadings()
+        await Task.yield()
+        seat.refreshTargetReadings()
+
+        // A native creation notification may start its own pass precisely when
+        // observation yields between the two agreeing reads. Make that burst
+        // deterministic: the bridge must join it rather than fold assignment
+        // state while its adoption is still awaiting placement confirmation.
+        sensing.onSurfaceRead = {
+            sensing.onSurfaceRead = nil
+            Task { @MainActor in await seat.runWindowFollowPass() }
+        }
+
+        let delivery = try await observe(seat)
+        #expect(placing.moves.count == movesBeforePopup + 1)
+        #expect(seat.adoptedWindows.map(\.id).contains(popup.windowNumber))
+        #expect(seat.currentTarget?.id == popup.windowNumber)
+        #expect(delivery.reference.recipient.windowNumber == popup.windowNumber)
+        #expect(seat.state == .ready)
+
+        let turn = try await seat.acquire()
+        #expect(seat.state == .ready)
+        let receipt = try await seat.send(
+            InputCommand.click(InputLocation(
+                screenPoint       : CGPoint(x: 2700, y: 700),
+                windowPointFromTop: CGPoint(x: 100, y: 100)
+            )),
+            observation: delivery.reference,
+            turn       : turn
+        )
+        try seat.confirm(receipt, .observed)
+        try seat.release(turn)
+        #expect(sender.sent.count == 1,
+                "the popup must remain the session target after observation")
     }
 
     @Test("the boundary of a finished Command is a wake-up, and the Command is not repeated")
@@ -336,8 +426,8 @@ struct AppWindowFollowTests {
         #expect(seat.adoptedWindows.count == 1)
     }
 
-    @Test("a window larger than the virtual display is refused instead of resized")
-    func aWindowTooLargeForTheDisplay() async throws {
+    @Test("a window larger than the virtual display is shrunk to fit and still owes its old size")
+    func aWindowTooLargeForTheDisplayIsShrunk() async throws {
         let sensing = FakeSensing()
         let placing = FakePlacing()
         let (seat, _) = try await Self.followingSeat(
@@ -348,14 +438,74 @@ struct AppWindowFollowTests {
         let log = MultiWindowTests.EventLog(seat)
         defer { log.stop() }
 
-        let huge = CGRect(x: 0, y: 0, width: 4000, height: 3000)
+        // An application that opens its window wider than the seat's display,
+        // which is what Resolve does with a project: 2593 points across a 2560
+        // point display, measured.
+        let bounds = sensing.virtualDisplayBounds
+        let huge   = CGRect(x: 0, y: 0, width: bounds.width + 33, height: 760)
+        _ = Self.offer(Self.secondWindowNumber, to: sensing, placing, frame: huge)
+        await Self.pass(seat)
+
+        await log.drain()
+        #expect(Self.refusals(log).isEmpty, "a window that can be made to fit is not refused")
+        #expect(placing.resizes.map(\.size) == [CGSize(width: bounds.width, height: 760)],
+                "shrunk in the dimension that did not fit, and only that one")
+        #expect(seat.adoptedWindows.count == 2)
+
+        let adopted = try #require(seat.adoptedWindows.first { $0.id == Self.secondWindowNumber })
+        #expect(adopted.originalFrame == huge,
+                "the person is owed the frame the window had before the seat touched it")
+    }
+
+    @Test("a window the seat shrank is given back the size it was found with")
+    func aShrunkWindowIsReturnedAtItsOriginalSize() async throws {
+        let sensing = FakeSensing()
+        let placing = FakePlacing()
+        let (seat, _) = try await Self.followingSeat(
+            sensing: sensing,
+            placing: placing,
+            marker : 7_019
+        )
+        let bounds = sensing.virtualDisplayBounds
+        let huge   = CGRect(x: 0, y: 0, width: bounds.width + 33, height: 760)
+        _ = Self.offer(Self.secondWindowNumber, to: sensing, placing, frame: huge)
+        await Self.pass(seat)
+        let adopted = try #require(seat.adoptedWindows.first { $0.id == Self.secondWindowNumber })
+        placing.resizes.removeAll()
+
+        _ = await seat.release(adopted, .returnToUserSeat)
+
+        #expect(placing.resizes.map(\.size) == [huge.size],
+                "the return writes the size back, once, and it is the size it was found with")
+        #expect(placing.moves.last == huge.origin)
+    }
+
+    @Test("a window nobody can shrink is refused, and nothing is moved")
+    func aWindowThatCannotBeShrunkIsRefused() async throws {
+        let sensing = FakeSensing()
+        let placing = FakePlacing()
+        let (seat, _) = try await Self.followingSeat(
+            sensing: sensing,
+            placing: placing,
+            marker : 7_018
+        )
+        let log = MultiWindowTests.EventLog(seat)
+        defer { log.stop() }
+
+        // The write is accepted and the application keeps the size it had,
+        // which is the ordinary answer of a window with a minimum size. The
+        // reading after the write is what says so.
+        let bounds = sensing.virtualDisplayBounds
+        let huge   = CGRect(x: 0, y: 0, width: bounds.width + 400, height: 3_000)
+        placing.resizeResult = huge.size
         _ = Self.offer(Self.secondWindowNumber, to: sensing, placing, frame: huge)
         let movesBefore = placing.moves.count
         await Self.pass(seat)
 
         await log.drain()
         #expect(Self.refusals(log).first?.1 == .tooLarge)
-        #expect(placing.moves.count == movesBefore, "nothing is resized to make it fit")
+        #expect(placing.moves.count == movesBefore, "a window that does not fit is not moved")
+        #expect(seat.adoptedWindows.count == 1)
     }
 
     @Test("a window that goes away before the move is not adopted and nothing is written")
@@ -557,9 +707,9 @@ struct AppWindowFollowTests {
         )
         let turn     = try await seat.acquire()
         let observed = Holder<Int>(-1)
-        let before   = seat.windowFollowScanCount
 
         let observation = try await observedReference(seat)
+        let before = seat.windowFollowScanCount
         // Publish the new window only after admission, exactly while the
         // Command that caused it is in flight.
         sender.onSend = { _ in
@@ -577,8 +727,8 @@ struct AppWindowFollowTests {
         try seat.release(turn)
     }
 
-    @Test("nothing is read while the driven application is the active one")
-    func nothingIsReadWhileTheApplicationIsActive() async throws {
+    @Test("nothing is read while the person's own physical intent is recent")
+    func nothingIsReadWhileThePersonIsSwitching() async throws {
         let sensing = FakeSensing()
         let placing = FakePlacing()
         let (seat, _) = try await Self.followingSeat(
@@ -588,14 +738,20 @@ struct AppWindowFollowTests {
         )
         _ = Self.offer(Self.secondWindowNumber, to: sensing, placing)
 
+        // The person clicked or used an app-switch shortcut a moment ago. This
+        // is the evidence that stands the pass down, and the only one: an
+        // application that is merely active is the application's own doing, and
+        // it is when it opens the very window this pass exists to find.
         sensing.targetIsActive = true
+        sensing.userMayBeSwitchingApplications = true
         let before = sensing.surfaceReadCount
         await Self.pass(seat, 3)
         #expect(sensing.surfaceReadCount == before)
         #expect(seat.adoptedWindows.count == 1)
 
-        // And the person leaving it is what lets the watch resume.
-        sensing.targetIsActive = false
+        // And the person's intent going stale is what lets the watch resume,
+        // active application or not.
+        sensing.userMayBeSwitchingApplications = false
         await Self.pass(seat)
         #expect(seat.adoptedWindows.count == 2)
     }

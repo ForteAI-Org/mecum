@@ -9,6 +9,7 @@ import AppKit
 import CoreGraphics
 import Foundation
 import PrivateSymbols
+import SeatCapture
 import SeatCore
 import SeatInput
 import SeatSession
@@ -149,25 +150,32 @@ extension VirtualDisplaySuites {
             )
             #expect(seat.isStaged(adopted))
 
-            // MARK: the hold, and what it refuses
+            // MARK: the hold and one qualified native observation
             let turn = try await seat.acquire()
             #expect(turn.generation == 1)
             #expect(!turn.seatChangedSinceLastHold)
 
             // There is no entry point that takes a window any more: a Command is
-            // addressed by the Observation Reference the seat issued. The
-            // shipped adapters leave the content clock unqualified and the
-            // enumeration incomplete, so this host asks and is refused with the
-            // gap named rather than sending anything.
-            switch await seat.observe() {
-                case .success:
-                    Issue.record(
-                        Comment(rawValue: "the shipped adapters qualified an observation, which no "
-                            + "evidence on this build supports")
-                    )
-                case .failure(let reason):
-                    print("host: the seat refused to observe, as expected: \(reason)")
-            }
+            // addressed by the Observation Reference the seat issued. This
+            // pass uses the shipped AX and WindowServer inventory, native
+            // containment, window capture and content clock together. A
+            // refusal is a regression in that composition, never an accepted
+            // alternative outcome.
+            let delivery = try await seat.observe().get()
+            let identity = try #require(adopted.reference.identity)
+
+            #expect(delivery.reference.instance == identity.process)
+            #expect(delivery.reference.recipient == identity)
+            #expect(delivery.reference.role == .ordinaryTarget)
+            #expect(delivery.frame.source == .window(identity))
+            #expect(delivery.reference.geometryVersion == delivery.geometry.version)
+            #expect(delivery.reference.observedFrame == delivery.geometry.window.frame)
+            #expect(delivery.contentAge.isQualified)
+            #expect(seat.coherentState.selectedTarget == identity)
+            #expect(!seat.coherentState.suspensions.contains {
+                if case .containmentNotVerified = $0 { true } else { false }
+            })
+            #expect(seat.coherentState.hasCurrentObservation)
 
             #expect(seat.unconfirmedCommandCount == 0)
             _ = await seat.concludeObservation()

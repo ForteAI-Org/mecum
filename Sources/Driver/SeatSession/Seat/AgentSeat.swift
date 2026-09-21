@@ -62,10 +62,10 @@ import WindowPlacement
 /// duplicated: an adoption hands the instance over, every reading is folded
 /// through both, and the causes of the gate that decide an observation are the
 /// ones those nuclei report. The evidence they need is supplied by adapters, and
-/// the shipped adapters are honest about what this build has qualified: the
-/// enumeration is incomplete, no selection fact is attested, the menu surface
-/// cannot be captured and the content clock is unqualified. Each of those
-/// produces a named refusal before any effect rather than an invented fact.
+/// the shipped adapters remain fail-closed: AX and WindowServer must agree on
+/// the inventory, capture must carry a valid display timestamp, and the menu
+/// surface is still unavailable. Every gap produces a named refusal before any
+/// effect rather than an invented fact.
 ///
 /// ## Never replay an uncertain effect
 ///
@@ -101,7 +101,7 @@ public final class AgentSeat {
     /// The identity and geometry the seat was fixed to, once a window is
     /// adopted. It is the guard of Core, and it performs no system call: the
     /// seat supplies the readings.
-    public private(set) var seatGuard: SeatGuard?
+    public internal(set) var seatGuard: SeatGuard?
 
     let eventChannel: AsyncStream<SeatEvent>.Continuation
 
@@ -124,7 +124,7 @@ public final class AgentSeat {
     private var adoptionInFlight = false
     var isTearingDown = false
     private var adoptionWaiters: [CheckedContinuation<Void, Never>] = []
-    private var stagedWindowNumber : Int?
+    var stagedWindowNumber         : Int?
     private var posted             : [PostedCommand] = []
     private var observer           : SeatObserver?
     private var observationSoFar   : SeatObservation?
@@ -169,6 +169,15 @@ public final class AgentSeat {
     /// nothing.
     var menuGeneration: UInt64 = 0
 
+    /// The selection generation the seat's own operating-window record is
+    /// already aligned with, so a fold follows an application-local transition
+    /// once and never follows the seat's own target change backwards.
+    var alignedSelectionGeneration: UInt64 = 0
+
+    /// The last reason a follow pass stood down, so the log names a reason when
+    /// it starts rather than on every tick of the cadence.
+    private var lastWindowFollowStandDown: String?
+
     var stateRevision   : UInt64 = 0
     var stateSubscribers: [ObjectIdentifier: SeatStateSubscription] = [:]
 
@@ -187,6 +196,7 @@ public final class AgentSeat {
     private var windowInventory = AppWindowInventory()
     private var windowFollowTask: Task<Void, Never>?
     private var windowFollowAgain = false
+    private var windowFollowPassInFlight = false
 
     /// Most recent focus episode, including a failed verification. Readiness
     /// describes the private facility separately from the normal input gate.
@@ -236,11 +246,11 @@ public final class AgentSeat {
     ///
     /// The observation collaborators have defaults that refuse: an
     /// `UnqualifiedObservationSource` captures nothing and an
-    /// `UnqualifiedContentClock` measures no age. That is deliberate, so a seat
-    /// built without an explicit capture path answers a named capability refusal
-    /// instead of reaching a path nobody configured. The surface reader defaults
-    /// to the shipped `SensingSurfaceReader`, which reads the window server and
-    /// reports honestly that the enumeration is not qualified.
+    /// `UnqualifiedContentClock` measures no age. A production `SeatHost`
+    /// explicitly supplies `MachAbsoluteContentClock`; direct composition without
+    /// an oracle still answers a named capability refusal. The surface reader defaults
+    /// to the shipped `SensingSurfaceReader`, which cross-checks AX with the
+    /// WindowServer and falls back to an incomplete on-screen pass on any gap.
     init(
         sensing              : any SeatSensing,
         placing              : any WindowPlacing,
@@ -505,6 +515,7 @@ public final class AgentSeat {
         _ window       : WindowReference,
         platform       : any InputPlatform = ChromiumPlatform(),
         title          : String = "",
+        restoringTo    : CGRect? = nil,
         within deadline: Duration = .seconds(2)
     ) async throws -> AdoptedWindow {
 
@@ -519,9 +530,10 @@ public final class AgentSeat {
 
         return try await adoptionTransaction(
             window,
-            platform: platform,
-            title   : title,
-            reason  : .detected
+            platform   : platform,
+            title      : title,
+            reason     : .detected,
+            restoringTo: restoringTo
         )
     }
 
@@ -622,10 +634,14 @@ public final class AgentSeat {
     }
 
     private func adoptionTransaction(
-        _ inbound: WindowReference,
-        platform : any InputPlatform,
-        title    : String,
-        reason   : SeatTargetChange
+        _ inbound  : WindowReference,
+        platform   : any InputPlatform,
+        title      : String,
+        reason     : SeatTargetChange,
+        /// What the window is owed on its return, when that is not the frame it
+        /// is being adopted from: a window shrunk to fit the Virtual Display is
+        /// adopted at its new size and still owes the person the old one.
+        restoringTo: CGRect? = nil
     ) async throws -> AdoptedWindow {
 
         // The fullscreen exit happens before anything is recorded, because the
@@ -663,7 +679,7 @@ public final class AgentSeat {
 
         let pending = AdoptedWindow(
             reference        : window,
-            originalFrame    : window.frame,
+            originalFrame    : restoringTo ?? window.frame,
             title            : title,
             originalDisplayID: homeDisplay,
             wasFullScreen    : wasFullScreen
@@ -678,7 +694,7 @@ public final class AgentSeat {
             let record = WindowRecord(
                 window  : AdoptedWindow(
                     reference        : placed,
-                    originalFrame    : window.frame,
+                    originalFrame    : restoringTo ?? window.frame,
                     title            : title,
                     originalDisplayID: homeDisplay,
                     wasFullScreen    : wasFullScreen
@@ -2110,17 +2126,32 @@ public final class AgentSeat {
     /// survive the contention is a wait long enough to hide a defect.
     func runWindowFollowPass() async {
 
-        guard windowWatch != nil, !isTearingDown, state.acceptsCommands,
-              !actionInFlight, !adoptionInFlight, transfersInFlight == 0,
-              focusRecovery?.isPaused != true,
-              !sensing.userMayBeSwitchingApplications
-        else { return }
+        if let standDown = windowFollowStandDown() {
+            // Once per distinct reason: the pass runs on a cadence, and a line
+            // per tick would bury the reason it is reporting.
+            if standDown != lastWindowFollowStandDown {
+                lastWindowFollowStandDown = standDown
+                Self.log.info("""
+                    the window follow pass stood down: \(standDown, privacy: .public)
+                    """)
+            }
+            return
+        }
+        lastWindowFollowStandDown = nil
 
+        // A driven application that is active used to stand the pass down. It
+        // was the wrong reading of the same evidence: the applications this
+        // seat drives activate themselves precisely when they open the window
+        // the pass exists to find, so the rule left every dialog and every
+        // window an agent's own Command opened outside the seat, on the
+        // person's display, for as long as it held focus. What tells the
+        // person's intent from the application's own is the physical evidence
+        // above — a click or an app-switch shortcut in the last third of a
+        // second — and that guard is unchanged, as are the hold, the action in
+        // flight, a teardown, and a focus recovery still restoring.
         let processes = session.processIdentities
-        guard !processes.isEmpty,
-              !processes.contains(where: { sensing.isActive(processID: $0.processID) == true })
-        else { return }
-
+        windowFollowPassInFlight = true
+        defer { windowFollowPassInFlight = false }
         windowFollowScanCount += 1
         let changes = windowInventory.changes(
             surfaces : sensing.windowSurfaces(
@@ -2150,6 +2181,45 @@ public final class AgentSeat {
                     }
             }
         }
+    }
+
+    /// Gives an observation request a bounded join point with the same window
+    /// follower that owns newly created windows. The first pass is a sighting;
+    /// only a second agreeing pass may transfer a candidate. Joining here keeps
+    /// assignment containment from racing ahead and asking its deliberately
+    /// unqualified direct effector to move a popup the seat can instead adopt,
+    /// confirm, register and later return through its existing lifecycle.
+    func settleWindowFollowingForObservation(until deadlineNanoseconds: UInt64) async {
+
+        guard windowWatch != nil,
+              await waitForWindowFollowPass(until: deadlineNanoseconds)
+        else { return }
+
+        await runWindowFollowPass()
+        guard windowInventory.hasPendingCandidate,
+              await waitForWindowFollowPass(until: deadlineNanoseconds)
+        else { return }
+
+        await Task.yield()
+        guard await waitForWindowFollowPass(until: deadlineNanoseconds)
+        else { return }
+        await runWindowFollowPass()
+        _ = await waitForWindowFollowPass(until: deadlineNanoseconds)
+    }
+
+    /// Waits for the one notification or observation pass that owns the
+    /// follower. Actor reentrancy lets another pass start at every `await`, so
+    /// the observation bridge joins before both reads and once more before it
+    /// returns to assignment folding.
+    private func waitForWindowFollowPass(until deadlineNanoseconds: UInt64) async -> Bool {
+
+        repeat {
+            guard !Task.isCancelled,
+                  DispatchTime.now().uptimeNanoseconds < deadlineNanoseconds
+            else { return false }
+            guard windowFollowPassInFlight else { return true }
+            await EventLoopWait.step(.milliseconds(10))
+        } while true
     }
 
     /// Brings one detected window onto the Virtual Display, or says why it
@@ -2219,15 +2289,31 @@ public final class AgentSeat {
         }
 
         let bounds = sensing.virtualDisplayBounds
-        guard body.width <= bounds.width, body.height <= bounds.height else {
-            refuseTransfer(fresh, .tooLarge)
-            return
+        var adopting = body
+        var owed     : CGRect?
+        if body.width > bounds.width || body.height > bounds.height {
+            // The numbers first: this is the one refusal a consumer answers by
+            // choosing a different display, and how much larger the window is
+            // is the whole of what it needs to know.
+            Self.log.info("""
+                window \(fresh.windowNumber, privacy: .public) is \
+                \(Int(body.width), privacy: .public)x\(Int(body.height), privacy: .public) \
+                and the virtual display is \
+                \(Int(bounds.width), privacy: .public)x\(Int(bounds.height), privacy: .public)
+                """)
+            guard let shrunk = shrinkToFit(fresh, body: body, within: bounds) else {
+                refuseTransfer(fresh, .tooLarge)
+                return
+            }
+            adopting = shrunk
+            owed     = body
         }
 
         do {
             _ = try await integrateDetectedWindow(
-                fresh.replacingFrame(body),
-                platform: defaultPlatform
+                fresh.replacingFrame(adopting),
+                platform   : defaultPlatform,
+                restoringTo: owed
             )
         } catch {
             refuseTransfer(fresh, Self.refusal(for: error))
@@ -2297,7 +2383,45 @@ public final class AgentSeat {
         }
     }
 
+    /// Shrinks a window that does not fit the Virtual Display and answers the
+    /// body it ends up with, nil when it still does not fit.
+    ///
+    /// The write is not the answer: an application with a minimum size accepts
+    /// it and keeps what it had, and one that refuses the attribute throws. Both
+    /// are the same conclusion here — this window cannot be given the seat — and
+    /// the window's own next reading is what says which happened. What the
+    /// person is owed is unaffected: the frame from before this call is recorded
+    /// as the adoption's original and written back on the return.
+    private func shrinkToFit(
+        _ window     : WindowReference,
+        body         : CGRect,
+        within bounds: CGRect
+    ) -> CGRect? {
+
+        let size = CGSize(
+            width : min(body.width, bounds.width),
+            height: min(body.height, bounds.height)
+        )
+        do { try placing.resize(window, to: size) }
+        catch {
+            Self.log.info("""
+                window \(window.windowNumber, privacy: .public) would not be resized: \
+                \(String(describing: error), privacy: .public)
+                """)
+            return nil
+        }
+        guard let current = ((try? placing.frame(of: window)) ?? nil),
+              current.width > 0, current.height > 0,
+              current.width <= bounds.width, current.height <= bounds.height
+        else { return nil }
+        return current
+    }
+
     private func refuseTransfer(_ window: WindowReference, _ reason: WindowTransferRefusal) {
+        Self.log.info("""
+            window \(window.windowNumber, privacy: .public) was not brought in: \
+            \(String(describing: reason), privacy: .public)
+            """)
         eventChannel.yield(
             .windowTransferRefused(
                 windowNumber: window.windowNumber,
@@ -2419,10 +2543,25 @@ public final class AgentSeat {
             changed: { [weak self] report in self?.focusRecoveryChanged(report) })
         focusRecovery = recovery
         driver.commandGate.setPreparation { [weak self, weak recovery] correlationID in
-            guard let self, let recovery else { throw InputFailure.inputPaused }
+            guard let self, let recovery else {
+                throw InputFailure.inputPaused([.recoveryUnavailable])
+            }
+            // Four separate facts, each named where it is read. They used to
+            // share one refusal, which told a consumer that the action had moved
+            // on and never which of the four moved it.
             @MainActor func checkAction() throws {
-                guard self.focusRecovery === recovery, self.actionInFlight, self.state == .acting,
-                      self.turns.current?.correlationID == correlationID else { throw InputFailure.inputPaused }
+                guard self.focusRecovery === recovery else {
+                    throw InputFailure.inputPaused([.recoveryReplaced])
+                }
+                guard self.actionInFlight else {
+                    throw InputFailure.inputPaused([.noActionInFlight])
+                }
+                guard self.state == .acting else {
+                    throw InputFailure.inputPaused([.seatNotActing])
+                }
+                guard self.turns.current?.correlationID == correlationID else {
+                    throw InputFailure.inputPaused([.turnChanged])
+                }
             }
             try checkAction()
             try await recovery.prepareBeforeAction()
@@ -2593,13 +2732,42 @@ public final class AgentSeat {
                 previousMatched = matches
                 if !matches, !requested {
                     requested = true
-                    do { try placing.move(window.reference, to: window.originalFrame.origin) }
+                    do { try restoreOriginalGeometry(of: window) }
                     catch { writeError = error }
                 }
             } else { previousMatched = false }
             await EventLoopWait.step(.milliseconds(100))
         }
         return (.refused, writeError)
+    }
+
+    /// Writes back what the seat changed, size before origin.
+    ///
+    /// A window shrunk to fit the Virtual Display is owed its old size as much
+    /// as its old place, and the return is verified against the whole frame, so
+    /// a restored origin alone would never match and the window would be given
+    /// back smaller than it was found. The size is written only when the window
+    /// reads differently from what was recorded: the ordinary adoption changes
+    /// no size and must post no size write.
+    private func restoreOriginalGeometry(of window: AdoptedWindow) throws {
+
+        let wanted = window.originalFrame.size
+        if let current = ((try? placing.frame(of: window.reference)) ?? nil),
+           !VirtualWindowPlacementCheck.framesMatch(
+               CGRect(origin: .zero, size: current.size),
+               CGRect(origin: .zero, size: wanted)
+           ) {
+            do { try placing.resize(window.reference, to: wanted) }
+            catch {
+                // Reported and not thrown: the move below is still worth making,
+                // and the return is decided by the readings either way.
+                Self.log.error("""
+                    window \(window.id, privacy: .public) would not be resized for its return: \
+                    \(String(describing: error), privacy: .public)
+                    """)
+            }
+        }
+        try placing.move(window.reference, to: window.originalFrame.origin)
     }
 
     /// A thumbnail outside the virtual display cannot expose its body's frame.
@@ -2660,7 +2828,7 @@ public final class AgentSeat {
         for _ in 0..<3 {
             guard sensing.physicalTopologyIsUnchanged else { return .refused }
             do {
-                if !previousMatched { try placing.move(window.reference, to: window.originalFrame.origin) }
+                if !previousMatched { try restoreOriginalGeometry(of: window) }
             } catch {
                 // The Window ID is momentarily not associable with an element,
                 // which happens while a display transition is in flight. It is
@@ -2790,10 +2958,31 @@ public final class AgentSeat {
         state = next
         eventChannel.yield(.seatStateChanged(from: previous, to: next, reason: reason))
 
+        // The reason is logged with the transition because a state change on its
+        // own says what happened and never why, and the two readings a consumer
+        // has to tell apart — an issue and a request — look identical without
+        // it. Issue cases carry no text of the person's.
         Self.log.info("""
             seat \(previous.rawValue, privacy: .public) -> \
-            \(next.rawValue, privacy: .public)
+            \(next.rawValue, privacy: .public), \
+            \(String(describing: reason), privacy: .public)
             """)
+    }
+
+    /// Why a follow pass is not running now, nil when it is. Naming them is what
+    /// turns "the window was never brought in" into a fact with a cause.
+    private func windowFollowStandDown() -> String? {
+        if windowWatch == nil                        { return "there is no window watch" }
+        if isTearingDown                             { return "the seat is tearing down" }
+        if !state.acceptsCommands                    { return "the seat is \(state.rawValue)" }
+        if actionInFlight                            { return "a Command is in flight" }
+        if adoptionInFlight                          { return "an adoption is in flight" }
+        if transfersInFlight != 0                    { return "a transfer is in flight" }
+        if windowFollowPassInFlight                  { return "a pass is already running" }
+        if focusRecovery?.isPaused == true           { return "focus recovery is restoring" }
+        if sensing.userMayBeSwitchingApplications    { return "the person's own intent is recent" }
+        if session.processIdentities.isEmpty         { return "the seat holds no process" }
+        return nil
     }
 
     /// The recovery episode: wait for whatever is in flight, then read the

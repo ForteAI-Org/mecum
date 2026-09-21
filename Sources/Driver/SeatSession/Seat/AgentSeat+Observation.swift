@@ -83,8 +83,9 @@ extension AgentSeat {
     func foldCurrentReading(at now: UInt64 = DispatchTime.now().uptimeNanoseconds) {
 
         guard assignmentKit.lifecycle.isAssigned else { return }
-        let reading = surfaceReader.read(ownedBy: session.processIDs)
-        let claims  = surfaceReader.selectionClaims(for: reading)
+        let snapshot = surfaceReader.snapshot(ownedBy: session.processIDs)
+        let reading  = snapshot.inventory
+        let claims   = snapshot.claims
 
         selectionKit.ingest(
             reading,
@@ -97,6 +98,58 @@ extension AgentSeat {
         for claim in claims.modals       { selectionKit.declareModal(claim) }
         for claim in claims.visibilities { selectionKit.observeVisibility(claim) }
         for claim in claims.recency      { selectionKit.noteRecency(claim) }
+
+        // A window the application stopped scoping is gone even though the
+        // window server still shows a surface for it. Without this the member
+        // stays absent-uncertain forever, containment never verifies again, and
+        // the seat is suspended on a window nobody can bring back.
+        for identity in snapshot.withdrawnByApplication {
+            AgentSeat.observationLog.info("""
+                the application withdrew window \(identity.windowNumber, privacy: .public),                 which the window server still shows: confirming its closure
+                """)
+            noteSurfaceGone(identity.windowNumber, evidence: .applicationWithdrewTheWindow)
+        }
+        synchronizeSessionTargetWithSelection()
+    }
+
+    /// Keeps the seat's operating-window record aligned with a qualified
+    /// application-local selection transition. This changes no placement: the
+    /// selected window is already a held record, and a withdrawn modal must not
+    /// be staged merely to stop targeting it.
+    ///
+    /// Only a selection generation this seat has not aligned yet moves the
+    /// record. A disagreement the seat itself just created is the other
+    /// direction of the same relation: the seat moves its target first and asks
+    /// the nucleus after, and a refused explicit selection leaves the previous
+    /// surface selected at the generation already aligned. Following it back
+    /// would undo the consumer's own target change and strand the selection the
+    /// gate reports on. A transition that is still waiting for its window to be
+    /// adopted keeps its generation unaligned and is applied at a later fold.
+    private func synchronizeSessionTargetWithSelection() {
+
+        guard let selected = selectionKit.selected else { return }
+        let generation = selectionKit.selectionGeneration
+        guard session.currentTargetNumber != selected.surface.windowNumber else {
+            alignedSelectionGeneration = generation
+            return
+        }
+        guard generation != alignedSelectionGeneration,
+              let record = session[selected.surface.windowNumber],
+              record.window.reference.identity == selected.surface
+        else { return }
+
+        alignedSelectionGeneration = generation
+        session.makeCurrent(selected.surface.windowNumber)
+        if record.isStaged { stagedWindowNumber = selected.surface.windowNumber }
+        if let baseline = seatGuard {
+            seatGuard = SeatGuard(
+                target       : record.window.reference,
+                displayID    : baseline.displayID,
+                displayBounds: baseline.displayBounds
+            )
+        }
+        observationIssuer.invalidate(.targetChanged)
+        outstandingGeometry = nil
     }
 
     /// Folds one more reading through both nuclei on request.
@@ -121,15 +174,23 @@ extension AgentSeat {
                 the explicit selection was refused: \(String(describing: refusal), privacy: .public)
                 """)
         }
+        // Both sides have just been reconciled by the seat itself, whichever way
+        // the nucleus answered. Recording the generation here is what stops the
+        // next fold from following this selection back onto the record the
+        // consumer moved away from.
+        alignedSelectionGeneration = selectionKit.selectionGeneration
     }
 
     /// Records that a surface the seat held is gone, on the seat's own proof of
     /// it: an explicit release or a destruction the recovery established. An
     /// absence from a reading is not this, and does not reach here.
-    func noteSurfaceGone(_ windowNumber: Int) {
+    func noteSurfaceGone(
+        _ windowNumber: Int,
+        evidence      : ClosureEvidence = .windowServerConfirmedDestruction
+    ) {
         selectionKit.confirmClosure(
             of      : windowNumber,
-            evidence: .windowServerConfirmedDestruction
+            evidence: evidence
         )
         observationIssuer.invalidate(.targetChanged)
         outstandingGeometry = nil
@@ -184,7 +245,32 @@ extension AgentSeat {
         if let context = menuContext {
             return .failure(.menuInteractionActive(parent: context.parent))
         }
+        let deadlineNanoseconds = DispatchTime.now().uptimeNanoseconds
+            &+ observationProfile.captureDeadlineNanoseconds
         foldCurrentReading()
+
+        // A surface first seen by this request needs the second reading the
+        // assignment nucleus requires before either selection or containment
+        // may trust it. First let the owned window follower settle an outside
+        // candidate through the adoption lifecycle; this also repairs a race in
+        // which an earlier assignment fold reached its unqualified direct
+        // effector before the follower. Then fold only once more inside the
+        // capture request's existing deadline. A changing or incomplete
+        // inventory still reaches the ordinary fail-closed gate.
+        if selectionNeedsConfirmingReading() {
+            await settleWindowFollowingForObservation(until: deadlineNanoseconds)
+            await Task.yield()
+            guard !Task.isCancelled else {
+                return .failure(.captureFailed(reason: String(describing: CancellationError())))
+            }
+            if let context = menuContext {
+                return .failure(.menuInteractionActive(parent: context.parent))
+            }
+            guard DispatchTime.now().uptimeNanoseconds < deadlineNanoseconds else {
+                return .failure(.captureDeadlineExpired(attemptsSpent: 0))
+            }
+            foldCurrentReading()
+        }
 
         guard let assignment = assignmentKit.lifecycle.current else {
             return .failure(.notAssigned)
@@ -219,10 +305,38 @@ extension AgentSeat {
             role               : .ordinaryTarget,
             instance           : assignment.instance,
             selectionGeneration: selected.generation,
-            deadlineNanoseconds: DispatchTime.now().uptimeNanoseconds
-                &+ observationProfile.captureDeadlineNanoseconds,
+            deadlineNanoseconds: deadlineNanoseconds,
             isMenu             : false
         )
+    }
+
+    /// True when one more reading can establish evidence that deliberately
+    /// requires two agreeing observations, or when the owned follower can
+    /// replace the assignment nucleus's refused direct move. Other permanent
+    /// qualification gaps and spent budgets reach the caller's normal refusal.
+    private func selectionNeedsConfirmingReading() -> Bool {
+
+        guard case .suspended(_, let causes) = selectionKit.operability() else { return false }
+        return causes.contains { cause in
+            switch cause {
+                case .noEligibleTarget, .selectedSurfaceNotVerified, .selectedSurfaceAbsent:
+                    true
+                case .containmentNotVerified(let blocks):
+                    blocks.contains { block in
+                        switch block {
+                            case .surfaceUnverified, .surfaceOutsideSeat,
+                                 .inventoryNotQualified:
+                                true
+                            case .effectRefused(_, let refusal):
+                                if case .adapterNotQualified = refusal { true } else { false }
+                            default:
+                                false
+                        }
+                    }
+                default:
+                    false
+            }
+        }
     }
 
     /// True while this generation is the interaction the seat is scoping by.

@@ -155,6 +155,18 @@ nonisolated public struct FocusRecoverySnapshot: Sendable {
         return !owned.isEmpty && owned.allSatisfy { virtualBounds.contains($0.frame) }
     }
 
+    /// The first on-screen window of the process that is not inside the virtual
+    /// display, so a refusal names the window it refused on instead of only
+    /// reporting that one exists. Nil when every window is contained, when the
+    /// process has none, and when the snapshot does not cover it: those are
+    /// different situations and none of them is this one.
+    func firstWindowOutsideVirtualDisplay(of processID: Int32) -> WindowReference? {
+        guard covers(processID) else { return nil }
+        return windows.first {
+            $0.processID == processID && !$0.frame.isEmpty && !virtualBounds.contains($0.frame)
+        }
+    }
+
     func containsUserWindow(_ destination: WindowReference, excluding targets: [WindowReference]) -> Bool {
         guard covers(destination.processID),
               !targets.contains(where: { $0.processID == destination.processID }),

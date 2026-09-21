@@ -5,6 +5,7 @@
 //  Created by Eliomar Alejandro Rodriguez Ferrer on 16/09/2026.
 //
 
+import Darwin
 import SeatCore
 
 /// ContentClockQualifying answers how old the **content** of a sample is on the
@@ -32,15 +33,69 @@ nonisolated public protocol ContentClockQualifying: Sendable {
     func contentAge(of frame: SeatFrame, atNanoseconds now: UInt64) -> FrameContentAge
 }
 
+/// Converts ScreenCaptureKit's WindowServer display timestamp from Mach absolute
+/// ticks into the nanosecond uptime clock used by `DispatchTime`.
+///
+/// The SDK contract for `SCStreamFrameInfoDisplayTime` names Mach absolute time,
+/// and `DispatchTime.uptimeNanoseconds` is that same clock after the conversion
+/// described by `mach_timebase_info`. Missing, zero, overflowing or future
+/// timestamps remain explicit refusals.
+nonisolated public struct MachAbsoluteContentClock: ContentClockQualifying {
+
+    private let numerator  : UInt64
+    private let denominator: UInt64
+
+    public init() {
+        var timebase = mach_timebase_info_data_t()
+        let status = mach_timebase_info(&timebase)
+        if status == KERN_SUCCESS, timebase.numer > 0, timebase.denom > 0 {
+            numerator   = UInt64(timebase.numer)
+            denominator = UInt64(timebase.denom)
+        } else {
+            numerator   = 0
+            denominator = 0
+        }
+    }
+
+    package init(numerator: UInt32, denominator: UInt32) {
+        self.numerator   = UInt64(numerator)
+        self.denominator = UInt64(denominator)
+    }
+
+    public var isQualified: Bool { numerator > 0 && denominator > 0 }
+
+    public func contentAge(of frame: SeatFrame, atNanoseconds now: UInt64) -> FrameContentAge {
+        guard isQualified else { return .unknown(.clockNotQualified) }
+        guard let displayTime = frame.displayTime else { return .unknown(.timestampMissing) }
+        guard displayTime > 0,
+              let displayedAt = nanoseconds(fromMachTicks: displayTime)
+        else { return .unknown(.timestampMalformed) }
+        guard displayedAt <= now else { return .unknown(.timestampNotMonotonic) }
+        return .qualified(nanoseconds: now - displayedAt)
+    }
+
+    /// Dividing first keeps ordinary long uptimes out of the overflowing
+    /// intermediate `ticks * numerator` while retaining the fractional part.
+    private func nanoseconds(fromMachTicks ticks: UInt64) -> UInt64? {
+        guard denominator > 0 else { return nil }
+        let whole = ticks / denominator
+        let remainder = ticks % denominator
+        let (wholeNanoseconds, wholeOverflow) = whole.multipliedReportingOverflow(by: numerator)
+        guard !wholeOverflow else { return nil }
+        let (fractionProduct, fractionOverflow) = remainder.multipliedReportingOverflow(by: numerator)
+        guard !fractionOverflow else { return nil }
+        let fractionNanoseconds = fractionProduct / denominator
+        let (nanoseconds, sumOverflow) = wholeNanoseconds.addingReportingOverflow(fractionNanoseconds)
+        return sumOverflow ? nil : nanoseconds
+    }
+}
+
 /// UnqualifiedContentClock is the shipped conformer, and it answers unknown for
 /// every sample.
 ///
-/// That is the honest state of this system: no traced oracle relates
-/// ScreenCaptureKit's sample clock to `mach_absolute_time` here, so a Frame's
-/// content age cannot be established and the finite age limit cannot be
-/// evaluated. Every Command carrying such an observation is refused before any
-/// effect, with `frameAgeUnknown`. Replacing this type with one that subtracts
-/// `receivedAt` would not qualify the capability, it would only hide the gap.
+/// It remains the default for a caller that composes no oracle. Production seats
+/// explicitly compose `MachAbsoluteContentClock`; substituting callback arrival
+/// time is still forbidden because it measures delivery rather than content.
 nonisolated public struct UnqualifiedContentClock: ContentClockQualifying {
 
     public init() {}

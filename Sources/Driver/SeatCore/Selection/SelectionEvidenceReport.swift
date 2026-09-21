@@ -34,9 +34,9 @@ nonisolated package enum EvidenceVerdict: String, Sendable, Equatable {
 /// ## Why the report is a value in the sources
 ///
 /// The nucleus accepts a conclusion only from a provenance that can carry it,
-/// and no adapter on this build produces any of those provenances. That fact is
-/// what makes the algorithms exercisable offline and the native path inactive,
-/// so a reader of the code has to be able to see it without running anything.
+/// and the report names which shipped adapter produces each provenance. Provider
+/// presence is not a Live verdict, so a reader of the code can distinguish an
+/// implemented path from one exercised against real applications.
 ///
 /// ## What it does not say
 ///
@@ -56,8 +56,8 @@ nonisolated package struct SelectionEvidenceReport: Sendable, Equatable {
         /// conclusion belongs to another nucleus.
         package let acceptedProvenance: SelectionProvenance?
 
-        /// The adapter producing that provenance on this build. Nil everywhere,
-        /// which is the point of the row.
+        /// The adapter producing that provenance on this build, or nil when the
+        /// build still has no native source for it.
         package let nativeProvider: String?
 
         package let nativeVerdict: EvidenceVerdict
@@ -91,63 +91,64 @@ nonisolated package struct SelectionEvidenceReport: Sendable, Equatable {
         rows.first { $0.conclusion == conclusion }
     }
 
-    /// The conclusions no adapter on this build can produce evidence for. Every
-    /// conclusion is in it, and each one blocks the activation of the adapter
-    /// that would depend on it.
+    /// The conclusions no adapter on this build can produce evidence for.
     package var conclusionsWithoutNativeProvider: [SelectionConclusion] {
         rows.filter { $0.nativeProvider == nil }.map(\.conclusion)
     }
 
-    /// The state of this build: the policy is exercised offline against written
-    /// evidence, and no native proof of any selection signal has been run.
+    /// The state of this build. `CrossCheckedSurfaceReader` provides AX role,
+    /// parentage, modality, visibility and the unique focused/main application
+    /// window joined to an attested WindowServer identity. The transition filter
+    /// turns only changes in that current-window state into recency. Their Live
+    /// matrix is deliberately still `notRun`.
     package static let current = SelectionEvidenceReport(rows: [
         Row(
             conclusion        : .surfaceRole,
             acceptedProvenance: .qualifiedRoleAttestation,
-            nativeProvider    : nil,
+            nativeProvider    : "CrossCheckedSurfaceReader",
             nativeVerdict     : .notRun,
-            offlineScope      : "Written role claims decide eligibility. Nothing here reads a role "
-                + "from a running application, and a window level is not a role."
+            offlineScope      : "AXRole and AXSubrole are joined to the exact WindowServer identity; "
+                + "unknown subroles remain unread instead of being inferred from a level."
         ),
         Row(
             conclusion        : .parentRelation,
             acceptedProvenance: .qualifiedParentAttestation,
-            nativeProvider    : nil,
+            nativeProvider    : "CrossCheckedSurfaceReader",
             nativeVerdict     : .notRun,
-            offlineScope      : "Written parent claims decide the return of a closing dialog. No "
-                + "parentage is derived from titles, levels or coinciding frames."
+            offlineScope      : "AXWindow binds sheets and drawers to their containing attested "
+                + "window; ordinary top-level self references are discarded."
         ),
         Row(
             conclusion        : .modalRelation,
             acceptedProvenance: .qualifiedModalAttestation,
-            nativeProvider    : nil,
+            nativeProvider    : "CrossCheckedSurfaceReader",
             nativeVerdict     : .notRun,
-            offlineScope      : "Written modal claims decide precedence and blocking. General "
-                + "coverage of modal relations on macOS is not established here."
+            offlineScope      : "AXModal uses window scope when an AX parent is attested and application "
+                + "scope otherwise. An unreadable modal attribute suspends input."
         ),
         Row(
             conclusion        : .frontOrder,
             acceptedProvenance: .qualifiedFrontOrderAttestation,
-            nativeProvider    : nil,
+            nativeProvider    : "CrossCheckedSurfaceReader + ApplicationTargetTransitionFilter",
             nativeVerdict     : .notRun,
-            offlineScope      : "Written instants order the qualified events. The order of the "
-                + "calls, the member order and the Window IDs are never an order."
+            offlineScope      : "A unique AX focused window, falling back to a unique AX main window, "
+                + "supplies application-local order only after every AX-scoped window is attested."
         ),
         Row(
             conclusion        : .raiseProvenance,
             acceptedProvenance: .qualifiedRaiseAttribution,
-            nativeProvider    : nil,
+            nativeProvider    : "CrossCheckedSurfaceReader + ApplicationTargetTransitionFilter",
             nativeVerdict     : .notRun,
-            offlineScope      : "Written raise origins keep the kit's own placements out of the "
-                + "recency. Telling them apart on a real system is not shown."
+            offlineScope      : "AX focused/main state is application semantic state, not WindowServer "
+                + "member order or a placement issued by the kit."
         ),
         Row(
             conclusion        : .visibilityState,
             acceptedProvenance: .qualifiedVisibilityAttestation,
-            nativeProvider    : nil,
+            nativeProvider    : "CrossCheckedSurfaceReader",
             nativeVerdict     : .notRun,
-            offlineScope      : "Written visibility states separate established hiding and "
-                + "minimising from an uncertain reading and from an absence."
+            offlineScope      : "AXMinimized, application hiding and the WindowServer on-screen state "
+                + "separate visible, hidden, minimised and uncertain readings."
         ),
         Row(
             conclusion        : .helperRelation,

@@ -84,9 +84,18 @@ final class UserFocusRecovery {
     /// including menu selection and each command of a sequence. It never replays input.
     func prepareBeforeAction() async throws {
         try Task.checkCancellation()
-        guard allowed, !isPaused else { throw InputFailure.inputPaused }
-        invalidatePreparation()
-        guard sensing.fenceIsActive else { throw InputFailure.inputPaused }
+        guard allowed else { throw InputFailure.inputPaused([.holdEnded]) }
+        guard !isPaused else { throw InputFailure.inputPaused([.activationUnverified]) }
+        // Supersede what is in flight, but do not discard what is already held.
+        // This call rebuilds a preparation only when the person's application is
+        // the front one, and a Command taken while the target is in front cannot
+        // meet that: a dialog the previous Command opened has already activated
+        // it. Dropping the held preparation there disarmed the very activation
+        // it was made for, and the seat then waited for a person who had done
+        // nothing. What keeps the kept evidence honest is unchanged: the one
+        // second lifetime, and every fact re-checked at the activation.
+        supersedePreparation()
+        guard sensing.fenceIsActive else { throw InputFailure.inputPaused([.fenceInactive]) }
         guard !attempted else { return }
         let start = now()
         rememberUserWindow()
@@ -101,7 +110,9 @@ final class UserFocusRecovery {
         let processIDs = Set(targets.map(\.processID)).union([destination.processID])
         let snapshot = await sensing.prepareFocusRecoverySnapshot(for: processIDs)
         try Task.checkCancellation()
-        guard allowed, !isPaused, sensing.fenceIsActive else { throw InputFailure.inputPaused }
+        guard allowed else { throw InputFailure.inputPaused([.holdEnded]) }
+        guard !isPaused else { throw InputFailure.inputPaused([.activationUnverified]) }
+        guard sensing.fenceIsActive else { throw InputFailure.inputPaused([.fenceInactive]) }
         guard generation == preparationGeneration,
               now() &- start <= Self.preparationLifetimeNanoseconds,
               sensing.frontmostProcessID == destination.processID,
@@ -112,8 +123,23 @@ final class UserFocusRecovery {
                                   identityDuration: identityDuration)
     }
 
-    private func invalidatePreparation() {
+    private static func milliseconds(_ nanoseconds: UInt64) -> String {
+        String(format: "%.1f ms", Double(nanoseconds) / 1_000_000)
+    }
+
+    private static func windowNumbers(_ windows: [WindowReference]) -> String {
+        windows.isEmpty ? "none" : windows.map { "\($0.windowNumber)" }.joined(separator: ", ")
+    }
+
+    /// Makes a preparation in flight stale without discarding the one in hand.
+    private func supersedePreparation() {
         preparationGeneration &+= 1
+    }
+
+    /// Supersedes and drops: the held evidence is about a destination, a hold or
+    /// a user window that is no longer the one this recovery is about.
+    private func invalidatePreparation() {
+        supersedePreparation()
         prepared = nil
     }
 
@@ -176,9 +202,15 @@ final class UserFocusRecovery {
         timing.pauseAndPublicationNanoseconds = checkpoint &- started
         let action = prepared
         invalidatePreparation()
-        let fresh = !attempted && action.map {
-            detected &- $0.started <= Self.preparationLifetimeNanoseconds && $0.targets == targets
-        } == true
+        // The four ways a preparation can fail to arm this activation are four
+        // different situations with four different answers, so each one is
+        // named. They used to share one sentence, which told a consumer that
+        // something was missing and never which thing.
+        let spent          = attempted
+        let age            = action.map { detected &- $0.started }
+        let expired        = age.map { $0 > Self.preparationLifetimeNanoseconds } ?? false
+        let targetsChanged = action.map { $0.targets != targets } ?? false
+        let fresh = !spent && action != nil && !expired && !targetsChanged
         let snapshot = fresh ? action?.snapshot : nil
         timing.actionPreparationNanoseconds = action?.duration ?? 0
         timing.preparedIdentityNanoseconds = action?.identityDuration ?? 0
@@ -234,7 +266,21 @@ final class UserFocusRecovery {
             if let refusal { emit(.waitingForUser, detail: refusal) }
         } else {
             let reason: String
-            if !fresh { reason = "No fresh prepared action or attempt available" }
+            if !fresh {
+                if spent {
+                    reason = "The one automatic request of this hold was already spent"
+                } else if action == nil {
+                    reason = "No prepared action was held when this activation arrived"
+                } else if expired {
+                    reason = "The prepared action expired: "
+                        + "\(Self.milliseconds(age ?? 0)) old, and the limit is "
+                        + "\(Self.milliseconds(Self.preparationLifetimeNanoseconds))"
+                } else {
+                    reason = "The adopted windows changed after the preparation: prepared "
+                        + "\(Self.windowNumbers(action?.targets ?? [])), now "
+                        + "\(Self.windowNumbers(targets))"
+                }
+            }
             else if !environmentValid {
                 let fallen = [
                     topologyValid  ? nil : "the prepared snapshot's topology",
@@ -249,7 +295,18 @@ final class UserFocusRecovery {
                 reason = "Focus recovery evidence is invalid: " + fallen.joined(separator: ", ")
             }
             else if !adoptedValid { reason = "An adopted window is absent or outside the virtual display" }
-            else if !visibleValid { reason = "A prepared target window is outside the virtual display" }
+            else if !visibleValid {
+                // Which window it was is the whole diagnosis: a thumbnail the
+                // window manager keeps on the person's display reads exactly
+                // like a target window that was never moved.
+                let outside = targets.map(\.processID).compactMap {
+                    snapshot?.firstWindowOutsideVirtualDisplay(of: $0)
+                }.first
+                reason = outside.map {
+                    "A prepared target window is outside the virtual display: Window ID "
+                        + "\($0.windowNumber) of PID \($0.processID) at \($0.frame)"
+                } ?? "The prepared snapshot has no window of a target process"
+            }
             else if !destinationValid { reason = "The prepared user window is absent or invalid" }
             else if !frontMatches { reason = "The front process no longer matches the activating target" }
             else { reason = "Recent user app-switch intent" }
@@ -276,6 +333,14 @@ final class UserFocusRecovery {
                 timer?.invalidate()
                 timer = nil
                 isPaused = false
+                // The episode is over, so its one automatic request is over with
+                // it. The budget is one request per activation, not one per
+                // hold: an application that activates itself twice in one hold
+                // is one dialog opening and then another, and the second had no
+                // way to ask. A hold spans a whole run in a consumer that holds
+                // the seat across Commands, which made the second activation of
+                // that run wait for a person who may not be there.
+                attempted = false
                 gate.resume(.focusRecovery)
                 emit(userSelectedDestination ? .userTookControl : .restored)
                 return

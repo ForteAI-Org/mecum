@@ -11,10 +11,9 @@ import Testing
 /// What each source of evidence is allowed to decide, and what this build has
 /// qualified natively.
 ///
-/// The second half is the important one: every native verdict is `notRun`, and
-/// no suite in this package changes that. A controlled double handing in a
-/// qualified provenance exercises the algorithm downstream of a signal; it is
-/// not evidence that the signal can be read on macOS.
+/// Every native verdict remains `notRun` until the final Live campaign. Provider
+/// presence is separate: the cross-checked reader supplies the application
+/// window conclusions, while helper attribution remains its own missing source.
 @Suite("The evidence behind a selection")
 struct SelectionEvidenceTests {
 
@@ -63,13 +62,13 @@ struct SelectionEvidenceTests {
         #expect(qualifying == [.appeared, .reappeared, .returnedToFront])
     }
 
-    @Test("The report covers every conclusion and claims no native provider")
-    func noNativeSignalIsQualified() {
+    @Test("The report separates implemented providers from pending Live verdicts")
+    func nativeProvidersRemainUnverified() {
 
         let report = SelectionEvidenceReport.current
 
         #expect(report.rows.map(\.conclusion) == SelectionConclusion.allCases)
-        #expect(report.conclusionsWithoutNativeProvider == SelectionConclusion.allCases)
+        #expect(report.conclusionsWithoutNativeProvider == [.helperRelation])
         #expect(report.rows.allSatisfy { $0.nativeVerdict == .notRun })
         #expect(report.rows.allSatisfy { !$0.offlineScope.isEmpty })
     }
@@ -92,7 +91,6 @@ struct SelectionEvidenceTests {
         let selection = SeatTargetSelectionKit(assignment: kit)
 
         #expect(!kit.effectorQualification.mayAct)
-        #expect(selection.evidenceReport.conclusionsWithoutNativeProvider.count
-            == SelectionConclusion.allCases.count)
+        #expect(selection.evidenceReport.conclusionsWithoutNativeProvider == [.helperRelation])
     }
 }

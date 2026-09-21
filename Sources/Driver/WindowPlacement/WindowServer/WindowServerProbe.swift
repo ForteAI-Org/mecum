@@ -308,6 +308,69 @@ nonisolated public enum WindowServerProbe {
         }
     }
 
+    /// The WindowServer rows matching application windows already named by AX,
+    /// including hidden and minimised windows, with every matched row
+    /// identity-attested.
+    ///
+    /// This is deliberately separate from `surfaces(ownedBy:)`: `.optionAll`
+    /// contains internal surfaces that were never shown and is not by itself
+    /// evidence that a row is a user-facing application window. `AXWindows`
+    /// supplies the positive scope; this pass independently attests every row
+    /// in that scope. Extra rows of the same process are not parsed or promoted
+    /// into assignment membership merely because their PID matches.
+    ///
+    /// A requested row that is absent remains absent for the caller to reject.
+    /// A requested row that is present but cannot be parsed or attested fails
+    /// the whole reading rather than silently shrinking the AX inventory.
+    public static func surfaces(
+        matching windowNumbersByProcess: [Int32: Set<Int>],
+        allowUnvalidatedBuild: Bool = false,
+        table                : SymbolTable = .shared
+    ) -> [WindowSurface]? {
+
+        guard !windowNumbersByProcess.isEmpty else { return [] }
+
+        let gate = FacilityGate.current(
+            facility             : .windowIdentity,
+            allowUnvalidatedBuild: allowUnvalidatedBuild,
+            table                : table
+        )
+        guard let descriptions = CGWindowListCopyWindowInfo(
+            [.optionAll],
+            kCGNullWindowID
+        ) as? [[String: Any]] else { return nil }
+
+        var result: [WindowSurface] = []
+        for description in descriptions {
+            guard let processID = owner(of: description),
+                  let requestedNumbers = windowNumbersByProcess[processID],
+                  let windowNumber = number(of: description),
+                  requestedNumbers.contains(windowNumber)
+            else {
+                continue
+            }
+            guard let frame = frame(of: description),
+                  let reference = reference(
+                      processID       : processID,
+                      windowNumber    : windowNumber,
+                      frame           : frame,
+                      table           : table,
+                      validatedBy     : gate
+                  )
+            else { return nil }
+
+            result.append(
+                WindowSurface(
+                    reference: reference,
+                    level    : layer(of: description) ?? 0,
+                    isVisible: reportedOnScreen(description) == true && alpha(of: description) > 0
+                        && frame.width > 0 && frame.height > 0
+                )
+            )
+        }
+        return result
+    }
+
     /// The frontmost normal-layer window whose frame reaches a display. It is
     /// how a Seat Host asks which window is on stage on the Virtual Display
     /// without asking Stage Manager anything.
@@ -421,6 +484,13 @@ nonisolated public enum WindowServerProbe {
     /// row without the key is not evidence that the server hid it.
     private static func isOnScreen(_ description: [String: Any]) -> Bool {
         (description[kCGWindowIsOnscreen as String] as? NSNumber)?.boolValue ?? true
+    }
+
+    /// `.optionAll` does not itself establish that a row is on screen, so an
+    /// absent flag stays false on that path instead of inheriting the
+    /// on-screen-list default above.
+    private static func reportedOnScreen(_ description: [String: Any]) -> Bool? {
+        (description[kCGWindowIsOnscreen as String] as? NSNumber)?.boolValue
     }
 
     private static func frame(of description: [String: Any]) -> CGRect? {

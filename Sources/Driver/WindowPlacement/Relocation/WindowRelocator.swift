@@ -63,6 +63,22 @@ nonisolated public enum WindowRelocator {
         log.debug("moved window \(window.windowNumber, privacy: .public)")
     }
 
+    /// Writes `AXSize` on the window behind this Window ID.
+    ///
+    /// Like `move` it does not wait and proves nothing: an application with a
+    /// minimum size accepts the write and keeps the size it had, so the caller
+    /// reads the window again and decides. It exists for one case, the window
+    /// an application opens larger than the Virtual Display, where the
+    /// alternative to shrinking it is leaving it on the person's screen.
+    public static func resize(_ window: WindowReference, to size: CGSize) throws {
+        let element = try windowElement(for: window)
+        try writeSize(size, to: element)
+        log.debug("""
+            resized window \(window.windowNumber, privacy: .public) to \
+            \(Int(size.width), privacy: .public)x\(Int(size.height), privacy: .public)
+            """)
+    }
+
     /// Reads only AXPosition and AXSize of the exact window. The body can have
     /// returned while WindowServer exposes its Stage Manager thumbnail; this
     /// reading supports return verification and never substitutes for staging.
@@ -443,6 +459,31 @@ nonisolated public enum WindowRelocator {
         )
         guard writeResult == .success else {
             throw DisplayFailure.attributeWriteFailed(attribute: "AXPosition", code: writeResult)
+        }
+    }
+
+    private static func writeSize(_ size: CGSize, to element: AXUIElement) throws {
+        var isSettable = DarwinBoolean(false)
+        let settableResult = AXUIElementIsAttributeSettable(
+            element,
+            kAXSizeAttribute as CFString,
+            &isSettable
+        )
+        guard settableResult == .success, isSettable.boolValue else {
+            throw DisplayFailure.attributeNotSettable("AXSize")
+        }
+
+        var requested = size
+        guard let value = AXValueCreate(.cgSize, &requested) else {
+            throw DisplayFailure.attributeNotSettable("AXSize")
+        }
+        let writeResult = AXUIElementSetAttributeValue(
+            element,
+            kAXSizeAttribute as CFString,
+            value
+        )
+        guard writeResult == .success else {
+            throw DisplayFailure.attributeWriteFailed(attribute: "AXSize", code: writeResult)
         }
     }
 

@@ -43,8 +43,10 @@ nonisolated public enum InputFailure: Error, Sendable, Equatable {
     /// events would carry the person's own state, so there is no fallback.
     case eventSourceUnavailable
 
-    /// Focus recovery has paused this driver before this command was posted.
-    case inputPaused
+    /// Input was not admitted before this command was posted. The reasons are
+    /// the ones the refusing reading held, sorted, and never empty: a pause with
+    /// nothing named is a pause nobody can act on.
+    case inputPaused([InputPauseReason])
 
     // MARK: The target
 

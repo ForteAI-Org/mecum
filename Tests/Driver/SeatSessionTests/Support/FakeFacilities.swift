@@ -234,9 +234,11 @@ final class FakeSensing: SeatSensing, @unchecked Sendable {
     /// How many passes the window watch has really made, for a test that wants
     /// to know a stopped watch stopped reading rather than stopped acting.
     private(set) var surfaceReadCount = 0
+    var onSurfaceRead: (() -> Void)?
 
     func windowSurfaces(ownedBy processIDs: Set<Int32>) -> [WindowSurface]? {
         surfaceReadCount += 1
+        onSurfaceRead?()
         guard let surfaces else { return nil }
         return surfaces.filter { processIDs.contains($0.reference.processID) }
     }
@@ -296,6 +298,24 @@ final class FakePlacing: WindowPlacing, @unchecked Sendable {
         if let moveError { throw moveError }
         onMove?(origin)
         if let afterMoveError { throw afterMoveError }
+    }
+
+    /// Every size written, in order, with the window it was written on.
+    var resizes: [(window: Int, size: CGSize)] = []
+
+    /// An application that refuses the size attribute.
+    var resizeError: (any Error)?
+
+    /// What the application really ends up at, when that is not what was asked:
+    /// a window with a minimum size keeps its own.
+    var resizeResult: CGSize?
+
+    func resize(_ window: WindowReference, to size: CGSize) throws {
+        resizes.append((window.windowNumber, size))
+        if let resizeError { throw resizeError }
+        let settled = resizeResult ?? size
+        let origin  = (bodyFrames[window.windowNumber] ?? bodyFrame)?.origin ?? window.frame.origin
+        bodyFrames[window.windowNumber] = CGRect(origin: origin, size: settled)
     }
 
     func stage(

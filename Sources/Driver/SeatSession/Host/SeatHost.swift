@@ -254,9 +254,8 @@ public final class SeatHost {
         }
 
         // The observation source is the shipped adapter over the capture module.
-        // It supports a window Still and refuses the menu surface and the content
-        // clock, which are the two abilities this build has no evidence for, so a
-        // seat made here observes and still refuses input with the gap named.
+        // It supports a window Still and a content clock tied to the documented
+        // WindowServer Mach timestamp. The menu surface remains unqualified.
         let created = AgentSeat(
             sensing              : systemSensing,
             placing              : SystemWindowPlacing(),
@@ -268,6 +267,7 @@ public final class SeatHost {
             observationSource    : SeatCaptureObservationSource(
                 displayGeneration: displayGeneration
             ),
+            contentClock         : MachAbsoluteContentClock(),
             observationProfile   : configuration.observationProfile
         )
 

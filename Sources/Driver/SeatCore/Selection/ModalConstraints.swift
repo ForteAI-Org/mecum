@@ -124,12 +124,16 @@ nonisolated package struct ModalConstraints: Sendable, Equatable {
 
     /// Every block in force among these members, in a stable order so a report
     /// reads the same on every run.
-    package func blocks(among members: [WindowIdentity]) -> [Block] {
+    package func blocks(
+        among members        : [WindowIdentity],
+        excluding withdrawn  : Set<WindowIdentity> = []
+    ) -> [Block] {
 
         let present = Set(members)
         var blocks : [Block] = []
 
         for modal in members {
+            guard !withdrawn.contains(modal) else { continue }
             guard let scope = scopes[modal] else { continue }
             switch scope {
                 case .window(let blocked):

@@ -228,8 +228,8 @@ struct AgentSeatTests {
         // first one already went out, so its Receipt stands and the Turn cannot
         // be given back until somebody says what it did.
         let second = try await observedReference(seat)
-        sender.error = InputFailure.inputPaused
-        await #expect(throws: InputFailure.inputPaused) {
+        sender.error = InputFailure.inputPaused([.focusRecovery])
+        await #expect(throws: InputFailure.inputPaused([.focusRecovery])) {
             try await seat.send(Self.click, observation: second, turn: turn)
         }
 

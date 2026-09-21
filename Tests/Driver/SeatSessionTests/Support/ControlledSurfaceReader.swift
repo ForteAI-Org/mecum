@@ -15,13 +15,12 @@ import SeatCore
 ///
 /// It reads the same fake window server the seat reads, so membership,
 /// verification and containment follow the readings a test sets up rather than a
-/// separate story. What it adds is the two claims no shipped adapter can make on
-/// this build: that the enumeration is the whole of the instance's surfaces, and
-/// what each surface is and whether it is visible.
+/// separate story. It can write every completeness, role and visibility case
+/// directly, including cases the shipped adapter would have to read through AX
+/// and WindowServer.
 ///
 /// Supplying those claims here proves the algorithms and proves nothing about
-/// macOS. The shipped `SensingSurfaceReader` still reports an unqualified
-/// enumeration and no selection facts, and that gap is what the seat refuses on.
+/// macOS. Native coverage remains the Live tier's job.
 final class ControlledSurfaceReader: AssignedSurfaceReading, @unchecked Sendable {
 
     private let sensing: FakeSensing
@@ -36,6 +35,10 @@ final class ControlledSurfaceReader: AssignedSurfaceReading, @unchecked Sendable
         provenance: .qualifiedSurfaceEnumeration
     )
 
+    /// Per-reading answers consumed before `completeness`, for a transient
+    /// native gap that a bounded readiness reread can resolve.
+    var completenessReadings: [InventoryCompleteness] = []
+
     /// Per-surface overrides. Anything absent is a visible document.
     var roles       : [Int: SurfaceRole]       = [:]
     var visibilities: [Int: SurfaceVisibility] = [:]
@@ -43,17 +46,28 @@ final class ControlledSurfaceReader: AssignedSurfaceReading, @unchecked Sendable
     /// Parent relations, by child Window ID, for the dialog return.
     var parents: [Int: WindowIdentity] = [:]
 
+    /// Qualified modal scopes and application-local recency events supplied by
+    /// the test scenario.
+    var modals : [Int: ModalScope] = [:]
+    var recency: [RecencyClaim] = []
+
     /// True to answer a failed pass, which must leave membership untouched.
     var readingFails = false
+
+    /// Surfaces the application has stopped scoping, as the native reader
+    /// reports them once their grace has passed.
+    var withdrawn: [WindowIdentity] = []
 
     init(sensing: FakeSensing) {
         self.sensing = sensing
     }
 
-    func read(ownedBy processIDs: Set<Int32>) -> SurfaceInventoryReading {
+    func snapshot(ownedBy processIDs: Set<Int32>) -> AssignedSurfaceSnapshot {
 
         guard !readingFails else {
-            return .unavailable(reason: "The controlled reader was asked to fail")
+            return AssignedSurfaceSnapshot(
+                inventory: .unavailable(reason: "The controlled reader was asked to fail")
+            )
         }
         let numbers = windowNumbers ?? sensing.knownWindowNumbers
         let rows = numbers.compactMap { number -> SurfaceInventoryReading.Row? in
@@ -65,10 +79,10 @@ final class ControlledSurfaceReader: AssignedSurfaceReading, @unchecked Sendable
                 provenance: .windowServerAttestedIdentity
             )
         }
-        return SurfaceInventoryReading(rows: rows, completeness: completeness)
-    }
-
-    func selectionClaims(for reading: SurfaceInventoryReading) -> SelectionClaimBatch {
+        let currentCompleteness = completenessReadings.isEmpty
+            ? completeness
+            : completenessReadings.removeFirst()
+        let reading = SurfaceInventoryReading(rows: rows, completeness: currentCompleteness)
 
         var batch = SelectionClaimBatch()
         for row in reading.rows {
@@ -96,7 +110,21 @@ final class ControlledSurfaceReader: AssignedSurfaceReading, @unchecked Sendable
                     )
                 )
             }
+            if let scope = modals[identity.windowNumber] {
+                batch.modals.append(
+                    ModalRelationClaim(
+                        modal     : identity,
+                        scope     : scope,
+                        provenance: .qualifiedModalAttestation
+                    )
+                )
+            }
         }
-        return batch
+        batch.recency = recency
+        return AssignedSurfaceSnapshot(
+            inventory: reading,
+            claims   : batch,
+            withdrawnByApplication: withdrawn
+        )
     }
 }

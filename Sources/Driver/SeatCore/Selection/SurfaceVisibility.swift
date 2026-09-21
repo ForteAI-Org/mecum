@@ -8,9 +8,9 @@
 /// SurfaceVisibility is what an established reading says about whether a member
 /// surface can be worked in right now.
 ///
-/// Hiding and minimising are their own cases because they are not closing: the
-/// surface stays a member, its reference stays valid, and only its eligibility
-/// as a target goes away. `uncertain` is the fourth case and the important one:
+/// Hiding, minimising and withdrawing are their own cases because they are not
+/// closing: the surface stays a member, its reference stays valid, and only its
+/// eligibility as a target goes away. `uncertain` is the fifth case and the important one:
 /// a reading that could not decide suspends the input and, deliberately, does
 /// not take eligibility away, because losing eligibility would replace the
 /// current target on the strength of something nobody read.
@@ -28,6 +28,11 @@ nonisolated package enum SurfaceVisibility: String, Sendable, Equatable {
 
     /// Established minimised. Membership persists, eligibility does not.
     case minimisedEstablished
+
+    /// AX no longer enumerates a previously qualified surface while
+    /// WindowServer still attests the same off-screen identity. Membership and
+    /// modal history persist, but a withdrawn modal no longer blocks its parent.
+    case withdrawnEstablished
 
     /// The reading did not decide. Input is suspended, nothing is closed and
     /// nothing is replaced.

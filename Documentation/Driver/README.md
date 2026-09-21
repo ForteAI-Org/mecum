@@ -89,22 +89,31 @@ and the two are never interchanged.
 ### What the code cutover is, and what it is not
 
 The public contract above is implemented and the internal callers are migrated.
-That is a change of code and **not** a qualification of any native ability, and
-the offline suites that exercise it qualify nothing about macOS either.
+The offline suites prove the joins and refusal rules; they do not replace the
+final native Live matrix.
 
-On this build three capabilities have no evidence, so the kit refuses with the
-gap named rather than inventing a fact:
+The content clock and the ordinary application-window inventory now have
+production adapters. The inventory is accepted only when `AXWindows` and an
+identity-attested WindowServer `.optionAll` pass agree on every AX-scoped
+application window. Additional same-process WindowServer surfaces remain outside
+that positive scope; a missing AX counterpart still leaves containment
+unverified. The final cross-application Live matrix is intentionally deferred to
+the Lab delivery pass.
 
 | Capability | State | What it stops |
 |---|---|---|
-| `contentClock` | not qualified | no Frame has a measurable content age, so every Command carrying one is refused at admission with `frameAgeUnknown(.clockNotQualified)` |
+| `contentClock` | qualified in `SeatHost` | frame age is measured from `SCStreamFrameInfo.displayTime`; a missing, malformed or future timestamp refuses that observation |
 | `menuSurfaceStill` | not qualified | `SeatMenuInteraction.observe()` refuses, so no item inside a contextual menu can be chosen |
-| qualified surface enumeration | not available | the shipped reader reports an incomplete pass, so containment stays unverified and the causes of the gate say so |
+| qualified surface enumeration | implemented, Live matrix pending | AX scopes application windows and WindowServer independently attests each one; missing counterparts or duplicates keep containment unverified |
+| role, modality and visibility | implemented, Live matrix pending | AX facts are bound to the matching WindowServer lifetime; unreadable modality or off-screen ambiguity suspends input |
+| multi-window selection and parentage | implemented, Live matrix pending | a unique AX focused/main window selects the current target; sheets and drawers carry an attested parent and window-scoped modality |
 
-There is no public switch that bypasses any of them, and there is no constructor
+There is no public switch that bypasses a refusal, and there is no constructor
 that lets a consumer declare evidence qualified or assemble an Observation
-Reference. Closing these gaps needs a qualified oracle and a live campaign, both
-of which are separate work that has **not** been performed.
+Reference. The remaining menu Still needs its own oracle. Multi-window selection
+fails closed to an explicit target choice only when AX reports no unique focused
+or main window, or reports contradictory current-window state. The Live campaign
+has not yet been run.
 
 ## The fence is alive only while somebody holds it
 

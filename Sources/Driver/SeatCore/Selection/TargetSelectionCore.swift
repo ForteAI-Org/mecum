@@ -285,7 +285,10 @@ nonisolated package struct TargetSelectionCore: Sendable {
             }
         }
 
-        modalBlocks = modality.blocks(among: identities)
+        let withdrawn = Set(identities.filter {
+            facts[$0]?.visibility == .withdrawnEstablished
+        })
+        modalBlocks = modality.blocks(among: identities, excluding: withdrawn)
         let blocked = Set(modalBlocks.map(\.blocked))
 
         ineligible = refusals
@@ -320,6 +323,7 @@ nonisolated package struct TargetSelectionCore: Sendable {
             case .visibleInteractive, .uncertain: return nil
             case .hiddenEstablished:              return .hiddenEstablished
             case .minimisedEstablished:           return .minimisedEstablished
+            case .withdrawnEstablished:           return .withdrawnEstablished
         }
     }
 

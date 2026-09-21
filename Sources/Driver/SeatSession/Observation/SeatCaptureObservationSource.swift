@@ -24,12 +24,12 @@ import SeatCore
 /// qualified, the menu path refuses before any effect with the capability named,
 /// and no parent Frame is offered in its place.
 ///
-/// The content clock is not supported either. That is not this adapter's choice
-/// to make differently: `FrameSampleQualifier` asks its clock oracle, and the
-/// shipped oracle answers unknown, so an observation taken here is delivered
-/// with an unknown age and every Command carrying it is refused at admission.
-/// Composing this source therefore activates the capture path and does not
-/// activate input.
+/// The content clock is supported by the host's separate
+/// `MachAbsoluteContentClock`, which converts the documented WindowServer Mach
+/// timestamp. A one-shot result that omits it is replaced by the first complete
+/// stream frame carrying it. `FrameSampleQualifier` still refuses a malformed
+/// timestamp, and a stream that cannot provide one expires inside the same
+/// capture deadline.
 nonisolated public struct SeatCaptureObservationSource: ObservedSurfaceSourcing {
 
     private let displayGeneration: UInt64
@@ -42,7 +42,7 @@ nonisolated public struct SeatCaptureObservationSource: ObservedSurfaceSourcing 
         switch capability {
             case .windowStill     : true
             case .menuSurfaceStill: false
-            case .contentClock    : false
+            case .contentClock    : true
         }
     }
 
@@ -56,11 +56,27 @@ nonisolated public struct SeatCaptureObservationSource: ObservedSurfaceSourcing 
         guard deadlineNanoseconds > now else {
             throw ObservationUnavailable.captureDeadlineExpired(attemptsSpent: 0)
         }
-        return try await SeatCaptureStream.still(
-            of                : .attestedWindow(identity),
+        let target = SeatCaptureTarget.attestedWindow(identity)
+        let still = try await SeatCaptureStream.still(
+            of                : target,
             displayGeneration : displayGeneration,
             observationBarrier: observationBarrier,
             timeout           : .nanoseconds(Int64(min(deadlineNanoseconds - now, UInt64(Int64.max))))
+        )
+        guard still.displayTime == nil else { return still }
+
+        let afterStill = DispatchTime.now().uptimeNanoseconds
+        guard deadlineNanoseconds > afterStill else {
+            throw ObservationUnavailable.captureDeadlineExpired(attemptsSpent: 1)
+        }
+        return try await SeatCaptureStream.timestampedStill(
+            of               : target,
+            pixelSize        : still.pixelSize,
+            displayGeneration: displayGeneration,
+            timeout          : .nanoseconds(Int64(min(
+                deadlineNanoseconds - afterStill,
+                UInt64(Int64.max)
+            )))
         )
     }
 

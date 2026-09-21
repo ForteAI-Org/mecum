@@ -65,9 +65,11 @@ nonisolated public enum WindowTransferRefusal: String, Sendable, Equatable {
     /// reach it.
     case notMovable
 
-    /// The window does not fit inside the Virtual Display. Nothing is resized:
-    /// a window shrunk to fit is a window the person gets back smaller than
-    /// they left it.
+    /// The window does not fit inside the Virtual Display and could not be made
+    /// to fit: the size attribute refused the write, or the application kept the
+    /// size it had. A window that is shrunk is recorded with the frame it had
+    /// before, and the return writes that size back, so a window nobody could
+    /// shrink is refused rather than left half moved.
     case tooLarge
 
     /// The move, or one of the two readings that confirm it, was refused. The

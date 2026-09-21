@@ -43,7 +43,9 @@ struct InputCommandGateTests {
             #expect(prepared.count == correlationID)
         }
         gate.pause(.focusRecovery)
-        await #expect(throws: InputFailure.inputPaused) { try await gate.prepare(correlationID: 4) }
+        await #expect(throws: InputFailure.inputPaused([.focusRecovery])) {
+            try await gate.prepare(correlationID: 4)
+        }
         #expect(prepared == [1, 2, 3])
     }
 
@@ -58,7 +60,7 @@ struct InputCommandGateTests {
 
         gate.resume(order[0])
         #expect(gate.isPaused, "Resolving one cause must not reopen the gate for the other")
-        #expect(throws: InputFailure.inputPaused) { try gate.check() }
+        #expect(throws: InputFailure.inputPaused([order[1].reason])) { try gate.check() }
 
         gate.resume(order[1])
         #expect(!gate.isPaused)
@@ -72,6 +74,6 @@ struct InputCommandGateTests {
         gate.resume(.focusRecovery)
         gate.resume(.windowTransfer)
         #expect(gate.isPaused, "The terminal cause is nobody else's to resolve")
-        #expect(throws: InputFailure.inputPaused) { try gate.check() }
+        #expect(throws: InputFailure.inputPaused([.focusRecoveryStopped])) { try gate.check() }
     }
 }

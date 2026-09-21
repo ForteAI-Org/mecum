@@ -44,7 +44,21 @@ nonisolated package enum ClosureEvidence: String, Sendable, Equatable {
     /// It was missing from a reading, which proves nothing.
     case absentFromReading
 
-    package var provesClosure: Bool { self == .windowServerConfirmedDestruction }
+    /// The application stopped listing the window among its own, while the
+    /// window server still holds a visible surface for it.
+    ///
+    /// This is the application's own statement and not a reading that missed
+    /// something: where the enumeration is positively scoped by the application,
+    /// a window it no longer scopes is not one of its windows. It is separate
+    /// from `absentFromReading` because that one is the opposite case — nobody
+    /// said anything — and separate from a window server destruction because
+    /// nothing was destroyed: measured on DaVinci Resolve, the Project Manager
+    /// it closes keeps a visible window server surface. Only a repeated
+    /// observation, held long enough that a slow or momentarily unavailable
+    /// accessibility reading is excluded, may offer it.
+    case applicationWithdrewTheWindow
+
+    package var provesClosure: Bool { self != .absentFromReading }
 }
 
 /// AssignedSurface is one surface the seat holds membership of, with everything

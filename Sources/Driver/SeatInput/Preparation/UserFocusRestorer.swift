@@ -71,7 +71,8 @@ package final class UserFocusRestorer {
         defer { timing.restoreCallNanoseconds = DispatchTime.now().uptimeNanoseconds &- entry }
         guard var participant = preparedDestination,
               participant.processID == window.processID,
-              Int(participant.windowNumber) == window.windowNumber else { throw InputFailure.inputPaused }
+              Int(participant.windowNumber) == window.windowNumber
+        else { throw InputFailure.inputPaused([.destinationNotPrepared]) }
         preparedDestination = nil
         let start = DispatchTime.now().uptimeNanoseconds
         let windowNumber = participant.windowNumber

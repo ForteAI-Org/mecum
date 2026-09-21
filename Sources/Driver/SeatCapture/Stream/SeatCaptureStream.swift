@@ -1334,6 +1334,100 @@ public final class SeatCaptureStream {
         )
     }
 
+    /// Captures the first complete stream frame that carries WindowServer's
+    /// documented display timestamp.
+    ///
+    /// `SCScreenshotManager` may return a valid image with no frame attachments.
+    /// This fallback uses the ordinary stream lifecycle because its complete
+    /// frames carry `SCStreamFrameInfoDisplayTime` on supported targets. Frames
+    /// without that timestamp remain unqualified and are skipped until the
+    /// capture deadline expires. The stream is stopped before this call returns.
+    nonisolated package static func timestampedStill(
+        of target        : SeatCaptureTarget,
+        pixelSize        : CGSize,
+        displayGeneration: UInt64 = 0,
+        timeout          : Duration = .seconds(2)
+    ) async throws -> SeatFrame {
+
+        let deadline = CaptureDeadline(timeout: timeout)
+        return try await timestampedStill(
+            of                : target,
+            pixelSize         : pixelSize,
+            displayGeneration: displayGeneration,
+            deadline         : deadline
+        )
+    }
+
+    private static func timestampedStill(
+        of target         : SeatCaptureTarget,
+        pixelSize         : CGSize,
+        displayGeneration : UInt64,
+        deadline          : CaptureDeadline
+    ) async throws -> SeatFrame {
+
+        let owner = SeatCaptureStream(
+            target           : target,
+            displayGeneration: displayGeneration
+        )
+        var capturedFrame: SeatFrame?
+        var captureError : (any Error)?
+        do {
+            try await owner.start(
+                configuration: SeatCaptureConfiguration(
+                    pixelSize      : pixelSize,
+                    framesPerSecond: 60
+                ),
+                deadline: deadline
+            )
+            let frame = try await firstTimestampedFrame(
+                in      : owner.frames,
+                deadline: deadline
+            )
+            capturedFrame = frame
+        } catch {
+            captureError = error
+        }
+
+        await owner.stop(deadline: CaptureDeadline(timeout: .seconds(5)))
+        guard case .stopped = owner.state, !owner.hasUnconfirmedResource else {
+            if case .failed(_, let failure) = owner.state { throw failure }
+            throw CaptureFailure.timedOut(.streamStop)
+        }
+        if let captureError { throw captureError }
+        try deadline.check(.still)
+        guard let capturedFrame else { throw CaptureFailure.frameUnavailable }
+        return capturedFrame
+    }
+
+    static func firstTimestampedFrame(
+        in frames       : AsyncStream<SeatFrame>,
+        deadline        : CaptureDeadline
+    ) async throws -> SeatFrame {
+
+        try deadline.check(.still)
+        return try await withThrowingTaskGroup(of: SeatFrame.self) { group in
+            group.addTask {
+                for await frame in frames {
+                    try Task.checkCancellation()
+                    if frame.displayTime != nil { return frame }
+                }
+                try Task.checkCancellation()
+                throw CaptureFailure.frameUnavailable
+            }
+            group.addTask {
+                let remaining = deadline.remainingNanoseconds
+                guard remaining > 0 else { throw CaptureFailure.timedOut(.still) }
+                try await Task.sleep(nanoseconds: remaining)
+                throw CaptureFailure.timedOut(.still)
+            }
+            defer { group.cancelAll() }
+            guard let frame = try await group.next() else {
+                throw CaptureFailure.frameUnavailable
+            }
+            return frame
+        }
+    }
+
     private static func still(
         of target         : SeatCaptureTarget,
         pixelSize         : CGSize?,

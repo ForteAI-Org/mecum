@@ -49,11 +49,11 @@ nonisolated package enum SelectionConclusion: String, Sendable, Equatable, CaseI
 /// SelectionProvenance names where a fact used by the selection nucleus came
 /// from, and which conclusion that source can carry.
 ///
-/// The qualified cases name adapters that are **not** qualified on this build.
-/// Nothing in the shipped package produces them: they are the shape the nucleus
-/// will accept once a qualification exists, and the shape a controlled test
-/// double supplies to exercise the algorithms offline. A unit suite that hands
-/// one in has proved the algorithm and never the native capability.
+/// The qualified cases name evidence shapes accepted by the nucleus. The
+/// shipped cross-checked reader produces role, parent, modal, visibility and
+/// application-local current-window claims. A controlled test double may
+/// produce every shape to exercise the algorithms offline, but that alone never
+/// qualifies a native capability.
 ///
 /// The unqualified cases are listed rather than omitted because they are the
 /// ones that keep being offered as proof of a selection fact: the window level,
@@ -72,11 +72,15 @@ nonisolated package enum SelectionProvenance: String, Sendable, Equatable, CaseI
     case qualifiedModalAttestation
 
     /// A relative order of surfaces inside one application, from an adapter
-    /// qualified to claim that the order it reports is the application's.
+    /// qualified to claim that the order it reports is the application's. The
+    /// native reader derives this only from a unique AX focused or main window,
+    /// never from Window IDs or the WindowServer list order.
     case qualifiedFrontOrderAttestation
 
     /// The origin of a raise, from an adapter qualified to tell an application's
-    /// own raise from the placements this kit asks for.
+    /// own current-window state from the placements this kit asks for. AX main
+    /// and focused-window state is application semantic state; a WindowServer
+    /// placement issued by this kit does not manufacture it.
     case qualifiedRaiseAttribution
 
     /// A visibility state, hidden and minimised included, from an adapter
@@ -137,9 +141,7 @@ nonisolated package enum SelectionProvenance: String, Sendable, Equatable, CaseI
         }
     }
 
-    /// True for a shape that carries some selection conclusion. No adapter on
-    /// this build produces one, which is why this is a property of the value and
-    /// not a claim about the system.
+    /// True for a shape that carries some selection conclusion.
     package var isQualifiedShape: Bool {
         SelectionConclusion.allCases.contains { attests($0) }
     }

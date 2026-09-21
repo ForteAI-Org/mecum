@@ -40,6 +40,37 @@ nonisolated package struct SelectionClaimBatch: Sendable, Equatable {
     }
 }
 
+/// One atomic pass over membership and selection evidence.
+///
+/// Keeping the two together matters for the native adapter: the AX role and
+/// visibility claims must describe the exact WindowServer identities carried by
+/// the inventory, not a second reading taken after a window changed.
+nonisolated package struct AssignedSurfaceSnapshot: Sendable, Equatable {
+
+    package let inventory: SurfaceInventoryReading
+    package let claims   : SelectionClaimBatch
+
+    /// Surfaces the assigned application no longer lists among its windows
+    /// while the window server still holds a visible surface for them.
+    ///
+    /// The cross-check reports every one it saw. The transition filter then
+    /// narrows the set to those that have stayed that way long enough to
+    /// exclude a slow accessibility reading, and that narrowed set is the one a
+    /// seat may confirm a closure on. Empty from an adapter that cannot attest
+    /// which windows an application scopes.
+    package let withdrawnByApplication: [WindowIdentity]
+
+    package init(
+        inventory: SurfaceInventoryReading,
+        claims   : SelectionClaimBatch = .none,
+        withdrawnByApplication: [WindowIdentity] = []
+    ) {
+        self.inventory = inventory
+        self.claims    = claims
+        self.withdrawnByApplication = withdrawnByApplication
+    }
+}
+
 /// AssignedSurfaceReading supplies the seat with one pass over the surfaces that
 /// may belong to the assigned instance, and with whatever selection facts
 /// qualified evidence supports about them.
@@ -49,21 +80,19 @@ nonisolated package struct SelectionClaimBatch: Sendable, Equatable {
 /// The two questions have different evidence. Which window a row is about comes
 /// from the window server connection and is attested. Whether the reading is the
 /// **whole** of the instance's surfaces, and what each surface is, come from
-/// adapters that have to be qualified separately, and none of them exists on
-/// this build. Making the reading a role keeps that gap visible: the shipped
-/// conformer reports an incomplete enumeration and no selection claims, the
-/// causes of the gate name it, and a controlled conformer in a suite exercises
-/// the algorithms without either of them certifying the system.
+/// adapters that have to be qualified separately. The shipped conformer now
+/// cross-checks AX and WindowServer and emits role, modal and visibility claims
+/// only for identities present in both readings. Making the reading a role keeps
+/// every mismatch visible and lets a controlled conformer exercise the same
+/// algorithms without TCC.
 ///
 /// A conformer is borrowed by the seat, holds no seat state, and is called on
 /// the main actor at the points the seat already takes readings.
 nonisolated package protocol AssignedSurfaceReading: Sendable {
 
-    /// One pass over the surfaces of the given processes. A failed pass answers
+    /// One pass over the surfaces of the given processes and the selection
+    /// facts read in that same pass. A failed inventory answers
     /// `SurfaceInventoryReading.unavailable`, which leaves membership untouched
     /// and is never an application with no windows.
-    func read(ownedBy processIDs: Set<Int32>) -> SurfaceInventoryReading
-
-    /// The selection facts this adapter can attest for the rows of `reading`.
-    func selectionClaims(for reading: SurfaceInventoryReading) -> SelectionClaimBatch
+    func snapshot(ownedBy processIDs: Set<Int32>) -> AssignedSurfaceSnapshot
 }

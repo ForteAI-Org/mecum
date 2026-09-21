@@ -18,16 +18,22 @@ import WindowPlacement
 /// protocol so that adopt, stage, release and the recovery loop run in a unit
 /// test without an Accessibility grant.
 ///
-/// The live witness is `WindowRelocator`, which is the kit's **entire** use of
-/// Accessibility (ADR 0004): `AXPosition` to move, `kAXRaiseAction` to bring on
-/// stage, `_AXUIElementGetWindow` to find the element behind a Window ID.
-/// Nothing here reads an element tree or acts on a control.
+/// The live witness is `WindowRelocator`, which is placement's entire use of
+/// Accessibility (ADR 0004): `AXPosition` to move, `AXSize` to shrink a window
+/// that does not fit the Virtual Display, `kAXRaiseAction` to bring on stage,
+/// `_AXUIElementGetWindow` to find the element behind a Window ID. Nothing here
+/// reads an element tree or acts on a control.
 nonisolated public protocol WindowPlacing: Sendable {
 
     /// Writes the window's origin. It does not wait: confirming that the window
     /// came to rest is the seat's, because what a move is confirmed against is
     /// the whole placement check.
     func move(_ window: WindowReference, to origin: CGPoint) throws
+
+    /// Writes the window's size. Like `move` it does not wait and proves
+    /// nothing: an application with a minimum size accepts the write and keeps
+    /// what it had, so the caller reads the window again and decides.
+    func resize(_ window: WindowReference, to size: CGSize) throws
 
     /// The untransformed AX window body, resolved by exact PID and Window ID.
     /// Used only for return verification when the server exposes a thumbnail.
@@ -252,6 +258,10 @@ nonisolated public struct SystemWindowPlacing: WindowPlacing {
 
     public func move(_ window: WindowReference, to origin: CGPoint) throws {
         try WindowRelocator.move(window, to: origin)
+    }
+
+    public func resize(_ window: WindowReference, to size: CGSize) throws {
+        try WindowRelocator.resize(window, to: size)
     }
 
     public func stage(

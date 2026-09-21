@@ -31,6 +31,15 @@ nonisolated public final class InputCommandGate: Sendable {
         /// Focus recovery stopped. Deliberately terminal: nothing resolves it,
         /// so a seat whose recovery went away never posts again.
         case focusRecoveryStopped
+
+        /// How this cause is reported to a consumer.
+        package var reason: InputPauseReason {
+            switch self {
+                case .focusRecovery       : .focusRecovery
+                case .windowTransfer      : .windowTransfer
+                case .focusRecoveryStopped: .focusRecoveryStopped
+            }
+        }
     }
 
     private let causes = Mutex<Set<PauseCause>>([])
@@ -61,6 +70,11 @@ nonisolated public final class InputCommandGate: Sendable {
     }
 
     package func check() throws {
-        guard !isPaused else { throw InputFailure.inputPaused }
+        // One read of the set, so the reported reasons are the ones that
+        // refused and not a second reading taken to explain the first.
+        let closed = pauseCauses
+        guard closed.isEmpty else {
+            throw InputFailure.inputPaused(closed.map(\.reason).sorted())
+        }
     }
 }

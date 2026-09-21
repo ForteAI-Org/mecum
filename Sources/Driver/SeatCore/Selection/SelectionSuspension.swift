@@ -34,6 +34,10 @@ nonisolated package enum EligibilityRefusal: Sendable, Equatable {
 
     /// Established minimised. Membership persists.
     case minimisedEstablished
+
+    /// Established withdrawn from the application's AX window set while the
+    /// same off-screen WindowServer identity persists. Membership persists.
+    case withdrawnEstablished
 }
 
 /// SelectionSuspension is one reason the agent may not act on the target right

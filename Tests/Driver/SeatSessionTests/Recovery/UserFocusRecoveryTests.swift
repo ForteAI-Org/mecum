@@ -61,7 +61,7 @@ struct UserFocusRecoveryTests {
         fixture.activateTarget()
         #expect(fixture.requested == [Self.user])
         #expect(fixture.gate.isPaused)
-        #expect(throws: InputFailure.inputPaused) { try fixture.gate.check() }
+        #expect(throws: InputFailure.inputPaused([.focusRecovery])) { try fixture.gate.check() }
         fixture.sensing.frontmostProcessID = Self.user.processID
         fixture.sensing.focusedUserWindow = Self.other
         fixture.recovery.verify()
@@ -100,21 +100,36 @@ struct UserFocusRecoveryTests {
         fixture.recovery.stop()
     }
 
-    @Test("failed verification and repeated activation stay paused without retrying")
-    func noRetry() async throws {
+    @Test("one request per activation: never twice inside an episode, once again after it")
+    func oneRequestPerActivation() async throws {
         let fixture = Harness()
         fixture.recovery.beginHold()
         try await fixture.recovery.prepareBeforeAction()
         fixture.activateTarget()
+        #expect(fixture.requested.count == 1)
+
         fixture.time += 300_000_000
         fixture.recovery.verify()
         #expect(fixture.reports.last?.outcome == .waitingForUser)
         #expect(fixture.gate.isPaused)
-        fixture.returnUser()
-        try await fixture.recovery.prepareBeforeAction()
+
+        // Inside the episode nothing asks a second time: a verification that did
+        // not agree is not a reason to activate the window again.
         fixture.activateTarget()
+        fixture.recovery.verify()
         #expect(fixture.requested.count == 1)
         #expect(fixture.gate.isPaused)
+
+        // The person's window verified twice ends the episode, and the next
+        // activation is a new one with its own single request. The hold never
+        // ended: this is the second dialog of one run.
+        fixture.returnUser()
+        #expect(!fixture.gate.isPaused)
+        try await fixture.recovery.prepareBeforeAction()
+        fixture.activateTarget()
+        #expect(fixture.requested.count == 2, "the second activation of a hold may ask once too")
+        #expect(fixture.gate.isPaused)
+
         fixture.returnUser()
         #expect(!fixture.gate.isPaused)
         fixture.recovery.stop()
@@ -198,7 +213,9 @@ struct UserFocusRecoveryTests {
             physicalBounds: physical,
             windows: windows)
         if variant == 8 {
-            await #expect(throws: InputFailure.inputPaused) { try await fixture.recovery.prepareBeforeAction() }
+            await #expect(throws: InputFailure.inputPaused([.fenceInactive])) {
+                try await fixture.recovery.prepareBeforeAction()
+            }
         } else { try await fixture.recovery.prepareBeforeAction() }
         fixture.activateTarget()
         #expect(fixture.requested.count == (variant == 0 ? 1 : 0))
@@ -217,6 +234,8 @@ struct UserFocusRecoveryTests {
         #expect(fixture.requested.isEmpty)
         #expect(fixture.gate.isPaused)
         #expect(fixture.sensing.snapshotReadCount == 0)
+        #expect(fixture.reports.last?.detail
+            == "No prepared action was held when this activation arrived")
         fixture.recovery.stop()
     }
 
@@ -243,6 +262,53 @@ struct UserFocusRecoveryTests {
         #expect(fixture.requested.isEmpty)
         #expect(fixture.gate.isPaused)
         #expect(fixture.sensing.snapshotReadCount == 1)
+        #expect(fixture.reports.last?.detail
+            == "The prepared action expired: 1000.0 ms old, and the limit is 1000.0 ms")
+        fixture.recovery.stop()
+    }
+
+    @Test("a window adopted after the preparation disarms it, and the refusal names both sets")
+    func adoptedSetChanged() async throws {
+        let fixture = Harness()
+        fixture.recovery.beginHold()
+        try await fixture.recovery.prepareBeforeAction()
+
+        // What an application's own dialog looks like from here: the follower
+        // takes it in, so the adopted set is no longer the prepared one.
+        let dialog = Self.reference(
+            processID   : FakeGeometry.targetPID,
+            windowNumber: 902,
+            frame       : FakeGeometry.adoptedWindow.frame
+        )
+        fixture.targets.append(dialog)
+        fixture.activateTarget()
+
+        #expect(fixture.requested.isEmpty, "no request goes out on evidence that predates the dialog")
+        #expect(fixture.gate.isPaused)
+        #expect(fixture.reports.last?.detail
+            == "The adopted windows changed after the preparation: prepared "
+                + "\(FakeGeometry.adoptedWindow.windowNumber), now "
+                + "\(FakeGeometry.adoptedWindow.windowNumber), 902")
+        fixture.recovery.stop()
+    }
+
+    @Test("a command taken while the target is in front does not disarm the pending recovery")
+    func preparationSurvivesACommandTakenWithTheTargetInFront() async throws {
+        let fixture = Harness()
+        fixture.recovery.beginHold()
+        try await fixture.recovery.prepareBeforeAction()
+
+        // The dialog the previous command opened has already brought the target
+        // to the front, and the next command is prepared before the activation
+        // notification lands. This preparation cannot be rebuilt: the person's
+        // application is not the front one to read a fresh destination from.
+        fixture.sensing.frontmostProcessID = FakeGeometry.targetPID
+        try await fixture.recovery.prepareBeforeAction()
+
+        fixture.activateTarget()
+        #expect(fixture.requested == [Self.user],
+                "the preparation made before the dialog still arms this activation")
+        #expect(fixture.reports.last?.outcome != .waitingForUser)
         fixture.recovery.stop()
     }
 
@@ -350,7 +416,9 @@ struct UserFocusRecoveryTests {
         let fixture = Harness()
         fixture.recovery.beginHold()
         fixture.sensing.fenceIsActive = false
-        await #expect(throws: InputFailure.inputPaused) { try await fixture.recovery.prepareBeforeAction() }
+        await #expect(throws: InputFailure.inputPaused([.fenceInactive])) {
+            try await fixture.recovery.prepareBeforeAction()
+        }
         fixture.sensing.fenceIsActive = true
         try await fixture.recovery.prepareBeforeAction()
         fixture.sensing.fenceIsActive = false
@@ -474,7 +542,10 @@ struct UserFocusRecoveryTests {
         fixture.activateTarget()
         #expect(fixture.requested.isEmpty)
         #expect(fixture.gate.isPaused)
-        #expect(fixture.reports.last?.detail == "A prepared target window is outside the virtual display")
+        #expect(fixture.reports.last?.detail
+            == "A prepared target window is outside the virtual display: Window ID 902 of "
+                + "PID \(second.processID) at \(Self.user.frame)",
+            "the refusal names the window it refused on")
     }
 
     @Test("the whole restoration call reaches the report on return and on throw, and stays absent otherwise",
@@ -483,7 +554,7 @@ struct UserFocusRecoveryTests {
         let fixture = Harness()
         fixture.request.restoreCallNanoseconds = 0
         fixture.request.restoreCallControlNanoseconds = 7
-        if variant == 1 { fixture.restoreFailure = .inputPaused }
+        if variant == 1 { fixture.restoreFailure = .inputPaused([.destinationNotPrepared]) }
         if variant == 2 { fixture.sensing.userMayBeSwitchingApplications = true }
         fixture.recovery.beginHold()
         try await fixture.recovery.prepareBeforeAction()
@@ -545,7 +616,7 @@ struct UserFocusRecoveryTests {
             }, now: { [unowned self] in time },
             requestTiming: { [unowned self] in request },
             prepareDestination: { [unowned self] destination, targets in
-                if identityUnavailable { throw InputFailure.inputPaused }
+                if identityUnavailable { throw InputFailure.inputPaused([.destinationNotPrepared]) }
                 #expect(targets == self.targets)
                 preparedDestinations.append(destination)
             },
