@@ -1,5 +1,10 @@
+import AccessibilityFacts
 import AppKit
 import Foundation
+import Perception
+import PixelRegions
+import PixelSections
+import VisionText
 
 /// The piece that brokers seats between an agent and the applications it
 /// uses: it lists targets, reports capabilities and opens sessions. Everything
@@ -11,14 +16,30 @@ import Foundation
 @MainActor
 public final class SeatBroker {
     public let configuration: SeatBrokerConfiguration
-    private let perception: LocatorPerceptionAdapter
+    /// The one place the Perception layer is composed: Vision for text through
+    /// the lab's best-effort wrapper, the pixel segmenter and its media filter
+    /// for regions, the colour section detector for panels, and the
+    /// accessibility tree as the stage that only ever adds. It captures
+    /// nothing: every frame comes from the seat.
+    ///
+    /// The accessibility budget is 0.35 s rather than the augmenter's own
+    /// 1.5 s. Electron trees are deep and slow to walk, and the budget is the
+    /// ceiling on what accessibility may add, not a target: it keeps one
+    /// observation under a second, and running out returns fewer labels and
+    /// never wrong ones.
+    private let perception = ScenePipeline(
+        text        : BestEffortTextRecognizer(),
+        regions     : ConnectedComponentSegmenter(),
+        regionFilter: MediaRegionFilter(),
+        sections    : ColorSectionDetector(),
+        augmentation: AccessibilityAugmenter(budgetSeconds: 0.35)
+    )
     private let recorder: RunRecorder
     private let ledger = LaunchLedger()
 
     public init(configuration: SeatBrokerConfiguration = .init()) {
         self.configuration = configuration
         SeatDriver.setResearchOptIn(configuration.allowUnvalidatedBuild)
-        self.perception = LocatorPerceptionAdapter(storeDirectory: configuration.perceptionStoreDirectory)
         self.recorder = RunRecorder(directory: configuration.recordingDirectory)
     }
 

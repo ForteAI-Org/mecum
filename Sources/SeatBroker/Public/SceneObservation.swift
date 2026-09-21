@@ -6,11 +6,15 @@ import Foundation
 public struct PerceptionTiming: Sendable, Hashable {
     /// The still capture of the window.
     public var capture: Duration = .zero
-    /// OCR, segmentation and surface analysis, run in parallel.
+    /// The whole scene pipeline: text recognition, segmentation, the
+    /// accessibility read and composition. They run concurrently inside it and
+    /// no stage has a duration of its own, so this is the one figure.
     public var detection: Duration = .zero
-    /// The accessibility read and merge.
+    /// Unfilled since perception became the Perception layer's pipeline, which
+    /// does not time its stages apart. Kept so a reader of this type still
+    /// compiles; a zero stage is left out of `summary` rather than printed.
     public var accessibility: Duration = .zero
-    /// Sections, scrollability and paragraph coalescing.
+    /// Unfilled, like `accessibility`.
     public var composition: Duration = .zero
 
     public var total: Duration { capture + detection + accessibility + composition }
@@ -21,7 +25,10 @@ public struct PerceptionTiming: Sendable, Hashable {
         func s(_ d: Duration) -> String {
             String(format: "%.2fs", Double(d.components.seconds) + Double(d.components.attoseconds) / 1e18)
         }
-        return "\(s(total)) · capture \(s(capture)) · ocr+cv \(s(detection)) · ax \(s(accessibility)) · compose \(s(composition))"
+        let stages = [("capture", capture), ("perception", detection),
+                      ("ax", accessibility), ("compose", composition)]
+        return ([s(total)] + stages.filter { $0.1 != .zero }.map { "\($0.0) \(s($0.1))" })
+            .joined(separator: " · ")
     }
 }
 
@@ -37,7 +44,7 @@ public struct SceneObservation: @unchecked Sendable, Identifiable {
     public let capturedAt: Date
     public let image: CGImage
     public let elements: [SceneElement]
-    /// Compact text for a model or a human: the Locator scene map.
+    /// Compact text for a model or a human: the numbered scene map.
     public let text: String
     /// Process-stable fingerprint of the element set; equal tokens mean nothing changed.
     public let token: String

@@ -1,7 +1,12 @@
+//
+//  SceneMapperTests.swift
+//  AgentLab
+//
+//  Created by Eliomar Alejandro Rodriguez Ferrer on 21/09/2026.
+//
+
 import CoreGraphics
-import CVBackend
-import LocatorCore
-import Relocation
+import PerceptionCore
 import Testing
 @testable import SeatBroker
 
@@ -13,19 +18,56 @@ private func blankImage() -> CGImage {
 }
 
 @Test func mapsSceneElementsToIndexedObservation() {
-    let snapshot = SceneSnapshot(bundleID: "b", app: "App", windowTitle: "T", viewportPx: [100, 50], elements: [
-        SceneElement(id: "control|send", kind: "control", label: "Send", pos: [0.5, 0.5, 0.2, 0.1],
-                     role: "AXButton", state: "off"),
-        SceneElement(id: "text|hi", kind: "text", label: "hi", pos: [0, 0, 0.1, 0.1]),
-    ], commands: [])
-    let scene = PerceivedScene(snapshot: snapshot, ocrFrame: OCRFrame(grid: .empty(width: 100, height: 50), runs: []))
-    let observation = LocatorSceneMapper.observation(from: scene, image: blankImage())
+    let snapshot = SceneSnapshot(
+        bundleID         : "b",
+        appName          : "App",
+        windowTitle      : "T",
+        viewportPixelSize: ViewportPixelSize(width: 100, height: 50),
+        elements         : [
+            PerceptionCore.SceneElement(id: "control|send", kind: .control, label: "Send",
+                                        bounds: NormalizedRect(x: 0.5, y: 0.5, width: 0.2, height: 0.1),
+                                        role: "AXButton", state: .off),
+            PerceptionCore.SceneElement(id: "text|hi", kind: .text, label: "hi",
+                                        bounds: NormalizedRect(x: 0, y: 0, width: 0.1, height: 0.1)),
+        ]
+    )
+    let observation = SceneMapper.observation(from: snapshot, image: blankImage())
 
     #expect(observation.elements.map(\.index) == [1, 2])
     #expect(observation.elements[0].label == "Send")
+    // The aiming rule: an action lands on the centre of the element's
+    // normalized bounds, in the pixels of the frame it was perceived on.
     let center = observation.elements[0].center(in: observation.pixelSize)
     #expect(abs(center.x - 60) < 1e-9)
     #expect(abs(center.y - 27.5) < 1e-9)
     #expect(observation.text.contains("[1] control/AXButton · Send [off]"))
-    #expect(observation.token == snapshot.token)
+    #expect(observation.token == snapshot.token.rawValue)
+}
+
+@Test func theMapNamesEveryPanelAndKeepsTheUnlabeledIconsTargetable() {
+    // An unlabeled icon is an honest coverage gap, and it still gets an index:
+    // the planner is told what it cannot name and can still click it.
+    let sidebar = NormalizedRect(x: 0, y: 0, width: 0.3, height: 1)
+    let snapshot = SceneSnapshot(
+        bundleID         : "b",
+        appName          : "App",
+        windowTitle      : "T",
+        viewportPixelSize: ViewportPixelSize(width: 100, height: 50),
+        elements         : [
+            PerceptionCore.SceneElement(id: "icon|0-0", kind: .icon, label: "(unlabeled)",
+                                        bounds: NormalizedRect(x: 0.05, y: 0.1, width: 0.05, height: 0.05),
+                                        isUnlabeled: true, section: "sidebar"),
+            PerceptionCore.SceneElement(id: "text|loose", kind: .text, label: "loose",
+                                        bounds: NormalizedRect(x: 0.8, y: 0.9, width: 0.1, height: 0.05)),
+        ],
+        sections         : [SceneSection(name: "sidebar", bounds: sidebar)]
+    )
+    let observation = SceneMapper.observation(from: snapshot, image: blankImage())
+
+    #expect(observation.elements.map(\.index) == [1, 2])
+    #expect(observation.text.contains("2 elements in 1 sections"))
+    #expect(observation.text.contains("▣ sidebar"))
+    #expect(observation.text.contains("[1] icon · (unlabeled)"))
+    #expect(observation.text.contains("▣ (unsectioned) — 1 elements"))
+    #expect(observation.text.contains("[2] text · loose"))
 }

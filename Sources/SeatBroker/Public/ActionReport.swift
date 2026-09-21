@@ -38,8 +38,8 @@ public struct ActionReport: @unchecked Sendable, Identifiable {
 
 /// Before/after comparison. `outcome` is what the Command came to and the one
 /// field a reader should believe; `sceneChanged`, `effect` and
-/// `pixelDifference` are the measurements under it. `effect` is the Locator
-/// scene diff family when one was detected (title change, state flip, menu
+/// `pixelDifference` are the measurements under it. `effect` is the encoded
+/// scene difference when one was detected (title change, state flip, menu
 /// opened, elements appeared or disappeared); `pixelDifference` is the mean
 /// absolute pixel delta 0...1, nil when it could not be measured.
 ///

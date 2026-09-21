@@ -280,13 +280,6 @@ func stopDuringRetargetCannotResurrectTheReplacement() async throws {
     #expect(events.values == ["stop s1", "make s2", "start s2", "stop s2"])
 }
 
-@Test @MainActor
-func perceptionHistoryIsScopedToOneRecipient() {
-    #expect(AgentSession.mayReuseScene(previous: identity(40), current: identity(40)))
-    #expect(!AgentSession.mayReuseScene(previous: identity(40), current: identity(41)))
-    #expect(!AgentSession.mayReuseScene(previous: nil, current: identity(40)))
-}
-
 /// The size the preview was started with used to be the size it kept for the
 /// life of the adoption. A window whose first figure was wrong showed at its
 /// own size in the corner of a frame four times its area, with black around

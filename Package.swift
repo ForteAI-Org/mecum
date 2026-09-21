@@ -238,7 +238,8 @@ let package = Package(
         driver("TargetReader", ["SeatCore", "WindowPlacement"]),
 
         // MARK: Lab locator
-        // The Lab's own perception, consumed by SeatBroker alone: not part of the MecumPerception product.
+        // The Lab's own perception. Nothing consumes it any more: SeatBroker perceives through the
+        // Perception layer, and these targets are leftovers the next ticket deletes.
         perception("LocatorCore", settings: labPerceptionSettings),
         perception("AXSupport", ["LocatorCore"], settings: labPerceptionSettings),
         perception("CaptureSupport", ["LocatorCore"], settings: labPerceptionSettings),
@@ -250,8 +251,8 @@ let package = Package(
         broker(
             "SeatBroker",
             ["SeatCore", "PrivateSymbols", "VirtualScreens", "WindowPlacement", "SeatInput",
-             "CursorGuard", "SeatCapture", "SeatSession", "TargetReader", "LocatorCore", "AXSupport",
-             "CaptureSupport", "OCRSupport", "CVBackend", "Relocation"]
+             "CursorGuard", "SeatCapture", "SeatSession", "TargetReader", "PerceptionCore",
+             "Perception", "VisionText", "PixelRegions", "PixelSections", "AccessibilityFacts"]
         ),
 
         // MARK: Driver tools
@@ -287,7 +288,7 @@ let package = Package(
         perceptionTests("Relocation", ["Relocation", "LocatorCore", "CVBackend"], settings: labPerceptionSettings),
         brokerTests(
             "SeatBroker",
-            ["SeatBroker", "LocatorCore", "Relocation", "CVBackend", "SeatCore", "SeatCapture",
+            ["SeatBroker", "PerceptionCore", "SeatCore", "SeatCapture",
              "SeatSession", "SeatInput", "TargetReader"]
         ),
 

@@ -1,6 +1,8 @@
 import AppKit
 import Foundation
 import os
+import Perception
+import PerceptionCore
 import SeatCapture
 import SeatCore
 import SeatSession
@@ -44,10 +46,10 @@ public final class AgentSession {
     /// The environment does not hold its sessions, so this reference is not a
     /// cycle; it keeps the runtime alive for as long as a session uses it.
     private let environment: SeatBroker
-    private let perception: LocatorPerceptionAdapter
+    private let perception: ScenePipeline
     private let recorder: RunRecorder
     private var lastDelivery: SeatObservationDelivery?
-    private var lastScene: PerceivedScene?
+    private var lastScene: SceneSnapshot?
     private var held: HeldApp?
 
     /// The application the session has to finish with: the process whose window
@@ -62,7 +64,7 @@ public final class AgentSession {
         let provenance: AppProvenance
     }
 
-    init(driver: SeatDriver, ledger: LaunchLedger, perception: LocatorPerceptionAdapter,
+    init(driver: SeatDriver, ledger: LaunchLedger, perception: ScenePipeline,
          recorder: RunRecorder, environment: SeatBroker) {
         self.driver = driver
         self.ledger = ledger
@@ -276,25 +278,27 @@ public final class AgentSession {
         guard let image = delivery.frame.makeCGImage() else {
             throw SeatBrokerError.frameUnavailable
         }
-        let capture = captureStart.duration(to: .now)
-        let sameRecipient = Self.mayReuseScene(
-            previous: lastDelivery?.reference.recipient,
-            current: delivery.reference.recipient
+        var timing = PerceptionTiming()
+        timing.capture = captureStart.duration(to: .now)
+        // The frame the accessibility stage is judged against is the seat's own
+        // window geometry, which the window server answered for: an accessibility
+        // frame is trusted only where it intersects that rectangle, and after a
+        // move an application's child frames still name the old place.
+        let window = ScenePipeline.Window(
+            bundleID : app.bundleID,
+            appName  : app.name,
+            title    : driver.windowTitle(for: delivery.reference.recipient),
+            processID: target.pid,
+            frame    : delivery.geometry.window.frame
         )
-        let scene = await perception.perceive(image: ImageBox(image: image), pid: target.pid,
-                                              bundleID: app.bundleID, appName: app.name,
-                                              windowTitle: driver.windowTitle(for: delivery.reference.recipient),
-                                              windowFrame: delivery.frame.geometry.screenRect,
-                                              previous: sameRecipient ? lastScene : nil)
-        let observation = LocatorSceneMapper.observation(from: scene, image: image, capture: capture)
+        let perceiveStart = ContinuousClock.now
+        let scene = try await perception.perceive(image, of: window)
+        timing.detection = perceiveStart.duration(to: .now)
+        let observation = SceneMapper.observation(from: scene, image: image, timing: timing)
         lastDelivery = delivery
         lastScene = scene
         lastObservation = observation
         return observation
-    }
-
-    static func mayReuseScene(previous: WindowIdentity?, current: WindowIdentity) -> Bool {
-        previous == current
     }
 
     public func execute(_ action: SemanticAction) async throws -> ActionReport {

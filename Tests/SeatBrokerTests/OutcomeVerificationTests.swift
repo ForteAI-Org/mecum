@@ -6,10 +6,7 @@
 //
 
 import CoreGraphics
-import CVBackend
-import LocatorCore
-import OCRSupport
-import Relocation
+import PerceptionCore
 import SeatCore
 import SeatInput
 import SeatSession
@@ -26,15 +23,20 @@ private func blankImage() -> CGImage {
 
 /// A scene with one background paragraph, which is what OCR reads and what a
 /// repaint changes without anything having been dismissed.
-private func scene(background: String) -> PerceivedScene {
-    let snapshot = SceneSnapshot(bundleID: "com.example", app: "Example", windowTitle: "Panel",
-                                 viewportPx: [20, 20], elements: [
-        LocatorCore.SceneElement(id: "text|\(background)", kind: "text", label: background,
-                                 pos: [0.1, 0.8, 0.5, 0.1]),
-        LocatorCore.SceneElement(id: "control|cancel", kind: "control", label: "Annulla",
-                                 pos: [0.6, 0.6, 0.2, 0.1], role: "AXButton"),
-    ], commands: [])
-    return PerceivedScene(snapshot: snapshot, ocrFrame: OCRFrame(grid: .empty(width: 20, height: 20), runs: []))
+private func scene(background: String) -> SceneSnapshot {
+    SceneSnapshot(
+        bundleID         : "com.example",
+        appName          : "Example",
+        windowTitle      : "Panel",
+        viewportPixelSize: ViewportPixelSize(width: 20, height: 20),
+        elements         : [
+            PerceptionCore.SceneElement(id: "text|\(background)", kind: .text, label: background,
+                                        bounds: NormalizedRect(x: 0.1, y: 0.8, width: 0.5, height: 0.1)),
+            PerceptionCore.SceneElement(id: "control|cancel", kind: .control, label: "Annulla",
+                                        bounds: NormalizedRect(x: 0.6, y: 0.6, width: 0.2, height: 0.1),
+                                        role: "AXButton"),
+        ]
+    )
 }
 
 /// The sheet the Command was aimed at. The numbers are a fixture, never a

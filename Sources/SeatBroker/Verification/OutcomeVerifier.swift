@@ -1,4 +1,5 @@
 import CoreGraphics
+import PerceptionCore
 import SeatCore
 
 /// What one action's Command came to, as evidence and never as optimism.
@@ -98,7 +99,8 @@ enum ExpectedEffect: Sendable, Equatable {
     /// The roles that carry their own on/off/mixed state.
     private static let statefulRoles: Set<String> = ["AXCheckBox", "AXRadioButton", "AXDisclosureTriangle"]
 
-    static func of(_ action: SemanticAction, target: SceneElement?, surface: WindowIdentity) -> ExpectedEffect {
+    static func of(_ action: SemanticAction, target: SceneObservation.Element?,
+                   surface: WindowIdentity) -> ExpectedEffect {
         switch action {
         case .type(_, let text):
             guard let target, fieldRoles.contains(target.role ?? "") else { return .unqualified }
@@ -125,8 +127,8 @@ enum ExpectedEffect: Sendable, Equatable {
     }
 }
 
-/// Before/after: the predicate the action is held to, Locator's scene diff,
-/// the scene token, and a mean pixel delta.
+/// Before/after: the predicate the action is held to, the Perception layer's
+/// scene difference, the scene token, and a mean pixel delta.
 enum OutcomeVerifier {
 
     /// What a Command the seat refused before its first event comes to. It is
@@ -135,11 +137,11 @@ enum OutcomeVerifier {
         outcome: .notObserved, sceneChanged: false, effect: nil, pixelDifference: nil
     )
 
-    static func verify(before: PerceivedScene, beforeImage: CGImage,
-                       after: PerceivedScene, afterImage: CGImage, targetID: String?,
-                       expected: ExpectedEffect, afterElements: [SceneElement],
+    static func verify(before: SceneSnapshot, beforeImage: CGImage,
+                       after: SceneSnapshot, afterImage: CGImage, targetID: String?,
+                       expected: ExpectedEffect, afterElements: [SceneObservation.Element],
                        surfaceIsGone: Bool) -> VerificationResult {
-        let effect = LocatorPerceptionAdapter.effect(before: before, after: after, targetID: targetID)
+        let effect = SceneDifference.effect(before: before, after: after, targetID: targetID)
         let changed = effect != nil || before.token != after.token
         let outcome: ActionOutcome = if holds(expected, in: afterElements, surfaceIsGone: surfaceIsGone) {
             .expectedEffectVerified
@@ -148,7 +150,7 @@ enum OutcomeVerifier {
         } else {
             .posted
         }
-        return VerificationResult(outcome: outcome, sceneChanged: changed, effect: effect,
+        return VerificationResult(outcome: outcome, sceneChanged: changed, effect: effect?.encoded,
                                   pixelDifference: FrameDifference.meanPixelDifference(beforeImage, afterImage))
     }
 
@@ -169,7 +171,8 @@ enum OutcomeVerifier {
 
     /// Whether the predicate holds. `after` is nil when no scene could be
     /// perceived, which leaves the closure oracle the only one answering.
-    static func holds(_ expected: ExpectedEffect, in after: [SceneElement]?, surfaceIsGone: Bool) -> Bool {
+    static func holds(_ expected: ExpectedEffect, in after: [SceneObservation.Element]?,
+                      surfaceIsGone: Bool) -> Bool {
         switch expected {
         case .surfaceCloses:
             surfaceIsGone
@@ -197,7 +200,7 @@ enum OutcomeVerifier {
     /// control that grew a focus ring is still the same control. Only an
     /// accessibility-backed element answers: rule 2 makes AX the oracle where
     /// one exists, and an OCR guess at a field's contents is not one.
-    private static func covers(_ element: SceneElement, _ bounds: CGRect) -> Bool {
+    private static func covers(_ element: SceneObservation.Element, _ bounds: CGRect) -> Bool {
         element.role?.hasPrefix("AX") == true
             && (bounds.contains(CGPoint(x: element.bounds.midX, y: element.bounds.midY))
                 || element.bounds.contains(CGPoint(x: bounds.midX, y: bounds.midY)))
