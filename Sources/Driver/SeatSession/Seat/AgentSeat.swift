@@ -2197,7 +2197,13 @@ public final class AgentSeat {
             if let failure { throw failure }
             throw SessionFailure.contextMenuNeverOpened(windowNumber: target.windowNumber, within: deadline)
         }
-        let closedBy = await close(menu, of: target, turn: turn, itemWasChosen: requested)
+        let closedBy = await close(
+            menu,
+            of                : target,
+            turn              : turn,
+            itemWasChosen     : requested,
+            withinNanoseconds : observationProfile.menuCleanupNanoseconds
+        )
         if requested {
             _ = await EventLoopWait.until(
                 { self.sensing.frontmostProcessID == target.processID },
