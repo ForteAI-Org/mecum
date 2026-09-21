@@ -6,6 +6,7 @@
 //
 
 import CoreGraphics
+import IncrementalText
 import OSLog
 import PerceptionCore
 import VisionText
@@ -24,11 +25,17 @@ import VisionText
 /// The failure is not swallowed. It is logged under the kit's own subsystem
 /// each time it happens, so a missing model is read in the log rather than
 /// guessed from a map with no text in it.
+///
+/// Vision is reached through `IncrementalTextRecognizer`, which reads only the
+/// lines the changed tiles touch: the seat perceives the same window over and
+/// over, so most of each frame is the frame before it. The swallow stays out
+/// here, where the policy is, rather than inside a recognizer whose contract
+/// is to throw.
 struct BestEffortTextRecognizer: TextRecognizing {
 
     private static let log = Logger(subsystem: "dev.forte.AgentSeatKit", category: "Lab")
 
-    private let vision = VisionTextRecognizer()
+    private let vision = IncrementalTextRecognizer(inner: VisionTextRecognizer())
 
     func recognizeText(in image: CGImage, accuracy: TextRecognitionAccuracy) throws -> [RecognizedText] {
         do {

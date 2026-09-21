@@ -1,5 +1,8 @@
 import CoreGraphics
-import LocatorCore
+
+/// Which way a container scrolls. Came with the descriptor vocabulary T5 deleted; kept here
+/// because the two scroll files T7 still has to port are written in terms of it.
+public enum ScrollAxis: String, Codable, Equatable, Sendable { case vertical, horizontal }
 
 /// How one scroll step is expressed. AX containers use an ABSOLUTE fraction (set the scroll bar's
 /// AXValue); opaque containers (no AX fraction to read/set) use RELATIVE wheel ticks (+down / −up).

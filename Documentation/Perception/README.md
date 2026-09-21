@@ -15,8 +15,9 @@ an action is taken, never a coordinate of their own.
 |---|---|
 | `PerceptionCore` | pure types and contracts: the scene vocabulary, grouping, composition, difference, pop-up rows, window classification, coordinate conversion, the accessibility harvest and its trust rule, and the roles every adapter fills |
 | `VisionText` | `TextRecognizing` over Apple Vision, tuned for UI labels |
+| `IncrementalText` | `TextRecognizing` over another recognizer: tile hashes decide which lines to read again, and the runs of the frame before are kept |
 | `WindowServerListing` | `WindowListing` over the window server's on-screen list |
-| `AccessibilityFacts` | `SceneAugmenting` over the live accessibility tree, on the main actor, under a budget |
+| `AccessibilityFacts` | `SceneAugmenting` over the live accessibility tree, on the main actor, under a budget; and `PopupRowReading` over the open menu |
 | `PixelControlState` | `ControlStateReading` over pixels: a switch's knob side, a checkbox or radio's mark, or nothing at all |
 | `Perception` | `ScenePipeline`: roles in, a scene out |
 | `ScreenCapture` | `StillCapturer`: one still of a window, or of a screen region holding a window and its pop-up, through ScreenCaptureKit; the foreground eye, where the Seat's capture is the background one |
@@ -70,6 +71,19 @@ scene.resolve(target: "Export")               // .found, .ambiguous(n) or .none
   augmentation stage, and writes a state only onto an element that still carries none, so an
   application that answered for itself always wins. A reading no element covers is dropped rather
   than attached to the panel around it, and a reader that will not commit leaves the control silent.
+- `IncrementalTextRecognizer` keeps the previous frame's tile grid and runs as its own state, behind
+  a mutex, and decorates any other recognizer: the pipeline still asks one question and gets one
+  answer, so the rule below stands. Every doubt reads the whole frame again, which is exactly what
+  the inner recognizer alone would have answered: no previous frame, a different frame size, a
+  different accuracy than the retained runs were read at, a crop the image refuses, or a plan whose
+  rects are past `maxPartialArea` or `maxPartialRects`. A changed tile is grown to the whole lines it
+  touches, never read as a fragment.
+- `PopupRowReading` only ever adds, like every other accessibility role here. `PopupRowSegmenter`
+  cuts the page that is painted; a conformer that reads the application's own tree sees the whole
+  list, scrolled-out rows included, and says which of them are on screen. An application that
+  exposes nothing answers an empty list, which is a real answer and the caller's cue to keep its
+  pixel rows; the role does not throw, because an unreadable pop-up is the ordinary case. A row that
+  is not on screen carries no frame, so nothing downstream can click a coordinate that is not there.
 - `ScenePipeline` reads no environment and keeps no state between calls. A nil segmenter yields a
   text-only scene; a nil augmenter leaves the scene as the pixels built it; an augmenter runs only
   when the window names its process and frame; a nil control state reader leaves the scene exactly
@@ -88,12 +102,18 @@ never wrong ones.
 
 `PopupRowSegmenter` caps rows at 240. The map tier shows up to 8 notable elements per section, 60
 for an open menu. `AccessibilityAugmentation.Limits` defaults to depth 10, 24 tables, 400 elements.
+`PopupRowHarvest.Limits` defaults to depth 8, 8 candidate menus, 400 rows.
+`IncrementalTextPlan` reads the whole frame again past 60% of its area or past 10 crops: the crops
+have a measured 17 to 20 ms floor each and break even against one full read at about eight to ten,
+so many scattered rects cost more than a full read while covering almost none of the frame.
 
 ## Evidence
 
-Unit: 114 tests in 13 suites, pure, parallel, no permission needed. `ScenePipelineTests` drives the
-roles with doubles that honor their ordering and failure semantics, the substitutability evidence
-for the roles.
+Unit: 131 tests in 12 suites for `PerceptionCore` alone, pure, parallel, no permission needed.
+`ScenePipelineTests` drives the roles with doubles that honor their ordering and failure semantics,
+the substitutability evidence for the roles. `IncrementalTextTests` adds 15: the plan's thresholds
+with their measured reasons, the tile grid, and a recording recognizer that proves an unchanged
+frame is never read again and a changed tile costs one line's rect.
 
 Boundary: `PerceptionBoundaryTests`, gated by `MECUM_LIVE_TESTS=1`, against a running Adobe
 Premiere with Screen Recording and Accessibility granted. Measured 2026-09-17 on Premiere 26.3.2,
@@ -104,8 +124,10 @@ purpose: `make live-tests` filters on `LiveTests` and asserts a count.
 ## Not here yet, in porting order
 
 Taught icon labels, the learned structure that rescues a remembered switch slot, section detection
-from pixels, content-region suppression, incremental recognition. Each arrives as a role the
-pipeline takes at construction, never as a default that silently succeeds.
+from pixels, content-region suppression. Each arrives as a role the
+pipeline takes at construction, never as a default that silently succeeds. Incremental recognition
+is here, as a recognizer that decorates a recognizer rather than as a role of its own: what it
+remembers is its business, and the pipeline's promise to keep nothing is untouched.
 A `FrameCapturing` role the Seat's frames fill is the first place
 this layer and Driver meet. Accessibility actions (pressing, selecting a menu row, the Go-to-Folder
 navigator) and the off-view probe belong to the Engine layer, over an acting role.
@@ -126,9 +148,16 @@ navigator) and the off-view probe belong to the Engine layer, over an acting rol
 | `Relocation/AXSceneAugmentor.swift` (harvest, merge, trust) | `PerceptionCore/Accessibility/*` |
 | `AXSupport/AXTreeReading.swift` | `PerceptionCore/Roles/AccessibilityTreeReading.swift` |
 | `AXSupport/LiveAXReader.swift` (the reads) | `AccessibilityFacts/LiveAccessibilityReader.swift` |
+| `Relocation/IncrementalOCR.swift` + `CVBackend/TileDiff.swift` | `IncrementalText/*` |
+| `Relocation/AXPopupReader.swift` (the menu walk) | `PerceptionCore/Popup/PopupRowHarvest.swift`, `AccessibilityFacts/AccessibilityPopupReader.swift` |
 | `CaptureSupport/WindowCaptureService.windowRows` | `WindowServerListing` |
 | `OCRSupport/OCREngine.swift` | `VisionText` |
 | `Relocation/SceneBuilder.detectLayers` (the pure part) | `Perception/ScenePipeline.assemble` |
 
 Left behind on purpose: every `try!`, force unwrap and environment read the old files carried, and
 the brain tests that rode along in `SceneDiffTests` (they test the brain, which is not ported).
+From the incremental reader, the `LOCATOR_FULL_OCR` kill switch: a caller that wants a plain read
+constructs a plain recognizer, and nothing in this layer reads the environment. From the popup
+reader, everything that was not a row: pressing an item, matching a target against the list,
+reading a selection back, and dropping the pixel copies of named rows. Those decide and verify an
+act, which is the Engine's half, and the role here answers only what the menu holds.

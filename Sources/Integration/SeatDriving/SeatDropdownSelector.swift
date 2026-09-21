@@ -17,10 +17,16 @@ public struct SeatDropdownSelector {
 
     private let target: SeatTarget
     private let pipeline: ScenePipeline
+    private let popupRows: (any PopupRowReading)?
 
-    public init(target: SeatTarget, pipeline: ScenePipeline) {
+    /// Creates a selector. `popupRows` is optional and nil by default: with a reader the arrow-key
+    /// route is counted over the rows the application named for itself, scrolled-out ones included,
+    /// and without one it is counted over the rows the pixels cut out of the painted page, which is
+    /// what this always did.
+    public init(target: SeatTarget, pipeline: ScenePipeline, popupRows: (any PopupRowReading)? = nil) {
         self.target = target
         self.pipeline = pipeline
+        self.popupRows = popupRows
     }
 
     /// Selects one item in a flat native dropdown. Success requires the requested value to be
@@ -155,12 +161,23 @@ public struct SeatDropdownSelector {
             }
             receipt = try await seat.useDropdownMenu(
                 openedAt: location, of: window, turn: turn, keyInterval: ActionTiming.standard.popupArrow
-            ) { menu in
+            ) { [rowReader = popupRows] menu in
                 guard let element = try await readItem(menu, fromDisplay: true), let scene = menuScene else { return nil }
-                let rows = PopupRowPick.rows(in: scene, windowFrame: menu.frame, popupFrame: menu.frame)
-                guard let plan = PopupRowPick.plan(rows: rows, currentValue: opener.label, target: element, wraps: false) else {
-                    return nil
-                }
+                // The rows the application named for itself, when a reader is there to ask: they
+                // include what the page does not paint, so the distance between two items is the
+                // real one. Pixel rows, and no wrap through a page, otherwise.
+                let named = await rowReader?.popupRows(
+                    ofProcess : window.reference.processID,
+                    popupFrame: menu.frame
+                ) ?? []
+                let route = PopupRowPick.plan(rows: named, currentValue: opener.label, target: element.label)
+                    ?? PopupRowPick.plan(
+                        rows        : PopupRowPick.rows(in: scene, windowFrame: menu.frame, popupFrame: menu.frame),
+                        currentValue: opener.label,
+                        target      : element,
+                        wraps       : false
+                    )
+                guard let plan = route else { return nil }
                 let arrow = plan.delta > 0 ? Key.downArrow : Key.upArrow
                 return Array(repeating: arrow, count: abs(plan.delta)) + [Key.return]
             }

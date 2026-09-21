@@ -81,6 +81,30 @@ public enum PopupRowPick {
         )
     }
 
+    /// The same plan over a list that named its own rows, for a pop-up read through `PopupRowReading`
+    /// instead of cut out of pixels.
+    ///
+    /// It wraps by default where the pixel plan cannot: those rows are only the page that is
+    /// painted, so a wrap through them would count past rows nobody saw, while a list that named
+    /// every row, scrolled-out ones included, knows how far apart two items really are.
+    public static func plan(rows: [PopupRow], currentValue: String, target: String,
+                            wraps: Bool = true) -> Plan? {
+        guard rows.count >= 2 else { return nil }
+        let current = LabelText.normalize(currentValue), wanted = LabelText.normalize(target)
+        guard !current.isEmpty, !wanted.isEmpty,
+              let currentIndex = rows.firstIndex(where: { LabelText.normalize($0.title) == current }),
+              let targetIndex = rows.firstIndex(where: { LabelText.normalize($0.title) == wanted })
+        else { return nil }
+        var delta = targetIndex - currentIndex
+        if wraps, abs(delta) > rows.count / 2 { delta += delta > 0 ? -rows.count : rows.count }
+        return Plan(
+            rowLabels   : rows.map { [$0.title] },
+            currentIndex: currentIndex,
+            targetIndex : targetIndex,
+            delta       : delta
+        )
+    }
+
     /// The typeable head of a label for a menu's own type-ahead: leading glyphs dropped, first word
     /// only, because a space dismisses some menus without selecting.
     public static func typeAheadPrefix(for label: String) -> String {

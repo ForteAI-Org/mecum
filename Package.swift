@@ -193,8 +193,8 @@ let package = Package(
         ),
         .library(
             name: "MecumPerception",
-            targets: ["PerceptionCore", "VisionText", "PixelSections", "PixelRegions", "PixelControlState",
-                      "WindowServerListing", "Perception", "AccessibilityFacts",
+            targets: ["PerceptionCore", "VisionText", "IncrementalText", "PixelSections", "PixelRegions",
+                      "PixelControlState", "WindowServerListing", "Perception", "AccessibilityFacts",
                       "ScreenCapture", "SceneOverlay"]
         ),
         .library(
@@ -240,18 +240,16 @@ let package = Package(
 
         // MARK: Lab locator
         // What survives of the Lab's own perception after Ronaldo's layer replaced it: only the pieces a
-        // later ticket still has to port or decide. Everything else went with T2.
+        // later ticket still has to port or decide. Everything else went with T2 and T5.
         //
-        //   LocatorCore    SceneElement + the AX/geometry vocabulary the three files below need.
-        //   AXSupport      the AX engine AXPopupReader reads the open menu through (T5).
         //   CaptureSupport CaptureGate + WindowVisibility — T6 decides them.
-        //   CVBackend      the tile-diff / hash / template-match kernels IncrementalOCR uses (T5).
-        //   Relocation     AXPopupReader + IncrementalOCR (T5), ScrollPlanner + ScrollTiming (T7).
-        perception("LocatorCore", settings: labPerceptionSettings),
-        perception("AXSupport", ["LocatorCore"], settings: labPerceptionSettings),
+        //   Relocation     ScrollPlanner + ScrollTiming, with the one axis enum they need (T7).
+        //
+        // T5 took the rest: IncrementalOCR became `IncrementalText`, AXPopupReader became
+        // `PopupRowReading` and `AccessibilityPopupReader`, and LocatorCore, AXSupport and CVBackend
+        // went with them.
         perception("CaptureSupport", settings: labPerceptionSettings),
-        perception("CVBackend", settings: labPerceptionSettings),
-        perception("Relocation", ["LocatorCore", "AXSupport", "CVBackend"], settings: labPerceptionSettings),
+        perception("Relocation", settings: labPerceptionSettings),
 
         // MARK: SeatBroker
         broker(
@@ -259,7 +257,7 @@ let package = Package(
             ["SeatCore", "PrivateSymbols", "VirtualScreens", "WindowPlacement", "SeatInput",
              "CursorGuard", "SeatCapture", "SeatSession", "TargetReader", "PerceptionCore",
              "Perception", "VisionText", "PixelRegions", "PixelSections", "PixelControlState",
-             "AccessibilityFacts", "EngineCore"]
+             "AccessibilityFacts", "EngineCore", "IncrementalText"]
         ),
 
         // MARK: Driver tools
@@ -287,10 +285,7 @@ let package = Package(
         driverTests("TargetReader", ["TargetReader"]),
 
         // MARK: Lab locator and broker tests
-        perceptionTests("AXSupport", ["AXSupport", "LocatorCore"], settings: labPerceptionSettings),
         perceptionTests("CaptureSupport", ["CaptureSupport"], settings: labPerceptionSettings),
-        perceptionTests("CVBackend", ["CVBackend"], settings: labPerceptionSettings),
-        perceptionTests("Relocation", ["Relocation", "LocatorCore"], settings: labPerceptionSettings),
         brokerTests(
             "SeatBroker",
             ["SeatBroker", "PerceptionCore", "SeatCore", "SeatCapture",
@@ -311,6 +306,9 @@ let package = Package(
 
         // Vision text recognition behind `TextRecognizing`. Runs where it is called; no main actor.
         perception("VisionText", ["PerceptionCore"], settings: pure),
+
+        // `TextRecognizing` over another recognizer: tile hashes decide what to read again.
+        perception("IncrementalText", ["PerceptionCore", "VisionText"], settings: pure),
         perception("PixelSections", ["PerceptionCore"], settings: pure),
         perception("PixelRegions", ["PerceptionCore"], settings: pure),
 
@@ -391,6 +389,7 @@ let package = Package(
         // MARK: Perception tests
         perceptionTests("PerceptionCore", ["PerceptionCore"]),
         perceptionTests("Perception", ["Perception", "PerceptionCore"]),
+        perceptionTests("IncrementalText", ["IncrementalText", "PerceptionCore"]),
         perceptionTests("PixelSections", ["PixelSections", "PerceptionCore"]),
         perceptionTests("PixelRegions", ["PixelRegions", "PerceptionCore"]),
         perceptionTests("PixelControlState", ["PixelControlState", "PerceptionCore"]),
