@@ -76,6 +76,10 @@ func driverTests(
     )
 }
 
+// The Lab's locator modules keep the isolation policy of the former Core:
+// nonisolated by default, without the upcoming features the layers above opt into.
+let labPerceptionSettings: [SwiftSetting] = [.swiftLanguageMode(.v6)]
+
 func perception(
     _ name        : String,
     _ dependencies: [String]       = [],
@@ -93,15 +97,18 @@ func perception(
 func perceptionTests(
     _ name        : String,
     _ dependencies: [String],
-      resources   : [Resource]? = nil
+      resources   : [Resource]?    = nil,
+      exclude     : [String]       = [],
+      settings    : [SwiftSetting] = suite
 ) -> Target {
 
     .testTarget(
         name         : "\(name)Tests",
         dependencies : dependencies.map { .target(name: $0) },
         path         : "Tests/Perception/\(name)Tests",
+        exclude      : exclude,
         resources    : resources,
-        swiftSettings: suite
+        swiftSettings: settings
     )
 }
 
@@ -148,6 +155,30 @@ func engineTests(
     )
 }
 
+func broker(
+    _ name        : String,
+    _ dependencies: [String]
+) -> Target {
+    .target(
+        name         : name,
+        dependencies : dependencies.map { .target(name: $0) },
+        path         : "Sources/\(name)",
+        swiftSettings: pure
+    )
+}
+
+func brokerTests(
+    _ name        : String,
+    _ dependencies: [String]
+) -> Target {
+    .testTarget(
+        name         : "\(name)Tests",
+        dependencies : dependencies.map { .target(name: $0) },
+        path         : "Tests/\(name)Tests",
+        swiftSettings: suite
+    )
+}
+
 let package = Package(
     name     : "Mecum",
     platforms: [deployment],
@@ -170,6 +201,7 @@ let package = Package(
             targets: ["EngineCore", "Engine", "HIDActuation", "AccessibilityActions", "WorkspaceActivation",
                       "Memory", "FileKnowledge", "LiveScenes"]
         ),
+        .library(name: "SeatBroker", targets: ["SeatBroker"]),
     ],
     targets: [
         
@@ -205,6 +237,23 @@ let package = Package(
         // Read-only reader of another application's window.
         driver("TargetReader", ["SeatCore", "WindowPlacement"]),
 
+        // MARK: Lab locator
+        // The Lab's own perception, consumed by SeatBroker alone: not part of the MecumPerception product.
+        perception("LocatorCore", settings: labPerceptionSettings),
+        perception("AXSupport", ["LocatorCore"], settings: labPerceptionSettings),
+        perception("CaptureSupport", ["LocatorCore"], settings: labPerceptionSettings),
+        perception("OCRSupport", ["LocatorCore"], settings: labPerceptionSettings),
+        perception("CVBackend", ["LocatorCore"], settings: labPerceptionSettings),
+        perception("Relocation", ["LocatorCore", "AXSupport", "CaptureSupport", "OCRSupport", "CVBackend"], settings: labPerceptionSettings),
+
+        // MARK: SeatBroker
+        broker(
+            "SeatBroker",
+            ["SeatCore", "PrivateSymbols", "VirtualScreens", "WindowPlacement", "SeatInput",
+             "CursorGuard", "SeatCapture", "SeatSession", "TargetReader", "LocatorCore", "AXSupport",
+             "CaptureSupport", "OCRSupport", "CVBackend", "Relocation"]
+        ),
+
         // MARK: Driver tools
         // The `malloc_logger` counter every allocation budget is measured with.
         // A C target: the hook runs inside the allocator, so its body must not allocate.
@@ -228,6 +277,19 @@ let package = Package(
         driverTests("SeatCapture", ["SeatCapture", "SeatCore"]),
         driverTests("SeatSession", ["SeatSession", "SeatCore", "CursorGuard", "SeatInput"]),
         driverTests("TargetReader", ["TargetReader"]),
+
+        // MARK: Lab locator and broker tests
+        perceptionTests("LocatorCore", ["LocatorCore"], exclude: ["Fixtures"], settings: labPerceptionSettings),
+        perceptionTests("AXSupport", ["AXSupport", "LocatorCore"], settings: labPerceptionSettings),
+        perceptionTests("CaptureSupport", ["CaptureSupport", "LocatorCore"], settings: labPerceptionSettings),
+        perceptionTests("OCRSupport", ["OCRSupport", "LocatorCore"], settings: labPerceptionSettings),
+        perceptionTests("CVBackend", ["CVBackend", "LocatorCore"], settings: labPerceptionSettings),
+        perceptionTests("Relocation", ["Relocation", "LocatorCore", "CVBackend"], settings: labPerceptionSettings),
+        brokerTests(
+            "SeatBroker",
+            ["SeatBroker", "LocatorCore", "Relocation", "CVBackend", "SeatCore", "SeatCapture",
+             "SeatSession", "SeatInput", "TargetReader"]
+        ),
 
         // Host (TCC, real display) and Live (fixture and reader) tiers, gated by
         // AGENTSEAT_HOST_TESTS=1 and AGENTSEAT_LIVE_TESTS=1 and run serialized.
