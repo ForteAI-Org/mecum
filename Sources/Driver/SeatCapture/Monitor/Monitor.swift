@@ -53,6 +53,11 @@ public final class Monitor {
     /// What the consumer asked for, or nil while the Monitor is not running.
     /// This is derived from the capture state, so a delegate stop clears it in
     /// the same main-actor turn even when the consumer uses this module alone.
+    ///
+    /// Its output size is rebased when the capture settles at a shape the
+    /// stream was not configured for: what it reports is then the shape the
+    /// Monitor is running, which is the only one a later rung change can be a
+    /// fraction of.
     public var configuration: MonitorConfiguration? {
         stream.isRunning ? requestedConfiguration : nil
     }
@@ -68,6 +73,10 @@ public final class Monitor {
     private var isEvaluatingQuality = false
     private var lastProduced  = 0
     private var lastCoalesced = 0
+
+    /// The previous heartbeat's reading of what the capture filled. Two of them
+    /// agreeing is the settle budget of `MonitorConfiguration.following`.
+    private var previousContentPixelSize: CGSize?
 
     public init(displayID: CGDirectDisplayID, displayGeneration: UInt64 = 1) {
         self.displayID = displayID
@@ -167,9 +176,10 @@ public final class Monitor {
             configuration: configuration.captureConfiguration(for: policy.quality),
             deadline     : deadline
         )
-        requestedConfiguration = configuration
-        lastProduced            = 0
-        lastCoalesced           = 0
+        requestedConfiguration   = configuration
+        lastProduced             = 0
+        lastCoalesced            = 0
+        previousContentPixelSize = nil
     }
 
     nonisolated public func stop(timeout: Duration = .seconds(5)) async {
@@ -217,6 +227,10 @@ public final class Monitor {
         isEvaluatingQuality = true
         defer { isEvaluatingQuality = false }
 
+        let contentPixelSize     = stream.lastContentPixelSize
+        let previousReading      = previousContentPixelSize
+        previousContentPixelSize = contentPixelSize
+
         let produced  = stream.producedFrameCount
         let coalesced = stream.coalescedFrameCount
         let windowProduced  = produced  - lastProduced
@@ -231,6 +245,11 @@ public final class Monitor {
             attributableCpuPercent: attributableCpuPercent
         ) else {
             policy = candidate
+            await followTargetShape(
+                contentPixelSize: contentPixelSize,
+                previousReading : previousReading,
+                asked           : configuration
+            )
             return nil
         }
 
@@ -254,6 +273,69 @@ public final class Monitor {
             \(String(describing: change.reason), privacy: .public)
             """)
         return change
+    }
+
+    /// Follows the target's shape when the capture has settled at one the
+    /// stream was not configured for.
+    ///
+    /// The geometry it decides on is the geometry the frames already carry:
+    /// ScreenCaptureKit attaches the content rectangle to every sample, the
+    /// stream keeps the last one as `lastContentPixelSize`, and this reads it on
+    /// the heartbeat the consumer already pays for. Nothing new travels from the
+    /// seat to the Monitor, because nothing has to: the seat's observation of a
+    /// window is about the agent's target, and this is about the shape of the
+    /// surface this stream is being handed.
+    ///
+    /// It runs on a beat the ladder left alone, and that is the arbitration
+    /// between the two: `SeatCaptureStream.updateConfiguration` refuses an
+    /// update while one is in flight, so a beat carries one reconfiguration or
+    /// none. The rung is the more urgent of the two, a pipeline that is behind
+    /// rather than one wasting pixels, and a follow that lost its beat is still
+    /// true on the next one.
+    ///
+    /// What a reconfiguration costs is why it is worth spending here.
+    /// `SCStream.updateConfiguration` replaces the surface pool without tearing
+    /// the pipeline down, so the price is the frames in flight through it, which
+    /// is a hitch of a frame or two in the preview and nothing in the agent's
+    /// observation, which does not read this stream. The band it removes is
+    /// permanent. `CaptureShapeStabilisation` is the line under which the trade
+    /// stops being worth making, and the one place that line is written: the
+    /// Lab's own preview stream follows a shape by the same rule.
+    private func followTargetShape(
+        contentPixelSize: CGSize?,
+        previousReading : CGSize?,
+        asked           : MonitorConfiguration
+    ) async {
+
+        guard let contentPixelSize,
+              let followed = asked.following(
+                  contentPixelSize: contentPixelSize,
+                  previousReading : previousReading,
+                  at              : policy.quality
+              )
+        else { return }
+
+        do {
+            try await stream.updateConfiguration(
+                followed.captureConfiguration(for: policy.quality)
+            )
+        } catch {
+            Self.log.error("""
+                monitor shape follow refused: \(String(describing: error), privacy: .public)
+                """)
+            return
+        }
+
+        // A stop or a restart during the update owns the configuration now, and
+        // the shape this followed belongs to the run that has already ended.
+        guard requestedConfiguration == asked else { return }
+        requestedConfiguration = followed
+        Self.log.info("""
+            monitor follows target shape to \
+            \(Int(contentPixelSize.width), privacy: .public)x\
+            \(Int(contentPixelSize.height), privacy: .public) at \
+            x\(self.policy.quality.resolutionScale, privacy: .public)
+            """)
     }
 
 }

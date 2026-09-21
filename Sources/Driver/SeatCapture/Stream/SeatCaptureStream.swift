@@ -50,6 +50,11 @@ nonisolated final class FrameReceiver:
     /// and screen-edge clipping.
     let capturesFullWindow: Bool
 
+    /// Explicit crop metadata for an attested hosted-sheet family. Attachments
+    /// on that filter can still report the host's stale content rectangle; the
+    /// crop is the measured union requested from the display.
+    let framing: (screenRect: CGRect, sourceWindowFrame: CGRect?)?
+
     /// What it still accepts. `stop()` moves it past the stamped one, so every
     /// frame already in flight for a display that is going away is dropped
     /// instead of presented.
@@ -101,6 +106,7 @@ nonisolated final class FrameReceiver:
         captureGeneration: UInt64 = 1,
         source           : FrameSourceIdentity = .display(0),
         capturesFullWindow: Bool = false,
+        framing          : (screenRect: CGRect, sourceWindowFrame: CGRect?)? = nil,
         present          : @escaping @MainActor @Sendable (SeatFrame, UInt64) -> Void,
         stopped          : @escaping @Sendable (UInt64, ObjectIdentifier, CaptureFailure) -> Void,
         sourceFailure    : @escaping @Sendable () -> CaptureFailure? = { nil },
@@ -116,6 +122,7 @@ nonisolated final class FrameReceiver:
         self.captureGeneration  = captureGeneration
         self.source             = source
         self.capturesFullWindow = capturesFullWindow
+        self.framing           = framing
         self.acceptedGeneration = Atomic(displayGeneration)
         self.slot               = Mutex(Slot())
         self.present            = present
@@ -220,6 +227,7 @@ nonisolated final class FrameReceiver:
             captureGeneration: captureGeneration,
             observedRevision : observedRevision,
             capturesFullWindow: capturesFullWindow,
+            framing           : framing,
             receivedAt       : receivedAt
         ) else { return }
         deliver(frame)
@@ -286,6 +294,20 @@ public final class SeatCaptureStream {
     /// The exact lifecycle state of this owner. `isRunning` is derived from it
     /// and is true only for `.running`.
     public private(set) var state: CaptureLifecycle = .idle
+
+    /// The pixel size the content of the last presented frame actually filled.
+    ///
+    /// It equals the configured `pixelSize` only while the source still has the
+    /// shape the stream was started with. ScreenCaptureKit does not stretch a
+    /// source that changed shape to fill a buffer whose size was fixed at
+    /// start: it writes the content where it fits and leaves the rest black, so
+    /// a reading smaller than the configuration is that black band, measured.
+    ///
+    /// It is read on a heartbeat and never on the frame path, which is why the
+    /// frame path only stores it. `Monitor.evaluate` is the shipped reader; a
+    /// consumer driving a stream of its own compares it with
+    /// `configuration?.pixelSize` on a heartbeat of its own.
+    public private(set) var lastContentPixelSize: CGSize?
 
     private let continuation: AsyncStream<SeatFrame>.Continuation
     private var receiver          : FrameReceiver?
@@ -680,6 +702,7 @@ public final class SeatCaptureStream {
             captureGeneration: generation,
             source           : target.sourceIdentity,
             capturesFullWindow: target.windowNumber != nil,
+            framing          : target.framing,
             present          : { [weak self] frame, callbackGeneration in
                 self?.present(frame, generation: callbackGeneration)
             },
@@ -1342,9 +1365,27 @@ public final class SeatCaptureStream {
     /// frames carry `SCStreamFrameInfoDisplayTime` on supported targets. Frames
     /// without that timestamp remain unqualified and are skipped until the
     /// capture deadline expires. The stream is stopped before this call returns.
+    ///
+    /// `pixelSize` is optional, and nil is the answer for every caller that has
+    /// no reason of its own to pin a size. A stream's size is fixed when it
+    /// starts and ScreenCaptureKit does not stretch a source that no longer has
+    /// that shape to fill it: it writes the content where it fits and leaves the
+    /// rest of the buffer black. A size measured for an earlier capture is
+    /// therefore not a size for this one, and the window this fallback exists
+    /// for is exactly the window a placement may have just resized. Nil takes
+    /// the size from the filter this call builds, which is the same
+    /// `naturalPixelSize` rule `still` has always used.
+    ///
+    /// The ceiling, and it is the reason a wrong size cannot be caught after the
+    /// fact: `SeatFrame.fallbackGeometry`, which is what a frame arriving with
+    /// no attachments is certified from, declares the content rectangle to be
+    /// the whole surface by construction. A frame on that path reports a full
+    /// buffer whatever is actually in it, so no content-rectangle reasoning,
+    /// this one or `MonitorLayer.contentsRect`, can see a band on it. Sizing the
+    /// capture correctly in the first place is the only defence there is.
     nonisolated package static func timestampedStill(
         of target        : SeatCaptureTarget,
-        pixelSize        : CGSize,
+        pixelSize        : CGSize? = nil,
         displayGeneration: UInt64 = 0,
         timeout          : Duration = .seconds(2)
     ) async throws -> SeatFrame {
@@ -1360,10 +1401,19 @@ public final class SeatCaptureStream {
 
     private static func timestampedStill(
         of target         : SeatCaptureTarget,
-        pixelSize         : CGSize,
+        pixelSize         : CGSize?,
         displayGeneration : UInt64,
         deadline          : CaptureDeadline
     ) async throws -> SeatFrame {
+
+        // Resolved before the owner exists, so a target that cannot be sized
+        // fails without a stream to stop.
+        let size: CGSize
+        if let pixelSize {
+            size = pixelSize
+        } else {
+            size = try await naturalPixelSize(of: target, deadline: deadline)
+        }
 
         let owner = SeatCaptureStream(
             target           : target,
@@ -1374,7 +1424,7 @@ public final class SeatCaptureStream {
         do {
             try await owner.start(
                 configuration: SeatCaptureConfiguration(
-                    pixelSize      : pixelSize,
+                    pixelSize      : size,
                     framesPerSecond: 60
                 ),
                 deadline: deadline
@@ -1407,9 +1457,26 @@ public final class SeatCaptureStream {
         try deadline.check(.still)
         return try await withThrowingTaskGroup(of: SeatFrame.self) { group in
             group.addTask {
+                let clock = MachAbsoluteContentClock()
                 for await frame in frames {
                     try Task.checkCancellation()
-                    if frame.displayTime != nil { return frame }
+                    try deadline.check(.still)
+                    guard let ticks = frame.displayTime,
+                          let displayedAt = clock.displayTimeNanoseconds(fromMachTicks: ticks),
+                          displayedAt < deadline.expiresAt
+                    else { continue }
+
+                    // ScreenCaptureKit can deliver a frame before its scheduled display instant.
+                    // Wait against the original deadline without changing the frame's timestamp.
+                    var now = DispatchTime.now().uptimeNanoseconds
+                    while displayedAt > now {
+                        try await Task.sleep(nanoseconds: displayedAt - now)
+                        try Task.checkCancellation()
+                        try deadline.check(.still)
+                        now = DispatchTime.now().uptimeNanoseconds
+                    }
+                    try deadline.check(.still)
+                    return frame
                 }
                 try Task.checkCancellation()
                 throw CaptureFailure.frameUnavailable
@@ -1450,9 +1517,9 @@ public final class SeatCaptureStream {
             in             : content,
             identityWitness: identityWitness
         )
-        let size    = pixelSize ?? naturalPixelSize(of: filter)
+        let size    = pixelSize ?? naturalPixelSize(of: target, filter: filter)
         let configuration = SeatCaptureConfiguration(pixelSize: size, framesPerSecond: 60)
-            .makeStillConfiguration()
+            .makeStillConfiguration(for: target)
 
         try deadline.check(.still)
         let requestIdentity = StillRequestIdentity(
@@ -1504,6 +1571,7 @@ public final class SeatCaptureStream {
             captureGeneration: captureGeneration,
             observedRevision : reply.observedRevision,
             capturesFullWindow: target.windowNumber != nil,
+            framing           : target.framing,
             receivedAt       : reply.receivedAt
         ) else { throw CaptureFailure.frameUnavailable }
         try Task.checkCancellation()
@@ -1537,7 +1605,40 @@ public final class SeatCaptureStream {
 
     private func presentToConsumers(_ frame: SeatFrame) {
         for layer in layers { layer.present(frame) }
+        // Two multiplications, after the person's preview and before the yield:
+        // the reading is taken here because only a frame carries the geometry.
+        lastContentPixelSize = frame.geometry.contentPixelSize
         continuation.yield(frame)
+    }
+
+    /// The pixel size the target has now, read from a filter built for it here.
+    ///
+    /// It is the opening of `still` without the capture: the same identity
+    /// binding before the shareable-content snapshot, the same deadline checks
+    /// on both sides of it, and the same filter helper, so a target that cannot
+    /// be filtered fails with the vocabulary it already fails with rather than a
+    /// refusal of its own. The cost is one extra shareable-content fetch, which
+    /// `CaptureFrameworkCoordinator` coalesces with any that is already in
+    /// flight, on a path that is about to pay for a whole stream start and stop.
+    private static func naturalPixelSize(
+        of target: SeatCaptureTarget,
+        deadline : CaptureDeadline
+    ) async throws -> CGSize {
+
+        let identityWitness = identityWitness(for: target)
+        try validateSourceBeforeContent(
+            target,
+            identityWitness: identityWitness
+        )
+        try deadline.check(.still)
+        let content = try await shareableContent(deadline: deadline)
+        try deadline.check(.still)
+        let filter = try filter(
+            for            : target,
+            in             : content,
+            identityWitness: identityWitness
+        )
+        return naturalPixelSize(of: target, filter: filter)
     }
 
     /// The pixel size the target already has: the filter's own rectangle at its
@@ -1549,6 +1650,21 @@ public final class SeatCaptureStream {
         return CGSize(
             width : max(1, filter.contentRect.width  * scale),
             height: max(1, filter.contentRect.height * scale)
+        )
+    }
+
+    private static func naturalPixelSize(
+        of target: SeatCaptureTarget,
+        filter: SCContentFilter
+    ) -> CGSize {
+        guard case .attestedWindowRegion(_, _, let displayID, let screenRect, _) = target,
+              let mode = CGDisplayCopyDisplayMode(displayID), mode.width > 0, mode.height > 0
+        else { return naturalPixelSize(of: filter) }
+        let scale = CGFloat(mode.pixelWidth) / CGFloat(mode.width)
+        guard scale.isFinite, scale > 0 else { return naturalPixelSize(of: filter) }
+        return CGSize(
+            width : max(1, screenRect.width * scale),
+            height: max(1, screenRect.height * scale)
         )
     }
 
@@ -1587,6 +1703,23 @@ public final class SeatCaptureStream {
                 throw CaptureFailure.windowIdentityChanged(expected: identity, observed: secondIdentity)
             }
             return SCContentFilter(desktopIndependentWindow: window)
+
+        case .attestedWindowRegion(let host, let children, let displayID, _, _):
+            guard let display = content.displays.first(where: { $0.displayID == displayID }) else {
+                throw CaptureFailure.displayNotShareable(displayID)
+            }
+            let identities = [host] + children
+            let windows = try identities.map { identity -> SCWindow in
+                guard let window = content.windows.first(where: { Int($0.windowID) == identity.windowNumber }),
+                      window.owningApplication?.processID == identity.processID
+                else { throw CaptureFailure.windowNotShareable(windowNumber: identity.windowNumber) }
+                guard identityWitness?.identity(of: identity.windowNumber) == identity else {
+                    throw CaptureFailure.windowIdentityChanged(expected: identity,
+                                                                observed: identityWitness?.identity(of: identity.windowNumber))
+                }
+                return window
+            }
+            return SCContentFilter(display: display, including: windows)
         }
     }
 
@@ -1598,13 +1731,17 @@ public final class SeatCaptureStream {
         _ target              : SeatCaptureTarget,
         identityWitness       : WindowIdentityWitness?
     ) throws {
-        guard case .attestedWindow(let identity) = target else { return }
-        let observed = identityWitness?.identity(of: identity.windowNumber)
-        guard observed == identity else {
-            throw CaptureFailure.windowIdentityChanged(
-                expected: identity,
-                observed: observed
-            )
+        let identities: [WindowIdentity]
+        switch target {
+        case .attestedWindow(let identity): identities = [identity]
+        case .attestedWindowRegion(let host, let children, _, _, _): identities = [host] + children
+        case .display, .window: return
+        }
+        for identity in identities {
+            let observed = identityWitness?.identity(of: identity.windowNumber)
+            guard observed == identity else {
+                throw CaptureFailure.windowIdentityChanged(expected: identity, observed: observed)
+            }
         }
     }
 
@@ -1621,13 +1758,26 @@ public final class SeatCaptureStream {
                 guard observed != identity else { return nil }
                 return .windowIdentityChanged(expected: identity, observed: observed)
             }
+        case .attestedWindowRegion(let host, let children, _, _, _):
+            let identities = [host] + children
+            return {
+                for identity in identities where identityWitness?.identity(of: identity.windowNumber) != identity {
+                    return .windowIdentityChanged(expected: identity,
+                                                  observed: identityWitness?.identity(of: identity.windowNumber))
+                }
+                return nil
+            }
         }
     }
 
     private static func identityWitness(
         for target: SeatCaptureTarget
     ) -> WindowIdentityWitness? {
-        guard case .attestedWindow(_) = target else { return nil }
-        return WindowIdentityWitness()
+        switch target {
+        case .attestedWindow, .attestedWindowRegion:
+            return WindowIdentityWitness()
+        case .display, .window:
+            return nil
+        }
     }
 }

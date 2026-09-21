@@ -34,6 +34,11 @@ nonisolated public struct FrameGeometryObservation: Sendable, Equatable {
     /// The captured content's onscreen rectangle in Quartz points.
     public let screenRect          : CGRect
 
+    /// The physical window whose identity supplied the capture source. A
+    /// hosted-sheet frame may cover the attested host-and-sheet union while
+    /// window-local input coordinates still belong to this host rectangle.
+    public let sourceWindowFrame   : CGRect?
+
     /// The captured content's rectangle in points inside the output surface.
     public let contentRectInSurface: CGRect
 
@@ -58,6 +63,7 @@ nonisolated public struct FrameGeometryObservation: Sendable, Equatable {
     public init(
         source              : FrameSourceIdentity,
         screenRect          : CGRect,
+        sourceWindowFrame   : CGRect? = nil,
         contentRectInSurface: CGRect,
         scaleFactor         : CGFloat,
         contentScale        : CGFloat,
@@ -67,6 +73,7 @@ nonisolated public struct FrameGeometryObservation: Sendable, Equatable {
     ) {
         self.source               = source
         self.screenRect           = screenRect
+        self.sourceWindowFrame    = sourceWindowFrame
         self.contentRectInSurface = contentRectInSurface
         self.scaleFactor          = scaleFactor
         self.contentScale         = contentScale
@@ -81,6 +88,7 @@ nonisolated public struct FrameGeometryObservation: Sendable, Equatable {
     /// Command.
     public var isValid: Bool {
         guard screenRect.hasFinitePositiveArea,
+              sourceWindowFrame.map(\.hasFinitePositiveArea) ?? true,
               contentRectInSurface.hasFinitePositiveArea,
               pixelSize.width.isFinite,
               pixelSize.height.isFinite,
@@ -106,6 +114,34 @@ nonisolated public struct FrameGeometryObservation: Sendable, Equatable {
             && contentRectInSurface.maxY <= surfaceRect.maxY + tolerance
     }
 
+    /// contentPixelSize is how much of the delivered buffer the capture filled,
+    /// in that buffer's own pixels.
+    ///
+    /// `pixelSize` is the buffer the stream was configured for and
+    /// `contentRectInSurface` is the part of it WindowServer wrote, in points,
+    /// so the two agree only while the source still has the shape the stream
+    /// was started with. When they disagree the remainder of the buffer is
+    /// black, and this is the size that black has to be removed by
+    /// reconfiguring to. The conversion is the same one `isValid` and
+    /// `MonitorLayer.contentsRect(of:)` use: the surface in points is
+    /// `pixelSize` over `scaleFactor`.
+    ///
+    /// Nil for a geometry the transform rules already refuse, which is the
+    /// answer `screenPoint(fromPixelPoint:)` gives such a frame too.
+    ///
+    /// The ceiling on every reader of this: a frame that arrived without
+    /// ScreenCaptureKit attachments is certified from `fallbackGeometry`, which
+    /// declares the content rectangle to be the whole surface by construction.
+    /// Such a frame reports a full buffer whatever is in it, so black it
+    /// carries is invisible here and in `MonitorLayer.contentsRect(of:)` alike.
+    public var contentPixelSize: CGSize? {
+        guard isValid else { return nil }
+        return CGSize(
+            width : contentRectInSurface.width  * scaleFactor,
+            height: contentRectInSurface.height * scaleFactor
+        )
+    }
+
     /// hasUniformWindowMapping rejects crops and output transforms that cannot
     /// be represented by one scalar from window points to surface points.
     public var hasUniformWindowMapping: Bool {
@@ -127,7 +163,10 @@ nonisolated public struct FrameGeometryObservation: Sendable, Equatable {
               hasUniformWindowMapping
         else { return nil }
         return WindowGeometryObservation(
-            window     : WindowReference(identity: identity, frame: screenRect),
+            window     : WindowReference(
+                identity: identity,
+                frame   : sourceWindowFrame ?? screenRect
+            ),
             scaleFactor: scaleFactor,
             version    : version
         )

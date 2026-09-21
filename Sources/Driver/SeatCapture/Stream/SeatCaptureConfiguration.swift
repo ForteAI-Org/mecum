@@ -24,6 +24,17 @@ nonisolated public enum SeatCaptureTarget: Sendable, Equatable {
     case window(windowNumber: Int)
     case attestedWindow(WindowIdentity)
 
+    /// One explicitly attested hosted-sheet family. The source remains the
+    /// host window; `screenRect` is the measured union used for the display
+    /// crop, never a rectangle inferred from ScreenCaptureKit's contentRect.
+    case attestedWindowRegion(
+        host: WindowIdentity,
+        children: [WindowIdentity],
+        displayID: CGDirectDisplayID,
+        screenRect: CGRect,
+        sourceWindowFrame: CGRect
+    )
+
     /// sourceIdentity preserves the distinction between a display, an
     /// identity-bound window and a legacy raw Window ID on every Frame.
     public var sourceIdentity: FrameSourceIdentity {
@@ -34,6 +45,8 @@ nonisolated public enum SeatCaptureTarget: Sendable, Equatable {
             .unverifiedWindow(windowNumber: windowNumber)
         case .attestedWindow(let identity):
             .window(identity)
+        case .attestedWindowRegion(let host, _, _, _, _):
+            .window(host)
         }
     }
 
@@ -45,7 +58,19 @@ nonisolated public enum SeatCaptureTarget: Sendable, Equatable {
             windowNumber
         case .attestedWindow(let identity):
             identity.windowNumber
+        case .attestedWindowRegion(let host, _, _, _, _):
+            host.windowNumber
         }
+    }
+
+    /// The rectangle the pixels represent and, independently, the window whose
+    /// lifetime supplies the capture identity. A hosted sheet is composited in
+    /// the union of its attested family, while window-local coordinates remain
+    /// those of the host.
+    var framing: (screenRect: CGRect, sourceWindowFrame: CGRect?)? {
+        guard case .attestedWindowRegion(_, _, _, let screenRect, let sourceWindowFrame) = self
+        else { return nil }
+        return (screenRect, sourceWindowFrame)
     }
 }
 
@@ -102,6 +127,23 @@ nonisolated public struct SeatCaptureConfiguration: Sendable, Equatable {
             configuration.ignoreShadowsSingleWindow    = true
             configuration.ignoreGlobalClipSingleWindow = true
         }
+        if case .attestedWindowRegion(_, _, let displayID, let screenRect, _) = target {
+            let displayRect = CGDisplayBounds(displayID)
+            let sourceRect = screenRect.offsetBy(dx: -displayRect.minX, dy: -displayRect.minY)
+            guard displayRect.contains(screenRect),
+                  let mode = CGDisplayCopyDisplayMode(displayID),
+                  mode.width > 0, mode.height > 0
+            else { return configuration }
+            let horizontal = CGFloat(mode.pixelWidth) / CGFloat(mode.width)
+            let vertical = CGFloat(mode.pixelHeight) / CGFloat(mode.height)
+            guard horizontal.isFinite, horizontal > 0,
+                  abs(horizontal - vertical) <= 0.000_001
+            else { return configuration }
+            configuration.sourceRect = sourceRect
+            configuration.width = Int((screenRect.width * horizontal).rounded())
+            configuration.height = Int((screenRect.height * horizontal).rounded())
+            configuration.includeChildWindows = true
+        }
         return configuration
     }
 
@@ -112,8 +154,8 @@ nonisolated public struct SeatCaptureConfiguration: Sendable, Equatable {
     ///
     /// `framesPerSecond` is meaningless for a one-shot capture and is left at
     /// the stream's value rather than invented.
-    func makeStillConfiguration() -> SCStreamConfiguration {
-        let configuration = makeStreamConfiguration()
+    func makeStillConfiguration(for target: SeatCaptureTarget? = nil) -> SCStreamConfiguration {
+        let configuration = makeStreamConfiguration(for: target)
         configuration.ignoreShadowsSingleWindow    = true
         configuration.ignoreGlobalClipSingleWindow = true
         return configuration

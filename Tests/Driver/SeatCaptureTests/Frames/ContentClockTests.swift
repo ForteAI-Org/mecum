@@ -2,7 +2,7 @@
 //  ContentClockTests.swift
 //  AgentSeatKit
 //
-//  Created by OpenAI Codex on 16/09/2026.
+//  Created by Eliomar Alejandro Rodriguez Ferrer on 16/09/2026.
 //
 
 import SeatCore

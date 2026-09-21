@@ -6,6 +6,7 @@
 //
 
 import QuartzCore
+import SeatCore
 
 /// MonitorLayer shows a `SeatFrame` by putting its `IOSurface` straight into
 /// `contents`. That assignment is the whole zero-copy pipeline: no conversion,
@@ -72,11 +73,60 @@ nonisolated open class MonitorLayer: CALayer {
     open func present(_ frame: SeatFrame) {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        contents = frame.surface
+        contents     = frame.surface
+        contentsRect = Self.contentsRect(of: frame.geometry)
         CATransaction.commit()
         presentedReceivedAtNanoseconds = frame.receivedAt
         presentedDisplayTime           = frame.displayTime
         isStale                        = false
+    }
+
+    /// Which part of the surface the capture actually filled, in the unit
+    /// coordinates `contentsRect` is written in.
+    ///
+    /// The surface is the size the stream was configured with, and a stream's
+    /// size is fixed when it starts. ScreenCaptureKit does not stretch a source
+    /// that no longer has that shape to fill it: it writes the content where it
+    /// fits and leaves the rest of the buffer black. Measured on a window being
+    /// moved onto the Virtual Display, where the window server publishes it
+    /// shrinking from 1291 by 949 points to 136 by 190 over 700 ms while the
+    /// window's own body never moves: for that stretch every frame carries a
+    /// small picture in a large buffer, and drawing the whole surface put the
+    /// black on the person's monitor.
+    ///
+    /// Nothing about it had to be inferred. The content rectangle arrives with
+    /// every frame, in points inside the surface, which is why it is normalised
+    /// against the surface in points and not against the pixel buffer. Both it
+    /// and `contentsRect` put their origin at the top left, so no flip belongs
+    /// here; `screenPoint(fromPixelPoint:)` is the same convention read the
+    /// other way.
+    ///
+    /// A geometry the transform rules already refuse, or a rectangle that does
+    /// not sit inside the unit square once normalised, answers the whole
+    /// surface. This is a preview: showing too much is a worse answer than
+    /// showing the wrong part, and neither is worth a crash.
+    package static func contentsRect(of geometry: FrameGeometryObservation) -> CGRect {
+
+        let whole = CGRect(x: 0, y: 0, width: 1, height: 1)
+        guard geometry.isValid else { return whole }
+
+        let surface = CGSize(
+            width : geometry.pixelSize.width  / geometry.scaleFactor,
+            height: geometry.pixelSize.height / geometry.scaleFactor
+        )
+        guard surface.width > 0, surface.height > 0 else { return whole }
+
+        let unit = CGRect(
+            x     : geometry.contentRectInSurface.minX   / surface.width,
+            y     : geometry.contentRectInSurface.minY   / surface.height,
+            width : geometry.contentRectInSurface.width  / surface.width,
+            height: geometry.contentRectInSurface.height / surface.height
+        )
+        guard unit.minX >= 0, unit.minY >= 0,
+              unit.maxX <= 1, unit.maxY <= 1,
+              unit.width > 0, unit.height > 0
+        else { return whole }
+        return unit
     }
 
     /// Marks what is on the layer as no longer live, without removing it. Called

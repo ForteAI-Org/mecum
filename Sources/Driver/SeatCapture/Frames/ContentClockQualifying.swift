@@ -67,17 +67,20 @@ nonisolated public struct MachAbsoluteContentClock: ContentClockQualifying {
     public func contentAge(of frame: SeatFrame, atNanoseconds now: UInt64) -> FrameContentAge {
         guard isQualified else { return .unknown(.clockNotQualified) }
         guard let displayTime = frame.displayTime else { return .unknown(.timestampMissing) }
-        guard displayTime > 0,
-              let displayedAt = nanoseconds(fromMachTicks: displayTime)
-        else { return .unknown(.timestampMalformed) }
-        guard displayedAt <= now else { return .unknown(.timestampNotMonotonic) }
+        guard let displayedAt = displayTimeNanoseconds(fromMachTicks: displayTime)
+        else {
+            return .unknown(.timestampMalformed)
+        }
+        guard displayedAt <= now else {
+            return .unknown(.timestampNotMonotonic)
+        }
         return .qualified(nanoseconds: now - displayedAt)
     }
 
     /// Dividing first keeps ordinary long uptimes out of the overflowing
     /// intermediate `ticks * numerator` while retaining the fractional part.
-    private func nanoseconds(fromMachTicks ticks: UInt64) -> UInt64? {
-        guard denominator > 0 else { return nil }
+    package func displayTimeNanoseconds(fromMachTicks ticks: UInt64) -> UInt64? {
+        guard isQualified, ticks > 0 else { return nil }
         let whole = ticks / denominator
         let remainder = ticks % denominator
         let (wholeNanoseconds, wholeOverflow) = whole.multipliedReportingOverflow(by: numerator)

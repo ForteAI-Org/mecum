@@ -74,4 +74,69 @@ nonisolated public struct MonitorConfiguration: Sendable, Equatable {
             framesPerSecond: quality.frameRate.rawValue
         )
     }
+
+    /// How far a reading may sit from the size it is compared with and still
+    /// count as the same size, in pixels of the delivered buffer.
+    ///
+    /// Two, and not zero, because two roundings sit between the request and the
+    /// delivery: `MonitorQuality.pixelSize(from:)` rounds the rung's fraction,
+    /// and ScreenCaptureKit delivers a size of its own choosing that the kit
+    /// reads back from the pixel buffer rather than assumes. One pixel of black
+    /// at an edge is that arithmetic and not a band, and a reconfiguration is
+    /// not free, so chasing it would trade an edge nobody can see for a hitch
+    /// in the preview everybody can.
+    ///
+    /// The figure lives in `CaptureShapeStabilisation`, which is the one place
+    /// the rule is written; this name stays for the callers that had it.
+    public static var contentPixelTolerance: CGFloat {
+        CaptureShapeStabilisation.contentPixelTolerance
+    }
+
+    /// The configuration to run when the capture has settled at a shape other
+    /// than the one the stream was configured for, or nil to leave it alone.
+    ///
+    /// `contentPixelSize` is `SeatCaptureStream.lastContentPixelSize` and
+    /// `previousReading` is the reading before it, both taken on the consumer's
+    /// heartbeat. **Two agreeing readings are the settle budget**, and they are
+    /// a heartbeat apart rather than a frame apart for a measured reason: a
+    /// window moved onto the Virtual Display is published shrinking from 1291
+    /// by 949 points to 136 by 190 over 700 ms, and a rule that acted on one
+    /// reading would reconfigure the stream through every intermediate shape of
+    /// that animation. `SeatWatchdog.heartbeat` is one second, so two agreeing
+    /// readings are at least a second of a shape that stopped moving, which the
+    /// 700 ms of that measurement cannot fit inside.
+    ///
+    /// The answer carries the size **at the top rung** in a `fixed` output, and
+    /// that is what makes it compose with the ladder: `captureConfiguration`
+    /// multiplies the output by the rung's own fraction, so the next rung
+    /// change asks for a fraction of the followed shape instead of reverting to
+    /// the size the consumer first asked for.
+    ///
+    /// Whether the shape has settled and is worth following at all is
+    /// `CaptureShapeStabilisation`, which the Lab's own preview stream asks the
+    /// same question of. What is left here is the rebasing, which is the only
+    /// part of it that belongs to the ladder.
+    public func following(
+        contentPixelSize: CGSize,
+        previousReading : CGSize?,
+        at quality      : MonitorQuality
+    ) -> MonitorConfiguration? {
+
+        guard quality.resolutionScale > 0,
+              let settled = CaptureShapeStabilisation.settledShape(
+                  running        : quality.pixelSize(from: output.pixelSize),
+                  reading        : contentPixelSize,
+                  previousReading: previousReading
+              )
+        else { return nil }
+
+        let atTopRung = CGSize(
+            width : settled.width  / quality.resolutionScale,
+            height: settled.height / quality.resolutionScale
+        )
+        return MonitorConfiguration(
+            targetFrameRate: targetFrameRate,
+            output         : .fixed(atTopRung)
+        )
+    }
 }

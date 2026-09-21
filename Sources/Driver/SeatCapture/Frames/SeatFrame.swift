@@ -103,6 +103,7 @@ nonisolated public struct SeatFrame: @unchecked Sendable {
         captureGeneration: UInt64,
         observedRevision : UInt64,
         capturesFullWindow: Bool,
+        framing           : (screenRect: CGRect, sourceWindowFrame: CGRect?)? = nil,
         receivedAt       : UInt64
     ) {
         guard
@@ -133,13 +134,15 @@ nonisolated public struct SeatFrame: @unchecked Sendable {
                 displayGeneration: displayGeneration,
                 captureGeneration: captureGeneration,
                 observedRevision : observedRevision,
-                capturesFullWindow: capturesFullWindow
+                capturesFullWindow: capturesFullWindow,
+                framing           : framing
             )
         }) ?? Self.fallbackGeometry(
             source            : source,
             pixelSize         : pixelSize,
             version           : version,
-            capturesFullWindow: capturesFullWindow
+            capturesFullWindow: capturesFullWindow,
+            framing           : framing
         )
         else { return nil }
 
@@ -218,7 +221,8 @@ nonisolated public struct SeatFrame: @unchecked Sendable {
         displayGeneration  : UInt64,
         captureGeneration  : UInt64,
         observedRevision   : UInt64,
-        capturesFullWindow : Bool
+        capturesFullWindow : Bool,
+        framing            : (screenRect: CGRect, sourceWindowFrame: CGRect?)?
     ) -> FrameGeometryObservation? {
         guard
             let screenRect   = rectangle(attachment[.screenRect]),
@@ -229,7 +233,8 @@ nonisolated public struct SeatFrame: @unchecked Sendable {
 
         let geometry = FrameGeometryObservation(
             source              : source,
-            screenRect          : screenRect,
+            screenRect          : framing?.screenRect ?? screenRect,
+            sourceWindowFrame   : framing?.sourceWindowFrame,
             contentRectInSurface: contentRect,
             scaleFactor         : CGFloat(scaleFactor),
             contentScale        : CGFloat(contentScale),
@@ -251,9 +256,14 @@ nonisolated public struct SeatFrame: @unchecked Sendable {
         source            : FrameSourceIdentity,
         pixelSize         : CGSize,
         version           : GeometryObservationVersion,
-        capturesFullWindow: Bool
+        capturesFullWindow: Bool,
+        framing           : (screenRect: CGRect, sourceWindowFrame: CGRect?)?
     ) -> FrameGeometryObservation? {
         let screenRect: CGRect?
+        let sourceWindowFrame = framing?.sourceWindowFrame
+        if let framing {
+            screenRect = framing.screenRect
+        } else {
         switch source {
         case .display(let displayID):
             screenRect = CGDisplayBounds(displayID)
@@ -261,6 +271,7 @@ nonisolated public struct SeatFrame: @unchecked Sendable {
             screenRect = WindowServerProbe.geometry(of: identity.windowNumber)?.frame
         case .unverifiedWindow(let windowNumber):
             screenRect = WindowServerProbe.geometry(of: windowNumber)?.frame
+        }
         }
         guard let screenRect, screenRect.width > 0, screenRect.height > 0,
               pixelSize.width > 0, pixelSize.height > 0
@@ -271,6 +282,7 @@ nonisolated public struct SeatFrame: @unchecked Sendable {
         let geometry = FrameGeometryObservation(
             source              : source,
             screenRect          : screenRect,
+            sourceWindowFrame   : sourceWindowFrame,
             contentRectInSurface: CGRect(origin: .zero, size: screenRect.size),
             scaleFactor         : scaleX,
             contentScale        : 1,

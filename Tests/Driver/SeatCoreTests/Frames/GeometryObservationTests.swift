@@ -59,6 +59,37 @@ struct GeometryObservationTests {
         #expect(location.observedGeometry?.version.sequence == 19)
     }
 
+    @Test("a hosted-sheet crop maps pixels over the union but keeps the host observation")
+    func hostedSheetCropUsesTheSourceWindowFrame() throws {
+        let host = CGRect(x: 200, y: 200, width: 300, height: 180)
+        let crop = CGRect(x: 120, y: 200, width: 460, height: 180)
+        let frame = Self.frame(
+            screenRect       : crop,
+            contentRect      : CGRect(origin: .zero, size: crop.size),
+            scaleFactor      : 1,
+            pixelSize        : crop.size
+        )
+        let region = FrameGeometryObservation(
+            source              : frame.source,
+            screenRect          : crop,
+            sourceWindowFrame   : host,
+            contentRectInSurface: frame.contentRectInSurface,
+            scaleFactor         : frame.scaleFactor,
+            contentScale        : frame.contentScale,
+            pixelSize           : frame.pixelSize,
+            version             : frame.version,
+            capturesFullWindow  : true
+        )
+        let location = try #require(InputLocation(
+            pixelPoint: CGPoint(x: 20, y: 40),
+            observedIn: region
+        ))
+        #expect(location.screenPoint == CGPoint(x: 140, y: 240))
+        #expect(location.observedGeometry?.window.frame == host)
+        #expect(location.windowPointFromTop == CGPoint(x: -60, y: 40),
+                "AgentSeat rebases this crop point onto the resolved child before posting")
+    }
+
     @Test("content padding is accounted for rather than treated as screen geometry")
     func contentPaddingMapsCorrectly() throws {
         let frame = Self.frame(
