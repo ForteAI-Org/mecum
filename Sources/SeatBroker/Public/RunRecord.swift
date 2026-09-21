@@ -15,6 +15,28 @@ public struct RunStepRecord: Codable, Sendable, Hashable, Identifiable {
     public let pixelDifference: Double?
     public let eventCount: Int
     public let milliseconds: Int
+    /// Clicks the step asked for: 2 is the double click that opens a file or
+    /// enters a folder. 1 for every action that is not a click.
+    public let count: Int
+}
+
+extension RunStepRecord {
+    /// Records written before the click count was kept carry no field at all,
+    /// and a step that named none was the single click it was.
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        index = try container.decode(Int.self, forKey: .index)
+        verb = try container.decode(String.self, forKey: .verb)
+        element = try container.decode(Int.self, forKey: .element)
+        targetLabel = try container.decode(String.self, forKey: .targetLabel)
+        outcome = try container.decodeIfPresent(ActionOutcome.self, forKey: .outcome)
+        sceneChanged = try container.decode(Bool.self, forKey: .sceneChanged)
+        effect = try container.decodeIfPresent(String.self, forKey: .effect)
+        pixelDifference = try container.decodeIfPresent(Double.self, forKey: .pixelDifference)
+        eventCount = try container.decode(Int.self, forKey: .eventCount)
+        milliseconds = try container.decode(Int.self, forKey: .milliseconds)
+        count = try container.decodeIfPresent(Int.self, forKey: .count) ?? 1
+    }
 }
 
 /// One planner run, kept across launches as evidence: what was asked, which

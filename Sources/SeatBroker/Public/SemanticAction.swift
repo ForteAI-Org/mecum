@@ -78,6 +78,11 @@ public enum SemanticAction: Sendable, Hashable {
         }
     }
 
+    /// The clicks this action asks for: 1 for everything that is not a click.
+    public var clickCount: Int {
+        if case .click(_, let count) = self { count } else { 1 }
+    }
+
     public var verb: String {
         switch self {
         case .click: "click"

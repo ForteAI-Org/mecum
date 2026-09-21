@@ -502,7 +502,8 @@ public final class AgentSession {
                           effect: report.verification.effect, pixelDifference: report.verification.pixelDifference,
                           eventCount: report.eventCount,
                           milliseconds: Int(report.duration.components.seconds * 1000
-                                            + report.duration.components.attoseconds / 1_000_000_000_000_000))
+                                            + report.duration.components.attoseconds / 1_000_000_000_000_000),
+                          count: report.action.clickCount)
         }
         let frame = lastObservation.flatMap { recorder.saveFrame($0.image, runID: id) }
         // What the seat itself did while the run went on, which the planner's
