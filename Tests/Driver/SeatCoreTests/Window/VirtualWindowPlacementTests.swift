@@ -225,4 +225,90 @@ struct VirtualWindowPlacementTests {
             Self.original, user: 322, behind: nil, concurrent: true
         ).isEmpty)
     }
+
+    // MARK: The measured cross-source offset
+
+    /// MarkEdit's own accessibility body, measured on two launches with
+    /// different Window IDs, on the background display below.
+    static let bodyFrame = CGRect(x: 2349, y: 1478, width: 885, height: 448)
+
+    /// What the window server published for that same window at that same
+    /// moment: 3 pt wider, 2 pt less x, identical height and y, twice.
+    static let serverFrame = CGRect(x: 2347, y: 1478, width: 888, height: 448)
+
+    static let backgroundDisplay = CGRect(x: 1512, y: 982, width: 2560, height: 1440)
+
+    static func offsetFailures(
+        body  : CGRect,
+        server: CGRect
+    ) -> [PlacementFailure] {
+        VirtualWindowPlacementCheck.failures(
+            original         : reference(frame: body),
+            current          : reference(frame: body),
+            server           : reference(frame: server),
+            displayBounds    : backgroundDisplay,
+            expectedUserPID  : 321,
+            currentUserPID   : 321,
+            targetBehindUser : true
+        )
+    }
+
+    @Test("MarkEdit's two sources are the same window and not a disagreement")
+    func measuredOffsetIsNotADisagreement() {
+        #expect(Self.offsetFailures(body: Self.bodyFrame, server: Self.serverFrame).isEmpty)
+    }
+
+    @Test("an offset larger than the one that was measured is still a disagreement")
+    func largerOffsetStillDisagrees() {
+        let wider = CGRect(x: 2347, y: 1478, width: 891, height: 448)
+        #expect(Self.offsetFailures(body: Self.bodyFrame, server: wider)
+            .contains(.readingsDisagree))
+    }
+
+    @Test("the same source resizing by three points is still a size change")
+    func sameSourceResizeStillFails() {
+        let resized = CGRect(x: 2349, y: 1478, width: 888, height: 448)
+        #expect(VirtualWindowPlacementCheck.failures(
+            original         : Self.reference(frame: Self.bodyFrame),
+            current          : Self.reference(frame: resized),
+            server           : Self.reference(frame: resized),
+            displayBounds    : Self.backgroundDisplay,
+            expectedUserPID  : 321,
+            currentUserPID   : 321,
+            targetBehindUser : true
+        ).contains(.sizeChanged), "The safety check must not be widened by the offset")
+    }
+
+    @Test("a window three points wider on the server still reads as full size")
+    func measuredOffsetReadsAsFullSize() {
+        #expect(VirtualWindowPlacementCheck.sizesMatchAcrossSources(
+            Self.serverFrame.size,
+            Self.bodyFrame.size
+        ))
+    }
+
+    @Test("a Stage Manager thumbnail is still not a full-size window")
+    func thumbnailIsStillRefused() {
+        #expect(!VirtualWindowPlacementCheck.sizesMatchAcrossSources(
+            CGSize(width: 90, height: 97),
+            Self.bodyFrame.size
+        ))
+    }
+
+    @Test("an offset of five points is not absorbed by the measured tolerance")
+    func fivePointOffsetIsRefused() {
+        #expect(!VirtualWindowPlacementCheck.sizesMatchAcrossSources(
+            CGSize(width: 890, height: 448),
+            Self.bodyFrame.size
+        ), "A second application's larger offset has to be re-measured, not absorbed")
+    }
+
+    @Test("a window outside the display is outside it however the sources differ")
+    func containmentStaysExact() {
+        let outside = Self.backgroundDisplay.offsetBy(dx: 1, dy: 0)
+        #expect(Self.offsetFailures(
+            body  : outside,
+            server: outside
+        ).contains(.frameOutsideDisplay))
+    }
 }

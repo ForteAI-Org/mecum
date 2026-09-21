@@ -59,6 +59,47 @@ struct SeatTargetSelectionKitTests {
         selection.observeVisibility(Fixture.visibility(windowNumber, .visibleInteractive))
     }
 
+    // MARK: A sheet attached to one window
+
+    @Test("A window-scoped modal names its host, blocks it, and owes no return of its own")
+    func anAttachedSheetIsTheHostsBusiness() {
+
+        let (assignment, selection) = Self.composed()
+        Self.ingest(selection, [11, 12], at: 0)
+        Self.ingest(selection, [11, 12], at: 10_000_000)
+
+        Self.describeDocument(selection, 11)
+        selection.declareRole(Fixture.role(12, .dialog))
+        selection.observeVisibility(Fixture.visibility(12, .visibleInteractive))
+        selection.declareParent(Fixture.parent(12, of: 11))
+        selection.declareModal(Fixture.modal(12, over: 11))
+
+        #expect(selection.attachedHost(of: Fixture.identity(12)) == Fixture.identity(11))
+        #expect(selection.attachedHost(of: Fixture.identity(11)) == nil)
+        #expect(selection.attachedModals == [Fixture.identity(12)])
+        #expect(selection.isModallyBlocked(Fixture.identity(11)))
+        #expect(!selection.isModallyBlocked(Fixture.identity(12)))
+        #expect(selection.selected?.surface == Fixture.identity(12),
+                "The sheet is what is usable while it is up")
+
+        // The host is inside the seat and owes a return; the sheet is drawn in
+        // it, goes where it goes, and is not a claim of its own.
+        #expect(assignment.inventory.heldMembers.map(\.windowNumber) == [11])
+
+        // An application-scoped modal is a window standing beside the others.
+        let (beside, second) = Self.composed()
+        Self.ingest(second, [11, 12], at: 0)
+        Self.ingest(second, [11, 12], at: 10_000_000)
+        Self.describeDocument(second, 11)
+        second.declareRole(Fixture.role(12, .dialog))
+        second.observeVisibility(Fixture.visibility(12, .visibleInteractive))
+        second.declareModal(Fixture.modal(12, over: nil))
+
+        #expect(second.attachedHost(of: Fixture.identity(12)) == nil)
+        #expect(second.isModallyBlocked(Fixture.identity(11)))
+        #expect(beside.inventory.heldMembers.map(\.windowNumber) == [11, 12])
+    }
+
     // MARK: Selected, then operational
 
     @Test("A contained, unblocked and observed target is operational, and nothing less is")

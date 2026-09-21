@@ -91,7 +91,13 @@ public struct SeatGuard: Sendable, Equatable {
             
             if observedIsActive { issues.append(.targetActivated) }
            
-            if !VirtualWindowPlacementCheck.framesMatch(observed.frame, target.frame) {
+            // Cross-source: the observation is the application's own reading
+            // and the target was confirmed against the window server.
+            if !VirtualWindowPlacementCheck.framesMatch(
+                observed.frame,
+                target.frame,
+                tolerance: VirtualWindowPlacementCheck.crossSourceTolerance
+            ) {
                 issues.append(.snapshotChanged)
             }
             

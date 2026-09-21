@@ -43,6 +43,11 @@ final class ControlledSurfaceReader: AssignedSurfaceReading, @unchecked Sendable
     var roles       : [Int: SurfaceRole]       = [:]
     var visibilities: [Int: SurfaceVisibility] = [:]
 
+    /// Surfaces the pass claims no role for at all, which is not a role it
+    /// refuses: it is the window the native reader would not answer for, such
+    /// as one with nothing in it yet, and the nucleus holds it as `roleNotRead`.
+    var rolesNotRead: Set<Int> = []
+
     /// Parent relations, by child Window ID, for the dialog return.
     var parents: [Int: WindowIdentity] = [:]
 
@@ -58,11 +63,25 @@ final class ControlledSurfaceReader: AssignedSurfaceReading, @unchecked Sendable
     /// reports them once their grace has passed.
     var withdrawn: [WindowIdentity] = []
 
+    /// Surfaces the window server was asked for by identity and answered no row
+    /// for at all, which is the one positive proof of closure a reading makes.
+    var destroyed: [WindowIdentity] = []
+
+    /// Ancestors the top accessibility level no longer shows, each with the
+    /// child that attests it, as the native reader keeps them.
+    var obscured: [WindowIdentity: WindowIdentity] = [:]
+
+    /// How many passes were asked of this reader, which is how a test sees that
+    /// a bounded rediscovery really took one more reading.
+    private(set) var passes = 0
+
     init(sensing: FakeSensing) {
         self.sensing = sensing
     }
 
     func snapshot(ownedBy processIDs: Set<Int32>) -> AssignedSurfaceSnapshot {
+
+        passes += 1
 
         guard !readingFails else {
             return AssignedSurfaceSnapshot(
@@ -87,13 +106,15 @@ final class ControlledSurfaceReader: AssignedSurfaceReading, @unchecked Sendable
         var batch = SelectionClaimBatch()
         for row in reading.rows {
             guard let identity = row.surface.reference.identity else { continue }
-            batch.roles.append(
-                SurfaceRoleClaim(
-                    surface   : identity,
-                    role      : roles[identity.windowNumber] ?? .document,
-                    provenance: .qualifiedRoleAttestation
+            if !rolesNotRead.contains(identity.windowNumber) {
+                batch.roles.append(
+                    SurfaceRoleClaim(
+                        surface   : identity,
+                        role      : roles[identity.windowNumber] ?? .document,
+                        provenance: .qualifiedRoleAttestation
+                    )
                 )
-            )
+            }
             batch.visibilities.append(
                 SurfaceVisibilityClaim(
                     surface   : identity,
@@ -121,10 +142,16 @@ final class ControlledSurfaceReader: AssignedSurfaceReading, @unchecked Sendable
             }
         }
         batch.recency = recency
+
+        var retained: [WindowIdentity: RetainedSurfaceDisposition] = [:]
+        for identity in withdrawn { retained[identity] = .withdrawn }
+        for identity in destroyed { retained[identity] = .destroyed }
+        for (ancestor, child) in obscured { retained[ancestor] = .obscuredByChild(child) }
+
         return AssignedSurfaceSnapshot(
             inventory: reading,
             claims   : batch,
-            withdrawnByApplication: withdrawn
+            retained : retained
         )
     }
 }

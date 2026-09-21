@@ -57,8 +57,12 @@ nonisolated public enum WindowRelocator {
     /// to rest is the caller's. The settable check before it is not ceremony,
     /// it is the difference between "the app refuses to be moved" and "the move
     /// silently did nothing", and the two need different reports.
-    public static func move(_ window: WindowReference, to origin: CGPoint) throws {
-        let element = try windowElement(for: window)
+    public static func move(
+        _ window : WindowReference,
+        to origin: CGPoint,
+        cache    : WindowElementCache? = nil
+    ) throws {
+        let element = try windowElement(for: window, cache: cache)
         try writeOrigin(origin, to: element)
         log.debug("moved window \(window.windowNumber, privacy: .public)")
     }
@@ -70,8 +74,12 @@ nonisolated public enum WindowRelocator {
     /// reads the window again and decides. It exists for one case, the window
     /// an application opens larger than the Virtual Display, where the
     /// alternative to shrinking it is leaving it on the person's screen.
-    public static func resize(_ window: WindowReference, to size: CGSize) throws {
-        let element = try windowElement(for: window)
+    public static func resize(
+        _ window: WindowReference,
+        to size : CGSize,
+        cache   : WindowElementCache? = nil
+    ) throws {
+        let element = try windowElement(for: window, cache: cache)
         try writeSize(size, to: element)
         log.debug("""
             resized window \(window.windowNumber, privacy: .public) to \
@@ -82,8 +90,11 @@ nonisolated public enum WindowRelocator {
     /// Reads only AXPosition and AXSize of the exact window. The body can have
     /// returned while WindowServer exposes its Stage Manager thumbnail; this
     /// reading supports return verification and never substitutes for staging.
-    public static func frame(of window: WindowReference) throws -> CGRect? {
-        let element = try windowElement(for: window)
+    public static func frame(
+        of window: WindowReference,
+        cache    : WindowElementCache? = nil
+    ) throws -> CGRect? {
+        let element = try windowElement(for: window, cache: cache)
         return frame(of: element)
     }
 
@@ -99,19 +110,21 @@ nonisolated public enum WindowRelocator {
     /// posted to the window until the confirmation arrives.
     ///
     /// `expectedSize` is what full size means here. A stashed window reads as a
-    /// thumbnail, 90 by 97 points in the measurement, so size is the signal
-    /// that separates staged from stashed and the caller is the one that knows
-    /// what the window measured before it was put away.
+    /// thumbnail, and the thumbnail is no constant: 90 by 97 points in one
+    /// measurement and 120 by 121 in another. That is why full size is the
+    /// caller's own reading of the window and never a literal here: the caller
+    /// is the one that knows what the window measured before it was put away.
     @discardableResult
     public static func stage(
         _ window     : WindowReference,
         expectedSize : CGSize,
         within bounds: CGRect,
         timeout      : TimeInterval = 2,
-        interval     : Duration     = .milliseconds(50)
+        interval     : Duration     = .milliseconds(50),
+        cache        : WindowElementCache? = nil
     ) async throws -> WindowReference {
 
-        let element = try windowElement(for: window)
+        let element = try windowElement(for: window, cache: cache)
         let result  = AXUIElementPerformAction(element, kAXRaiseAction as CFString)
         guard result == .success else {
             throw DisplayFailure.raiseFailed(windowNumber: window.windowNumber, code: result)
@@ -122,9 +135,14 @@ nonisolated public enum WindowRelocator {
             timeout : timeout,
             interval: interval
         ) { reading in
+            // The reading is the window server's and `expectedSize` the
+            // application's own, so the comparison is the cross-source one.
             rectangleIsUsable(reading.frame)
                 && bounds.contains(reading.frame)
-                && sizesMatch(reading.frame.size, expectedSize)
+                && VirtualWindowPlacementCheck.sizesMatchAcrossSources(
+                    reading.frame.size,
+                    expectedSize
+                )
         }
         if processIsGone(window.processID) {
             throw DisplayFailure.windowOwnerVanished(
@@ -223,8 +241,11 @@ nonisolated public enum WindowRelocator {
     }
 
     /// Reads `AXFullScreen` and its writability in one pass.
-    public static func fullScreen(of window: WindowReference) throws -> FullScreenReading {
-        let element = try windowElement(for: window)
+    public static func fullScreen(
+        of window: WindowReference,
+        cache    : WindowElementCache? = nil
+    ) throws -> FullScreenReading {
+        let element = try windowElement(for: window, cache: cache)
         var raw: CFTypeRef?
         let read = AXUIElementCopyAttributeValue(element, fullScreenAttribute as CFString, &raw)
         guard read == .success, let number = raw as? NSNumber else { return .unreadable(read) }
@@ -245,8 +266,12 @@ nonisolated public enum WindowRelocator {
     ///
     /// A window whose state is unreadable, or readable but not writable, is
     /// refused with its own case and left exactly where it is.
-    public static func requestFullScreen(_ wanted: Bool, of window: WindowReference) throws {
-        switch try fullScreen(of: window) {
+    public static func requestFullScreen(
+        _ wanted : Bool,
+        of window: WindowReference,
+        cache    : WindowElementCache? = nil
+    ) throws {
+        switch try fullScreen(of: window, cache: cache) {
             case .unreadable(let code):
                 throw DisplayFailure.fullScreenStateUnreadable(
                     windowNumber: window.windowNumber,
@@ -259,7 +284,7 @@ nonisolated public enum WindowRelocator {
             case .writable:
                 break
         }
-        let element = try windowElement(for: window)
+        let element = try windowElement(for: window, cache: cache)
         let result  = AXUIElementSetAttributeValue(element, fullScreenAttribute as CFString, wanted as CFBoolean)
         guard result == .success else {
             throw DisplayFailure.attributeWriteFailed(attribute: "AXFullScreen", code: result)
@@ -281,20 +306,24 @@ nonisolated public enum WindowRelocator {
         _ wanted: Bool,
         of window: WindowReference,
         timeout  : TimeInterval = 5,
-        interval : Duration     = .milliseconds(20)
+        interval : Duration     = .milliseconds(20),
+        cache    : WindowElementCache? = nil
     ) async throws -> WindowReference {
 
-        let deadline = Date().addingTimeInterval(timeout)
+        try Task.checkCancellation()
+        let clock = ContinuousClock()
+        let deadline = clock.now.advanced(by: .seconds(max(0, timeout)))
         var previous : WindowReference?
 
         repeat {
+            try Task.checkCancellation()
             if processIsGone(window.processID) {
                 throw DisplayFailure.windowOwnerVanished(
                     windowNumber: window.windowNumber,
                     processID   : window.processID
                 )
             }
-            let state = try? fullScreen(of: window)
+            let state = try? fullScreen(of: window, cache: cache)
             if state?.value == wanted, let reading = WindowServerProbe.geometry(of: window.windowNumber),
                reading.hasSameIdentity(as: window) {
                 if let previous,
@@ -305,8 +334,10 @@ nonisolated public enum WindowRelocator {
             } else {
                 previous = nil
             }
-            do { try await Task.sleep(for: interval) } catch { break }
-        } while Date() < deadline
+            let now = clock.now
+            guard now < deadline else { break }
+            try await Task.sleep(for: min(interval, now.duration(to: deadline)))
+        } while clock.now < deadline
 
         throw DisplayFailure.fullScreenTransitionNotObserved(
             windowNumber: window.windowNumber,
@@ -341,6 +372,63 @@ nonisolated public enum WindowRelocator {
 
     // MARK: The Window ID behind an element
 
+    /// What `_AXUIElementGetWindow` answered, as the three separate facts it
+    /// carries rather than the single `nil` `windowNumber(of:table:)` reduces
+    /// them to.
+    ///
+    /// The distinction exists because a caller that scopes an application by
+    /// its `AXWindows` list asks a different question from a caller resolving
+    /// one known Window ID. For the second, every outcome but a number is the
+    /// same "not this window" and `nil` is the right answer. For the first,
+    /// "this entry is not a window" and "I could not read this entry" are
+    /// opposite outcomes: the entry leaves the scope in one case and fails the
+    /// whole reading in the other.
+    nonisolated package enum WindowNumberReading: Sendable, Equatable {
+
+        /// The call succeeded and named a window.
+        case number(Int)
+
+        /// The call succeeded and answered zero: this element has no window
+        /// server window at all. Positive evidence, not a read that failed.
+        case noWindow
+
+        /// `_AXUIElementGetWindow` did not resolve on this build. A Ledger
+        /// matter and a build-validation one, and nothing about the element.
+        case symbolUnavailable
+
+        /// The call itself failed, carrying its `AXError`.
+        case readFailed(AXError)
+    }
+
+    /// `_AXUIElementGetWindow` with its three outcomes kept apart.
+    ///
+    /// Measured on 26A428, one reading of every `AXWindows` entry of every
+    /// running application: 18 of 19 entries answered a window, and the one
+    /// that did not, Finder's desktop at index 2 with role `AXScrollArea`,
+    /// answered `illegalArgument` (-25201) rather than success with zero.
+    /// `noWindow` did not occur in that sample, and it is not unreachable
+    /// either: measured on the same build, an `AXExtrasMenuBar` child of role
+    /// `AXGroup` answers exactly that, success with a Window ID of zero.
+    /// Note that -25201 is also what a destroyed element answers, which is why
+    /// this reading treats it as a read that failed and not as an exclusion.
+    package static func windowNumberReading(
+        of element: AXUIElement,
+        table     : SymbolTable = .shared
+    ) -> WindowNumberReading {
+
+        typealias GetWindow = @convention(c) (
+            AXUIElement, UnsafeMutablePointer<CGWindowID>
+        ) -> AXError
+
+        guard let getWindow = table.function(.axUIElementGetWindow, as: GetWindow.self) else {
+            return .symbolUnavailable
+        }
+        var windowNumber = CGWindowID.zero
+        let error = getWindow(element, &windowNumber)
+        guard error == .success else { return .readFailed(error) }
+        return windowNumber == 0 ? .noWindow : .number(Int(windowNumber))
+    }
+
     /// `_AXUIElementGetWindow`: the Window ID of an accessibility window
     /// element, or `nil` when the element has none. Verified on 26A5425a and
     /// gated in the Ledger; there is no fallback, a build where it stops
@@ -350,23 +438,19 @@ nonisolated public enum WindowRelocator {
     /// consumer holds, an accessibility element from its own observation layer
     /// and the Window ID the kit acts on, and every consumer that resolves one
     /// from the other would otherwise write this `dlsym` again.
+    ///
+    /// `nil` stays what it has always been here: three different facts, an
+    /// unresolved symbol, a call that failed and an element with no window,
+    /// reduced to one answer. A caller that has to tell them apart reads
+    /// `windowNumberReading(of:table:)` instead.
     public static func windowNumber(
         of element: AXUIElement,
         table     : SymbolTable = .shared
     ) -> Int? {
 
-        typealias GetWindow = @convention(c) (
-            AXUIElement, UnsafeMutablePointer<CGWindowID>
-        ) -> AXError
-
-        guard let getWindow = table.function(.axUIElementGetWindow, as: GetWindow.self) else {
-            return nil
-        }
-        var windowNumber = CGWindowID.zero
-        guard getWindow(element, &windowNumber) == .success, windowNumber != 0 else {
-            return nil
-        }
-        return Int(windowNumber)
+        guard case .number(let windowNumber) = windowNumberReading(of: element, table: table)
+        else { return nil }
+        return windowNumber
     }
 
     // MARK: Resolution and writing
@@ -389,7 +473,30 @@ nonisolated public enum WindowRelocator {
     /// The limit is stated rather than papered over: a window that is neither
     /// focused nor main and is not in `AXWindows` is not reachable by any
     /// public route, and this throws for it.
-    private static func windowElement(for window: WindowReference) throws -> AXUIElement {
+    ///
+    /// A caller that holds a `WindowElementCache` skips the **search** and not
+    /// the check: the cached element is put through the same
+    /// `_AXUIElementGetWindow` and is used only when it answers the Window ID
+    /// that was asked for. Anything else, a dead element, a missing grant, an
+    /// unresolved symbol, drops the entry and lands in the resolution below
+    /// with its existing refusals. An unattested reference has no identity to
+    /// key on and is always resolved in full.
+    private static func windowElement(
+        for window: WindowReference,
+        cache     : WindowElementCache?
+    ) throws -> AXUIElement {
+
+        guard let cache, let identity = window.identity else {
+            return try resolveWindowElement(for: window)
+        }
+        return try cache.element(
+            for        : identity,
+            confirmedBy: { windowNumber(of: $0) },
+            otherwise  : { try resolveWindowElement(for: window) }
+        )
+    }
+
+    private static func resolveWindowElement(for window: WindowReference) throws -> AXUIElement {
         let windows = try windowElements(ofProcess: window.processID)
         if let listed = windows.first(where: { windowNumber(of: $0) == window.windowNumber }) {
             return listed
@@ -528,14 +635,6 @@ nonisolated public enum WindowRelocator {
 
         let boxed = unsafeDowncast(raw, to: AXValue.self)
         return AXValueGetType(boxed) == type ? boxed : nil
-    }
-
-    /// Two window sizes agree within the placement tolerance. Size is what
-    /// separates a staged window from a stashed one: Stage Manager leaves the
-    /// stash as a thumbnail, 90 by 97 points when it was measured.
-    private static func sizesMatch(_ lhs: CGSize, _ rhs: CGSize) -> Bool {
-        abs(lhs.width  - rhs.width)  <= VirtualWindowPlacementCheck.placementTolerance
-            && abs(lhs.height - rhs.height) <= VirtualWindowPlacementCheck.placementTolerance
     }
 
     // MARK: Confirmation

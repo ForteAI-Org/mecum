@@ -6,6 +6,7 @@
 //
 
 import Dispatch
+import OSLog
 import SeatCore
 
 /// SensingSurfaceReader is the shipped conformer. It first asks the cross-checked
@@ -34,24 +35,79 @@ import SeatCore
 /// application-local current target. The transition filter turns that state into
 /// recency only when it first appears, reappears, or actually changes, so a poll
 /// cannot cancel the consumer's standing explicit choice.
+///
+/// ## The one remembered reading
+///
+/// This reader owns the `AccessibilityWindowNumberCache` the pass reads window
+/// identity through, which is what keeps it per seat rather than process wide.
+/// It holds one fact, the Window ID behind an accessibility element, and that
+/// type's documentation carries the argument for why that fact cannot change.
+/// This reader supplies the other half of it: a pass that did not qualify
+/// empties the cache, because a remembered Window ID that stopped belonging to
+/// its element can reach a reading only as a window WindowServer would not
+/// attest, and that is what an unqualified pass reports. So the cache never
+/// outlives a pass it could have spoiled, and the pass after it is uncached.
 nonisolated package struct SensingSurfaceReader: AssignedSurfaceReading {
+
+    private static let observationLog = Logger(
+        subsystem: "dev.forte.AgentSeatKit",
+        category : "Observation"
+    )
+
+    /// One complete native pass: the assigned processes, the identities the
+    /// previous pass retained, and the cache the identity reads go through.
+    package typealias NativeSurfacePass = @Sendable (
+        Set<Int32>,
+        Set<WindowIdentity>,
+        AccessibilityWindowNumberCache
+    ) -> Result<AssignedSurfaceSnapshot, CrossCheckedSurfaceReadFailure>
 
     private let sensing: any SeatSensing
     private let targetTransitions: ApplicationTargetTransitionFilter
+    private let windowNumbers: AccessibilityWindowNumberCache
+    private let nativePass: NativeSurfacePass
 
-    package init(sensing: any SeatSensing) {
+    /// The shipped reader takes the real cross-check. `nativePass` exists for
+    /// the Unit tier alone: the fallback branch below is reached only when a
+    /// native source is unreadable, and an offline test cannot make AX or the
+    /// window server refuse.
+    package init(
+        sensing   : any SeatSensing,
+        nativePass: @escaping NativeSurfacePass =
+            CrossCheckedSurfaceReader.snapshot(ownedBy:retaining:windowNumbers:)
+    ) {
         self.sensing = sensing
         self.targetTransitions = ApplicationTargetTransitionFilter()
+        self.windowNumbers = AccessibilityWindowNumberCache()
+        self.nativePass = nativePass
     }
 
     package func snapshot(ownedBy processIDs: Set<Int32>) -> AssignedSurfaceSnapshot {
 
         let nativeFailure: CrossCheckedSurfaceReadFailure
         let retained = targetTransitions.retainedIdentities(ownedBy: processIDs)
-        switch CrossCheckedSurfaceReader.snapshot(ownedBy: processIDs, retaining: retained) {
+        if !retained.isEmpty {
+            let requested = String(describing: retained.map(\.windowNumber).sorted())
+            Self.observationLog.info(
+                "[known-missing] requesting named WindowServer rows=\(requested, privacy: .public)"
+            )
+        }
+        switch nativePass(processIDs, retained, windowNumbers) {
             case .success(let native):
+                if !retained.isEmpty {
+                    let rows = String(describing: native.inventory.rows.map(\.surface.reference.windowNumber).sorted())
+                    let destroyed = String(describing: native.destroyedByWindowServer.map(\.windowNumber).sorted())
+                    let withdrawn = String(describing: native.withdrawnByApplication.map(\.windowNumber).sorted())
+                    Self.observationLog.info(
+                        "[known-missing] named reply qualified=\(native.inventory.completeness.isQualified, privacy: .public) rows=\(rows, privacy: .public) destroyed=\(destroyed, privacy: .public) withdrawn=\(withdrawn, privacy: .public)"
+                    )
+                }
+                // A remembered Window ID that no longer belongs to its element
+                // can only surface here, as a window nothing attested.
+                if !native.inventory.completeness.isQualified { windowNumbers.removeAll() }
                 return targetTransitions.filter(native, at: DispatchTime.now().uptimeNanoseconds)
             case .failure(let failure):
+                windowNumbers.removeAll()
                 nativeFailure = failure
         }
 
@@ -66,7 +122,7 @@ nonisolated package struct SensingSurfaceReader: AssignedSurfaceReading {
         let rows = surfaces.map {
             SurfaceInventoryReading.Row(surface: $0, provenance: .windowServerAttestedIdentity)
         }
-        return AssignedSurfaceSnapshot(
+        let fallback = AssignedSurfaceSnapshot(
             inventory: SurfaceInventoryReading(
                 rows        : rows,
                 completeness: .incomplete(
@@ -75,6 +131,17 @@ nonisolated package struct SensingSurfaceReader: AssignedSurfaceReading {
                         + "surface of the assigned instance"
                 )
             )
+        )
+        // The fallback has incomplete membership, but each row it does carry
+        // still has a WindowServer-attested full identity.  Let the same
+        // transition filter retain it for the next native pass: otherwise an
+        // auxiliary window adopted from this fallback vanishes before any
+        // exact request ever names it, leaving containment to wait on a raw
+        // absence forever.  An entirely unavailable fallback returns above,
+        // because it supplies no identity that may safely be retained.
+        return targetTransitions.filter(
+            fallback,
+            at: DispatchTime.now().uptimeNanoseconds
         )
     }
 }

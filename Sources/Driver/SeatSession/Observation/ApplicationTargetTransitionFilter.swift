@@ -2,20 +2,27 @@
 //  ApplicationTargetTransitionFilter.swift
 //  AgentSeatKit
 //
-//  Created by OpenAI Codex on 16/09/2026.
+//  Created by Eliomar Alejandro Rodriguez Ferrer on 16/09/2026.
 //
 
 import Foundation
+import OSLog
 import SeatCore
 
 /// Turns the current AX main/focused-window state into edge-triggered recency.
 ///
 /// The native cross-check is a snapshot, while `RecencyClaim` represents an
 /// event. Re-emitting the same current window on every poll would incorrectly
-/// cancel an explicit selection. This filter remembers only qualified complete
-/// snapshots and emits the three accepted events: first appearance, established
-/// reappearance, and a change in the application's current window.
+/// cancel an explicit selection. This filter emits the three accepted events,
+/// first appearance, established reappearance and a change in the application's
+/// current window, from a qualified complete snapshot alone, and it remembers
+/// what every pass attested so the next pass can look those identities up.
 nonisolated package final class ApplicationTargetTransitionFilter: @unchecked Sendable {
+
+    private static let observationLog = Logger(
+        subsystem: "dev.forte.AgentSeatKit",
+        category : "Observation"
+    )
 
     /// How long a surface must stay outside the application's own window scope
     /// before its absence is the application's statement rather than a slow
@@ -27,21 +34,38 @@ nonisolated package final class ApplicationTargetTransitionFilter: @unchecked Se
     private let lock = NSLock()
     private var current: WindowIdentity?
     private var visibilities: [WindowIdentity: SurfaceVisibility] = [:]
-    private var qualifiedIdentities: Set<WindowIdentity> = []
+    private var attestedIdentities: Set<WindowIdentity> = []
     private var withdrawnSince: [WindowIdentity: UInt64] = [:]
 
     package init() {}
 
-    /// Identities from the last qualified native snapshot that still belong to
-    /// one of the assigned process lifetimes. They widen only the exact
-    /// WindowServer lookup, never AX's positive application-window scope.
+    /// Identities the last native pass attested that still belong to one of the
+    /// assigned process lifetimes. They widen only the exact WindowServer
+    /// lookup, never AX's positive application-window scope.
     package func retainedIdentities(ownedBy processIDs: Set<Int32>) -> Set<WindowIdentity> {
         lock.lock()
         defer { lock.unlock() }
 
-        return qualifiedIdentities.filter { processIDs.contains($0.processID) }
+        return attestedIdentities.filter { processIDs.contains($0.processID) }
     }
 
+    /// Turns one native pass into the edge-triggered snapshot, and remembers
+    /// what that pass attested so the next one can look it up by identity.
+    ///
+    /// Retention deliberately does not wait for an exact pass. A row of an
+    /// inexact pass carries `windowServerAttestedIdentity` like any other and
+    /// the assignment folds it in as a member either way, so a retention that
+    /// skipped it would leave a member nothing ever names again: the window
+    /// server is never asked about it, no answer can prove it destroyed, and it
+    /// stays absent and uncertain until both containment budgets expire. The
+    /// short-lived system surfaces macOS draws over a dialog live and die
+    /// inside exactly such passes, which is how one of them suspended a seat
+    /// for good.
+    ///
+    /// What leaves the retained set is positive as before: a destroyed identity
+    /// at once, a withdrawn one when its grace has run out, and anything the
+    /// pass carries no row for. Nothing accumulates, because the set is one
+    /// pass's rows plus the withdrawals that pass is still waiting on.
     package func filter(
         _ snapshot: AssignedSurfaceSnapshot,
         at now    : UInt64 = DispatchTime.now().uptimeNanoseconds
@@ -49,14 +73,45 @@ nonisolated package final class ApplicationTargetTransitionFilter: @unchecked Se
         lock.lock()
         defer { lock.unlock() }
 
-        let withdrawn = confirmedWithdrawals(snapshot.withdrawnByApplication, at: now)
+        let previouslyAttested = attestedIdentities
+        let retained      = graced(snapshot.retained, at: now)
+        let withdrawn     = Set(retained.filter { $0.value == .withdrawn }.keys)
+        let destroyed     = Set(retained.filter { $0.value == .destroyed }.keys)
+        let rowIdentities = Set(snapshot.inventory.rows.compactMap(\.surface.reference.identity))
+
+        // A destroyed window is looked up no more, and unlike a withdrawal it
+        // waits for no grace: nothing brings a destroyed window back. An
+        // ancestor kept under its child carries a row of its own, so it is
+        // retained by the first term like every other surface of the pass.
+        attestedIdentities = rowIdentities
+            .union(withdrawnSince.keys)
+            .subtracting(withdrawn)
+            .subtracting(destroyed)
+
+        // Temporary live diagnosis for a short-lived adopted auxiliary surface:
+        // the next native pass can only ask the WindowServer for an identity it
+        // reaches through this set.  Log deltas, rather than every ordinary
+        // reading, so a failed closure shows whether the loss is before or
+        // after the transition filter.
+        let admitted = attestedIdentities.subtracting(previouslyAttested)
+        let omitted  = previouslyAttested.subtracting(attestedIdentities)
+        if !admitted.isEmpty || !omitted.isEmpty || !retained.isEmpty {
+            let rowNumbers      = String(describing: rowIdentities.map(\.windowNumber).sorted())
+            let retainedNumbers = String(describing: retained.keys.map(\.windowNumber).sorted())
+            let admittedNumbers = String(describing: admitted.map(\.windowNumber).sorted())
+            let omittedNumbers  = String(describing: omitted.map(\.windowNumber).sorted())
+            Self.observationLog.info(
+                "[known-missing] filter qualified=\(snapshot.inventory.completeness.isQualified, privacy: .public) rows=\(rowNumbers, privacy: .public) retained=\(retainedNumbers, privacy: .public) admitted=\(admittedNumbers, privacy: .public) omitted=\(omittedNumbers, privacy: .public)"
+            )
+        }
+
         var claims = snapshot.claims
         guard snapshot.inventory.completeness.isQualified else {
             claims.recency = []
             return AssignedSurfaceSnapshot(
                 inventory: snapshot.inventory,
                 claims   : claims,
-                withdrawnByApplication: withdrawn
+                retained : retained
             )
         }
 
@@ -64,10 +119,8 @@ nonisolated package final class ApplicationTargetTransitionFilter: @unchecked Se
         claims.recency = []
 
         let previousVisibilities = visibilities
-        let identities = Set(snapshot.inventory.rows.compactMap(\.surface.reference.identity))
-        qualifiedIdentities = identities
         visibilities = Dictionary(uniqueKeysWithValues: claims.visibilities.compactMap { claim in
-            identities.contains(claim.surface) ? (claim.surface, claim.state) : nil
+            rowIdentities.contains(claim.surface) ? (claim.surface, claim.state) : nil
         })
 
         guard let reported else {
@@ -75,7 +128,7 @@ nonisolated package final class ApplicationTargetTransitionFilter: @unchecked Se
             return AssignedSurfaceSnapshot(
                 inventory: snapshot.inventory,
                 claims   : claims,
-                withdrawnByApplication: withdrawn
+                retained : retained
             )
         }
 
@@ -106,33 +159,36 @@ nonisolated package final class ApplicationTargetTransitionFilter: @unchecked Se
         return AssignedSurfaceSnapshot(
             inventory: snapshot.inventory,
             claims   : claims,
-            withdrawnByApplication: withdrawn
+            retained : retained
         )
     }
 
-    /// Narrows what the cross-check saw to what has been that way long enough
-    /// to act on, and stops retaining those surfaces.
+    /// Holds each withdrawal the cross-check reported inside its grace, where it
+    /// reads as `temporarilyUnreadable`, and lets it through as a withdrawal
+    /// once it has been that way long enough to act on. Every other disposition
+    /// passes untouched: only this one is a question about elapsed time.
     ///
-    /// Dropping them from the retained set is half the answer and the closure a
-    /// seat confirms is the other: a surface nobody retains is no longer looked
-    /// up by identity, so it stops disqualifying every later reading, and the
-    /// application's own scope is what said so.
-    private func confirmedWithdrawals(
-        _ reported: [WindowIdentity],
+    /// Dropping a confirmed one from the retained set is half the answer and the
+    /// closure a seat confirms is the other: a surface nobody retains is no
+    /// longer looked up by identity, so it stops disqualifying every later
+    /// reading, and the application's own scope is what said so. One still
+    /// inside its grace is retained instead, because a grace nobody keeps asking
+    /// about never ends.
+    private func graced(
+        _ reported: [WindowIdentity: RetainedSurfaceDisposition],
         at now    : UInt64
-    ) -> [WindowIdentity] {
+    ) -> [WindowIdentity: RetainedSurfaceDisposition] {
 
-        let seen = Set(reported)
+        let seen = Set(reported.filter { $0.value == .withdrawn }.keys)
         withdrawnSince = withdrawnSince.filter { seen.contains($0.key) }
 
-        var confirmed: [WindowIdentity] = []
-        for identity in reported {
+        var graced = reported
+        for identity in seen {
             let since = withdrawnSince[identity] ?? now
             withdrawnSince[identity] = since
-            guard now &- since >= Self.withdrawalGraceNanoseconds else { continue }
-            confirmed.append(identity)
-            qualifiedIdentities.remove(identity)
+            guard now &- since < Self.withdrawalGraceNanoseconds else { continue }
+            graced[identity] = .temporarilyUnreadable
         }
-        return confirmed
+        return graced
     }
 }

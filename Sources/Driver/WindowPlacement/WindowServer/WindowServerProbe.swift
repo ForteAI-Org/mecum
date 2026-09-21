@@ -30,10 +30,30 @@ import VirtualScreens
 /// calls do not create a window-list dictionary.
 nonisolated public enum WindowServerProbe {
 
+    /// A public-list reading carries the distinction the remote fallback needs:
+    /// a missing row may be read through the qualified path, whereas a row that
+    /// contradicts its ownership chain or an unavailable public read is a
+    /// refusal. Neither is evidence of an unlisted remote window.
+    package enum GeometryReading {
+        case present(WindowReference)
+        case absent
+        case refused
+    }
+
+    /// The ownership reading keeps an absent public row separate from an
+    /// unreadable ownership chain. Consumers deciding whether a panel closed
+    /// must never turn an arbitrary failed identity read into destruction.
+    public enum IdentityReading {
+        case present(WindowIdentity)
+        case absent
+        case unreadable
+    }
+
     /// The public Process Manager mapping documented by the macOS SDK. Swift 6
     /// no longer imports `ProcessSerialNumber`, so the two-word value crosses
-    /// this call as raw storage with the header's exact pointer ABI.
-    private typealias GetProcessPID = @convention(c) (
+    /// this call as raw storage with the header's exact pointer ABI. It is
+    /// module-wide only so the Unit tier can hand the chain its own mapping.
+    typealias GetProcessPID = @convention(c) (
         UnsafeRawPointer?,
         UnsafeMutablePointer<Int32>?
     ) -> Int32
@@ -64,6 +84,25 @@ nonisolated public enum WindowServerProbe {
         table                 : SymbolTable = .shared
     ) -> WindowReference? {
 
+        switch geometryReading(
+            of: windowNumber,
+            allowUnvalidatedBuild: allowUnvalidatedBuild,
+            table: table
+        ) {
+        case .present(let window): return window
+        case .absent, .refused: return nil
+        }
+    }
+
+    /// The complete result of reading one public WindowServer row. Callers that
+    /// can legitimately use the private unlisted path must preserve this state
+    /// instead of turning every `nil` from `geometry(of:)` into absence.
+    package static func geometryReading(
+        of windowNumber       : Int,
+        allowUnvalidatedBuild : Bool = false,
+        table                 : SymbolTable = .shared
+    ) -> GeometryReading {
+
         let gate = FacilityGate.current(
             facility             : .windowIdentity,
             allowUnvalidatedBuild: allowUnvalidatedBuild,
@@ -78,20 +117,24 @@ nonisolated public enum WindowServerProbe {
               let windows = CGWindowListCopyWindowInfo(
                   .optionIncludingWindow,
                   windowID
-              ) as? [[String: Any]],
-              let entry = windows.first(where: { number(of: $0) == windowNumber }),
-              let processID = (entry[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value,
+              ) as? [[String: Any]]
+        else { return .refused }
+        guard let entry = windows.first(where: { number(of: $0) == windowNumber }) else {
+            return .absent
+        }
+        guard let processID = (entry[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value,
               let rawBounds = entry[kCGWindowBounds as String] as? NSDictionary,
               let frame = CGRect(dictionaryRepresentation: rawBounds as CFDictionary),
+              frame.hasFinitePositiveArea,
               processID == firstIdentity.processID,
               identity(
                   of         : windowNumber,
                   table      : table,
                   validatedBy: gate
               ) == firstIdentity
-        else { return nil }
+        else { return .refused }
 
-        return WindowReference(identity: firstIdentity, frame: frame)
+        return .present(WindowReference(identity: firstIdentity, frame: frame))
     }
 
     /// The WindowServer ownership chain for one Window ID, read twice and
@@ -116,6 +159,44 @@ nonisolated public enum WindowServerProbe {
         return identity(of: windowNumber, table: table, validatedBy: gate)
     }
 
+    /// Reads the identity when possible. A failed qualified owner read remains
+    /// unreadable even if the public list has no row: remote content is
+    /// deliberately absent from that list, and a transient gate failure is not
+    /// proof that a logical surface was destroyed.
+    public static func identityReading(
+        of windowNumber       : Int,
+        wasPubliclyAttested   : Bool = false,
+        allowUnvalidatedBuild : Bool = false,
+        table                 : SymbolTable = .shared
+    ) -> IdentityReading {
+        let gate = FacilityGate.current(
+            facility: .windowIdentity,
+            allowUnvalidatedBuild: allowUnvalidatedBuild,
+            table: table
+        )
+        guard let candidate = CGWindowID(exactly: windowNumber), candidate != 0 else {
+            return .unreadable
+        }
+        if let value = identity(of: windowNumber, table: table, validatedBy: gate) {
+            return .present(value)
+        }
+        // Remote helper content is often absent from the public list, so only
+        // a logical proxy this caller previously saw there can be declared
+        // destroyed. Read the same scoped public list twice under the live
+        // facility gate; a failed owner chain or a list error stays unreadable.
+        guard wasPubliclyAttested, gate.mayAct,
+              publicRowIsAbsent(windowNumber), publicRowIsAbsent(windowNumber)
+        else { return .unreadable }
+        return .absent
+    }
+
+    private static func publicRowIsAbsent(_ windowNumber: Int) -> Bool {
+        guard let windowID = CGWindowID(exactly: windowNumber), windowID != 0,
+              let rows = CGWindowListCopyWindowInfo(.optionIncludingWindow, windowID) as? [[String: Any]]
+        else { return false }
+        return !rows.contains { number(of: $0) == windowNumber }
+    }
+
     /// Resolves identity under a gate already evaluated by the owning Facility.
     /// Package clients cache this gate so the per-Command revalidation performs
     /// only the three ownership calls and the documented PID mapping.
@@ -123,6 +204,37 @@ nonisolated public enum WindowServerProbe {
         of windowNumber: Int,
         table          : SymbolTable,
         validatedBy gate: FacilityGate
+    ) -> WindowIdentity? {
+
+        var processes = OwnerProcesses()
+        return identity(
+            of         : windowNumber,
+            table      : table,
+            validatedBy: gate,
+            memoizing  : &processes
+        )
+    }
+
+    /// The owner connections already resolved during one call, so the two pure
+    /// legs of the chain are paid once each per connection instead of once per
+    /// read. It is created by the enumerating call and dies with it: a
+    /// connection ID can be handed to a new process after the old one exits, so
+    /// a memo that outlived the walk could name a live PID for a dead process,
+    /// which is the error this whole type exists to refuse.
+    package typealias OwnerProcesses = [Int32: ProcessIdentity]
+
+    /// Resolves identity against a memo of owner connections the calling walk
+    /// owns. Both readings of `SLSGetWindowOwner` and their comparison stay:
+    /// the owner is the leg that can change underneath a walk, and it is never
+    /// memoized. What the memo removes is `SLSGetConnectionPSN` and
+    /// `GetProcessPID` behind it, which are a pure function of the connection
+    /// for that connection's life: ten windows of one application resolve one
+    /// process instead of twenty.
+    static func identity(
+        of windowNumber : Int,
+        table           : SymbolTable,
+        validatedBy gate: FacilityGate,
+        memoizing processes: inout OwnerProcesses
     ) -> WindowIdentity? {
 
         guard gate.mayAct,
@@ -149,14 +261,16 @@ nonisolated public enum WindowServerProbe {
                   connectionID    : connectionID,
                   getWindowOwner  : getWindowOwner,
                   getConnectionPSN: getConnectionPSN,
-                  getProcessPID   : getProcessPID
+                  getProcessPID   : getProcessPID,
+                  memoizing       : &processes
               ),
               let second = identity(
                   windowNumber    : windowID,
                   connectionID    : connectionID,
                   getWindowOwner  : getWindowOwner,
                   getConnectionPSN: getConnectionPSN,
-                  getProcessPID   : getProcessPID
+                  getProcessPID   : getProcessPID,
+                  memoizing       : &processes
               ),
               first == second
         else { return nil }
@@ -195,10 +309,35 @@ nonisolated public enum WindowServerProbe {
         validatedBy gate: FacilityGate
     ) -> WindowReference? {
 
+        var processes = OwnerProcesses()
+        return reference(
+            processID   : processID,
+            windowNumber: windowNumber,
+            frame       : frame,
+            table       : table,
+            validatedBy : gate,
+            memoizing   : &processes
+        )
+    }
+
+    /// The same attestation, against the memo of the walk that is enumerating.
+    /// The walk owns the memo and passes it to every row, so an enumeration of
+    /// `n` windows pays one process resolution per distinct owner connection
+    /// instead of one per row; both owner readings and their comparison stay.
+    package static func reference(
+        processID       : Int32,
+        windowNumber    : Int,
+        frame           : CGRect,
+        table           : SymbolTable,
+        validatedBy gate: FacilityGate,
+        memoizing processes: inout OwnerProcesses
+    ) -> WindowReference? {
+
         guard let identity = identity(
             of         : windowNumber,
             table      : table,
-            validatedBy: gate
+            validatedBy: gate,
+            memoizing  : &processes
         ), identity.processID == processID else { return nil }
         return WindowReference(identity: identity, frame: frame)
     }
@@ -215,6 +354,17 @@ nonisolated public enum WindowServerProbe {
     /// read is that a constant copied out of a header is exactly the kind of
     /// fact this package has already caught being wrong.
     public static let popUpMenuLevel = Int(CGWindowLevelForKey(.popUpMenuWindow))
+
+    /// The level the desktop is drawn at, asked of the system for the same
+    /// reason as the one above.
+    ///
+    /// A window at or below it is behind every ordinary window, the person's
+    /// own included, so it cannot be on top of their work. The Finder draws one
+    /// of these per display and always has: measured on 26A5425a with the Finder
+    /// adopted, pid 487 owned Window ID 39 at (0, 0, 1512, 982) on the physical
+    /// display and Window ID 43302 at (1512, 982, 2560, 1440) on the virtual
+    /// one, both at level -2147483603, which is this key.
+    public static let desktopIconLevel = Int(CGWindowLevelForKey(.desktopIconWindow))
 
     /// Every window this process owns that is drawn at the pop up menu level
     /// and is on screen: the whole oracle for "did a contextual menu open".
@@ -265,9 +415,11 @@ nonisolated public enum WindowServerProbe {
     /// window that just appeared, and opening one of them for real produces no
     /// difference in the list at all.
     ///
-    /// Attestation is per row, under one gate evaluated once, so a list of `n`
-    /// windows costs one window list allocation and `n` ownership chains rather
-    /// than `n` window lists.
+    /// Attestation is per row, under one gate evaluated once and one memo of
+    /// owner connections, so a list of `n` windows costs one window list
+    /// allocation, `2n` owner readings and one process resolution per distinct
+    /// owner connection, instead of the `6n` window server round trips a chain
+    /// resolved from scratch on every row costs.
     public static func surfaces(
         ownedBy processIDs   : Set<Int32>,
         allowUnvalidatedBuild: Bool = false,
@@ -286,7 +438,9 @@ nonisolated public enum WindowServerProbe {
             kCGNullWindowID
         ) as? [[String: Any]] else { return nil }
 
-        return descriptions.compactMap { description in
+        var processes = OwnerProcesses()
+        var surfaces: [WindowSurface] = []
+        for description in descriptions {
             guard let processID = owner(of: description), processIDs.contains(processID),
                   let windowNumber = number(of: description),
                   let frame = frame(of: description),
@@ -295,29 +449,40 @@ nonisolated public enum WindowServerProbe {
                       windowNumber    : windowNumber,
                       frame           : frame,
                       table           : table,
-                      validatedBy     : gate
+                      validatedBy     : gate,
+                      memoizing       : &processes
                   )
-            else { return nil }
+            else { continue }
 
-            return WindowSurface(
-                reference: reference,
-                level    : layer(of: description) ?? 0,
-                isVisible: isOnScreen(description) && alpha(of: description) > 0
-                    && frame.width > 0 && frame.height > 0
+            surfaces.append(
+                WindowSurface(
+                    reference: reference,
+                    level    : layer(of: description) ?? 0,
+                    isVisible: isOnScreen(description) && alpha(of: description) > 0
+                        && frame.width > 0 && frame.height > 0
+                )
             )
         }
+        return surfaces
     }
 
     /// The WindowServer rows matching application windows already named by AX,
     /// including hidden and minimised windows, with every matched row
     /// identity-attested.
     ///
-    /// This is deliberately separate from `surfaces(ownedBy:)`: `.optionAll`
-    /// contains internal surfaces that were never shown and is not by itself
-    /// evidence that a row is a user-facing application window. `AXWindows`
-    /// supplies the positive scope; this pass independently attests every row
-    /// in that scope. Extra rows of the same process are not parsed or promoted
-    /// into assignment membership merely because their PID matches.
+    /// This is deliberately separate from `surfaces(ownedBy:)`: the whole window
+    /// list contains internal surfaces that were never shown and is not by
+    /// itself evidence that a row is a user-facing application window.
+    /// `AXWindows` supplies the positive scope; this pass independently attests
+    /// every row in that scope. Extra rows of the same process are not parsed or
+    /// promoted into assignment membership merely because their PID matches, and
+    /// the owner of every returned row is still compared with the process that
+    /// asked for it, so a Window ID handed on to somebody else reads as absent.
+    ///
+    /// The scope is asked of the window server rather than read whole and
+    /// filtered afterwards. `.optionAll` was measured at 477 rows to reach the
+    /// handful the caller named, and the call is spent waiting on the window
+    /// server rather than working: 0.27 ms of CPU inside 0.88 ms of wall, warm.
     ///
     /// A requested row that is absent remains absent for the caller to reject.
     /// A requested row that is present but cannot be parsed or attested fails
@@ -335,11 +500,17 @@ nonisolated public enum WindowServerProbe {
             allowUnvalidatedBuild: allowUnvalidatedBuild,
             table                : table
         )
-        guard let descriptions = CGWindowListCopyWindowInfo(
-            [.optionAll],
-            kCGNullWindowID
-        ) as? [[String: Any]] else { return nil }
+        // Unique: the same id asked for twice is answered twice, and two
+        // processes claiming one Window ID must stay one row for the caller.
+        var windowIDs: Set<CGWindowID> = []
+        for numbers in windowNumbersByProcess.values {
+            for number in numbers where number != 0 {
+                if let windowID = CGWindowID(exactly: number) { windowIDs.insert(windowID) }
+            }
+        }
+        guard let descriptions = descriptions(ofWindowIDs: Array(windowIDs)) else { return nil }
 
+        var processes = OwnerProcesses()
         var result: [WindowSurface] = []
         for description in descriptions {
             guard let processID = owner(of: description),
@@ -355,7 +526,8 @@ nonisolated public enum WindowServerProbe {
                       windowNumber    : windowNumber,
                       frame           : frame,
                       table           : table,
-                      validatedBy     : gate
+                      validatedBy     : gate,
+                      memoizing       : &processes
                   )
             else { return nil }
 
@@ -459,6 +631,26 @@ nonisolated public enum WindowServerProbe {
 
     // MARK: Reading one entry of the list
 
+    /// The description rows for exactly these Window IDs, one window server
+    /// call wide instead of the whole machine. A requested ID nothing owns is
+    /// simply not in the answer, which is the absence the caller rejects, and
+    /// the rows carry the same keys the full list carries, `kCGWindowIsOnscreen`
+    /// included and present on exactly the same windows.
+    ///
+    /// The IDs cross as raw values in a `CFArray` built with no callbacks, the
+    /// shape `CGWindowListCreate` returns and this call reads back; a `CFNumber`
+    /// would be read as a Window ID of its own address. They are widened to
+    /// pointer size first, because a `UInt32` array has the wrong stride for the
+    /// slots `CFArrayCreate` copies.
+    private static func descriptions(ofWindowIDs windowIDs: [CGWindowID]) -> [[String: Any]]? {
+        var values = windowIDs.map { UnsafeRawPointer(bitPattern: UInt($0)) }
+        guard let requested = values.withUnsafeMutableBufferPointer({ buffer in
+            CFArrayCreate(kCFAllocatorDefault, buffer.baseAddress, buffer.count, nil)
+        }) else { return nil }
+
+        return CGWindowListCreateDescriptionFromArray(requested) as? [[String: Any]]
+    }
+
     private static func orderedWindows() -> [[String: Any]]? {
         let options: CGWindowListOption = [.optionOnScreenOnly, .excludeDesktopElements]
         return CGWindowListCopyWindowInfo(options, kCGNullWindowID) as? [[String: Any]]
@@ -486,9 +678,11 @@ nonisolated public enum WindowServerProbe {
         (description[kCGWindowIsOnscreen as String] as? NSNumber)?.boolValue ?? true
     }
 
-    /// `.optionAll` does not itself establish that a row is on screen, so an
-    /// absent flag stays false on that path instead of inheriting the
-    /// on-screen-list default above.
+    /// A list that was not asked for on-screen windows does not itself establish
+    /// that a row is on screen, so an absent flag stays false on that path
+    /// instead of inheriting the on-screen-list default above. The window server
+    /// writes the key on the same windows whether the rows are asked for by ID
+    /// or read whole.
     private static func reportedOnScreen(_ description: [String: Any]) -> Bool? {
         (description[kCGWindowIsOnscreen as String] as? NSNumber)?.boolValue
     }
@@ -500,18 +694,32 @@ nonisolated public enum WindowServerProbe {
         return CGRect(dictionaryRepresentation: rawBounds as CFDictionary)
     }
 
-    private static func identity(
+    /// One reading of the chain, with the process behind the owner connection
+    /// taken from the memo when the walk has already proved it. It is internal
+    /// rather than private so the Unit tier can drive it with its own three
+    /// functions and compare the memoized answer with the unmemoized one; no
+    /// shipping caller reaches it, and it still refuses everything it refused.
+    static func identity(
         windowNumber    : UInt32,
         connectionID    : Int32,
         getWindowOwner  : SymbolABI.GetWindowOwner,
         getConnectionPSN: SymbolABI.GetConnectionPSN,
-        getProcessPID   : GetProcessPID
+        getProcessPID   : GetProcessPID,
+        memoizing processes: inout OwnerProcesses
     ) -> WindowIdentity? {
 
         var ownerConnectionID: Int32 = 0
         guard getWindowOwner(connectionID, windowNumber, &ownerConnectionID) == 0,
               ownerConnectionID != 0
         else { return nil }
+
+        if let process = processes[ownerConnectionID] {
+            return WindowIdentity(
+                process          : process,
+                windowNumber     : Int(windowNumber),
+                ownerConnectionID: ownerConnectionID
+            )
+        }
 
         var serialNumber = ProcessSerialNumberValue()
         let serialResult = withUnsafeMutablePointer(to: &serialNumber) { pointer in
@@ -525,12 +733,15 @@ nonisolated public enum WindowServerProbe {
         }
         guard processResult == 0, processID > 0 else { return nil }
 
+        let process = ProcessIdentity(
+            processID       : processID,
+            serialNumberHigh: serialNumber.high,
+            serialNumberLow : serialNumber.low
+        )
+        processes[ownerConnectionID] = process
+
         return WindowIdentity(
-            process: ProcessIdentity(
-                processID       : processID,
-                serialNumberHigh: serialNumber.high,
-                serialNumberLow : serialNumber.low
-            ),
+            process          : process,
             windowNumber     : Int(windowNumber),
             ownerConnectionID: ownerConnectionID
         )

@@ -36,7 +36,11 @@ nonisolated package enum SurfacePresence: String, Sendable, Equatable {
 }
 
 /// ClosureEvidence is what is offered as proof that a window is gone.
-nonisolated package enum ClosureEvidence: String, Sendable, Equatable {
+///
+/// It is public because it is also the cause a `windowUnavailable` Issue is
+/// published with: the question "why is this window not there" has one set of
+/// answers in this kit and this is it.
+nonisolated public enum ClosureEvidence: String, Sendable, Equatable {
 
     /// The window server confirmed the window was destroyed.
     case windowServerConfirmedDestruction
@@ -58,7 +62,7 @@ nonisolated package enum ClosureEvidence: String, Sendable, Equatable {
     /// accessibility reading is excluded, may offer it.
     case applicationWithdrewTheWindow
 
-    package var provesClosure: Bool { self != .absentFromReading }
+    public var provesClosure: Bool { self != .absentFromReading }
 }
 
 /// AssignedSurface is one surface the seat holds membership of, with everything
@@ -91,6 +95,28 @@ nonisolated package struct AssignedSurface: Sendable, Equatable {
     /// its geometry settles, so acting on one reading acts on a frame that is
     /// about to change.
     package fileprivate(set) var isVerified: Bool
+
+    /// True while the seat owes this surface a return: a transfer into the seat
+    /// was requested for it, or a reading put it inside the seat. It is the
+    /// claim, and membership is not one: every window of the assigned
+    /// application is a member, including the ones the seat never touched.
+    ///
+    /// It starts on the first sighting inside rather than on the agreeing pair,
+    /// because a lost return obligation strands a window on a display the person
+    /// cannot see, while a claim that turns out to be wrong costs one no-op
+    /// placement. It ends only when two agreeing readings put the surface
+    /// outside the seat again: an absence is not a window that went home.
+    package fileprivate(set) var isHeldBySeat: Bool
+
+    /// True when this surface is drawn inside another window of the same
+    /// application and moves with it: an AppKit sheet is the case that exists.
+    ///
+    /// Such a surface is never held by the seat. It was not moved in, it has no
+    /// place of its own in the User Seat, and the frame a reading finds it at is
+    /// its host's minus the host's own inset, so a return computed from it would
+    /// send the sheet somewhere nobody put it. It is a member like any other and
+    /// its host answers for where it goes.
+    package fileprivate(set) var isAttachedToHost = false
 
     /// True once two readings put this surface inside the seat, until a later
     /// pair puts it outside again. It is what makes "it left" a different fact
@@ -194,6 +220,36 @@ nonisolated package struct AssignedSurfaceInventory: Sendable {
         members.filter(\.isContained)
     }
 
+    /// Members the seat owes a return: the ones it asked to move in, and the
+    /// ones a reading found inside it. It is the list a handback has to see
+    /// empty and the list an ending assignment turns into return obligations,
+    /// because those are one question and membership answers neither.
+    ///
+    /// It is deliberately not `containedMembers`: that one is "verified **and**
+    /// inside", so a window the seat moved whose containment no pair of readings
+    /// has agreed on yet would drop out of it, and the return it is owed with it.
+    package var heldMembers: [AssignedSurface] {
+        members.filter(\.isHeldBySeat)
+    }
+
+    /// Records which members are drawn inside another window of the same
+    /// application, and drops the claim on the ones that are.
+    ///
+    /// The set is handed in whole on every fold rather than accumulated, so a
+    /// sheet that closed and left a plain window behind the same Window ID stops
+    /// being attached at the same moment it stops being a modal. Dropping the
+    /// claim here and not only in `heldMembers` is what keeps a later reading
+    /// from opening it again.
+    package mutating func noteAttachedSurfaces(_ identities: Set<WindowIdentity>) {
+
+        for (number, surface) in surfaces {
+            let attached = identities.contains(surface.identity)
+            guard surface.isAttachedToHost != attached else { continue }
+            surfaces[number]?.isAttachedToHost = attached
+            if attached { surfaces[number]?.isHeldBySeat = false }
+        }
+    }
+
     /// Folds one reading in and answers what changed.
     ///
     /// `isHandover` marks the reading taken at the moment of the handover, whose
@@ -277,6 +333,13 @@ nonisolated package struct AssignedSurfaceInventory: Sendable {
             existing.presence   = Self.presence(of: reference.frame, within: virtualBounds)
             existing.isVerified = agrees
             if existing.isContained { existing.hadBeenContained = true }
+            // The claim starts at the first sighting inside the seat and ends
+            // only on the two agreeing readings that put the surface outside.
+            if existing.presence == .containedInSeat {
+                existing.isHeldBySeat = !existing.isAttachedToHost
+            } else if agrees, existing.presence == .outsideSeat {
+                existing.isHeldBySeat = false
+            }
             surfaces[number]    = existing
 
             if wasAbsent {
@@ -328,8 +391,13 @@ nonisolated package struct AssignedSurfaceInventory: Sendable {
     /// Marks a member as no longer verified because a move was just requested
     /// for it, so the next agreement is measured against where the window ends
     /// up rather than against where it used to be.
+    ///
+    /// The same request is what makes the seat answerable for the return: a
+    /// transfer that was asked for happened, whatever the next reading says, so
+    /// a window on its way in is already one the seat has to put back.
     package mutating func noteContainmentRequested(of windowNumber: Int) {
-        surfaces[windowNumber]?.isVerified = false
+        surfaces[windowNumber]?.isVerified   = false
+        surfaces[windowNumber]?.isHeldBySeat = true
     }
 
     private func record(
@@ -342,7 +410,8 @@ nonisolated package struct AssignedSurfaceInventory: Sendable {
         at now     : UInt64
     ) -> AssignedSurface {
 
-        AssignedSurface(
+        let presence = Self.presence(of: reference.frame, within: bounds)
+        return AssignedSurface(
             identity                  : identity,
             attribution               : attribution,
             origin                    : origin,
@@ -350,8 +419,9 @@ nonisolated package struct AssignedSurfaceInventory: Sendable {
             originalDisplayID         : Self.display(containing: reference.frame, in: displays),
             firstDetectedAtNanoseconds: now,
             reference                 : reference,
-            presence                  : Self.presence(of: reference.frame, within: bounds),
-            isVerified                : false
+            presence                  : presence,
+            isVerified                : false,
+            isHeldBySeat              : presence == .containedInSeat
         )
     }
 

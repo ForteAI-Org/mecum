@@ -40,6 +40,42 @@ nonisolated package struct SelectionClaimBatch: Sendable, Equatable {
     }
 }
 
+/// RetainedSurfaceDisposition is what one pass established about a surface it
+/// looked the window server up for by identity and did not find in the
+/// application's own accessibility window scope.
+///
+/// The five answers are kept apart because only two of them say the surface is
+/// gone. Merging them is how a modal stack loses the window underneath its top
+/// level: the absence of a parent from `AXWindows` while a child dialog is open
+/// is not the parent going away, and a time grace alone establishes nothing.
+nonisolated package enum RetainedSurfaceDisposition: Sendable, Equatable {
+
+    /// Named in this pass's own window server request and answered with no row
+    /// at all. It is the one absence that proves the window ended.
+    case destroyed
+
+    /// On screen, outside the application's scope, and no surface in that scope
+    /// attests it as an ancestor. It is the application's own statement, and
+    /// the transition filter is what decides it has stood long enough.
+    case withdrawn
+
+    /// On screen and positively attested by a surface that **is** in the scope
+    /// as that surface's parent window. It is the nested dialog case: the top
+    /// accessibility level shows the child alone while the parent is still
+    /// there, blocked and drawn under it. The ancestor is kept as a member.
+    case obscuredByChild(WindowIdentity)
+
+    /// On screen and outside the scope, inside the short deadline that tells a
+    /// withdrawal from an accessibility reading that has not caught up. Nothing
+    /// is concluded from it and the surface keeps being looked up.
+    case temporarilyUnreadable
+
+    /// The window server answered for that Window ID with a different window.
+    /// The surface being looked up is not the one on screen, so this pass says
+    /// nothing about it and stops carrying it.
+    case unrelated
+}
+
 /// One atomic pass over membership and selection evidence.
 ///
 /// Keeping the two together matters for the native adapter: the AX role and
@@ -50,24 +86,49 @@ nonisolated package struct AssignedSurfaceSnapshot: Sendable, Equatable {
     package let inventory: SurfaceInventoryReading
     package let claims   : SelectionClaimBatch
 
-    /// Surfaces the assigned application no longer lists among its windows
-    /// while the window server still holds a visible surface for them.
+    /// What this pass established about each surface it looked up by identity
+    /// and did not find in the application's own window scope. A surface the
+    /// pass found is not in it at all: it is a row like any other.
     ///
-    /// The cross-check reports every one it saw. The transition filter then
-    /// narrows the set to those that have stayed that way long enough to
-    /// exclude a slow accessibility reading, and that narrowed set is the one a
-    /// seat may confirm a closure on. Empty from an adapter that cannot attest
-    /// which windows an application scopes.
-    package let withdrawnByApplication: [WindowIdentity]
+    /// The cross-check reports what it could see in one pass. The transition
+    /// filter then holds a withdrawal inside its grace as
+    /// `temporarilyUnreadable`, and only the narrowed set a seat may confirm a
+    /// closure on reaches `withdrawnByApplication`.
+    package let retained: [WindowIdentity: RetainedSurfaceDisposition]
+
+    /// Surfaces the assigned application no longer lists among its windows
+    /// while the window server still holds a visible surface for them, and
+    /// which no surface in the scope attests as an ancestor.
+    ///
+    /// Empty from an adapter that cannot attest which windows an application
+    /// scopes.
+    package var withdrawnByApplication: [WindowIdentity] { identities(.withdrawn) }
+
+    /// Surfaces the window server was asked for by identity and answered no row
+    /// for at all, so they are destroyed and no wait brings them back.
+    ///
+    /// It is the one positive proof of closure this reading can make, and it is
+    /// separate from every absence: the pass named these Window IDs in its own
+    /// request, and a window server that answers nothing for a named id is not
+    /// a reading that missed something. A pass that could not read the window
+    /// server reports none, because it asked nothing.
+    package var destroyedByWindowServer: [WindowIdentity] { identities(.destroyed) }
 
     package init(
         inventory: SurfaceInventoryReading,
         claims   : SelectionClaimBatch = .none,
-        withdrawnByApplication: [WindowIdentity] = []
+        retained : [WindowIdentity: RetainedSurfaceDisposition] = [:]
     ) {
         self.inventory = inventory
         self.claims    = claims
-        self.withdrawnByApplication = withdrawnByApplication
+        self.retained  = retained
+    }
+
+    private func identities(_ disposition: RetainedSurfaceDisposition) -> [WindowIdentity] {
+        retained
+            .filter { $0.value == disposition }
+            .keys
+            .sorted { $0.windowNumber < $1.windowNumber }
     }
 }
 

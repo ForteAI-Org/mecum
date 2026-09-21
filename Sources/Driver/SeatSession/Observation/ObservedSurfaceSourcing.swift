@@ -5,6 +5,7 @@
 //  Created by Eliomar Alejandro Rodriguez Ferrer on 16/09/2026.
 //
 
+import CoreGraphics
 import SeatCapture
 import SeatCore
 
@@ -14,11 +15,12 @@ import SeatCore
 /// ## Why the qualification is part of the role
 ///
 /// Capturing the dedicated surface of a transient menu and capturing an ordinary
-/// window are two native abilities, and only the second one has a path with
-/// evidence behind it here. A conformer therefore answers `supports` honestly
-/// and the seat refuses the corresponding operation before any effect, with the
-/// capability named. A conformer that answered true for everything would not
-/// make the ability exist, it would make the refusal disappear.
+/// window are two native abilities, and each carries its own evidence: the
+/// second was qualified first, the first on the AppKit family later. A conformer
+/// answers `supports` for what it has evidence of, and the seat refuses the
+/// corresponding operation before any effect, with the capability named. A
+/// conformer that answered true for everything would not make the ability
+/// exist, it would make the refusal disappear.
 ///
 /// ## Ownership and cancellation
 ///
@@ -44,6 +46,19 @@ nonisolated public protocol ObservedSurfaceSourcing: Sendable {
         deadlineNanoseconds: UInt64
     ) async throws -> SeatFrame
 
+    /// Captures one attested hosted-sheet family as a display crop. The host
+    /// remains the frame source; `screenRect` is the exact union the pixels
+    /// occupy, so a child extending past the host cannot be mapped as padding.
+    func captureWindowRegionStill(
+        host                : WindowIdentity,
+        children            : [WindowIdentity],
+        displayID           : CGDirectDisplayID,
+        screenRect          : CGRect,
+        sourceWindowFrame   : CGRect,
+        observationBarrier  : UInt64,
+        deadlineNanoseconds : UInt64
+    ) async throws -> SeatFrame
+
     /// Captures one Still of the dedicated surface of a transient menu,
     /// attributed to `parent`. The parent's own Frame is never substituted for
     /// it, and there is no fallback to the desktop.
@@ -53,6 +68,24 @@ nonisolated public protocol ObservedSurfaceSourcing: Sendable {
         observationBarrier : UInt64,
         deadlineNanoseconds: UInt64
     ) async throws -> SeatFrame
+}
+
+public extension ObservedSurfaceSourcing {
+    /// A conformer must implement the measured crop operation. Capturing only
+    /// the host would recreate the black-band mapping error this API exists to
+    /// prevent, so source compatibility is a named refusal rather than a
+    /// silently incorrect host still.
+    func captureWindowRegionStill(
+        host                : WindowIdentity,
+        children            : [WindowIdentity],
+        displayID           : CGDirectDisplayID,
+        screenRect          : CGRect,
+        sourceWindowFrame   : CGRect,
+        observationBarrier  : UInt64,
+        deadlineNanoseconds : UInt64
+    ) async throws -> SeatFrame {
+        throw ObservationUnavailable.capabilityUnqualified(.windowStill)
+    }
 }
 
 /// UnqualifiedObservationSource is the source a seat gets when nothing was
@@ -71,6 +104,18 @@ nonisolated public struct UnqualifiedObservationSource: ObservedSurfaceSourcing 
         of identity        : WindowIdentity,
         observationBarrier : UInt64,
         deadlineNanoseconds: UInt64
+    ) async throws -> SeatFrame {
+        throw ObservationUnavailable.capabilityUnqualified(.windowStill)
+    }
+
+    public func captureWindowRegionStill(
+        host                : WindowIdentity,
+        children            : [WindowIdentity],
+        displayID           : CGDirectDisplayID,
+        screenRect          : CGRect,
+        sourceWindowFrame   : CGRect,
+        observationBarrier  : UInt64,
+        deadlineNanoseconds : UInt64
     ) async throws -> SeatFrame {
         throw ObservationUnavailable.capabilityUnqualified(.windowStill)
     }

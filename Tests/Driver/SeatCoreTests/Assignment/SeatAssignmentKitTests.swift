@@ -325,6 +325,77 @@ struct SeatAssignmentKitTests {
         #expect(kit.completeRestitution().isComplete)
     }
 
+    // MARK: Membership is not a claim
+
+    @Test("An application whose windows the seat never moved is given back with nothing owed")
+    func untouchedWindowsAreNotAClaim() {
+        // The shipped effector, which is the one a seat composes: every transfer
+        // is refused, so nothing of window 11 was ever moved.
+        let kit = Self.handedOver(UnqualifiedSurfaceEffector())
+
+        Self.ingest(kit, [Fixture.row(11, at: Fixture.outside)], at: 0)
+        Self.ingest(kit, [Fixture.row(11, at: Fixture.outside)], at: 10_000_000)
+
+        #expect(kit.inventory.members.map(\.windowNumber) == [11],
+                "It is a member: every window of the assigned application is")
+        #expect(kit.inventory.heldMembers.isEmpty,
+                "And the seat has no claim on it, which is the other question")
+
+        let outcome = kit.release(displays: Fixture.displays)
+
+        #expect(outcome.issuedReturns.isEmpty)
+        #expect(outcome.blocks.isEmpty)
+        #expect(!outcome.retainsVirtualDisplay)
+        #expect(outcome.isComplete, "The window is where the person left it")
+    }
+
+    @Test("A window the seat asked to move in is owed a return before any reading agrees")
+    func aRequestedTransferIsAClaimAtOnce() {
+        let effector = RecordingSurfaceEffector()
+        let kit      = Self.handedOver(effector)
+
+        Self.ingest(kit, [Fixture.row(11, at: Fixture.outside)], at: 0)
+        Self.ingest(kit, [Fixture.row(11, at: Fixture.outside)], at: 10_000_000)
+
+        #expect(effector.requestedWindowNumbers == [11])
+        #expect(kit.inventory.heldMembers.map(\.windowNumber) == [11])
+        #expect(kit.inventory.containedMembers.isEmpty,
+                "Verified containment would have dropped the window mid transfer")
+
+        // It lands, and the claim stands.
+        Self.ingest(kit, [Fixture.row(11, at: Fixture.contained)], at: 20_000_000)
+        Self.ingest(kit, [Fixture.row(11, at: Fixture.contained)], at: 30_000_000)
+        #expect(kit.inventory.heldMembers.map(\.windowNumber) == [11])
+
+        // It goes home, and only the second agreeing reading ends the claim.
+        Self.ingest(kit, [Fixture.row(11, at: Fixture.outside)], at: 40_000_000)
+        #expect(kit.inventory.heldMembers.map(\.windowNumber) == [11],
+                "One reading is a sighting, here as everywhere else")
+
+        Self.ingest(kit, [Fixture.row(11, at: Fixture.outside)], at: 50_000_000)
+        #expect(kit.inventory.heldMembers.isEmpty)
+    }
+
+    @Test("Ending an assignment opens a return for the window that moved and for no other")
+    func onlyTheMovedWindowIsOwedAReturn() {
+        let effector = RecordingSurfaceEffector(
+            refusals: [12: .destinationUnusable(reason: "the double refuses this one")]
+        )
+        let kit = Self.handedOver(effector)
+        let rows = [Fixture.row(11, at: Fixture.outside), Fixture.row(12, at: Fixture.outside)]
+
+        Self.ingest(kit, rows, at: 0)
+        Self.ingest(kit, rows, at: 10_000_000)
+
+        #expect(kit.inventory.members.map(\.windowNumber) == [11, 12])
+
+        let outcome = kit.release(displays: Fixture.displays)
+
+        #expect(outcome.issuedReturns.map(\.windowNumber) == [11])
+        #expect(outcome.blocks.isEmpty, "Window 12 never moved, so it is owed nothing")
+        #expect(kit.restitution.outstanding == [11])
+    }
+
     @Test("Releasing what was never assigned is a rejection before any effect")
     func releasingNothingIsARejection() {
         let effector = RecordingSurfaceEffector()
@@ -339,7 +410,10 @@ struct SeatAssignmentKitTests {
     @Test("Stopping the seat gives the windows back and refuses every later handover")
     func stoppingTheSeatEndsEverything() {
         let kit = Self.handedOver()
+        // Two readings, because the second verifies window 11 and lets its
+        // transfer be asked for: a stop gives back what the seat moved.
         Self.ingest(kit, [Fixture.row(11, at: Fixture.outside)], at: 0)
+        Self.ingest(kit, [Fixture.row(11, at: Fixture.outside)], at: 10_000_000)
 
         let outcome = kit.stopSeat(displays: Fixture.displays)
 

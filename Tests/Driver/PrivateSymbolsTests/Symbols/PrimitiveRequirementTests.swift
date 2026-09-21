@@ -30,9 +30,30 @@ struct PrimitiveRequirementTests {
         #expect(PrivateSymbol.axUIElementGetWindow.rawValue == "_AXUIElementGetWindow")
         #expect(PrivateSymbol.setFrontProcess.rawValue == "_SLPSSetFrontProcessWithOptions")
         #expect(PrivateSymbol.getFrontProcess.rawValue == "_SLPSGetFrontProcess")
+        #expect(PrivateSymbol.getWindowBounds.rawValue == "SLSGetWindowBounds")
         #expect(Facility.focusRecovery.requirements.contains(.symbol(.getFrontProcess)))
         #expect(!Facility.input.requirements.contains(.symbol(.getFrontProcess)))
-        #expect(PrivateSymbol.allCases.count == 11)
+        #expect(PrivateSymbol.allCases.count == 12)
+    }
+
+    /// The unlisted-window reading is its own Facility. Folding its unpromoted
+    /// primitive into the identity Facility would turn every ordinary identity
+    /// reading unvalidated over a symbol those readings never call.
+    @Test("the unlisted window geometry keeps its primitive out of the other facilities")
+    func remoteWindowGeometryIsSeparate() {
+        #expect(
+            Facility.remoteWindowGeometry.requirements.contains(.symbol(.getWindowBounds))
+        )
+        #expect(!Facility.windowIdentity.requirements.contains(.symbol(.getWindowBounds)))
+        #expect(!Facility.input.requirements.contains(.symbol(.getWindowBounds)))
+        #expect(!Facility.display.requirements.contains(.symbol(.getWindowBounds)))
+        #expect(!Facility.all.contains(Facility.remoteWindowGeometry))
+
+        // It still needs the whole identity chain: a rectangle without an
+        // attested owner is not geometry anybody may act on.
+        for requirement in Facility.windowIdentity.requirements {
+            #expect(Facility.remoteWindowGeometry.requirements.contains(requirement))
+        }
     }
 
     @Test("a selector's Ledger key is its class and its spelling")

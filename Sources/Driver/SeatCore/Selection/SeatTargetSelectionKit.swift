@@ -202,6 +202,61 @@ package final class SeatTargetSelectionKit {
 
     // MARK: Reading the state
 
+    /// The window a window-scoped modal is attached to, nil when this surface is
+    /// not such a modal or when its block is not in force among the members.
+    ///
+    /// It is the one question the sheet paths ask: a sheet has no surface of its
+    /// own to capture and no frame the person moved it to, so both the picture
+    /// the seat observes and the ownership it records are the host's. A modal
+    /// whose scope is the whole application answers nil here, because it is a
+    /// window standing beside the others rather than one drawn inside one.
+    package func attachedHost(of modal: WindowIdentity) -> WindowIdentity? {
+        guard let host = core.modality.parentNamed(by: modal) else { return nil }
+        return core.modalBlocks.contains { $0.modal == modal && $0.blocked == host }
+            ? host
+            : nil
+    }
+
+    /// Whether this surface is an explicitly attested application-modal dialog.
+    /// It has no host window by design, but it remains a modal surface whose
+    /// endpoint discovery must fail closed rather than falling through to an
+    /// ordinary target route.
+    package func isApplicationModal(_ surface: WindowIdentity) -> Bool {
+        core.modality.scopes[surface] == .application
+    }
+
+    /// The window a window-scoped modal names as the one it is drawn inside,
+    /// whether or not that window is a member of this assignment.
+    ///
+    /// `attachedHost(of:)` answers only when the block is in force among the
+    /// members, which is the question ownership and the picture's climb ask. A
+    /// capture asks a second one: whether this surface has pixels of its own at
+    /// all. A surface that names a host has none, and that stays true when the
+    /// host is a window the seat never took, so the two readings are separate.
+    package func namedModalHost(of surface: WindowIdentity) -> WindowIdentity? {
+        core.modality.parentNamed(by: surface)
+    }
+
+    /// Every member surface a window-scoped modal block attaches to another
+    /// member, which is the set that owes no return of its own.
+    package var attachedModals: Set<WindowIdentity> {
+        Set(
+            core.modalBlocks.compactMap { block in
+                core.modality.parentNamed(by: block.modal) == block.blocked ? block.modal : nil
+            }
+        )
+    }
+
+    /// True when a modal of the same application blocks this surface.
+    ///
+    /// A blocked surface is not a candidate, and the seat needs to tell that
+    /// apart from a surface that stopped being one because it is gone: the
+    /// first is the target the consumer is still working in, with a sheet over
+    /// it, and the second is a target to leave.
+    package func isModallyBlocked(_ surface: WindowIdentity) -> Bool {
+        core.modalBlocks.contains { $0.blocked == surface }
+    }
+
     package func status(observation: TargetObservationClaim? = nil) -> TargetSelectionStatus {
         refold()
         return makeStatus(observation: observation)
@@ -252,6 +307,9 @@ package final class SeatTargetSelectionKit {
             return
         }
         core.reselect(members: assignment.inventory.members)
+        // The blocks are recomputed above, so this is the one place where the
+        // assignment nucleus can be told which of its members are attached.
+        assignment.noteAttachedSurfaces(attachedModals)
     }
 
     private func makeStatus(observation: TargetObservationClaim? = nil) -> TargetSelectionStatus {

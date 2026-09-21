@@ -44,6 +44,16 @@ nonisolated public enum SymbolABI {
         UnsafeMutableRawPointer?
     ) -> Int32
 
+    /// `SLSGetWindowBounds(connection, windowID, &frame)`, 0 on success. It is
+    /// the window server's own rectangle for one Window ID, scoped to that id
+    /// and answered for a window the public `CGWindowList` calls do not
+    /// enumerate, which is what an out of process panel's content window is.
+    public typealias GetWindowBounds = @convention(c) (
+        Int32,
+        UInt32,
+        UnsafeMutablePointer<CGRect>?
+    ) -> Int32
+
     /// `SLEventRecordPointer(event)`, the private record behind a `CGEvent`.
     public typealias EventRecordPointer = @convention(c) (
         UnsafeRawPointer?

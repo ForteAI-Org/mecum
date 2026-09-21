@@ -163,7 +163,7 @@ package final class SeatAssignmentKit {
     ) -> RestitutionOutcome {
 
         guard lifecycle.isAssigned else { return refusedRestitution() }
-        let members = inventory.members
+        let members = inventory.heldMembers
         lifecycle.release(reason: .explicitRelease)
         focus.endEpisode()
         return giveBack(members: members, chosenDisplays: chosenDisplays, displays: displays)
@@ -178,7 +178,7 @@ package final class SeatAssignmentKit {
         displays      : [CGDirectDisplayID: CGRect] = [:]
     ) -> RestitutionOutcome {
 
-        let members     = inventory.members
+        let members     = inventory.heldMembers
         let wasAssigned = lifecycle.isAssigned
         lifecycle.stopSeat()
         focus.endEpisode()
@@ -187,6 +187,14 @@ package final class SeatAssignmentKit {
             return refusedRestitution()
         }
         return giveBack(members: members, chosenDisplays: chosenDisplays, displays: displays)
+    }
+
+    /// Records which members are drawn inside another window of the same
+    /// application, so the seat neither owes their return nor is refused a
+    /// handback over them. The selection nucleus is the only thing that knows
+    /// it, and it hands the whole set in on every fold.
+    package func noteAttachedSurfaces(_ identities: Set<WindowIdentity>) {
+        inventory.noteAttachedSurfaces(identities)
     }
 
     // MARK: Membership and containment
@@ -201,6 +209,8 @@ package final class SeatAssignmentKit {
     ///
     /// A failed reading changes nothing at all and is reported as such. An
     /// incomplete one keeps the surfaces it carried and keeps the gate closed.
+    /// Either way the pass is noted on the containment clock first, so neither
+    /// of them spends a containment budget it produced no evidence for.
     @discardableResult
     package func ingest(
         _ reading           : SurfaceInventoryReading,
@@ -213,6 +223,10 @@ package final class SeatAssignmentKit {
         guard let assignment = lifecycle.current else {
             return makeStatus(events: [], blocks: [.notAssigned], isContained: false)
         }
+        // Before the early return for a failed read, because a read that failed
+        // is the clearest stretch of time the budgets must not be charged for.
+        containment.notePass(completeness: reading.completeness, at: now)
+
         if case .unavailable(let reason) = reading.completeness {
             return makeStatus(
                 events     : [],
@@ -231,6 +245,9 @@ package final class SeatAssignmentKit {
             isHandover: awaitsHandoverReading
         )
         awaitsHandoverReading = false
+        // Between the fold and the plan, which is where a surface first exists
+        // and the pause it did not live through is already accounted for.
+        containment.noteSurfaces(inventory.members)
 
         let plan = containment.plan(
             members      : inventory.members,
@@ -391,6 +408,13 @@ package final class SeatAssignmentKit {
 
     // MARK: Private
 
+    /// Turns the surfaces the seat owes a return into the obligation, and drops
+    /// the membership the assignment was holding.
+    ///
+    /// The callers hand in `inventory.heldMembers` and not `inventory.members`:
+    /// a member is any window of the assigned application, so passing members
+    /// would open a return for a window nobody ever moved, which nothing public
+    /// can discharge and which a handback would then be refused over forever.
     private func giveBack(
         members       : [AssignedSurface],
         chosenDisplays: [Int: CGDirectDisplayID],

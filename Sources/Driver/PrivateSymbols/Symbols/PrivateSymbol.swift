@@ -24,6 +24,11 @@ nonisolated public enum PrivateSymbol: String, Sendable, CaseIterable {
     /// two Preparation records.
     case getConnectionPSN       = "SLSGetConnectionPSN"
 
+    /// The window server's rectangle for one Window ID. Read only for a window
+    /// the public window list does not enumerate; a listed window keeps the
+    /// public reading and its cross check.
+    case getWindowBounds        = "SLSGetWindowBounds"
+
     /// Restores the user's front process and window. Used only by the opt-in
     /// focus recovery facility, never by background input preparation.
     case setFrontProcess       = "_SLPSSetFrontProcessWithOptions"

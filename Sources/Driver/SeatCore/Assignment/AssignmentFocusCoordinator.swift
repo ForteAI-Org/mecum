@@ -43,7 +43,7 @@ nonisolated package enum FocusMiss: String, Sendable, Equatable {
     /// Nothing was prepared, so there is no destination to ask for.
     case preparationMissing
 
-    /// The preparation is older than its 1 s lifetime.
+    /// The preparation is older than its 1.25 s lifetime.
     case preparationExpired
 
     /// The destination was not attested.
@@ -150,8 +150,16 @@ nonisolated package enum LateActivationDecision: Sendable, Equatable {
 /// caller hands in, which is why the whole of it is a unit test.
 nonisolated package struct AssignmentFocusCoordinator: Sendable {
 
-    /// A preparation is usable for 1 s from its own start.
-    package static let preparationLifetimeNanoseconds: UInt64 = 1_000_000_000
+    /// A preparation is usable for 1.25 s from its own start: the 1 s of the
+    /// heartbeat that rebuilds it, plus the 250 ms this repository already
+    /// treats as a late reading's slack.
+    ///
+    /// At 1 s the two numbers were equal, so a preparation stamped on one beat
+    /// was exactly at its expiry on the next, and the beat's own lateness plus
+    /// the rebuild's duration was a window in which an activation got
+    /// `preparationExpired`. It is the single source for the whole package:
+    /// `UserFocusRecovery` reads this rather than carrying its own literal.
+    package static let preparationLifetimeNanoseconds: UInt64 = 1_250_000_000
 
     /// From the return of the focus request to two agreeing readings.
     package static let verificationBudgetNanoseconds: UInt64 = 250_000_000

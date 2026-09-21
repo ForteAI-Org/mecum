@@ -84,11 +84,14 @@ struct AssignmentFocusCoordinatorTests {
         #expect(Self.decide(&coordinator) == .miss(.destinationNotAttested))
     }
 
-    @Test("A preparation older than one second from its own start is a miss")
+    @Test("A preparation older than its lifetime from its own start is a miss")
     func expiredPreparationIsAMiss() {
         var coordinator = Self.armed(Self.preparation(startedAt: 0))
 
-        #expect(Self.decide(&coordinator, at: 1_000_000_001) == .miss(.preparationExpired))
+        #expect(
+            Self.decide(&coordinator, at: AssignmentFocusCoordinator.preparationLifetimeNanoseconds + 1)
+                == .miss(.preparationExpired)
+        )
     }
 
     @Test("A preparation exactly at the lifetime is still usable")
@@ -279,13 +282,15 @@ struct AssignmentFocusCoordinatorTests {
         )
     }
 
-    @Test("A late activation after the preparation's second is refused")
+    @Test("A late activation after the preparation's lifetime is refused")
     func lateActivationAfterTheLifetimeIsRefused() {
         var coordinator = Self.armed(Self.preparation(startedAt: 0))
 
         #expect(
-            coordinator.noteLateActivation(isCorrelated: true, at: 1_000_000_001)
-                == .refused(.preparationExpired)
+            coordinator.noteLateActivation(
+                isCorrelated: true,
+                at          : AssignmentFocusCoordinator.preparationLifetimeNanoseconds + 1
+            ) == .refused(.preparationExpired)
         )
     }
 

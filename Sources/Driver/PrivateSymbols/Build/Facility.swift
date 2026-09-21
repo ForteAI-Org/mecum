@@ -137,6 +137,26 @@ nonisolated public struct Facility: Sendable, Hashable {
         ]
     )
 
+    /// Geometry of a window the public window list does not enumerate, which is
+    /// what the content window of an out of process panel is: measured on
+    /// 26A428, `SLSGetWindowBounds` read its frame while
+    /// `CGWindowListCopyWindowInfo` had no row for it at all.
+    ///
+    /// It is separate from `windowIdentity` and not an addition to it. Its one
+    /// new primitive has not been promoted into the build ledger, so folding it
+    /// into the identity Facility would turn every ordinary identity reading
+    /// unvalidated over a symbol those readings never touch. A consumer opts
+    /// into this Facility the way it opts into focus recovery.
+    public static let remoteWindowGeometry = Facility(
+        name: "remoteWindowGeometry",
+        requirements: [
+            .symbol(.mainConnectionID),
+            .symbol(.getWindowOwner),
+            .symbol(.getConnectionPSN),
+            .symbol(.getWindowBounds),
+        ]
+    )
+
     /// The HID cursor fence. It is built entirely on public API, so its Ledger
     /// requirement is the build entry itself and its gate is the permission.
     public static let fence = Facility(
