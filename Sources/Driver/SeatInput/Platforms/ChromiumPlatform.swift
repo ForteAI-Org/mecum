@@ -55,7 +55,7 @@ nonisolated public struct ChromiumPlatform: InputPlatform {
     ///
     /// The same property is the lever the teardown uses: applying and restoring
     /// a Preparation closes an open menu in 50 ms, which is why
-    /// `AgentSeat.useContextMenu` closes with the cycle it must not use to open.
+    /// `AgentSeat.withContextMenu` closes with the cycle it must not use to open.
     public func preparation(for command: InputCommand) -> Preparation {
         switch command {
             case .click(_, .right)          : .none

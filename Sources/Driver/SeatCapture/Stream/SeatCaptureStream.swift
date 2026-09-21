@@ -1309,30 +1309,38 @@ public final class SeatCaptureStream {
     /// The deadline is not decoration: the Ledger records that this completion
     /// handler sometimes does not arrive, and without a gate the caller would
     /// wait forever with no name for what went wrong.
+    /// `observationBarrier` separates two otherwise identical requests that
+    /// belong to different observational moments. A request issued after a
+    /// Command completed must not join a job that started before it: the
+    /// coalescing key carries the barrier so the later requester waits for a
+    /// capture of its own instead of inheriting pre barrier pixels.
     nonisolated public static func still(
         of target        : SeatCaptureTarget,
         pixelSize        : CGSize?   = nil,
         displayGeneration: UInt64    = 0,
         captureGeneration: UInt64    = 0,
+        observationBarrier: UInt64   = 0,
         timeout          : Duration  = .seconds(2)
     ) async throws -> SeatFrame {
 
         let deadline = CaptureDeadline(timeout: timeout)
         return try await still(
-            of               : target,
-            pixelSize        : pixelSize,
-            displayGeneration: displayGeneration,
-            captureGeneration: captureGeneration,
-            deadline         : deadline
+            of                : target,
+            pixelSize         : pixelSize,
+            displayGeneration : displayGeneration,
+            captureGeneration : captureGeneration,
+            observationBarrier: observationBarrier,
+            deadline          : deadline
         )
     }
 
     private static func still(
-        of target        : SeatCaptureTarget,
-        pixelSize        : CGSize?,
-        displayGeneration: UInt64,
-        captureGeneration: UInt64,
-        deadline         : CaptureDeadline
+        of target         : SeatCaptureTarget,
+        pixelSize         : CGSize?,
+        displayGeneration : UInt64,
+        captureGeneration : UInt64,
+        observationBarrier: UInt64 = 0,
+        deadline          : CaptureDeadline
     ) async throws -> SeatFrame {
 
         let identityWitness = identityWitness(for: target)
@@ -1359,7 +1367,8 @@ public final class SeatCaptureStream {
             pixelHeightBits   : Double(size.height).bitPattern,
             framesPerSecond   : 60,
             displayGeneration : displayGeneration,
-            captureGeneration : captureGeneration
+            captureGeneration : captureGeneration,
+            observationBarrier: observationBarrier
         )
         let filterHandoff        = Handoff(value: filter)
         let configurationHandoff = Handoff(value: configuration)

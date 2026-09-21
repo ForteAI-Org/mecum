@@ -18,6 +18,14 @@ nonisolated struct StillRequestIdentity: Sendable, Hashable {
     let framesPerSecond   : Int
     let displayGeneration : UInt64
     let captureGeneration : UInt64
+
+    /// The requester's observational barrier. Two requests with the same pixels
+    /// and provenance are still different requests when a Command completed, a
+    /// selection moved or an invalidation happened between them: without this
+    /// field a request made after a Command could join a job that started before
+    /// it and inherit pixels of the state the Command has already changed. The
+    /// default keeps every caller that has no barrier on the previous behaviour.
+    var observationBarrier: UInt64 = 0
 }
 
 nonisolated enum CaptureCompatibilityKey: Sendable, Hashable {

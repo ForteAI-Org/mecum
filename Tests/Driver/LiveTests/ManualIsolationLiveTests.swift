@@ -104,7 +104,11 @@ struct ManualIsolationLiveTests {
         // row is about is the state of the hardware while this event went out.
         let heldAtThePost = CGEventSource.flagsState(.hidSystemState).contains(.maskShift)
 
-        let receipt = try await stage.seat.send(Self.letter, to: window, turn: turn)
+        let receipt = try await stage.seat.send(
+            Self.letter,
+            observation: try await liveObservation(stage.seat),
+            turn       : turn
+        )
         LivePump.run(for: 0.5)
         let observed = chrome.state()["lastModifiers"]
         try stage.seat.confirm(receipt, observed == nil ? .unknown : .observed)
@@ -170,13 +174,22 @@ struct ManualIsolationLiveTests {
         // question is whether the target digs itself out of it.
         var receipts = [
             try await stage.seat.send(
-                Self.command, phase: .down, to: window, turn: turn, platform: platform
+                Self.command,
+                phase      : .down,
+                observation: try await liveObservation(stage.seat),
+                turn       : turn,
+                platform   : platform
             )
         ]
         LivePump.run(for: 0.3)
 
         receipts.append(
-            try await stage.seat.send(Self.letter, to: window, turn: turn, platform: platform)
+            try await stage.seat.send(
+                Self.letter,
+                observation: try await liveObservation(stage.seat),
+                turn       : turn,
+                platform   : platform
+            )
         )
         LivePump.run(for: 0.4)
         let whileStranded = chrome.state()["lastModifiers"]
@@ -188,7 +201,12 @@ struct ManualIsolationLiveTests {
         )
 
         receipts.append(
-            try await stage.seat.send(Self.letter, to: window, turn: turn, platform: platform)
+            try await stage.seat.send(
+                Self.letter,
+                observation: try await liveObservation(stage.seat),
+                turn       : turn,
+                platform   : platform
+            )
         )
         LivePump.run(for: 0.4)
         let afterTheHardware = chrome.state()["lastModifiers"]
@@ -215,7 +233,11 @@ struct ManualIsolationLiveTests {
 
         receipts.append(
             try await stage.seat.send(
-                Self.command, phase: .up, to: window, turn: turn, platform: platform
+                Self.command,
+                phase      : .up,
+                observation: try await liveObservation(stage.seat),
+                turn       : turn,
+                platform   : platform
             )
         )
         // The Turn refuses to be given back while a Command it handed out is

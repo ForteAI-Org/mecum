@@ -216,8 +216,8 @@ struct MultiWindowTests {
         #expect(log.refusals == [stranger.id])
     }
 
-    @Test("a request addressed to one window is not delivered to the target")
-    func sendFollowsItsOwnWindow() async throws {
+    @Test("a Command of the previous target is refused and never redirected to the new one")
+    func aCommandIsNeverRedirected() async throws {
         let sensing = FakeSensing()
         let sender  = FakeSender()
         let (seat, windows) = try await Self.seat(
@@ -226,14 +226,20 @@ struct MultiWindowTests {
             also   : [Self.secondWindowNumber]
         )
         _ = try await seat.switchTarget(to: windows[0])
-        #expect(seat.currentTarget?.id == windows[0].id)
+        let turn = try await seat.acquire()
+        let observation = try await observedReference(seat)
+        #expect(observation.recipient == windows[0].reference.identity)
 
-        let turn    = try await seat.acquire()
-        let receipt = try await seat.send(Self.click, to: windows[1], turn: turn)
+        // The target moves while the consumer was deciding. The Command it
+        // decided is refused: the recipient is the reference's and is never
+        // recomputed from whatever is current now.
+        _ = try await seat.switchTarget(to: windows[1])
 
-        #expect(receipt.route.windowNumber == windows[1].id)
-        #expect(seat.currentTarget?.id == windows[0].id, "Sending is not a target change")
-        try seat.confirm(receipt, .observed)
+        await #expect(throws: ObservationAdmissionRefusal.noCurrentObservation(.targetChanged)) {
+            try await seat.send(Self.click, observation: observation, turn: turn)
+        }
+        #expect(sender.sent.isEmpty)
+        #expect(seat.currentTarget?.id == windows[1].id)
         try seat.release(turn)
     }
 
@@ -375,7 +381,11 @@ struct MultiWindowTests {
             observed.value = placing.stages
         }
 
-        let receipt = try await seat.send(Self.click, to: windows[0], turn: turn)
+        let receipt = try await seat.send(
+            Self.click,
+            observation: try await observedReference(seat),
+            turn       : turn
+        )
         #expect(observed.value == stagesBefore, "A Command in flight is never cut in half")
         #expect(sender.sent.count == 1, "And it is never posted twice")
 
@@ -540,7 +550,7 @@ struct MultiWindowTests {
     func detectedWindowWaitsForTheBoundary() async throws {
         let sensing = FakeSensing()
         let sender  = FakeSender()
-        let (seat, windows) = try await Self.seat(sensing: sensing, sender: sender)
+        let (seat, _) = try await Self.seat(sensing: sensing, sender: sender)
         let turn = try await seat.acquire()
 
         let reference = Self.reference(Self.secondWindowNumber)
@@ -556,7 +566,11 @@ struct MultiWindowTests {
             seen.value = seat.adoptedWindows.count
         }
 
-        let receipt = try await seat.send(Self.click, to: windows[0], turn: turn)
+        let receipt = try await seat.send(
+            Self.click,
+            observation: try await observedReference(seat),
+            turn       : turn
+        )
         #expect(seen.value == 1, "Nothing is adopted while a Command is in flight")
 
         let adopted = try await started.value?.value

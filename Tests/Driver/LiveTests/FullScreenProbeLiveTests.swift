@@ -176,9 +176,9 @@ struct FullScreenProbeLiveTests {
             let turn    = try await seat.acquire()
             let receipt = try await seat.send(
                 .click(try fixture.location(of: openPoint)),
-                to      : adopted,
-                turn    : turn,
-                platform: fixture.platform
+                observation: try await liveObservation(seat),
+                turn       : turn,
+                platform   : fixture.platform
             )
             let opened = LivePump.run(
                 until  : { fixture.refresh(); return !(fixture.latest.secondaryWindows ?? []).isEmpty },

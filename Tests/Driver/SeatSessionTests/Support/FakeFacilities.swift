@@ -8,6 +8,7 @@
 import CoreGraphics
 import CursorGuard
 import Foundation
+import SeatCapture
 import SeatCore
 import SeatInput
 @testable import SeatSession
@@ -174,6 +175,13 @@ final class FakeSensing: SeatSensing, @unchecked Sendable {
 
     func windowGeometry(of windowNumber: Int) -> WindowReference? {
         windowNumber == FakeGeometry.windowNumber ? geometry : additionalWindows[windowNumber]
+    }
+
+    /// Every Window ID this fake window server can answer for, in a stable
+    /// order. It is what a controlled surface reader enumerates, so membership
+    /// follows the same readings the seat itself takes.
+    var knownWindowNumbers: [Int] {
+        ([FakeGeometry.windowNumber] + additionalWindows.keys).sorted()
     }
 
     func windowGeometryObservation(
@@ -396,7 +404,10 @@ class FakeSender: CommandSending, @unchecked Sendable {
         sent.append((command, correlationID))
         onSend?(command)
         await onSendWait?()
-        return receipt(for: window)
+        // Distinguishable by posting time, as two real Receipts are: `confirm`
+        // matches a Receipt by its whole value, so two identical ones would let
+        // an out of order confirmation pass unnoticed.
+        return receipt(for: window, index: sent.count)
     }
 
     func sendSequence(
@@ -466,14 +477,25 @@ class FakeSender: CommandSending, @unchecked Sendable {
     }
 }
 
-/// A seat wired to the three fakes, already holding an adopted window, which is
-/// the starting point of every test about acting.
+/// A seat wired to the fakes, which is the starting point of every test about
+/// acting.
+///
+/// The observation collaborators are the controlled ones by default, so a suite
+/// exercises the real composition: the assignment nucleus, the selection
+/// nucleus, the qualifier and the admission, all on the production path. What
+/// the controlled adapters supply is the evidence no shipped adapter can supply
+/// on this build, and supplying it here proves the algorithms and never the
+/// system.
 @MainActor
 func makeSeat(
     sensing: FakeSensing = FakeSensing(),
     placing: FakePlacing = FakePlacing(),
     sender : FakeSender  = FakeSender(),
-    marker : Int64       = 555
+    marker : Int64       = 555,
+    reader : ControlledSurfaceReader? = nil,
+    source : ControlledObservationSource? = nil,
+    clock  : ControlledContentClock? = nil,
+    profile: ObservationProfile = .initialLab
 ) -> AgentSeat {
 
     // `KeyHold` is process wide and keyed by owner and PID, so a test that
@@ -486,6 +508,10 @@ func makeSeat(
         fence                : nil,
         displayID            : 7,
         expectedMainDisplayID: FakeGeometry.mainDisplayID,
-        markers              : { marker }
+        markers              : { marker },
+        surfaceReader        : reader ?? ControlledSurfaceReader(sensing: sensing),
+        observationSource    : source ?? ControlledObservationSource(sensing: sensing),
+        contentClock         : clock  ?? ControlledContentClock(),
+        observationProfile   : profile
     )
 }

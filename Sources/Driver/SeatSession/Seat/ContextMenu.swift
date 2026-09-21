@@ -21,7 +21,7 @@ import SeatCore
 ///
 /// The frame is the window server's, because a menu window has no other
 /// reading: the target publishes nothing about it and no element describes it.
-public struct ContextMenu: Sendable, Equatable {
+nonisolated public struct ContextMenu: Sendable, Equatable {
 
     /// The **menu's** window, not the target's: same process, its own Window ID,
     /// and the identity an event has to be routed to in order to land on an
@@ -49,10 +49,10 @@ public struct ContextMenu: Sendable, Equatable {
 /// There is no case in which a menu was left open: that outcome is a thrown
 /// `SessionFailure.contextMenuNotClosed` and a `SeatIssue.contextMenuLeftOpen`,
 /// never a receipt somebody might not read.
-public struct ContextMenuReceipt: Sendable, Equatable {
+nonisolated public struct ContextMenuReceipt: Sendable, Equatable {
 
     /// Which of the three things ended the menu.
-    public enum Closure: String, Sendable, Equatable {
+    nonisolated public enum Closure: String, Sendable, Equatable {
 
         /// The item click closed it, which is what choosing an item does.
         case chosenItem

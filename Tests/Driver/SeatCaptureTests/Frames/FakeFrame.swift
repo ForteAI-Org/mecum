@@ -25,6 +25,7 @@ nonisolated func makeFakeFrame(
     height           : Int    = 64,
     displayGeneration: UInt64 = 1,
     receivedAt       : UInt64 = 0,
+    displayTime      : UInt64? = nil,
     source           : FrameSourceIdentity = .display(1)
 ) -> SeatFrame? {
 
@@ -66,6 +67,7 @@ nonisolated func makeFakeFrame(
         pixelBuffer      : pixelBuffer,
         presentationTime : CMTime(value: CMTimeValue(receivedAt), timescale: 1_000_000),
         receivedAt       : receivedAt,
+        displayTime      : displayTime,
         displayGeneration: displayGeneration,
         source           : source,
         geometry         : geometry

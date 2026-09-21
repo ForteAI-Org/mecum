@@ -100,14 +100,28 @@ struct KeyIsolationLiveTests {
 
         // Shift goes down on the first window and is never released until
         // the end. Everything between is about what the second window sees.
-        let down = try await stage.seat.send(Self.shift, phase: .down, to: first, turn: turn)
+        // The recipient is the reference's, so the window this half is about has
+        // to be the Selected Target before it is observed. Selecting is explicit
+        // here for the same reason the row exists: two windows of one process.
+        first = try await stage.seat.switchTarget(to: first)
+        let down = try await stage.seat.send(
+            Self.shift,
+            phase      : .down,
+            observation: try await liveObservation(stage.seat),
+            turn       : turn
+        )
         try #require(LivePump.run(until: {
             windows[0].state()["lastModifiers"] == Double(Modifiers.shift.rawValue)
         }, timeout: 2))
         try stage.seat.confirm(down, .observed)
         _ = await stage.seat.concludeObservation()
         second = try await stage.seat.stage(second)
-        let letter = try await stage.seat.send(try Self.letter(on: layout), to: second, turn: turn)
+        second = try await stage.seat.switchTarget(to: second)
+        let letter = try await stage.seat.send(
+            try Self.letter(on: layout),
+            observation: try await liveObservation(stage.seat),
+            turn       : turn
+        )
         LivePump.run(for: 0.6)
 
         let observed   = windows[1].state()["lastModifiers"]
@@ -147,7 +161,13 @@ struct KeyIsolationLiveTests {
         }
 
         first = try await stage.seat.stage(first)
-        let up = try await stage.seat.send(Self.shift, phase: .up, to: first, turn: turn)
+        first = try await stage.seat.switchTarget(to: first)
+        let up = try await stage.seat.send(
+            Self.shift,
+            phase      : .up,
+            observation: try await liveObservation(stage.seat),
+            turn       : turn
+        )
         try #require(LivePump.run(until: { windows[0].state()["lastModifiers"] == 0 }, timeout: 2))
         try stage.seat.confirm(up, .observed)
         #expect(

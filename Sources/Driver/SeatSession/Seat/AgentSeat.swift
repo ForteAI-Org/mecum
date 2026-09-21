@@ -12,6 +12,7 @@ import Darwin
 import Dispatch
 import Foundation
 import os
+import SeatCapture
 import SeatCore
 import SeatInput
 import VirtualScreens
@@ -43,6 +44,28 @@ import WindowPlacement
 /// state refuses input: it answers `seatNotReady(state)` and the caller decides.
 /// The driver can wait behind another transaction aimed at the same target PID,
 /// then it re-verifies window identity after that wait and before posting.
+///
+/// ## Every Command carries the observation it was decided on
+///
+/// There is no entry point that takes a window and sends into it. A Command is
+/// addressed by a `SeatObservationReference` the seat issued with the Frame the
+/// consumer looked at, and the seat verifies that reference against the world at
+/// admission. A new observation is required after every complete Command and
+/// after every invalidation, the recipient is never recomputed from the current
+/// target, and nothing here captures implicitly to make an old plan admissible.
+/// The legacy entry points are gone rather than deprecated: see the `unavailable`
+/// declarations below for what each one migrates to.
+///
+/// ## What it composes
+///
+/// The assignment nucleus and the selection nucleus are owned here, not
+/// duplicated: an adoption hands the instance over, every reading is folded
+/// through both, and the causes of the gate that decide an observation are the
+/// ones those nuclei report. The evidence they need is supplied by adapters, and
+/// the shipped adapters are honest about what this build has qualified: the
+/// enumeration is incomplete, no selection fact is attested, the menu surface
+/// cannot be captured and the content clock is unqualified. Each of those
+/// produces a named refusal before any effect rather than an invented fact.
 ///
 /// ## Never replay an uncertain effect
 ///
@@ -80,9 +103,9 @@ public final class AgentSeat {
     /// seat supplies the readings.
     public private(set) var seatGuard: SeatGuard?
 
-    private let eventChannel: AsyncStream<SeatEvent>.Continuation
+    let eventChannel: AsyncStream<SeatEvent>.Continuation
 
-    private let sensing  : any SeatSensing
+    let sensing  : any SeatSensing
     private let placing  : any WindowPlacing
     private let sender   : any CommandSending
     private let fence    : CursorFence?
@@ -92,14 +115,14 @@ public final class AgentSeat {
 
     private let turns: TurnQueue
 
-    private var session            = SeatWindowSession()
+    var session                    = SeatWindowSession()
     private var transferGeneration : UInt64 = 0
     private var transfersInFlight  = 0
     private var recoveryTrigger    : [SeatIssue] = []
     private var pendingAdoptions: [Int: AdoptedWindow] = [:]
     private var adoptionRestorations: [Int: WindowReleaseOutcome] = [:]
     private var adoptionInFlight = false
-    private var isTearingDown = false
+    var isTearingDown = false
     private var adoptionWaiters: [CheckedContinuation<Void, Never>] = []
     private var stagedWindowNumber : Int?
     private var posted             : [PostedCommand] = []
@@ -113,6 +136,46 @@ public final class AgentSeat {
     private var focusWatch: UserFocusWatch?
     private var focusRecoveryWasDegraded = false
     private var actionInFlight = false
+
+    // MARK: The observation half
+
+    /// The authority that mints and verifies Observation References. It is owned
+    /// here and handed to nobody: a second one would be a second opinion about
+    /// which observation is current.
+    let observationIssuer = ObservationIssuer()
+
+    /// The assignment nucleus this seat drives, and the selection nucleus that
+    /// borrows it. Both are the committed ones, composed here rather than
+    /// modelled again.
+    let assignmentKit: SeatAssignmentKit
+    let selectionKit : SeatTargetSelectionKit
+
+    let surfaceReader    : any AssignedSurfaceReading
+    let observationSource: any ObservedSurfaceSourcing
+    let sampleQualifier  : FrameSampleQualifier
+
+    /// The finite positive budgets this seat observes and admits under.
+    public let observationProfile: ObservationProfile
+
+    /// The geometry of the Frame the outstanding reference was issued with, kept
+    /// so admission compares the live window against the sample's own reading
+    /// rather than against a reading taken later.
+    var outstandingGeometry: WindowGeometryObservation?
+
+    /// The menu interaction currently scoping what may be sent, nil when none is.
+    var menuContext: MenuContext?
+
+    /// Counts menu interactions, so a context kept past its interaction matches
+    /// nothing.
+    var menuGeneration: UInt64 = 0
+
+    var stateRevision   : UInt64 = 0
+    var stateSubscribers: [ObjectIdentifier: SeatStateSubscription] = [:]
+
+    /// The Monitor's own health, set by the host that owns the Monitor. It is
+    /// separate from the observation's availability on purpose: an isolated
+    /// Monitor fault costs the person the preview and costs the agent nothing.
+    var monitorHealth: SeatMonitorHealth = .notRequested
 
     /// MW-03's two experiments, both off unless the host was configured for
     /// them. They are separate because the outward leg is free of focus and the
@@ -169,6 +232,15 @@ public final class AgentSeat {
     /// The hold currently out, nil when the seat is free.
     public var currentTurn: Turn? { turns.current }
 
+    /// Composes the seat with the collaborators it needs.
+    ///
+    /// The observation collaborators have defaults that refuse: an
+    /// `UnqualifiedObservationSource` captures nothing and an
+    /// `UnqualifiedContentClock` measures no age. That is deliberate, so a seat
+    /// built without an explicit capture path answers a named capability refusal
+    /// instead of reaching a path nobody configured. The surface reader defaults
+    /// to the shipped `SensingSurfaceReader`, which reads the window server and
+    /// reports honestly that the enumeration is not qualified.
     init(
         sensing              : any SeatSensing,
         placing              : any WindowPlacing,
@@ -177,7 +249,11 @@ public final class AgentSeat {
         displayID            : CGDirectDisplayID,
         expectedMainDisplayID: CGDirectDisplayID,
         defaultPlatform      : any InputPlatform = ChromiumPlatform(),
-        markers              : @escaping () -> Int64 = { Int64.random(in: 1...Int64.max) }
+        markers              : @escaping () -> Int64 = { Int64.random(in: 1...Int64.max) },
+        surfaceReader        : (any AssignedSurfaceReading)? = nil,
+        observationSource    : any ObservedSurfaceSourcing = UnqualifiedObservationSource(),
+        contentClock         : any ContentClockQualifying = UnqualifiedContentClock(),
+        observationProfile   : ObservationProfile = .initialLab
     ) {
         self.sensing               = sensing
         self.placing               = placing
@@ -187,6 +263,14 @@ public final class AgentSeat {
         self.expectedMainDisplayID = expectedMainDisplayID
         self.defaultPlatform       = defaultPlatform
         self.turns                 = TurnQueue(markers: markers)
+
+        let assignment = SeatAssignmentKit()
+        self.assignmentKit      = assignment
+        self.selectionKit       = SeatTargetSelectionKit(assignment: assignment)
+        self.surfaceReader      = surfaceReader ?? SensingSurfaceReader(sensing: sensing)
+        self.observationSource  = observationSource
+        self.sampleQualifier    = FrameSampleQualifier(clock: contentClock)
+        self.observationProfile = observationProfile
 
         var channel: AsyncStream<SeatEvent>.Continuation!
         self.events = AsyncStream(bufferingPolicy: .bufferingNewest(128)) { channel = $0 }
@@ -257,11 +341,11 @@ public final class AgentSeat {
     /// lift a key that was never pressed and leave the pressed one down.
     @discardableResult
     public nonisolated func send(
-        _ shortcut: Shortcut,
-        phase     : KeyPhase = .press,
-        to window : AdoptedWindow,
-        turn      : Turn,
-        platform  : (any InputPlatform)? = nil
+        _ shortcut : Shortcut,
+        phase      : KeyPhase = .press,
+        observation: SeatObservationReference,
+        turn       : Turn,
+        platform   : (any InputPlatform)? = nil
     ) async throws -> InputReceipt {
 
         let needsLayout: Bool = if case .character = shortcut.key { true } else { false }
@@ -270,41 +354,53 @@ public final class AgentSeat {
             phase    : phase,
             layout   : needsLayout ? KeyboardLayoutReader.current() : nil,
             owner    : turn.correlationID,
-            processID: window.reference.processID
-        )
-        let traceContext = InputTraceIdentity.submitted(
-            command      : resolved.command,
-            window       : window.reference,
-            correlationID: turn.correlationID
+            processID: observation.recipient.processID
         )
         return try await send(
             resolved.command,
-            to              : window,
+            observation     : observation,
             turn            : turn,
             platform        : platform,
-            layoutGeneration: resolved.layoutGeneration,
-            traceContext    : traceContext
+            layoutGeneration: resolved.layoutGeneration
         )
     }
 
-    /// sendText delivers a whole string in chunks, re-verifying the recipient
-    /// between them.
+    /// The pieces a string is delivered in, as Commands, decided and never sent.
     ///
-    /// The re-verification is not a mechanism added here: each chunk is its own
-    /// Command, and the driver re-reads the target window's identity before
-    /// building a Command and again immediately before its first event. Cutting
-    /// the text into Commands is therefore what makes the recipient checked
-    /// between chunks, and this method is the chunking plus the accounting.
+    /// It replaces the old `sendText`, which cut a string into chunks and posted
+    /// all of them from one observation. The cutting is the only part that was
+    /// ever pure, so it stays and the sending does not: the consumer sends each
+    /// Command against its own new observation, and decides between them. A
+    /// single `insertText` is one atomic Command and is not cut per character.
     ///
-    /// Every cut falls on a grapheme cluster boundary, so no chunk can carry
-    /// half of a joined emoji. A single cluster too large for one chunk is
-    /// refused before anything is posted.
+    /// Every cut falls on a grapheme cluster boundary, so no piece carries half
+    /// of a joined emoji, and a single cluster too large for one piece is
+    /// refused here rather than split.
+    public static func textCommands(
+        of text: String,
+        mode   : TextDeliveryMode = .inserted,
+        limits : TextDeliveryLimits = .measured
+    ) throws -> [InputCommand] {
+
+        let chunks = try TextChunking.chunks(
+            of              : text,
+            maximumClusters : limits.maximumClusters,
+            maximumCodeUnits: limits.maximumCodeUnits
+        )
+        return chunks.map { mode == .typed ? InputCommand.text($0) : InputCommand.insertText($0) }
+    }
+
+    /// Removed in the observation cutover, not deprecated: it posted every chunk
+    /// of a string from one observation and one decision, which is the blind
+    /// composed send the new contract forbids.
     ///
-    /// What it returns is delivery and never effect. A `.stoppedAfter` outcome
-    /// means the chunks already posted are already inside the target and there
-    /// is no rollback: it is thrown as `TextDeliveryFailure` **carrying** that
-    /// outcome, so a caller cannot see only the error and retry from the start.
-    @discardableResult
+    /// Migration: `AgentSeat.textCommands(of:mode:limits:)` cuts the string, and
+    /// the consumer sends each Command against its own new observation, deciding
+    /// between them. A single `insertText` stays one atomic Command.
+    @available(
+        *, unavailable,
+        message: "Use textCommands(of:mode:limits:), then send(_:observation:turn:platform:) per Command"
+    )
     public nonisolated func sendText(
         _ text  : String,
         to window: AdoptedWindow,
@@ -313,52 +409,7 @@ public final class AgentSeat {
         limits  : TextDeliveryLimits = .measured,
         platform: (any InputPlatform)? = nil
     ) async throws -> TextDeliveryOutcome {
-
-        let chunks = try TextChunking.chunks(
-            of              : text,
-            maximumClusters : limits.maximumClusters,
-            maximumCodeUnits: limits.maximumCodeUnits
-        )
-        let commands = chunks.map { chunk in
-            mode == .typed ? InputCommand.text(chunk) : InputCommand.insertText(chunk)
-        }
-
-        do {
-            let receipts = try await sendSequence(
-                commands,
-                to      : window,
-                turn    : turn,
-                platform: platform
-            )
-            return TextDeliveryOutcome.of(
-                chunks       : chunks,
-                mode         : mode,
-                receipts     : receipts,
-                requestedText: text
-            )
-        } catch let failure as InputSequenceFailure {
-            throw TextDeliveryFailure(
-                outcome: TextDeliveryOutcome.of(
-                    chunks       : chunks,
-                    mode         : mode,
-                    receipts     : failure.completedReceipts,
-                    requestedText: text
-                ),
-                cause  : failure.cause
-            )
-        } catch {
-            // Nothing came back, so nothing was posted: a refusal of the driver
-            // happens before the first event of the first chunk.
-            throw TextDeliveryFailure(
-                outcome: TextDeliveryOutcome.of(
-                    chunks       : chunks,
-                    mode         : mode,
-                    receipts     : [],
-                    requestedText: text
-                ),
-                cause  : error
-            )
-        }
+        fatalError("unavailable")
     }
 
     /// Reports the keys the kit is still holding when there is no longer a Turn
@@ -657,7 +708,15 @@ public final class AgentSeat {
             )
 
             transition(to: previous == .degraded ? .degraded : .ready, reason: .requested)
+            // The instance is handed over to the assignment nucleus here, at the
+            // one moment the seat knows it is driving it, and the observation of
+            // whatever was current before stops being current with the target.
+            takeOverInstance(of: placed)
+            observationIssuer.invalidate(.targetChanged)
+            outstandingGeometry = nil
+            selectExplicitly(placed)
             eventChannel.yield(.targetChanged(from: displaced, to: placed, reason: reason))
+            publishCoherentState()
             return record.window
 
         } catch {
@@ -776,6 +835,7 @@ public final class AgentSeat {
         endTransfer()
         let successor = session.forget(window.id)
         refreshWindowFollowing()
+        noteSurfaceGone(window.id)
         eventChannel.yield(.windowReleased(windowNumber: window.id, outcome: outcome))
 
         // An explicit release is one of the two proofs that the target is gone,
@@ -914,7 +974,16 @@ public final class AgentSeat {
             self.observer = nil
         }
 
+        // A change of target invalidates the previous observation at once, before
+        // anything is arranged for the new one. Coming back to a window later is
+        // a new selection under a new generation, which is what stops A to B to A
+        // from reviving the first A's observation.
+        observationIssuer.invalidate(.targetChanged)
+        outstandingGeometry = nil
+        selectExplicitly(reading)
+
         eventChannel.yield(.targetChanged(from: displaced, to: reading, reason: reason))
+        publishCoherentState()
         return session[windowNumber]?.window ?? staged
     }
 
@@ -967,48 +1036,73 @@ public final class AgentSeat {
 
     // MARK: The action
 
-    /// send posts one Command to one adopted window.
+    /// send posts one Command against the observation it was decided on.
     ///
-    /// The order is fixed and every step of it is a refusal point: the hold,
-    /// the state, the guard on fresh readings, the stage if Stage Manager
-    /// stashed the window, then the events. After the last of those an event
-    /// has gone out, and an event that went out is never repeated.
+    /// ## The recipient is the reference's, never the current target
+    ///
+    /// The window this Command reaches is the one the reference names. A seat
+    /// whose target moved while the consumer was deciding refuses the Command;
+    /// it does not deliver it to whatever is current now, because a plan made on
+    /// one window's pixels is not a plan for another window.
+    ///
+    /// ## Where it is verified
+    ///
+    /// At entry, and again on the last main actor statement before the sender is
+    /// handed the Command, which is the boundary before the driver builds and
+    /// posts. The driver then re-reads identity and geometry immediately before
+    /// its first `postToPid`, and the reference is bound to that same identity
+    /// and geometry, so the pair is the irreversible boundary. After the first
+    /// event nothing is checked, because nothing can be undone.
+    ///
+    /// ## After it completes
+    ///
+    /// The barrier advances and the observation stops being current: the next
+    /// Command needs a new one. A Command that was refused before any effect
+    /// leaves the observation exactly as it was, so the consumer may fix the
+    /// cause and send again without observing twice.
     ///
     /// The Receipt comes back with a `SeatObservation` attached, which is the
-    /// field a driver alone has to leave nil: the driver posts events and makes
-    /// no observation, the seat watches the User Seat and has one.
+    /// User Seat diagnostic of the interval and not this observation.
     @discardableResult
     public nonisolated func send(
-        _ command: InputCommand,
-        to window: AdoptedWindow,
-        turn     : Turn,
-        platform : (any InputPlatform)? = nil
+        _ command  : InputCommand,
+        observation: SeatObservationReference,
+        turn       : Turn,
+        platform   : (any InputPlatform)? = nil
     ) async throws -> InputReceipt {
-
-        let traceContext = InputTraceIdentity.submitted(
-            command      : command,
-            window       : window.reference,
-            correlationID: turn.correlationID
-        )
-        return try await send(
+        try await send(
             command,
-            to          : window,
-            turn        : turn,
-            platform    : platform,
-            traceContext: traceContext
+            observation     : observation,
+            turn            : turn,
+            platform        : platform,
+            layoutGeneration: nil
         )
     }
 
     private func send(
         _ command       : InputCommand,
-        to window       : AdoptedWindow,
+        observation     : SeatObservationReference,
         turn            : Turn,
         platform        : (any InputPlatform)?,
-        layoutGeneration: UInt64? = nil,
-        traceContext suppliedTraceContext: InputTraceContext
+        layoutGeneration: UInt64?
     ) async throws -> InputReceipt {
 
-        var traceContext = suppliedTraceContext
+        // While a menu interaction is current, only the menu and its closing may
+        // be acted on, and those go through the interaction. An ordinary Command
+        // here is refused whatever it carries.
+        if let context = menuContext {
+            throw ObservationAdmissionRefusal.ordinaryCommandDuringMenu(parent: context.parent)
+        }
+        guard !observation.role.isTransientMenu else {
+            throw ObservationAdmissionRefusal.menuContextRevoked
+        }
+        let window = try admitOrdinary(observation)
+
+        var traceContext = InputTraceIdentity.submitted(
+            command      : command,
+            window       : window.reference,
+            correlationID: turn.correlationID
+        )
         traceContext.beginExecution(at: DispatchTime.now().uptimeNanoseconds)
 
         let record: WindowRecord
@@ -1034,6 +1128,16 @@ public final class AgentSeat {
         }
 
         do {
+            // The boundary: the last statement on this actor before the driver
+            // builds and posts. The preflight above changed the seat's state, so
+            // the reference is checked against the world one more time here.
+            if let refusal = admissionRefusal(for: observation, expecting: .ordinaryTarget) {
+                restoreActionState(previous, reason: .cancelled)
+                sender.recordCompletedTrace(
+                    traceContext.completed(at: DispatchTime.now().uptimeNanoseconds)
+                )
+                throw refusal
+            }
             traceContext.beginQueue(at: DispatchTime.now().uptimeNanoseconds)
             let receipt = try await sender.send(
                 command,
@@ -1042,6 +1146,9 @@ public final class AgentSeat {
                 platform     : resolved,
                 traceContext : traceContext
             )
+            // The Command is complete, so the observation it was decided on is
+            // no longer current. It is not a fault: the reason says so.
+            noteObservationConsumed()
 
             let traced = receipt.trace == nil
                 ? receipt.replacingTrace(
@@ -1073,113 +1180,25 @@ public final class AgentSeat {
         }
     }
 
-    /// sendSequence posts several Commands under **one** Preparation: prepared
-    /// once, restored once, with the settle paid once.
+    /// Removed in the observation cutover, not deprecated: it posted a list of
+    /// Commands from one observation and one decision, with no new observation
+    /// and no new decision between them.
     ///
-    /// The Commands stay atomic one by one and none of them is ever retried.
-    /// What a sequence buys is the target's own state, which would otherwise be
-    /// taken and given back between every keystroke, which on a typed string is
-    /// one full pair of window server round trips per character.
-    @discardableResult
+    /// Migration: the consumer orchestrates the succession itself, observing and
+    /// deciding again between Commands. The Preparation saving a sequence bought
+    /// is deliberately given up: a saved Preparation is not worth a Command
+    /// posted onto pixels nobody looked at.
+    @available(
+        *, unavailable,
+        message: "Orchestrate the succession: send(_:observation:turn:platform:) per observation"
+    )
     public nonisolated func sendSequence(
         _ commands: [InputCommand],
         to window : AdoptedWindow,
         turn      : Turn,
         platform  : (any InputPlatform)? = nil
     ) async throws -> [InputReceipt] {
-
-        guard !commands.isEmpty else { throw InputFailure.noCommands }
-
-        let traceContexts = commands.map {
-            InputTraceIdentity.submitted(
-                command      : $0,
-                window       : window.reference,
-                correlationID: turn.correlationID
-            )
-        }
-        return try await sendSequence(
-            commands,
-            to           : window,
-            turn         : turn,
-            platform     : platform,
-            traceContexts: traceContexts
-        )
-    }
-
-    private func sendSequence(
-        _ commands: [InputCommand],
-        to window : AdoptedWindow,
-        turn      : Turn,
-        platform  : (any InputPlatform)?,
-        traceContexts suppliedTraceContexts: [InputTraceContext]
-    ) async throws -> [InputReceipt] {
-
-        var traceContexts = suppliedTraceContexts
-        let executionStarted = DispatchTime.now().uptimeNanoseconds
-        for index in traceContexts.indices {
-            traceContexts[index].beginExecution(at: executionStarted)
-        }
-
-        let record: WindowRecord
-        do {
-            record = try preflight(window, turn: turn, traceContexts: &traceContexts)
-        } catch {
-            let completedAt = DispatchTime.now().uptimeNanoseconds
-            for traceContext in traceContexts {
-                sender.recordCompletedTrace(traceContext.completed(at: completedAt))
-            }
-            throw error
-        }
-        let resolved = platform ?? record.platform
-        let previous = state
-        actionInFlight = true
-        transition(to: .acting, reason: .requested)
-        defer {
-            actionInFlight = false
-            restoreActionState(previous, reason: .requested)
-            // A window opened by the Command that has just finished is looked
-            // for here, at the boundary, rather than a beat later.
-            requestWindowFollow()
-        }
-
-        do {
-            let queueStartedAt = DispatchTime.now().uptimeNanoseconds
-            for index in traceContexts.indices {
-                traceContexts[index].beginQueue(at: queueStartedAt)
-            }
-            let receipts = try await sender.sendSequence(
-                commands,
-                to           : record.window.reference,
-                correlationID: turn.correlationID,
-                platform     : resolved,
-                traceContexts: traceContexts
-            )
-
-            return receipts.map { finish($0, returningTo: previous) }
-
-        } catch let failure as InputSequenceFailure {
-            let completed = failure.completedReceipts.map { finish($0, returningTo: previous) }
-            if failure.progress?.neededRecovery != nil,
-               !completed.contains(where: \.hasUnrestoredPreparation) {
-                report([.preparationNotRestored])
-            }
-            restoreActionState(previous, reason: .cancelled)
-            throw InputSequenceFailure(
-                completedReceipts: completed,
-                cause            : failure.cause,
-                progress         : failure.progress,
-                cleanupCause     : failure.cleanupCause
-            )
-        } catch let failure as InputPreparationFailure {
-            if failure.progress.neededRecovery != nil {
-                report([.preparationNotRestored])
-            }
-            restoreActionState(previous, reason: .cancelled)
-            throw failure
-        } catch {
-            restoreActionState(previous, reason: .cancelled)
-            throw error
-        }
+        fatalError("unavailable")
     }
 
     // MARK: The contextual menu
@@ -1405,19 +1424,40 @@ public final class AgentSeat {
     /// unconfirmed. The anti-replay invariant exists because the kit usually
     /// cannot see an effect and the consumer can; here the opposite is true,
     /// and the seat sees every one of them: the menu appeared, the menu closed.
-    /// Leaving them for the caller would also strand the hold, because an
-    /// action that refuses after posting hands back an error and no Receipt to
-    /// answer with, and a hold that cannot be given back is a seat that is
-    /// finished. What the item did **inside** the target is a further question
-    /// and it stays the caller's, answered on the caller's own next Command.
+    /// What the item did **inside** the target is a further question and it
+    /// stays the caller's, answered on the caller's own next observation.
+    ///
+    /// ## The budgets
+    ///
+    /// 180 s from the start of the opening for the whole interaction, captures,
+    /// waits and any Vision the body ran included, and nothing renews it. 2 s
+    /// separately for the cleanup and the verification of the close, measured
+    /// from the end, the error or the expiry. Expiry revokes the context at once:
+    /// the body may still be running, and every entry point it holds answers
+    /// `menuContextRevoked` from that moment.
+    ///
+    /// ## What the body can actually do on this build
+    ///
+    /// Observing the menu's dedicated surface needs a native ability nothing here
+    /// has qualified, so `SeatMenuInteraction.observe` refuses with the capability
+    /// named and choosing an item cannot be reached. The parent's Frame is never
+    /// offered in its place. The opening, the closing and the accounting are real;
+    /// the choice is blocked by the evidence, not by a placeholder.
     @discardableResult
-    public func useContextMenu(
-        openedAt location: InputLocation,
-        of window        : AdoptedWindow,
-        turn             : Turn,
-        within deadline  : Duration = .milliseconds(1500),
-        choosing choose  : (ContextMenu) -> CGPoint? = { _ in nil }
-    ) async throws -> ContextMenuReceipt {
+    public func withContextMenu(
+        openedAt location  : InputLocation,
+        observation        : SeatObservationReference,
+        turn               : Turn,
+        appearingWithin    : Duration = .milliseconds(1500),
+        body               : (SeatMenuInteraction) async -> Void = { _ in }
+    ) async throws -> SeatMenuOutcome {
+
+        guard menuContext == nil else {
+            throw SessionFailure.contextMenuAlreadyOpen(
+                processID: observation.recipient.processID
+            )
+        }
+        let window = try admitOrdinary(observation)
 
         var openingTrace = InputTraceIdentity.submitted(
             command      : .click(location, button: .right),
@@ -1451,9 +1491,18 @@ public final class AgentSeat {
             throw SessionFailure.contextMenuAlreadyOpen(processID: target.processID)
         }
 
+        let interactionStarted  = DispatchTime.now().uptimeNanoseconds
+        let interactionDeadline = interactionStarted
+            &+ observationProfile.menuInteractionNanoseconds
+
         let postedAt = ContinuousClock.now
         let opening : InputReceipt
         do {
+            // The boundary before the first event of the opening Command.
+            if let refusal = admissionRefusal(for: observation, expecting: .ordinaryTarget) {
+                restoreActionState(previous, reason: .cancelled)
+                throw refusal
+            }
             openingTrace.beginQueue(at: DispatchTime.now().uptimeNanoseconds)
             opening = witnessed(
                 try await sender.send(
@@ -1468,6 +1517,10 @@ public final class AgentSeat {
             restoreActionState(previous, reason: .cancelled)
             throw error
         }
+        // The parent's observation is spent by the opening Command and the menu
+        // now scopes what may be sent. Neither of them comes back afterwards.
+        observationIssuer.invalidate(.menuOpened)
+        outstandingGeometry = nil
 
         var appeared: WindowReference?
         _ = await EventLoopWait.until(
@@ -1475,10 +1528,10 @@ public final class AgentSeat {
                 appeared = self.sensing.menuWindows(ownedBy: target.processID).first
                 return appeared != nil
             },
-            timeout : deadline,
+            timeout : appearingWithin,
             interval: .milliseconds(30)
         )
-        guard let appeared else {
+        guard let appeared, let menuIdentity = appeared.identity else {
             // A menu that arrives one sample after the deadline would otherwise
             // be a menu this action opened, walked away from and never closed,
             // which is the one outcome worse than failing. So the failure path
@@ -1504,6 +1557,7 @@ public final class AgentSeat {
                 interval: .milliseconds(30)
             )
             restoreActionState(previous, reason: .cancelled)
+            publishCoherentState()
             if let late = sensing.menuWindows(ownedBy: target.processID).first {
                 report([.contextMenuLeftOpen])
                 throw SessionFailure.contextMenuNotClosed(
@@ -1513,7 +1567,7 @@ public final class AgentSeat {
             }
             throw SessionFailure.contextMenuNeverOpened(
                 windowNumber: target.windowNumber,
-                within      : deadline
+                within      : appearingWithin
             )
         }
         let menu = ContextMenu(
@@ -1521,35 +1575,50 @@ public final class AgentSeat {
             appearedAfter: postedAt.duration(to: .now)
         )
 
-        var chosenPoint  : CGPoint?
-        var choosing     : InputReceipt?
-        var choiceFailure: (any Error)?
+        menuGeneration &+= 1
+        let generation = menuGeneration
+        menuContext = MenuContext(
+            generation         : generation,
+            parent             : observation.recipient,
+            parentReference    : target,
+            menu               : menu,
+            menuIdentity       : menuIdentity,
+            correlationID      : turn.correlationID,
+            deadlineNanoseconds: interactionDeadline
+        )
+        publishCoherentState()
 
-        if let point = choose(menu) {
-            chosenPoint = point
-            do {
-                // Routed to the **menu's** window and not to the target's, and
-                // posted through a platform that prepares nothing: a
-                // Preparation applied now would close the menu before the click
-                // reached it.
-                choosing = witnessed(
-                    try await sender.send(
-                        .click(try pointInside(menu, at: point), button: .left),
-                        to           : menu.window,
-                        correlationID: turn.correlationID,
-                        platform     : AppKitPlatform()
-                    )
-                )
-            } catch {
-                choiceFailure = error
-            }
-        }
+        await body(
+            SeatMenuInteraction(
+                parent             : observation.recipient,
+                menu               : menu,
+                deadlineNanoseconds: interactionDeadline,
+                seat               : self,
+                generation         : generation
+            )
+        )
 
-        let closedBy = await close(menu, of: target, turn: turn, itemWasChosen: chosenPoint != nil)
+        let expired      = DispatchTime.now().uptimeNanoseconds >= interactionDeadline
+        let insideMenu   = menuContext?.receipts ?? []
+        let itemWasChosen = !insideMenu.isEmpty
+
+        // The context is revoked before the cleanup starts: from here on only
+        // the kit's own closing runs, and no semantic Command is admitted.
+        menuContext = nil
+        observationIssuer.invalidate(.menuClosed)
+        outstandingGeometry = nil
+
+        let closedBy = await close(
+            menu,
+            of                : target,
+            turn              : turn,
+            itemWasChosen     : itemWasChosen,
+            withinNanoseconds : observationProfile.menuCleanupNanoseconds
+        )
 
         // A selected command may activate the target after the menu fades.
         // Keep observing through that delay, including for identified items.
-        if chosenPoint != nil {
+        if itemWasChosen {
             _ = await EventLoopWait.until(
                 { self.sensing.frontmostProcessID == target.processID },
                 timeout : .milliseconds(800),
@@ -1560,6 +1629,7 @@ public final class AgentSeat {
             if let focusRecovery { focusRecovery.activationChanged(to: target.processID, source: .contextMenuPoll) }
             else { report([.targetActivated]) }
         }
+        publishCoherentState()
 
         guard let closedBy else {
             report([.contextMenuLeftOpen])
@@ -1568,15 +1638,74 @@ public final class AgentSeat {
                 processID       : target.processID
             )
         }
-        if let choiceFailure { throw choiceFailure }
-
-        return ContextMenuReceipt(
-            menu       : menu,
-            opening    : opening,
-            chosenPoint: chosenPoint,
-            choosing   : choosing,
-            closedBy   : closedBy
+        return SeatMenuOutcome(
+            menu              : menu,
+            opening           : opening,
+            insideMenu        : insideMenu,
+            interactionExpired: expired,
+            cleanup           : .verifiedClosed(closedBy)
         )
+    }
+
+    /// Removed in the observation cutover, not deprecated: its choice closure was
+    /// synchronous, it had no observation of the menu's own surface, and it bound
+    /// the whole interaction to one 1500 ms deadline.
+    ///
+    /// Migration: `withContextMenu(openedAt:observation:turn:appearingWithin:body:)`,
+    /// whose body receives a scoped `SeatMenuInteraction`.
+    @available(
+        *, unavailable,
+        message: "Use withContextMenu(openedAt:observation:turn:appearingWithin:body:)"
+    )
+    @discardableResult
+    public func useContextMenu(
+        openedAt location: InputLocation,
+        of window        : AdoptedWindow,
+        turn             : Turn,
+        within deadline  : Duration = .milliseconds(1500),
+        choosing choose  : (ContextMenu) -> CGPoint? = { _ in nil }
+    ) async throws -> ContextMenuReceipt {
+        fatalError("unavailable")
+    }
+
+    /// Posts one Command inside the menu the given interaction scopes.
+    ///
+    /// The recipient is the menu's own window, which is where an item click has
+    /// to land, and the reference must be an observation of that surface. The
+    /// Receipt is recorded on the context so the outcome carries what went out
+    /// even when a later step fails: an event that went out is never withdrawn.
+    func sendInsideMenu(
+        _ command  : InputCommand,
+        observation: SeatObservationReference,
+        generation : UInt64
+    ) async throws -> InputReceipt {
+
+        guard let context = menuContext, context.generation == generation,
+              DispatchTime.now().uptimeNanoseconds < context.deadlineNanoseconds
+        else { throw ObservationAdmissionRefusal.menuContextRevoked }
+
+        guard let refusal = admissionRefusal(
+            for     : observation,
+            expecting: .transientMenu(parent: context.parent)
+        ) else {
+            // Routed to the **menu's** window and not to the target's, and posted
+            // through a platform that prepares nothing: a Preparation applied now
+            // would close the menu before the click reached it.
+            let receipt = witnessed(
+                try await sender.send(
+                    command,
+                    to           : context.menu.window,
+                    correlationID: context.correlationID,
+                    platform     : AppKitPlatform()
+                )
+            )
+            menuContext?.receipts.append(receipt)
+            observationIssuer.noteCommandCompleted()
+            outstandingGeometry = nil
+            publishCoherentState()
+            return receipt
+        }
+        throw refusal
     }
 
     /// The Receipt of a Command the seat verified for itself, with the
@@ -1604,7 +1733,7 @@ public final class AgentSeat {
     /// two readings disagree about. A menu window publishes nothing and is in no
     /// tree, so the window server's frame is not one of two readings, it is the
     /// only one there is.
-    private func pointInside(
+    func pointInside(
         _ menu       : ContextMenu,
         at pointFromTop: CGPoint
     ) throws -> InputLocation {
@@ -1628,12 +1757,21 @@ public final class AgentSeat {
     /// unconfirmed Commands. The anti-replay invariant is about a Command whose
     /// effect only the consumer can verify; the effect of these two is "the menu
     /// is gone", which the seat verifies itself, here, before answering.
+    /// `withinNanoseconds` is the separate cleanup budget, measured from here.
+    /// Every wait below is clamped to what is left of it, so the levers are
+    /// pulled in the order they were measured in and the whole cleanup still
+    /// ends inside its own budget. Reaching the budget with the menu still there
+    /// answers nil, which the caller turns into an explicit failure: it does not
+    /// mean the menu closed and it does not mean a native call ended.
     private func close(
-        _ menu       : ContextMenu,
-        of target    : WindowReference,
-        turn         : Turn,
-        itemWasChosen: Bool
+        _ menu           : ContextMenu,
+        of target        : WindowReference,
+        turn             : Turn,
+        itemWasChosen    : Bool,
+        withinNanoseconds: UInt64
     ) async -> ContextMenuReceipt.Closure? {
+
+        let cleanupDeadline = DispatchTime.now().uptimeNanoseconds &+ withinNanoseconds
 
         // Any menu of the target, not only the one that was opened. Clicking an
         // item that carries a submenu closes the parent and opens a **new**
@@ -1644,15 +1782,21 @@ public final class AgentSeat {
             !sensing.menuWindows(ownedBy: target.processID).isEmpty
         }
 
+        func remaining(upTo wanted: Duration) -> Duration? {
+            let now = DispatchTime.now().uptimeNanoseconds
+            guard now < cleanupDeadline else { return nil }
+            let left = cleanupDeadline - now
+            return min(wanted, .nanoseconds(Int64(min(left, UInt64(Int64.max)))))
+        }
+
         // Choosing an item dismisses the menu, which is the ordinary ending. The
         // wait is not padding: the dismissal is the target's own animation and
         // not an answer to the click, measured at 457 ms on a native target and
-        // under 400 ms on a browser, so the budget is the larger of those plus
-        // half again. Too short and a menu that closed by itself is closed a
-        // second time by a Preparation cycle nobody needed.
-        if itemWasChosen,
+        // under 400 ms on a browser. Too short and a menu that closed by itself
+        // is closed a second time by a Preparation cycle nobody needed.
+        if itemWasChosen, let budget = remaining(upTo: .milliseconds(700)),
            await EventLoopWait.until(
-               { !isOpen() }, timeout: .milliseconds(700), interval: .milliseconds(30)
+               { !isOpen() }, timeout: budget, interval: .milliseconds(30)
            ) {
             return .chosenItem
         }
@@ -1670,11 +1814,13 @@ public final class AgentSeat {
                 \(String(describing: error), privacy: .public)
                 """)
         }
-        if await EventLoopWait.until(
-            { !isOpen() }, timeout: .milliseconds(500), interval: .milliseconds(30)
-        ) {
+        if let budget = remaining(upTo: .milliseconds(500)),
+           await EventLoopWait.until(
+               { !isOpen() }, timeout: budget, interval: .milliseconds(30)
+           ) {
             return .preparationCycle
         }
+        guard remaining(upTo: .milliseconds(1)) != nil else { return nil }
 
         do {
             _ = try await sender.send(
@@ -1689,9 +1835,10 @@ public final class AgentSeat {
                 \(String(describing: error), privacy: .public)
                 """)
         }
-        if await EventLoopWait.until(
-            { !isOpen() }, timeout: .milliseconds(500), interval: .milliseconds(30)
-        ) {
+        if let budget = remaining(upTo: .milliseconds(500)),
+           await EventLoopWait.until(
+               { !isOpen() }, timeout: budget, interval: .milliseconds(30)
+           ) {
             return .escapeKey
         }
         return nil
@@ -1811,8 +1958,10 @@ public final class AgentSeat {
 
         recoveryTask?.cancel()
         recoveryTask = nil
+        endAssignmentAndObservation(reason: .lifecycleChanged)
         transition(to: .failed, reason: .issues(issues))
         turns.failAll(with: SeatInterruption(issues: issues))
+        publishCoherentState()
     }
 
     /// Lets every window go, best effort, and answers what happened to each.
@@ -1838,6 +1987,10 @@ public final class AgentSeat {
         for window in adoptedWindows {
             outcomes[window.id] = await release(window, mode)
         }
+        // The stop revokes input authority before anything else, and what the
+        // returns did not finish stays an explicit obligation of the host.
+        endAssignmentAndObservation(reason: .lifecycleChanged)
+        publishCoherentState()
 
         return outcomes
     }
@@ -2207,29 +2360,6 @@ public final class AgentSeat {
 
         beginObservationIfNeeded(for: record, turn: turn)
         return record
-    }
-
-    private func preflight(
-        _ window     : AdoptedWindow,
-        turn         : Turn,
-        traceContexts: inout [InputTraceContext]
-    ) throws -> WindowRecord {
-
-        guard var first = traceContexts.first else {
-            throw InputFailure.noCommands
-        }
-        defer {
-            traceContexts[0] = first
-
-            let measured = first.windowVerification
-            for index in traceContexts.indices.dropFirst() {
-                guard let start = measured.startedAtNanoseconds,
-                      let end = measured.completedAtNanoseconds
-                else { continue }
-                traceContexts[index].recordWindowVerification(from: start, through: end)
-            }
-        }
-        return try preflight(window, turn: turn, traceContext: &first)
     }
 
     /// The Issues the current readings show, using the guard of Core: one
@@ -2619,6 +2749,12 @@ public final class AgentSeat {
     public func report(_ issues: [SeatIssue]) {
 
         guard !issues.isEmpty, state != .failed else { return }
+
+        // A cause of the gate appearing while an observation is outstanding
+        // invalidates it: the conditions the observation was taken under are no
+        // longer the ones a Command would be admitted under.
+        observationIssuer.invalidate(.suspensionRaised)
+        outstandingGeometry = nil
 
         for issue in issues { eventChannel.yield(.issueDetected(issue, cause: nil)) }
         turns.recordIssue()

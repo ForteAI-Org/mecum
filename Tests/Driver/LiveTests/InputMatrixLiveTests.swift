@@ -465,9 +465,9 @@ struct InputMatrixLiveTests {
             if action.shortcutRow == .cancel, target.family == .chromium {
                 let setup = try await seat.send(
                     Shortcut.physical(PhysicalKey(name: "F8", virtualKey: 100)),
-                    to      : window,
-                    turn    : held,
-                    platform: platform
+                    observation: try await liveObservation(seat),
+                    turn       : held,
+                    platform   : platform
                 )
                 let opened = LivePump.run(until: { target.state()["dialogOpen"] == 1 }, timeout: 2)
                 try seat.confirm(setup, opened ? .observed : .absent)
@@ -489,16 +489,16 @@ struct InputMatrixLiveTests {
                 // would press something else entirely.
                 receipt = try await seat.send(
                     row.shortcut,
-                    to      : window,
-                    turn    : held,
-                    platform: platform
+                    observation: try await liveObservation(seat),
+                    turn       : held,
+                    platform   : platform
                 )
             } else {
                 receipt = try await seat.send(
                     try makeCommand(action, for: target),
-                    to      : window,
-                    turn    : held,
-                    platform: platform
+                    observation: try await liveObservation(seat),
+                    turn       : held,
+                    platform   : platform
                 )
             }
             outcome.receipt = "\(receipt.eventCount) events, "

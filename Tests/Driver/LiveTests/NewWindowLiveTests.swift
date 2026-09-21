@@ -144,9 +144,9 @@ struct NewWindowLiveTests {
             let posted   = DispatchTime.now().uptimeNanoseconds
             let receipt  = try await seat.send(
                 .click(location),
-                to      : main,
-                turn    : turn,
-                platform: fixture.platform
+                observation: try await liveObservation(seat),
+                turn       : turn,
+                platform   : fixture.platform
             )
             let opened = LivePump.run(
                 until  : { fixture.refresh(); return !(fixture.latest.secondaryWindows ?? []).isEmpty },
@@ -209,9 +209,9 @@ struct NewWindowLiveTests {
             let secondTurn = try await seat.acquire()
             let secondSend = try await seat.send(
                 .click(try Self.location(of: buttonPoint, in: follower.id)),
-                to      : follower,
-                turn    : secondTurn,
-                platform: fixture.platform
+                observation: try await liveObservation(seat),
+                turn       : secondTurn,
+                platform   : fixture.platform
             )
             let landed = LivePump.run(
                 until  : {

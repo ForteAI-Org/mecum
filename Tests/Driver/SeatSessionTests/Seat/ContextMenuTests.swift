@@ -11,12 +11,13 @@ import SeatInput
 @testable import SeatSession
 import Testing
 
-/// The contextual menu action, driven through the fakes.
+/// The scoped menu interaction, driven through the fakes.
 ///
 /// What is under test here is the half a live run cannot assert reliably: that
-/// the window server's answer is believed and nothing else is, that the
-/// teardown runs on every path out of the action, and that a menu nothing could
-/// close is the loudest failure the seat has.
+/// the window server's answer is believed and nothing else is, that the cleanup
+/// runs on every path out of the interaction, that a menu nothing could close is
+/// the loudest failure the seat has, and that the context carries no authority
+/// once the interaction is over.
 ///
 /// The fakes model the menu's life rather than counting reads. The right click
 /// makes the sensing show a menu window, the item click and the Preparation
@@ -40,14 +41,23 @@ struct ContextMenuTests {
     /// and one that answers nothing.
     private static func ready(
         opensAMenu: Bool = true,
-        closedBy  : Set<ContextMenuReceipt.Closure> = [.chosenItem, .preparationCycle, .escapeKey]
+        closedBy  : Set<ContextMenuReceipt.Closure> = [.chosenItem, .preparationCycle, .escapeKey],
+        profile   : ObservationProfile = .initialLab
     ) async throws -> (
         seat: AgentSeat, window: AdoptedWindow, turn: Turn,
-        sensing: FakeSensing, sender: FakeSender
+        sensing: FakeSensing, sender: FakeSender, source: ControlledObservationSource
     ) {
 
         let sensing = FakeSensing()
         let sender  = FakeSender()
+
+        // The menu window is readable like any other surface, and the reader
+        // names it a contextual menu, which is what keeps it out of the history
+        // of targets rather than a filter on the window level.
+        sensing.additionalWindows[FakeGeometry.menuWindowNumber] = FakeGeometry.menuWindow
+        let reader = ControlledSurfaceReader(sensing: sensing)
+        reader.roles[FakeGeometry.menuWindowNumber] = .contextualMenu
+        let source = ControlledObservationSource(sensing: sensing)
 
         sender.onSend = { command in
             switch command {
@@ -65,10 +75,16 @@ struct ContextMenuTests {
             if closedBy.contains(.preparationCycle) { sensing.menus = [] }
         }
 
-        let seat   = makeSeat(sensing: sensing, sender: sender)
+        let seat = makeSeat(
+            sensing: sensing,
+            sender : sender,
+            reader : reader,
+            source : source,
+            profile: profile
+        )
         let window = try await seat.adopt(FakeGeometry.userSeatWindow, platform: AppKitPlatform())
         let turn   = try await seat.acquire()
-        return (seat, window, turn, sensing, sender)
+        return (seat, window, turn, sensing, sender, source)
     }
 
     // MARK: Opening
@@ -78,14 +94,17 @@ struct ContextMenuTests {
 
         let context = try await Self.ready()
 
-        let receipt = try await context.seat.useContextMenu(
-            openedAt: Self.openAt, of: context.window, turn: context.turn
+        let outcome = try await context.seat.withContextMenu(
+            openedAt   : Self.openAt,
+            observation: try await observedReference(context.seat),
+            turn       : context.turn
         )
 
         #expect(context.sender.sent.first?.command == .click(Self.openAt, button: .right))
-        #expect(receipt.menu.window.windowNumber == FakeGeometry.menuWindowNumber)
-        #expect(receipt.menu.frame == FakeGeometry.menuWindow.frame)
-        #expect(receipt.chosenPoint == nil)
+        #expect(outcome.menu.window.windowNumber == FakeGeometry.menuWindowNumber)
+        #expect(outcome.menu.frame == FakeGeometry.menuWindow.frame)
+        #expect(outcome.insideMenu.isEmpty)
+        #expect(!outcome.interactionExpired)
         #expect(context.seat.state == .ready)
     }
 
@@ -93,16 +112,17 @@ struct ContextMenuTests {
     func neverOpenedRefuses() async throws {
 
         let context = try await Self.ready(opensAMenu: false)
+        let observation = try await observedReference(context.seat)
 
         await #expect(throws: SessionFailure.contextMenuNeverOpened(
             windowNumber: FakeGeometry.windowNumber,
             within      : .milliseconds(90)
         )) {
-            try await context.seat.useContextMenu(
-                openedAt: Self.openAt,
-                of      : context.window,
-                turn    : context.turn,
-                within  : .milliseconds(90)
+            try await context.seat.withContextMenu(
+                openedAt       : Self.openAt,
+                observation    : observation,
+                turn           : context.turn,
+                appearingWithin: .milliseconds(90)
             )
         }
         // The click did go out, which is why this is a refusal of the action
@@ -124,16 +144,17 @@ struct ContextMenuTests {
             cause       : InputFailure.restoreFailed(code: -17),
             cleanupCause: InputFailure.restoreFailed(code: -17)
         )
+        let observation = try await observedReference(context.seat)
 
         await #expect(throws: SessionFailure.contextMenuNeverOpened(
             windowNumber: FakeGeometry.windowNumber,
             within      : .milliseconds(90)
         )) {
-            try await context.seat.useContextMenu(
-                openedAt: Self.openAt,
-                of      : context.window,
-                turn    : context.turn,
-                within  : .milliseconds(90)
+            try await context.seat.withContextMenu(
+                openedAt       : Self.openAt,
+                observation    : observation,
+                turn           : context.turn,
+                appearingWithin: .milliseconds(90)
             )
         }
 
@@ -146,13 +167,16 @@ struct ContextMenuTests {
     func alreadyOpenRefuses() async throws {
 
         let context = try await Self.ready()
+        let observation = try await observedReference(context.seat)
         context.sensing.menus = [FakeGeometry.menuWindow]
 
         await #expect(throws: SessionFailure.contextMenuAlreadyOpen(
             processID: FakeGeometry.targetPID
         )) {
-            try await context.seat.useContextMenu(
-                openedAt: Self.openAt, of: context.window, turn: context.turn
+            try await context.seat.withContextMenu(
+                openedAt   : Self.openAt,
+                observation: observation,
+                turn       : context.turn
             )
         }
         #expect(context.sender.sent.isEmpty, "nothing was posted at all")
@@ -164,17 +188,33 @@ struct ContextMenuTests {
     func theItemClickGoesToTheMenu() async throws {
 
         let context = try await Self.ready()
+        var observedRole: ObservedSurfaceRole?
 
-        let receipt = try await context.seat.useContextMenu(
-            openedAt: Self.openAt,
-            of      : context.window,
-            turn    : context.turn
-        ) { menu in
-            CGPoint(x: menu.frame.width / 2, y: menu.frame.height / 2)
+        let outcome = try await context.seat.withContextMenu(
+            openedAt   : Self.openAt,
+            observation: try await observedReference(context.seat),
+            turn       : context.turn
+        ) { interaction in
+            guard case .success(let delivery) = await interaction.observe() else { return }
+            observedRole = delivery.role
+            let frame = delivery.geometry.window.frame
+            guard let point = InputLocation(
+                screenPoint: CGPoint(x: frame.minX + 57.5, y: frame.minY + 17),
+                observedIn : delivery.geometry
+            ) else { return }
+            do {
+                _ = try await interaction.send(
+                    .click(point, button: .left),
+                    observation: delivery.reference
+                )
+            } catch {
+                Issue.record("the item click was refused: \(error)")
+            }
         }
 
-        #expect(receipt.chosenPoint == CGPoint(x: 57.5, y: 17))
-        #expect(receipt.closedBy == .chosenItem)
+        #expect(observedRole == .transientMenu(parent: FakeGeometry.identity()))
+        #expect(outcome.insideMenu.count == 1)
+        #expect(outcome.cleanup == .verifiedClosed(.chosenItem))
         #expect(context.sender.sent.count == 2, "no teardown event was needed")
 
         guard case .click(let location, let button) = context.sender.sent[1].command else {
@@ -191,17 +231,122 @@ struct ContextMenuTests {
         ))
     }
 
-    @Test("answering nil chooses nothing, and the menu is closed anyway")
+    @Test("the menu surface cannot be observed where the capability is unqualified")
+    func menuSurfaceCaptureIsRefusedWhenUnqualified() async throws {
+
+        let context = try await Self.ready()
+        context.source.supported.remove(.menuSurfaceStill)
+        var refusal: ObservationUnavailable?
+
+        let outcome = try await context.seat.withContextMenu(
+            openedAt   : Self.openAt,
+            observation: try await observedReference(context.seat),
+            turn       : context.turn
+        ) { interaction in
+            if case .failure(let reason) = await interaction.observe() { refusal = reason }
+        }
+
+        // The shipped source answers exactly this, so a deployment that has not
+        // qualified the menu surface cannot choose an item at all.
+        #expect(refusal == .capabilityUnqualified(.menuSurfaceStill))
+        #expect(outcome.insideMenu.isEmpty)
+        #expect(outcome.cleanup == .verifiedClosed(.preparationCycle))
+    }
+
+    @Test("an ordinary Command on the parent is refused while a menu is the observation")
+    func ordinaryCommandOnTheParentIsRefused() async throws {
+
+        let context = try await Self.ready()
+        var refusal: (any Error)?
+
+        _ = try await context.seat.withContextMenu(
+            openedAt   : Self.openAt,
+            observation: try await observedReference(context.seat),
+            turn       : context.turn
+        ) { interaction in
+            guard case .success(let delivery) = await interaction.observe() else { return }
+            do {
+                _ = try await context.seat.send(
+                    .click(Self.openAt),
+                    observation: delivery.reference,
+                    turn       : context.turn
+                )
+            } catch { refusal = error }
+        }
+
+        #expect(refusal as? ObservationAdmissionRefusal == .ordinaryCommandDuringMenu(
+            parent: FakeGeometry.identity()
+        ))
+    }
+
+    @Test("a context kept past its interaction carries no authority")
+    func aKeptContextIsRevoked() async throws {
+
+        let context = try await Self.ready()
+        var escaped: SeatMenuInteraction?
+
+        _ = try await context.seat.withContextMenu(
+            openedAt   : Self.openAt,
+            observation: try await observedReference(context.seat),
+            turn       : context.turn
+        ) { interaction in
+            escaped = interaction
+        }
+
+        let kept = try #require(escaped)
+        #expect(kept.isRevoked)
+        guard case .failure(let reason) = await kept.observe() else {
+            Issue.record("a revoked context answered an observation")
+            return
+        }
+        #expect(reason == .menuContextRevoked)
+    }
+
+    @Test("an expired interaction revokes the context and the cleanup still runs")
+    func anExpiredInteractionIsRevoked() async throws {
+
+        let expiring = try ObservationProfile.configured(
+            frameAgeLimitNanoseconds  : 120_000_000_000,
+            captureDeadlineNanoseconds: 5_000_000_000,
+            captureAttempts           : 2,
+            menuInteractionNanoseconds: 1_000_000,
+            menuCleanupNanoseconds    : 2_000_000_000
+        )
+        let context = try await Self.ready(profile: expiring)
+        var revokedInside = false
+
+        let outcome = try await context.seat.withContextMenu(
+            openedAt   : Self.openAt,
+            observation: try await observedReference(context.seat),
+            turn       : context.turn
+        ) { interaction in
+            try? await Task.sleep(for: .milliseconds(20))
+            revokedInside = interaction.isRevoked
+            if case .failure(.menuContextRevoked) = await interaction.observe() {
+                revokedInside = true
+            }
+        }
+
+        #expect(revokedInside)
+        #expect(outcome.interactionExpired)
+        // The budget limits the interaction, never the cleanup: closing is the
+        // kit's obligation and it has its own two seconds.
+        #expect(outcome.cleanup == .verifiedClosed(.preparationCycle))
+    }
+
+    @Test("answering nothing chooses nothing, and the menu is closed anyway")
     func choosingNothingStillCloses() async throws {
 
         let context = try await Self.ready()
 
-        let receipt = try await context.seat.useContextMenu(
-            openedAt: Self.openAt, of: context.window, turn: context.turn
+        let outcome = try await context.seat.withContextMenu(
+            openedAt   : Self.openAt,
+            observation: try await observedReference(context.seat),
+            turn       : context.turn
         )
 
-        #expect(receipt.choosing == nil)
-        #expect(receipt.closedBy == .preparationCycle)
+        #expect(outcome.insideMenu.isEmpty)
+        #expect(outcome.cleanup == .verifiedClosed(.preparationCycle))
         #expect(context.sender.preparationCycles == [FakeGeometry.windowNumber])
     }
 
@@ -212,11 +357,13 @@ struct ContextMenuTests {
 
         let context = try await Self.ready(closedBy: [.preparationCycle])
 
-        let receipt = try await context.seat.useContextMenu(
-            openedAt: Self.openAt, of: context.window, turn: context.turn
+        let outcome = try await context.seat.withContextMenu(
+            openedAt   : Self.openAt,
+            observation: try await observedReference(context.seat),
+            turn       : context.turn
         )
 
-        #expect(receipt.closedBy == .preparationCycle)
+        #expect(outcome.cleanup == .verifiedClosed(.preparationCycle))
         // The cycle goes to the target's window and never to the menu's: what
         // the tracking loop watches is the target's own application state.
         #expect(context.sender.preparationCycles == [FakeGeometry.windowNumber])
@@ -230,11 +377,13 @@ struct ContextMenuTests {
 
         let context = try await Self.ready(closedBy: [.escapeKey])
 
-        let receipt = try await context.seat.useContextMenu(
-            openedAt: Self.openAt, of: context.window, turn: context.turn
+        let outcome = try await context.seat.withContextMenu(
+            openedAt   : Self.openAt,
+            observation: try await observedReference(context.seat),
+            turn       : context.turn
         )
 
-        #expect(receipt.closedBy == .escapeKey)
+        #expect(outcome.cleanup == .verifiedClosed(.escapeKey))
         #expect(context.sender.preparationCycles == [FakeGeometry.windowNumber])
         #expect(context.sender.sent.contains { command, _ in
             command == .key(virtualKey: 53, text: "", modifiers: [])
@@ -255,13 +404,13 @@ struct ContextMenuTests {
             cleanupCause: InputFailure.restoreFailed(code: -17)
         )
 
-        let receipt = try await context.seat.useContextMenu(
-            openedAt: Self.openAt,
-            of      : context.window,
-            turn    : context.turn
+        let outcome = try await context.seat.withContextMenu(
+            openedAt   : Self.openAt,
+            observation: try await observedReference(context.seat),
+            turn       : context.turn
         )
 
-        #expect(receipt.closedBy == .escapeKey)
+        #expect(outcome.cleanup == .verifiedClosed(.escapeKey))
         #expect(context.seat.state == .degraded)
     }
 
@@ -270,19 +419,18 @@ struct ContextMenuTests {
 
         let context = try await Self.ready()
 
-        // The menu opens, the caller looks at it and chooses nothing, and the
-        // target has dropped it by the time the teardown looks: an application
+        // The menu opens, the body looks at it and chooses nothing, and the
+        // target has dropped it by the time the cleanup looks: an application
         // switch does exactly this.
-        let receipt = try await context.seat.useContextMenu(
-            openedAt: Self.openAt,
-            of      : context.window,
-            turn    : context.turn
+        let outcome = try await context.seat.withContextMenu(
+            openedAt   : Self.openAt,
+            observation: try await observedReference(context.seat),
+            turn       : context.turn
         ) { _ in
             context.sensing.menus = []
-            return nil
         }
 
-        #expect(receipt.closedBy == .dismissedItself)
+        #expect(outcome.cleanup == .verifiedClosed(.dismissedItself))
         #expect(context.sender.preparationCycles.isEmpty, "no lever was pulled at all")
     }
 
@@ -290,6 +438,7 @@ struct ContextMenuTests {
     func aMenuLeftOpenIsCritical() async throws {
 
         let context = try await Self.ready(closedBy: [])
+        let observation = try await observedReference(context.seat)
 
         var issues: [SeatIssue] = []
         let listening = Task { @MainActor in
@@ -303,8 +452,10 @@ struct ContextMenuTests {
             menuWindowNumber: FakeGeometry.menuWindowNumber,
             processID       : FakeGeometry.targetPID
         )) {
-            try await context.seat.useContextMenu(
-                openedAt: Self.openAt, of: context.window, turn: context.turn
+            try await context.seat.withContextMenu(
+                openedAt   : Self.openAt,
+                observation: observation,
+                turn       : context.turn
             )
         }
 
@@ -328,12 +479,30 @@ struct ContextMenuTests {
             return nil
         }
 
-        await #expect(throws: InputFailure.invalidLocation) {
-            try await context.seat.useContextMenu(
-                openedAt: Self.openAt, of: context.window, turn: context.turn
-            ) { _ in CGPoint(x: 10, y: 10) }
+        var refusal: (any Error)?
+
+        let outcome = try await context.seat.withContextMenu(
+            openedAt   : Self.openAt,
+            observation: try await observedReference(context.seat),
+            turn       : context.turn
+        ) { interaction in
+            guard case .success(let delivery) = await interaction.observe() else { return }
+            let frame = delivery.geometry.window.frame
+            guard let point = InputLocation(
+                screenPoint: CGPoint(x: frame.minX + 10, y: frame.minY + 10),
+                observedIn : delivery.geometry
+            ) else { return }
+            do {
+                _ = try await interaction.send(
+                    .click(point, button: .left),
+                    observation: delivery.reference
+                )
+            } catch { refusal = error }
         }
+
+        #expect(refusal as? InputFailure == .invalidLocation)
+        #expect(outcome.insideMenu.isEmpty, "nothing went out, so nothing is recorded")
         #expect(context.sender.preparationCycles == [FakeGeometry.windowNumber],
-                "the teardown ran although the choice threw")
+                "the cleanup ran although the choice threw")
     }
 }

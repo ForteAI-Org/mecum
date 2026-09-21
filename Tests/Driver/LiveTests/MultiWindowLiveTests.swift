@@ -190,9 +190,9 @@ struct MultiWindowLiveTests {
         let turn    = try await seat.acquire()
         let receipt = try await seat.send(
             .click(location),
-            to      : window,
-            turn    : turn,
-            platform: target.platform
+            observation: try await liveObservation(seat),
+            turn       : turn,
+            platform   : target.platform
         )
         let landed = LivePump.run(
             until  : { (target.state()["clicks"] ?? -1) > before },

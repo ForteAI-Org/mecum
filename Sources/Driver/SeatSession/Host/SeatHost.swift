@@ -253,6 +253,10 @@ public final class SeatHost {
             throw SessionFailure.hostNotReady(state)
         }
 
+        // The observation source is the shipped adapter over the capture module.
+        // It supports a window Still and refuses the menu surface and the content
+        // clock, which are the two abilities this build has no evidence for, so a
+        // seat made here observes and still refuses input with the gap named.
         let created = AgentSeat(
             sensing              : systemSensing,
             placing              : SystemWindowPlacing(),
@@ -260,11 +264,16 @@ public final class SeatHost {
             fence                : installedFence,
             displayID            : display.displayID,
             expectedMainDisplayID: display.topology.mainDisplayID,
-            defaultPlatform      : configuration.platform
+            defaultPlatform      : configuration.platform,
+            observationSource    : SeatCaptureObservationSource(
+                displayGeneration: displayGeneration
+            ),
+            observationProfile   : configuration.observationProfile
         )
 
         created.transfersFullScreenWindows  = configuration.transfersFullScreenWindows
         created.restoresFullScreenOnRelease = configuration.restoresFullScreenOnRelease
+        created.reportMonitorHealth(currentMonitorHealth)
 
         if configuration.followsNewWindows { created.enableWindowFollowing() }
 
@@ -396,6 +405,22 @@ public final class SeatHost {
         eventChannel.yield(.monitorQualityChanged(change))
     }
 
+    /// The Monitor's health as this host reads it now.
+    ///
+    /// A Monitor nobody asked for is not a fault and implies no obligation to run
+    /// one. A Monitor that was asked for and is not running is an **isolated**
+    /// fault: the person loses the preview, the agent's observation and input are
+    /// untouched, and whatever image is still on the layer is stale. The shared
+    /// fault is set by the fail-closed path, where the display or the capture the
+    /// observation needs is gone too.
+    private var currentMonitorHealth: SeatMonitorHealth {
+        guard configuration.monitor != nil else { return .notRequested }
+        guard let monitor, monitor.isRunning else {
+            return .isolatedFault(lastImageIsStale: monitor != nil)
+        }
+        return .live
+    }
+
     /// Observes the Monitor's own lifecycle so a spontaneous ScreenCaptureKit
     /// stop is reported as soon as its delegate fires. The heartbeat remains
     /// responsible for quality; capture ownership is event driven.
@@ -411,6 +436,12 @@ public final class SeatHost {
 
                 if case .failed = lifecycle {
                     self.raiseHostIssue(.monitorUnavailable)
+                    // Isolated: whatever the layer still shows is marked stale
+                    // and kept, and the agent's own observation is not affected.
+                    observed.markPresentationStale()
+                    self.seat?.reportMonitorHealth(
+                        .isolatedFault(lastImageIsStale: observed.presentation.hasImage)
+                    )
                     return
                 }
             }
@@ -471,6 +502,9 @@ public final class SeatHost {
         isFailingClosed = true
 
         transition(to: .failed, reason: .issues(issues))
+        // The display, the fence or the capture the observation needs is gone, so
+        // this is the shared fault and not the isolated one.
+        seat?.reportMonitorHealth(.sharedFault)
         seat?.failFromHost(issues)
 
         Task { @MainActor [weak self] in

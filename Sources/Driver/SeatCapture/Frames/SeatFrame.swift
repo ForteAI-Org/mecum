@@ -155,7 +155,15 @@ nonisolated public struct SeatFrame: @unchecked Sendable {
         )
     }
 
-    init(
+    /// Builds a Frame from parts that are already decided.
+    ///
+    /// It is `package` so a controlled collaborator inside this package can hand
+    /// a real Frame, with a real `IOSurface` and the same 32BGRA pixel buffer, to
+    /// the production observation path. It is deliberately not public: a Frame a
+    /// consumer assembled would be pixels nothing captured, and building one here
+    /// still qualifies nothing. `FrameSampleQualifier` decides whether a Frame is
+    /// sufficient evidence, and it does not ask who made it.
+    package init(
         surface          : IOSurface,
         pixelBuffer      : CVPixelBuffer,
         presentationTime : CMTime,

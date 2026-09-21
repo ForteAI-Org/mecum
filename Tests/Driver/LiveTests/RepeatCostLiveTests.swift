@@ -83,7 +83,11 @@ struct RepeatCostLiveTests {
         ) async throws -> Int {
             let before  = chrome.state()["keyDowns"] ?? 0
             let receipt = try await stage.seat.send(
-                arrow, phase: phase, to: window, turn: turn, platform: platform
+                arrow,
+                phase      : phase,
+                observation: try await liveObservation(stage.seat),
+                turn       : turn,
+                platform   : platform
             )
             LivePump.run(for: 0.25)
             let delta = Int((chrome.state()["keyDowns"] ?? 0) - before)

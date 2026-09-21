@@ -43,19 +43,68 @@ let seat = try host.makeSeat()
 let turn = try await seat.acquire()                     // exclusive between safe points
 let window = try await seat.adopt(reference, platform: .universal)
 
-let receipt = try await seat.send(.click(location), to: window, turn: turn)
-// the consumer verifies the effect however it likes, then says so:
-seat.confirm(receipt, .observed)
+// A Command is addressed by the observation it was decided on, never by a
+// window. `observe()` answers the Frame and the reference that binds it, or an
+// unavailability with its reason; it never answers older pixels.
+switch await seat.observe() {
+    case .failure(let reason):
+        // Waiting, a cause of the gate, or a native ability with no evidence.
+        print("nothing to act on: \(reason)")
+    case .success(let delivery):
+        // The consumer decides on `delivery.frame`, asynchronously if it likes,
+        // and hands the same reference back with the Command.
+        let receipt = try await seat.send(
+            .click(location),
+            observation: delivery.reference,
+            turn       : turn
+        )
+        // the consumer verifies the effect however it likes, then says so:
+        try seat.confirm(receipt, .observed)
+}
 
 try await seat.release(window, .returnToUserSeat)
-seat.release(turn)
+try seat.release(turn)
 await host.stop()
 ```
 
+A complete Command consumes its observation: the next one needs a new
+`observe()`, and so does every invalidation. Sequences and multi-chunk text are
+the consumer's to orchestrate — `AgentSeat.textCommands(of:mode:limits:)` cuts a
+string and sends nothing — while a single `insertText` stays one atomic Command.
+A contextual menu is a scoped asynchronous interaction:
+`withContextMenu(openedAt:observation:turn:appearingWithin:body:)` hands the body
+a `SeatMenuInteraction` that is revoked the moment the interaction ends, and the
+kit closes the menu on every path out.
+
 `SeatHost.events` and `AgentSeat.events` carry state transitions, issues and
-recovery progress. Every action returns an observation of the User Seat so the
-consumer can tell a person's own activity from an anomaly; the kit reports, it
-does not attribute.
+recovery progress, and `AgentSeat.coherentState` plus `subscribeToState()` carry
+one versioned reading of the selected and operational target, the causes of the
+gate, the observation, the Monitor's own health and any restitution still owed.
+Reading that state is not authority: the reference and the gate are verified
+again where input is admitted. Every action returns an observation of the User
+Seat so the consumer can tell a person's own activity from an anomaly; the kit
+reports, it does not attribute. That diagnostic is not the Observation Reference
+and the two are never interchanged.
+
+### What the code cutover is, and what it is not
+
+The public contract above is implemented and the internal callers are migrated.
+That is a change of code and **not** a qualification of any native ability, and
+the offline suites that exercise it qualify nothing about macOS either.
+
+On this build three capabilities have no evidence, so the kit refuses with the
+gap named rather than inventing a fact:
+
+| Capability | State | What it stops |
+|---|---|---|
+| `contentClock` | not qualified | no Frame has a measurable content age, so every Command carrying one is refused at admission with `frameAgeUnknown(.clockNotQualified)` |
+| `menuSurfaceStill` | not qualified | `SeatMenuInteraction.observe()` refuses, so no item inside a contextual menu can be chosen |
+| qualified surface enumeration | not available | the shipped reader reports an incomplete pass, so containment stays unverified and the causes of the gate say so |
+
+There is no public switch that bypasses any of them, and there is no constructor
+that lets a consumer declare evidence qualified or assemble an Observation
+Reference. Closing these gaps needs a qualified oracle and a live campaign, both
+of which are separate work that has **not** been performed.
 
 ## The fence is alive only while somebody holds it
 

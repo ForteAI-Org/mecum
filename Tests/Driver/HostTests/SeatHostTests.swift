@@ -154,19 +154,19 @@ extension VirtualDisplaySuites {
             #expect(turn.generation == 1)
             #expect(!turn.seatChangedSinceLastHold)
 
-            let foreign = AdoptedWindow(
-                reference    : WindowReference(processID: 1, windowNumber: 1, frame: .zero),
-                originalFrame: .zero
-            )
-            let point = InputLocation(
-                screenPoint       : CGPoint(
-                    x: adopted.reference.frame.midX,
-                    y: adopted.reference.frame.midY
-                ),
-                windowPointFromTop: CGPoint(x: 10, y: 10)
-            )
-            await #expect(throws: SessionFailure.windowNotAdopted(windowNumber: 1)) {
-                try await seat.send(.click(point), to: foreign, turn: turn, platform: AppKitPlatform())
+            // There is no entry point that takes a window any more: a Command is
+            // addressed by the Observation Reference the seat issued. The
+            // shipped adapters leave the content clock unqualified and the
+            // enumeration incomplete, so this host asks and is refused with the
+            // gap named rather than sending anything.
+            switch await seat.observe() {
+                case .success:
+                    Issue.record(
+                        Comment(rawValue: "the shipped adapters qualified an observation, which no "
+                            + "evidence on this build supports")
+                    )
+                case .failure(let reason):
+                    print("host: the seat refused to observe, as expected: \(reason)")
             }
 
             #expect(seat.unconfirmedCommandCount == 0)

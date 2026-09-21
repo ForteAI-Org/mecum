@@ -7,6 +7,7 @@
 
 import Foundation
 import SeatCapture
+import SeatCore
 import SeatInput
 import VirtualScreens
 
@@ -147,6 +148,16 @@ nonisolated public struct SeatHostConfiguration: Sendable {
     /// The window comes back usable and the person's seat is untouched.
     public let restoresFullScreenOnRelease: Bool
 
+    /// The finite positive budgets the seats of this host observe and admit
+    /// Commands under: the Frame age limit, the capture deadline and attempts,
+    /// and the menu interaction and cleanup budgets.
+    ///
+    /// The default is the initial profile that was decided: 120 s, 5 s with 2
+    /// attempts, 180 s and 2 s. A consumer that wants other values builds one
+    /// with `ObservationProfile.configured`, which refuses a value that is not
+    /// finite and positive instead of substituting a default.
+    public let observationProfile: ObservationProfile
+
     /// Package-only A/B experiment. Production recovery remains activation-only.
     package var focusRecoveryUsesKeyRecords = false
 
@@ -160,7 +171,8 @@ nonisolated public struct SeatHostConfiguration: Sendable {
         restoresUserFocus: Bool = false,
         allowUnvalidatedFocusRecovery: Bool = false,
         transfersFullScreenWindows: Bool = false,
-        restoresFullScreenOnRelease: Bool = false
+        restoresFullScreenOnRelease: Bool = false,
+        observationProfile: ObservationProfile = .initialLab
     ) {
         self.display       = display
         self.monitor       = monitor
@@ -172,6 +184,7 @@ nonisolated public struct SeatHostConfiguration: Sendable {
         self.allowUnvalidatedFocusRecovery = allowUnvalidatedFocusRecovery
         self.transfersFullScreenWindows  = transfersFullScreenWindows
         self.restoresFullScreenOnRelease = restoresFullScreenOnRelease
+        self.observationProfile          = observationProfile
     }
 
     public static let `default` = SeatHostConfiguration()

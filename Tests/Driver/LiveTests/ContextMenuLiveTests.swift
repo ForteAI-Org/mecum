@@ -405,25 +405,57 @@ struct ContextMenuLiveTests {
             var reading = "not read"
 
             timeline.mark("the menu action")
-            let receipt = try await seat.useContextMenu(
-                openedAt: location,
-                of      : adopted,
-                turn    : turn
-            ) { menu in
+            let outcome = try await seat.withContextMenu(
+                openedAt   : location,
+                observation: try await liveObservation(seat),
+                turn       : turn
+            ) { interaction in
                 timeline.sample()
-                let answer = choose(menu, window.processID, adopted.id)
+                let answer = choose(interaction.menu, window.processID, adopted.id)
                 reading = answer.reading
-                return answer.point
+                guard let pointFromTop = answer.point else { return }
+
+                // The item click needs an observation of the **menu's own**
+                // surface from the kit. Where that ability is unqualified the
+                // choice is not reached at all, and the reason is recorded
+                // rather than replaced by a click the row aimed itself.
+                switch await interaction.observe() {
+                    case .failure(let refusal):
+                        reading += "; the menu surface was not observable: \(refusal)"
+                    case .success(let delivery):
+                        let frame = delivery.geometry.window.frame
+                        guard let point = InputLocation(
+                            screenPoint: CGPoint(
+                                x: frame.minX + pointFromTop.x,
+                                y: frame.minY + pointFromTop.y
+                            ),
+                            observedIn : delivery.geometry
+                        ) else {
+                            reading += "; the point was outside the observed menu"
+                            return
+                        }
+                        do {
+                            _ = try await interaction.send(
+                                .click(point, button: .left),
+                                observation: delivery.reference
+                            )
+                        } catch {
+                            reading += "; the item click was refused: \(error)"
+                        }
+                }
             }
             timeline.sample()
 
             row.menuOpened    = true
-            row.appearedAfter = receipt.menu.appearedAfter
-            row.insideDisplay = bounds.intersection(receipt.menu.frame) == receipt.menu.frame
-            row.closedBy      = receipt.closedBy.rawValue
+            row.appearedAfter = outcome.menu.appearedAfter
+            row.insideDisplay = bounds.intersection(outcome.menu.frame) == outcome.menu.frame
+            switch outcome.cleanup {
+                case .verifiedClosed(let closure): row.closedBy = closure.rawValue
+                case .notVerified(let reason)    : row.closedBy = "not verified: \(reason)"
+            }
             row.reading       = reading
             row.note          = "target pid \(window.processID),"
-                + " menu window \(receipt.menu.window.windowNumber) at \(receipt.menu.frame)"
+                + " menu window \(outcome.menu.window.windowNumber) at \(outcome.menu.frame)"
 
             // Nothing to confirm: the action's own Commands are ones the seat
             // witnessed, so the hold comes straight back.

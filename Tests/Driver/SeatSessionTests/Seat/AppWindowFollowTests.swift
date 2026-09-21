@@ -196,17 +196,25 @@ struct AppWindowFollowTests {
         let sensing = FakeSensing()
         let placing = FakePlacing()
         let sender  = FakeSender()
-        let (seat, first) = try await Self.followingSeat(
+        let (seat, _) = try await Self.followingSeat(
             sensing: sensing,
             placing: placing,
             sender : sender,
             marker : 7_002
         )
 
-        _ = Self.offer(Self.secondWindowNumber, to: sensing, placing)
-
         let turn    = try await seat.acquire()
-        let receipt = try await seat.send(Self.click, to: first, turn: turn)
+        // The Command is what opens the second window. Publishing it before the
+        // observation would correctly close the containment gate: at that point
+        // the window already exists and has not yet been transferred.
+        sender.onSend = { _ in
+            _ = Self.offer(Self.secondWindowNumber, to: sensing, placing)
+        }
+        let receipt = try await seat.send(
+            Self.click,
+            observation: try await observedReference(seat),
+            turn       : turn
+        )
         try seat.confirm(receipt, .observed)
         _ = await seat.concludeObservation()
         try seat.release(turn)
@@ -541,23 +549,27 @@ struct AppWindowFollowTests {
         let sensing = FakeSensing()
         let placing = FakePlacing()
         let sender  = FakeSender()
-        let (seat, first) = try await Self.followingSeat(
+        let (seat, _) = try await Self.followingSeat(
             sensing: sensing,
             placing: placing,
             sender : sender,
             marker : 7_015
         )
-        _ = Self.offer(Self.secondWindowNumber, to: sensing, placing)
-
         let turn     = try await seat.acquire()
         let observed = Holder<Int>(-1)
         let before   = seat.windowFollowScanCount
 
+        let observation = try await observedReference(seat)
+        // Publish the new window only after admission, exactly while the
+        // Command that caused it is in flight.
+        sender.onSend = { _ in
+            _ = Self.offer(Self.secondWindowNumber, to: sensing, placing)
+        }
         sender.onSendWait = {
             await Self.pass(seat, 1)
             observed.value = seat.windowFollowScanCount
         }
-        let receipt = try await seat.send(Self.click, to: first, turn: turn)
+        let receipt = try await seat.send(Self.click, observation: observation, turn: turn)
 
         #expect(observed.value == before, "a pass never reads while a Command is in flight")
         try seat.confirm(receipt, .observed)

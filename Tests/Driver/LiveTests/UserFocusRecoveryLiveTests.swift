@@ -58,12 +58,13 @@ struct UserFocusRecoveryLiveTests {
             if ProcessInfo.processInfo.environment["AGENTSEAT_FOCUS_SCENARIO"] == "warm-menu" {
                 let warmTurn = try await seat.acquire()
                 let warmGeometry = try #require(WindowServerProbe.geometry(of: adopted.id))
-                let warmReceipt = try await seat.useContextMenu(
-                    openedAt: try #require(target.probePoint(within: warmGeometry.frame)),
-                    of      : adopted,
-                    turn    : warmTurn
-                ) { _ in nil }
-                try #require(warmReceipt.closedBy != .chosenItem)
+                let warmOutcome = try await seat.withContextMenu(
+                    openedAt   : try #require(target.probePoint(within: warmGeometry.frame)),
+                    observation: try await liveObservation(seat),
+                    turn       : warmTurn
+                )
+                try #require(warmOutcome.insideMenu.isEmpty)
+                try #require(warmOutcome.cleanup != .verifiedClosed(.chosenItem))
                 try seat.release(warmTurn)
                 LivePump.run(for: 0.3)
             }
@@ -92,15 +93,43 @@ struct UserFocusRecoveryLiveTests {
                 sampler.arguments = arguments
                 sampler.standardOutput = sampleOutput
             }
-            let receipt = try await seat.useContextMenu(
-                openedAt: try #require(target.probePoint(within: geometry.frame)),
-                of      : adopted,
-                turn    : turn
-            ) { menu in
+            let outcome = try await seat.withContextMenu(
+                openedAt   : try #require(target.probePoint(within: geometry.frame)),
+                observation: try await liveObservation(seat),
+                turn       : turn
+            ) { interaction in
+                let pointFromTop: CGPoint
                 do {
-                    let point = try MenuImageChoice.point(for: ["Print...", "Print…", "Stampa...", "Stampa…"],
-                                                          in: menu.window)
-                    if let samplerPath, sampler.executableURL != nil {
+                    pointFromTop = try MenuImageChoice.point(
+                        for: ["Print...", "Print…", "Stampa...", "Stampa…"],
+                        in : interaction.menu.window
+                    )
+                } catch {
+                    Issue.record("Print was not uniquely identified: \(error)")
+                    return
+                }
+                // The click is addressed by an observation of the menu's own
+                // surface. Where that capability is unqualified the item is not
+                // chosen at all: the row stops with the reason named instead of
+                // posting a click it aimed itself.
+                guard case .success(let delivery) = await interaction.observe() else {
+                    Issue.record(Comment(rawValue: "the menu's own surface could not be observed, "
+                        + "so Print was not chosen and this trial exercised nothing"))
+                    return
+                }
+                let frame = delivery.geometry.window.frame
+                guard let point = InputLocation(
+                    screenPoint: CGPoint(
+                        x: frame.minX + pointFromTop.x,
+                        y: frame.minY + pointFromTop.y
+                    ),
+                    observedIn : delivery.geometry
+                ) else {
+                    Issue.record("the identified point is outside the observed menu")
+                    return
+                }
+                if let samplerPath, sampler.executableURL != nil {
+                    do {
                         try sampler.run()
                         samplerLaunched = true
                         let provenance = TrialResources.ProcessProvenance(
@@ -113,12 +142,21 @@ struct UserFocusRecoveryLiveTests {
                         )
                         samplerProvenance = provenance
                         ledger.claim(provenance)
+                    } catch {
+                        Issue.record("the independent focus sampler did not start: \(error)")
                     }
-                    return point
-                } catch { Issue.record("Print was not uniquely identified: \(error)"); return nil }
+                }
+                do {
+                    _ = try await interaction.send(
+                        .click(point, button: .left),
+                        observation: delivery.reference
+                    )
+                } catch {
+                    Issue.record("the Print click was refused: \(error)")
+                }
             }
-            #expect(receipt.chosenPoint != nil)
-            #expect(receipt.closedBy == .chosenItem)
+            #expect(outcome.insideMenu.count == 1)
+            #expect(outcome.cleanup == .verifiedClosed(.chosenItem))
             let restored = LivePump.run(until: {
                 seat.lastFocusRecovery?.outcome == .restored && seat.state.acceptsCommands
             }, timeout: 3)

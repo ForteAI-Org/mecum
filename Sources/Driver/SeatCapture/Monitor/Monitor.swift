@@ -59,6 +59,11 @@ public final class Monitor {
 
     private let stream: SeatCaptureStream
     private var policy: MonitorQualityPolicy
+
+    /// The layers this Monitor presents to. Held strongly because a consumer
+    /// legitimately hands one over and keeps only the view it put it in;
+    /// `release(_:)` is the explicit end of that ownership.
+    private var attachedLayers: [MonitorLayer] = []
     private var requestedConfiguration: MonitorConfiguration?
     private var isEvaluatingQuality = false
     private var lastProduced  = 0
@@ -91,10 +96,33 @@ public final class Monitor {
     /// measures callback to screen by wrapping `present`.
     public func attach(_ layer: MonitorLayer) {
         stream.attach(layer)
+        attachedLayers.append(layer)
     }
 
     public func release(_ layer: MonitorLayer) {
         stream.detach(layer)
+        attachedLayers.removeAll { $0 === layer }
+    }
+
+    /// What the Monitor is showing and how much is known about when it was true.
+    ///
+    /// The Monitor is always the live view of the **Virtual Display**, never a
+    /// stream of the agent's target, and this value says nothing about the
+    /// agent's observation: a stale preview is not a stale Frame and a live
+    /// preview certifies no freshness, no containment and no focus.
+    public var presentation: MonitorPresentation {
+        guard let layer = attachedLayers.last else { return .nothingPresented }
+        return layer.presentation
+    }
+
+    /// Marks every attached layer's image stale, keeping it on screen.
+    ///
+    /// It is called when the capture stops, spontaneously or on request. Blanking
+    /// the layer would hide that the preview stopped; leaving it unmarked would
+    /// present an old picture as current. Neither is acceptable, so the image
+    /// stays and says what it is.
+    public func markPresentationStale() {
+        for layer in attachedLayers { layer.markStale() }
     }
 
     // MARK: Lifecycle
@@ -151,6 +179,7 @@ public final class Monitor {
 
     private func stop(deadline: CaptureDeadline) async {
         requestedConfiguration = nil
+        markPresentationStale()
         await stream.stop(deadline: deadline)
     }
 

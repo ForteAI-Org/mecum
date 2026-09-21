@@ -45,16 +45,57 @@ nonisolated open class MonitorLayer: CALayer {
         backgroundColor    = CGColor(gray: 0, alpha: 1)
     }
 
+    /// When the callback delivered the presented sample, and when WindowServer
+    /// said it was displayed.
+    ///
+    /// They are two clocks and they are kept apart: the first is a fact about
+    /// delivery, the second is the only documented statement about the visual
+    /// instant and is often absent. Nil display time means unknown, and the
+    /// callback time is never put in its place.
+    public private(set) var presentedReceivedAtNanoseconds: UInt64?
+    public private(set) var presentedDisplayTime: UInt64?
+
+    /// True when the image on this layer is no longer being refreshed. The
+    /// layer's `contents` deliberately stays: a consumer marks it rather than
+    /// blanking it, because a blank preview hides that the preview stopped.
+    public private(set) var isStale = false
+
     /// Presents one frame, inside a transaction with actions disabled.
     ///
     /// The transaction is not decoration. Without `setDisableActions`, changing
     /// `contents` is an implicitly animated property: Core Animation would
     /// cross-fade every frame into the next, which at 60 fps is a blur and a
     /// GPU cost for something that has to be an instant replacement.
+    ///
+    /// A subclass that overrides this and does not call `super` takes over the
+    /// staleness bookkeeping with it.
     open func present(_ frame: SeatFrame) {
         CATransaction.begin()
         CATransaction.setDisableActions(true)
         contents = frame.surface
         CATransaction.commit()
+        presentedReceivedAtNanoseconds = frame.receivedAt
+        presentedDisplayTime           = frame.displayTime
+        isStale                        = false
+    }
+
+    /// Marks what is on the layer as no longer live, without removing it. Called
+    /// by the owner when the capture stopped or failed.
+    ///
+    /// These three properties are written by `present`, which the owning stream
+    /// calls on the main actor, and by this method, which the Monitor calls on
+    /// the main actor. That one writer is the whole synchronization rule.
+    public func markStale() {
+        isStale = presentedReceivedAtNanoseconds != nil
+    }
+
+    /// What this layer is showing, and how much is known about when it was true.
+    public var presentation: MonitorPresentation {
+        MonitorPresentation(
+            isLive               : presentedReceivedAtNanoseconds != nil && !isStale,
+            hasImage             : presentedReceivedAtNanoseconds != nil,
+            receivedAtNanoseconds: presentedReceivedAtNanoseconds,
+            displayTime          : presentedDisplayTime
+        )
     }
 }

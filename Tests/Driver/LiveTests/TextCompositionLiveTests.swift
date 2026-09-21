@@ -91,7 +91,11 @@ struct TextCompositionLiveTests {
 
         // MARK: the control, before anything is composing
 
-        let controlReceipt = try await stage.seat.send(.insertText(Self.control), to: window, turn: turn)
+        let controlReceipt = try await stage.seat.send(
+            .insertText(Self.control),
+            observation: try await liveObservation(stage.seat),
+            turn       : turn
+        )
         let controlArrived = LivePump.run(
             until  : { Self.field(of: fixture).contains(Self.control) },
             timeout: 10
@@ -110,7 +114,11 @@ struct TextCompositionLiveTests {
 
         // MARK: arm the composition
 
-        let armed  = try await stage.seat.send(Self.trigger, to: window, turn: turn)
+        let armed  = try await stage.seat.send(
+            Self.trigger,
+            observation: try await liveObservation(stage.seat),
+            turn       : turn
+        )
         let marked = LivePump.run(
             until  : { (fixture.state()["marked"] ?? 0) > 0 },
             timeout: 5
@@ -136,7 +144,11 @@ struct TextCompositionLiveTests {
 
         // MARK: the insertion, straight past the input method
 
-        let receipt = try await stage.seat.send(.insertText(Self.insertion), to: window, turn: turn)
+        let receipt = try await stage.seat.send(
+            .insertText(Self.insertion),
+            observation: try await liveObservation(stage.seat),
+            turn       : turn
+        )
         _ = LivePump.run(
             until  : { fixture.state()["marked"] != markedLength
                 || Self.field(of: fixture).contains(Self.insertion) },

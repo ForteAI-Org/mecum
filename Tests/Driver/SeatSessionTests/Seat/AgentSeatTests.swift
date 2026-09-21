@@ -11,9 +11,14 @@ import SeatInput
 @testable import SeatSession
 import Testing
 
-/// The whole seat driven through the three fakes: adopt, hold, send, confirm,
+/// The whole seat driven through the fakes: adopt, hold, observe, send, confirm,
 /// release, and every refusal in between. No display, no tap, no Accessibility
 /// grant, so this runs on any machine and in parallel with everything else.
+///
+/// Every Command here goes through the production path: the assignment nucleus,
+/// the selection nucleus, the qualifier and the admission. What the controlled
+/// adapters supply is evidence, not verdicts, and supplying it proves the
+/// algorithms and never the system.
 @MainActor
 @Suite("Agent seat")
 struct AgentSeatTests {
@@ -32,7 +37,10 @@ struct AgentSeatTests {
         sensing  : FakeSensing = FakeSensing(),
         placing  : FakePlacing = FakePlacing(),
         sender   : FakeSender  = FakeSender(),
-        processID: Int32       = FakeGeometry.targetPID
+        processID: Int32       = FakeGeometry.targetPID,
+        source   : ControlledObservationSource? = nil,
+        clock    : ControlledContentClock? = nil,
+        profile  : ObservationProfile = .initialLab
     ) async throws -> (seat: AgentSeat, window: AdoptedWindow) {
 
         sensing.targetPID = processID
@@ -40,7 +48,14 @@ struct AgentSeatTests {
             frame    : FakeGeometry.adoptedWindow.frame,
             processID: processID
         )
-        let seat   = makeSeat(sensing: sensing, placing: placing, sender: sender)
+        let seat = makeSeat(
+            sensing: sensing,
+            placing: placing,
+            sender : sender,
+            source : source,
+            clock  : clock,
+            profile: profile
+        )
         let window = try await seat.adopt(
             FakeGeometry.reference(
                 frame    : FakeGeometry.userSeatWindow.frame,
@@ -65,7 +80,10 @@ struct AgentSeatTests {
         let second = try await seat.adopt(reference, platform: AppKitPlatform())
         let turn = try await seat.acquire()
         for window in [first, second, first] {
-            let receipt = try await seat.send(Self.click, to: window, turn: turn)
+            _ = try await seat.switchTarget(to: window)
+            let observation = try await observedReference(seat)
+            #expect(observation.recipient == window.reference.identity)
+            let receipt = try await seat.send(Self.click, observation: observation, turn: turn)
             try seat.confirm(receipt, .observed)
             _ = await seat.concludeObservation()
         }
@@ -195,56 +213,47 @@ struct AgentSeatTests {
 
     // MARK: Adoption
 
-    @Test("a sequence paused after posting preserves its receipts and cannot be silently replayed")
-    func partialSequenceRequiresConfirmation() async throws {
+    @Test("a succession stopped after posting preserves its receipts and cannot be silently replayed")
+    func partialSuccessionRequiresConfirmation() async throws {
         let sender = FakeSender()
-        let completed = try await sender.send(
-            Self.click,
-            to           : FakeGeometry.adoptedWindow,
-            correlationID: 555,
-            platform     : AppKitPlatform()
-        ).replacingCleanup(.failed(code: -17))
-        let progress = InputProgress(
-            completedSteps              : [.activation, .keyWindowFirst, .keyWindowSecond],
-            failedStep                  : nil,
-            failedStepMayHaveTakenEffect: false,
-            cleanup                     : .failed(code: -17)
-        )
-        sender.error = InputSequenceFailure(
-            completedReceipts: [completed],
-            cause            : InputFailure.inputPaused,
-            progress         : progress,
-            cleanupCause     : InputFailure.restoreFailed(code: -17)
-        )
-        let (seat, window) = try await Self.adopted(sender: sender)
+        let (seat, _) = try await Self.adopted(sender: sender)
         let turn = try await seat.acquire()
-        do {
-            _ = try await seat.sendSequence([Self.click, Self.click], to: window, turn: turn)
-            Issue.record("The paused sequence must report its partial delivery")
-        } catch let failure as InputSequenceFailure {
-            #expect(failure.completedReceipts.count == 1)
-            #expect(failure.completedReceipts.first?.cleanup == .failed(code: -17))
-            #expect(failure.progress == progress)
-            #expect(failure.cause as? InputFailure == .inputPaused)
-            #expect(failure.cleanupCause as? InputFailure == .restoreFailed(code: -17))
-            #expect(seat.unconfirmedCommandCount == 1)
-            #expect(seat.state == .degraded)
-            #expect(throws: SessionFailure.unconfirmedCommands(count: 1)) { try seat.release(turn) }
-            try seat.confirm(try #require(failure.completedReceipts.first), .unknown)
-            try seat.release(turn)
+
+        let first = try await seat.send(
+            Self.click,
+            observation: try await observedReference(seat),
+            turn       : turn
+        )
+        // The second Command of the consumer's own succession is refused. The
+        // first one already went out, so its Receipt stands and the Turn cannot
+        // be given back until somebody says what it did.
+        let second = try await observedReference(seat)
+        sender.error = InputFailure.inputPaused
+        await #expect(throws: InputFailure.inputPaused) {
+            try await seat.send(Self.click, observation: second, turn: turn)
         }
+
+        #expect(seat.unconfirmedCommandCount == 1)
+        #expect(throws: SessionFailure.unconfirmedCommands(count: 1)) { try seat.release(turn) }
+        try seat.confirm(first, .unknown)
+        try seat.release(turn)
     }
 
     @Test("a focus interruption delivered during send survives its completion")
     func completionPreservesWaiting() async throws {
         let sender = FakeSender()
-        let (seat, window) = try await Self.adopted(sender: sender)
+        let (seat, _) = try await Self.adopted(sender: sender)
         let turn = try await seat.acquire()
         sender.onSend = { _ in seat.report([.targetActivated]) }
-        let receipt = try await seat.send(Self.click, to: window, turn: turn)
+        let receipt = try await seat.send(
+            Self.click,
+            observation: try await observedReference(seat),
+            turn       : turn
+        )
         #expect(seat.state == .waiting)
+        let next = try await observedReference(seat)
         await #expect(throws: SessionFailure.seatNotReady(.waiting)) {
-            try await seat.send(Self.click, to: window, turn: turn)
+            try await seat.send(Self.click, observation: next, turn: turn)
         }
         #expect(sender.sent.count == 1)
         try seat.confirm(receipt, .unknown)
@@ -264,11 +273,12 @@ struct AgentSeatTests {
             cause       : InputFailure.preparationFailed(step: .keyWindowFirst, code: -9),
             cleanupCause: InputFailure.restoreFailed(code: -17)
         )
-        let (seat, window) = try await Self.adopted(sender: sender)
+        let (seat, _) = try await Self.adopted(sender: sender)
         let turn = try await seat.acquire()
+        let observation = try await observedReference(seat)
 
         await #expect(throws: InputPreparationFailure.self) {
-            try await seat.send(Self.click, to: window, turn: turn)
+            try await seat.send(Self.click, observation: observation, turn: turn)
         }
 
         #expect(seat.state == .degraded)
@@ -311,10 +321,11 @@ struct AgentSeatTests {
     func turnRequired() async throws {
 
         let sender = FakeSender()
-        let (seat, window) = try await Self.adopted(sender: sender)
+        let (seat, _) = try await Self.adopted(sender: sender)
+        let observation = try await observedReference(seat)
 
         await #expect(throws: SessionFailure.turnRequired) {
-            try await seat.send(Self.click, to: window, turn: Turn(
+            try await seat.send(Self.click, observation: observation, turn: Turn(
                 generation              : 1,
                 seatChangedSinceLastHold: false,
                 correlationID           : 1
@@ -328,7 +339,7 @@ struct AgentSeatTests {
 
         let sensing = FakeSensing()
         let sender  = FakeSender()
-        let (seat, window) = try await Self.adopted(sensing: sensing, sender: sender)
+        let (seat, _) = try await Self.adopted(sensing: sensing, sender: sender)
 
         let turn = try await seat.acquire()
 
@@ -338,8 +349,9 @@ struct AgentSeatTests {
         seat.report([.targetActivated])
         #expect(seat.state == .waiting)
 
+        let observation = try await observedReference(seat)
         await #expect(throws: SessionFailure.seatNotReady(.waiting)) {
-            try await seat.send(Self.click, to: window, turn: turn)
+            try await seat.send(Self.click, observation: observation, turn: turn)
         }
         #expect(sender.sent.isEmpty)
     }
@@ -348,10 +360,14 @@ struct AgentSeatTests {
     func markerTravels() async throws {
 
         let sender = FakeSender()
-        let (seat, window) = try await Self.adopted(sender: sender)
+        let (seat, _) = try await Self.adopted(sender: sender)
 
         let turn    = try await seat.acquire()
-        let receipt = try await seat.send(Self.click, to: window, turn: turn)
+        let receipt = try await seat.send(
+            Self.click,
+            observation: try await observedReference(seat),
+            turn       : turn
+        )
 
         #expect(sender.sent.count == 1)
         #expect(sender.sent[0].correlationID == turn.correlationID)
@@ -362,9 +378,13 @@ struct AgentSeatTests {
     @Test("the receipt comes back with an observation, which a driver alone leaves nil")
     func receiptCarriesAnObservation() async throws {
 
-        let (seat, window) = try await Self.adopted()
+        let (seat, _) = try await Self.adopted()
         let turn    = try await seat.acquire()
-        let receipt = try await seat.send(Self.click, to: window, turn: turn)
+        let receipt = try await seat.send(
+            Self.click,
+            observation: try await observedReference(seat),
+            turn       : turn
+        )
 
         #expect(receipt.observation != nil)
     }
@@ -374,9 +394,13 @@ struct AgentSeatTests {
     @Test("releasing the hold is refused while a command is unconfirmed")
     func releaseRefusedWithAnUnknown() async throws {
 
-        let (seat, window) = try await Self.adopted()
+        let (seat, _) = try await Self.adopted()
         let turn = try await seat.acquire()
-        _ = try await seat.send(Self.click, to: window, turn: turn)
+        _ = try await seat.send(
+            Self.click,
+            observation: try await observedReference(seat),
+            turn       : turn
+        )
 
         #expect(seat.unconfirmedCommandCount == 1)
         #expect(throws: SessionFailure.unconfirmedCommands(count: 1)) {
@@ -388,9 +412,13 @@ struct AgentSeatTests {
     @Test("an explicit unknown still releases: the caller answered, and the answer is remembered")
     func explicitUnknownReleases() async throws {
 
-        let (seat, window) = try await Self.adopted()
+        let (seat, _) = try await Self.adopted()
         let turn    = try await seat.acquire()
-        let receipt = try await seat.send(Self.click, to: window, turn: turn)
+        let receipt = try await seat.send(
+            Self.click,
+            observation: try await observedReference(seat),
+            turn       : turn
+        )
 
         try seat.confirm(receipt, .unknown)
         try seat.release(turn)
@@ -401,45 +429,58 @@ struct AgentSeatTests {
     @Test("confirming closes the command and lets the hold go")
     func confirmThenRelease() async throws {
 
-        let (seat, window) = try await Self.adopted()
+        let (seat, _) = try await Self.adopted()
         let turn    = try await seat.acquire()
-        let receipt = try await seat.send(Self.click, to: window, turn: turn)
+        let receipt = try await seat.send(
+            Self.click,
+            observation: try await observedReference(seat),
+            turn       : turn
+        )
 
         try seat.confirm(receipt, .observed)
         #expect(seat.unconfirmedCommandCount == 0)
 
         try seat.release(turn)
-        #expect(!seat.unconfirmedCommandCount.isMultiple(of: 2) == false)
+        #expect(seat.unconfirmedCommandCount == 0)
     }
 
     @Test("a confirmation out of order is refused instead of matched by guesswork")
     func confirmOutOfOrder() async throws {
 
-        let (seat, window) = try await Self.adopted()
+        let (seat, _) = try await Self.adopted()
         let turn = try await seat.acquire()
 
-        let receipts = try await seat.sendSequence(
-            [Self.click, Self.click],
-            to  : window,
-            turn: turn
+        let first = try await seat.send(
+            Self.click,
+            observation: try await observedReference(seat),
+            turn       : turn
+        )
+        let second = try await seat.send(
+            Self.click,
+            observation: try await observedReference(seat),
+            turn       : turn
         )
 
-        #expect(receipts.count == 2)
+        #expect(first != second)
         #expect(throws: SessionFailure.receiptOutOfOrder) {
-            try seat.confirm(receipts[1], .observed)
+            try seat.confirm(second, .observed)
         }
 
-        try seat.confirm(receipts[0], .observed)
-        try seat.confirm(receipts[1], .observed)
+        try seat.confirm(first, .observed)
+        try seat.confirm(second, .observed)
         try seat.release(turn)
     }
 
     @Test("confirming with nothing pending is refused")
     func nothingToConfirm() async throws {
 
-        let (seat, window) = try await Self.adopted()
+        let (seat, _) = try await Self.adopted()
         let turn    = try await seat.acquire()
-        let receipt = try await seat.send(Self.click, to: window, turn: turn)
+        let receipt = try await seat.send(
+            Self.click,
+            observation: try await observedReference(seat),
+            turn       : turn
+        )
 
         try seat.confirm(receipt, .observed)
         #expect(throws: SessionFailure.nothingToConfirm) {
@@ -447,14 +488,20 @@ struct AgentSeatTests {
         }
     }
 
-    @Test("a sequence is one preparation and one marker for every command in it")
-    func sequenceSharesOnePreparation() async throws {
+    @Test("a succession the consumer orchestrates stamps every Command with its Turn")
+    func successionSharesTheTurnsMarker() async throws {
 
         let sender = FakeSender()
-        let (seat, window) = try await Self.adopted(sender: sender)
+        let (seat, _) = try await Self.adopted(sender: sender)
 
         let turn = try await seat.acquire()
-        _ = try await seat.sendSequence([Self.click, Self.click, Self.click], to: window, turn: turn)
+        for _ in 0 ..< 3 {
+            _ = try await seat.send(
+                Self.click,
+                observation: try await observedReference(seat),
+                turn       : turn
+            )
+        }
 
         #expect(sender.sent.count == 3)
         #expect(Set(sender.sent.map(\.correlationID)) == [turn.correlationID])
@@ -503,40 +550,48 @@ struct AgentSeatTests {
         let sender = FakeSender()
         sender.reportsUnrestoredPreparation = true
 
-        let (seat, window) = try await Self.adopted(sender: sender)
+        let (seat, _) = try await Self.adopted(sender: sender)
         let turn    = try await seat.acquire()
-        let receipt = try await seat.send(Self.click, to: window, turn: turn)
+        let receipt = try await seat.send(
+            Self.click,
+            observation: try await observedReference(seat),
+            turn       : turn
+        )
 
         #expect(receipt.hasUnrestoredPreparation)
         #expect(seat.state == .degraded)
 
         // Degraded still acts: what degraded it is not what the Command needs.
-        _ = try await seat.send(Self.click, to: window, turn: turn)
+        _ = try await seat.send(
+            Self.click,
+            observation: try await observedReference(seat),
+            turn       : turn
+        )
         #expect(sender.sent.count == 2)
     }
 
-    @Test("the guard runs immediately before the events, and refuses on a reused window id")
-    func preflightCatchesIdentity() async throws {
+    @Test("the admission runs on a reused window id and refuses before any event")
+    func admissionCatchesIdentity() async throws {
 
         let sensing = FakeSensing()
         let sender  = FakeSender()
-        let (seat, window) = try await Self.adopted(sensing: sensing, sender: sender)
+        let (seat, _) = try await Self.adopted(sensing: sensing, sender: sender)
 
         let turn = try await seat.acquire()
+        let observation = try await observedReference(seat)
 
         // The window died and the id was handed to somebody else between the
-        // adoption and the send, which is the case a check taken a second
+        // observation and the send, which is the case a check taken a second
         // earlier cannot see.
         sensing.geometry = FakeGeometry.reference(
             frame    : FakeGeometry.adoptedWindow.frame,
             processID: 1
         )
 
-        await #expect(throws: SeatInterruption.self) {
-            try await seat.send(Self.click, to: window, turn: turn)
+        await #expect(throws: ObservationAdmissionRefusal.geometryChanged) {
+            try await seat.send(Self.click, observation: observation, turn: turn)
         }
         #expect(sender.sent.isEmpty)
-        #expect(seat.state == .failed)
     }
 
     @Test("a target that became active refuses the command and waits")
@@ -544,13 +599,14 @@ struct AgentSeatTests {
 
         let sensing = FakeSensing()
         let sender  = FakeSender()
-        let (seat, window) = try await Self.adopted(sensing: sensing, sender: sender)
+        let (seat, _) = try await Self.adopted(sensing: sensing, sender: sender)
 
         let turn = try await seat.acquire()
+        let observation = try await observedReference(seat)
         sensing.targetIsActive = true
 
         await #expect(throws: SeatInterruption.self) {
-            try await seat.send(Self.click, to: window, turn: turn)
+            try await seat.send(Self.click, observation: observation, turn: turn)
         }
         #expect(sender.sent.isEmpty)
         #expect(seat.state == .waiting)
@@ -561,13 +617,14 @@ struct AgentSeatTests {
 
         let sensing = FakeSensing()
         let sender  = FakeSender()
-        let (seat, window) = try await Self.adopted(sensing: sensing, sender: sender)
+        let (seat, _) = try await Self.adopted(sensing: sensing, sender: sender)
 
         let turn = try await seat.acquire()
+        let observation = try await observedReference(seat)
         sensing.fenceIsActive = false
 
         await #expect(throws: SeatInterruption.self) {
-            try await seat.send(Self.click, to: window, turn: turn)
+            try await seat.send(Self.click, observation: observation, turn: turn)
         }
         #expect(sender.sent.isEmpty)
         #expect(seat.state == .failed)
@@ -656,20 +713,34 @@ struct AgentSeatTests {
         #expect(outcome == .vanished)
     }
 
-    @Test("a command to a window the seat does not hold is refused")
-    func sendToAForeignWindow() async throws {
+    @Test("a reference the consumer assembled is not authority")
+    func fabricatedReferenceIsRefused() async throws {
 
         let sender = FakeSender()
         let (seat, _) = try await Self.adopted(sender: sender)
-        let turn = try await seat.acquire()
+        let other = makeSeat()
+        let turn  = try await seat.acquire()
 
-        let foreign = AdoptedWindow(
-            reference    : FakeGeometry.reference(frame: .zero, processID: 1, windowNumber: 1),
-            originalFrame: .zero
+        // A well formed value issued by another seat. There is no public
+        // initializer at all, so this is the closest a consumer can come to
+        // building one, and it still matches nothing here.
+        let foreign = SeatObservationReference(
+            issuer                : other.observationIssuer.token,
+            instance              : FakeGeometry.identity().process,
+            surface               : FakeGeometry.identity(),
+            selectionGeneration   : 1,
+            geometryVersion       : GeometryObservationVersion(
+                observerGeneration: 1,
+                sequence          : 1
+            ),
+            observedFrame         : FakeGeometry.adoptedWindow.frame,
+            role                  : .ordinaryTarget,
+            barrier               : 1,
+            contentAge            : .qualified(nanoseconds: 0),
+            deliveredAtNanoseconds: 0
         )
-
-        await #expect(throws: SessionFailure.windowNotAdopted(windowNumber: 1)) {
-            try await seat.send(Self.click, to: foreign, turn: turn)
+        await #expect(throws: ObservationAdmissionRefusal.foreignReference) {
+            try await seat.send(Self.click, observation: foreign, turn: turn)
         }
         #expect(sender.sent.isEmpty)
     }
@@ -680,11 +751,12 @@ struct AgentSeatTests {
         let sender = FakeSender()
         sender.error = InputFailure.preparationFailed(step: .activation, code: -1)
 
-        let (seat, window) = try await Self.adopted(sender: sender)
+        let (seat, _) = try await Self.adopted(sender: sender)
         let turn = try await seat.acquire()
+        let observation = try await observedReference(seat)
 
         await #expect(throws: InputFailure.self) {
-            try await seat.send(Self.click, to: window, turn: turn)
+            try await seat.send(Self.click, observation: observation, turn: turn)
         }
 
         #expect(seat.unconfirmedCommandCount == 0)

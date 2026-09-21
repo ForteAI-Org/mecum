@@ -56,7 +56,11 @@ struct TextCeilingLiveTests {
             let before = try #require(target.state()["field"], "The initial field counter is unreadable")
 
             let started = DispatchTime.now().uptimeNanoseconds
-            let receipt = try await stage.seat.send(.insertText(text), to: window, turn: turn)
+            let receipt = try await stage.seat.send(
+                .insertText(text),
+                observation: try await liveObservation(stage.seat),
+                turn       : turn
+            )
             let posted  = DispatchTime.now().uptimeNanoseconds - started
 
             // Polled rather than slept: a long insertion lands when it lands,
@@ -104,7 +108,11 @@ struct TextCeilingLiveTests {
         let tooLong = String(repeating: "a", count: TextLimits.maximumInsertedCodeUnits + 1)
         var refused = false
         do {
-            _ = try await stage.seat.send(.insertText(tooLong), to: window, turn: turn)
+            _ = try await stage.seat.send(
+                .insertText(tooLong),
+                observation: try await liveObservation(stage.seat),
+                turn       : turn
+            )
         } catch let failure as InputPreparationFailure {
             refused = failure.cause is InputFailure
             #expect(failure.progress.cleanup == .succeeded, "the Preparation was not given back")
@@ -130,14 +138,24 @@ struct TextCeilingLiveTests {
         // answer, and a repeat is what makes it practical.
         let backspace = Shortcut.physical(PhysicalKey(name: "Backspace", virtualKey: 51))
         let receipts = [
-            try await stage.seat.send(backspace, phase: .down, to: window, turn: turn),
             try await stage.seat.send(
                 backspace,
-                phase: .repeated(count: KeyPhase.maximumRepeatCount),
-                to   : window,
-                turn : turn
+                phase      : .down,
+                observation: try await liveObservation(stage.seat),
+                turn       : turn
             ),
-            try await stage.seat.send(backspace, phase: .up, to: window, turn: turn),
+            try await stage.seat.send(
+                backspace,
+                phase      : .repeated(count: KeyPhase.maximumRepeatCount),
+                observation: try await liveObservation(stage.seat),
+                turn       : turn
+            ),
+            try await stage.seat.send(
+                backspace,
+                phase      : .up,
+                observation: try await liveObservation(stage.seat),
+                turn       : turn
+            ),
         ]
         for receipt in receipts { try stage.seat.confirm(receipt, .unknown) }
         try stage.seat.release(turn)
