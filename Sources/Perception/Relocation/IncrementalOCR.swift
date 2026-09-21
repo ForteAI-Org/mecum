@@ -1,8 +1,22 @@
 import Foundation
 import CoreGraphics
 import CVBackend
-import OCRSupport
-import LocatorCore
+
+/// A recognized text run, with its box already converted to image pixels (top-left). No Vision-space
+/// (bottom-left normalized) coordinates ever leave the OCR layer.
+///
+/// Lived in `OCRSupport` beside the Vision wrapper `VisionText` now covers; kept here because the
+/// incremental plan below is written in terms of it. T5 ports both onto the Perception layer's own
+/// recognized-text vocabulary.
+public struct OCRResult: Sendable, Equatable {
+    public var text: String
+    public var boxImagePx: CGRect
+
+    public init(text: String, boxImagePx: CGRect) {
+        self.text = text
+        self.boxImagePx = boxImagePx
+    }
+}
 
 /// What one frame's OCR knew: its tile grid and every recognized run. Hand it to the next frame's
 /// `IncrementalOCR.recognize` and only the tiles that changed are read again.
@@ -62,13 +76,14 @@ public enum IncrementalOCR {
     /// (`.scratch/harness/issues/14-sweep-and-freeze-rule.md`) and must be earned, not kept.
     public static let maxPartialRects = 10
 
-    public static func recognize(in image: CGImage, previous: OCRFrame?, ocr: OCREngine, accurate: Bool = true,
+    /// `read` recognizes one image and answers runs boxed in THAT image's pixels (top-left). It used to be
+    /// `OCRSupport.OCREngine`; it is a closure so this decision logic owes nothing to which recognizer runs
+    /// underneath — T5 hands it the Perception layer's `TextRecognizing`.
+    public static func recognize(in image: CGImage, previous: OCRFrame?, read: (CGImage) -> [OCRResult],
                                  tile: Int = TileDiff.defaultTile) -> Outcome {
         let w = image.width, h = image.height
-        let fullCtx = WindowCoordinateContext(axWindowOriginGlobalPt: .zero, backingScale: 1,
-                                              imagePixelSize: CGSize(width: w, height: h))
         func full(_ reason: String, grid: TileGrid?) -> Outcome {
-            let runs = ocr.recognizeText(in: image, ctx: fullCtx, accurate: accurate)
+            let runs = read(image)
             let g = grid ?? TileGrid.empty(width: w, height: h, tile: tile)
             return Outcome(runs: runs, frame: OCRFrame(grid: g, runs: runs), mode: .full(reason: reason))
         }
@@ -91,9 +106,7 @@ public enum IncrementalOCR {
         for r in rects {
             let ri = r.integral.intersection(frameRect)
             guard ri.width >= 1, ri.height >= 1, let crop = image.cropping(to: ri) else { return full("crop failed", grid: grid) }
-            let ctx = WindowCoordinateContext(axWindowOriginGlobalPt: .zero, backingScale: 1,
-                                              imagePixelSize: CGSize(width: crop.width, height: crop.height))
-            fresh += ocr.recognizeText(in: crop, ctx: ctx, accurate: accurate).map {
+            fresh += read(crop).map {
                 OCRResult(text: $0.text, boxImagePx: $0.boxImagePx.offsetBy(dx: ri.minX, dy: ri.minY))
             }
         }

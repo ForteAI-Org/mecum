@@ -210,7 +210,35 @@ public enum AXPopupReader {
 
     /// Same title, allowing for the trailing "…"/ordinal noise a scene label picks up. Deliberately
     /// STRICTER than resolve: this guards a PRESS, so "8 kHz" must never satisfy "48 kHz".
-    static func matches(_ a: String, _ b: String) -> Bool { PopupVision.norm(a) == PopupVision.norm(b) }
+    static func matches(_ a: String, _ b: String) -> Bool { norm(a) == norm(b) }
+
+    /// Alphanumerics only, lowercased — the number-preserving comparison key the popup path has always
+    /// used. Inlined from the deleted `PopupVision`/`KnowledgeBase` (`VisionText` and `PerceptionCore`
+    /// cover what those files were for); T5 picks the Perception layer's normalizer when it ports this.
+    static func norm(_ s: String) -> String {
+        String(s.lowercased().unicodeScalars.filter { CharacterSet.alphanumerics.contains($0) }.map(Character.init))
+    }
+
+    /// A label's junk-tolerant core: lowercase alphanumeric tokens, leading tokens of ≤2 characters
+    /// dropped (avatar-glyph OCR junk), joined. Was `LocatorMemory.core`.
+    static func core(_ label: String) -> String {
+        var toks = label.lowercased().split(whereSeparator: { !$0.isLetter && !$0.isNumber }).map(String.init)
+        while let f = toks.first, f.count <= 2, toks.count > 1 { toks.removeFirst() }
+        return toks.joined()
+    }
+
+    /// Peel the " #2" ordinal `elements` appends to a duplicate row. Was `AXSceneAugmentor.stripOrdinal`.
+    static func stripOrdinal(_ s: String) -> String {
+        if let r = s.range(of: #" #\d+$"#, options: .regularExpression) { return String(s[..<r.lowerBound]) }
+        return s
+    }
+
+    /// The scene element's stable identity key. Was `ObservedObject.makeIdentityKey`; a menu row always
+    /// has text, so only the text branch is reachable here.
+    static func identityKey(role: String, text: String) -> String {
+        let t = String(text.lowercased().unicodeScalars.filter { CharacterSet.alphanumerics.contains($0) })
+        return t.isEmpty ? "\(role)|@0,0" : "\(role)|\(t)"
+    }
 
     /// Is this item painted on screen right now? An item whose frame AX withheld, or whose frame sits
     /// outside the menu's visible window, is a real item the engine must NOT click at coordinates.
@@ -258,8 +286,7 @@ public enum AXPopupReader {
         for item in items {
             let onView = isOnView(item, popup: popup)
             let pos = norm(onView ? (item.frameGlobalPt ?? popup) : popup)
-            let id = ObservedObject.makeIdentityKey(role: "AXMenuItem", identifier: nil,
-                                                    text: "\(item.title)#\(item.order)", boundsNormalized: pos)
+            let id = identityKey(role: "AXMenuItem", text: "\(item.title)#\(item.order)")
             var does = "menu item"
             if item.hasSubmenu { does += " — opens a submenu" }
             if !onView { does += " (off-view: the engine selects it by name, no scrolling needed)" }
@@ -292,13 +319,13 @@ public enum AXPopupReader {
         guard popupNormalized.count == 4, !menuRows.isEmpty else { return cv }
         let box = CGRect(x: popupNormalized[0], y: popupNormalized[1],
                          width: popupNormalized[2], height: popupNormalized[3])
-        let named = Set(menuRows.map { LocatorMemory.core(AXSceneAugmentor.stripOrdinal($0.label)) }
+        let named = Set(menuRows.map { core(stripOrdinal($0.label)) }
                                 .filter { !$0.isEmpty })
         return cv.filter { e in
             guard e.pos.count == 4, e.unlabeled != true else { return true }
             let c = CGPoint(x: e.pos[0] + e.pos[2] / 2, y: e.pos[1] + e.pos[3] / 2)
             guard box.insetBy(dx: -0.01, dy: -0.01).contains(c) else { return true }
-            return !named.contains(LocatorMemory.core(e.label))
+            return !named.contains(core(e.label))
         }
     }
 
@@ -307,11 +334,11 @@ public enum AXPopupReader {
     /// button's own value). Exact match, or a suffix at a real word boundary ("Font: Helvetica") — never
     /// a bare suffix, or "48 kHz" would read back as a successful "8 kHz".
     public static func readsBack(_ title: String, in labels: [String]) -> Bool {
-        let want = PopupVision.norm(title)
+        let want = norm(title)
         guard !want.isEmpty else { return false }
         let t = title.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
         for raw in labels {
-            if PopupVision.norm(raw) == want { return true }
+            if norm(raw) == want { return true }
             let low = raw.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
             guard low.count > t.count, low.hasSuffix(t) else { continue }
             let boundary = low[low.index(low.endIndex, offsetBy: -t.count - 1)]
@@ -324,12 +351,12 @@ public enum AXPopupReader {
     /// guarded prefix rules `PopupVision` uses on OCR'd items (number-preserving — "8" must never win
     /// "48"), then the scene's ordinal suffix stripped.
     public static func match(_ target: String, in items: [MenuItem]) -> MenuItem? {
-        let want = PopupVision.norm(AXSceneAugmentor.stripOrdinal(target))
+        let want = norm(stripOrdinal(target))
         guard !want.isEmpty else { return nil }
-        if let e = items.first(where: { PopupVision.norm($0.title) == want }) { return e }
-        if let p = items.first(where: { let n = PopupVision.norm($0.title)
+        if let e = items.first(where: { norm($0.title) == want }) { return e }
+        if let p = items.first(where: { let n = norm($0.title)
                                         return n.hasPrefix(want) && n.count <= want.count + 12 }) { return p }
-        if let p = items.first(where: { let n = PopupVision.norm($0.title)
+        if let p = items.first(where: { let n = norm($0.title)
                                         return !n.isEmpty && want.hasPrefix(n) && n.count >= max(3, want.count - 6) }) { return p }
         return nil
     }

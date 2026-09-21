@@ -238,14 +238,20 @@ let package = Package(
         driver("TargetReader", ["SeatCore", "WindowPlacement"]),
 
         // MARK: Lab locator
-        // The Lab's own perception. Nothing consumes it any more: SeatBroker perceives through the
-        // Perception layer, and these targets are leftovers the next ticket deletes.
+        // What survives of the Lab's own perception after Ronaldo's layer replaced it: only the pieces a
+        // later ticket still has to port or decide. Everything else went with T2.
+        //
+        //   LocatorCore    SceneElement + the AX/geometry/grouping vocabulary the four files below need.
+        //   AXSupport      the AX engine AXPopupReader reads the open menu through (T5).
+        //   CaptureSupport CaptureGate + WindowVisibility — T6 decides them.
+        //   CVBackend      ToggleStateReader (T4 → a `ControlStateReading` role) and the
+        //                  tile-diff / hash / template-match kernels IncrementalOCR uses (T5).
+        //   Relocation     AXPopupReader + IncrementalOCR (T5), ScrollPlanner + ScrollTiming (T7).
         perception("LocatorCore", settings: labPerceptionSettings),
         perception("AXSupport", ["LocatorCore"], settings: labPerceptionSettings),
-        perception("CaptureSupport", ["LocatorCore"], settings: labPerceptionSettings),
-        perception("OCRSupport", ["LocatorCore"], settings: labPerceptionSettings),
+        perception("CaptureSupport", settings: labPerceptionSettings),
         perception("CVBackend", ["LocatorCore"], settings: labPerceptionSettings),
-        perception("Relocation", ["LocatorCore", "AXSupport", "CaptureSupport", "OCRSupport", "CVBackend"], settings: labPerceptionSettings),
+        perception("Relocation", ["LocatorCore", "AXSupport", "CVBackend"], settings: labPerceptionSettings),
 
         // MARK: SeatBroker
         broker(
@@ -280,12 +286,11 @@ let package = Package(
         driverTests("TargetReader", ["TargetReader"]),
 
         // MARK: Lab locator and broker tests
-        perceptionTests("LocatorCore", ["LocatorCore"], exclude: ["Fixtures"], settings: labPerceptionSettings),
+        perceptionTests("LocatorCore", ["LocatorCore"], settings: labPerceptionSettings),
         perceptionTests("AXSupport", ["AXSupport", "LocatorCore"], settings: labPerceptionSettings),
-        perceptionTests("CaptureSupport", ["CaptureSupport", "LocatorCore"], settings: labPerceptionSettings),
-        perceptionTests("OCRSupport", ["OCRSupport", "LocatorCore"], settings: labPerceptionSettings),
+        perceptionTests("CaptureSupport", ["CaptureSupport"], settings: labPerceptionSettings),
         perceptionTests("CVBackend", ["CVBackend", "LocatorCore"], settings: labPerceptionSettings),
-        perceptionTests("Relocation", ["Relocation", "LocatorCore", "CVBackend"], settings: labPerceptionSettings),
+        perceptionTests("Relocation", ["Relocation", "LocatorCore"], settings: labPerceptionSettings),
         brokerTests(
             "SeatBroker",
             ["SeatBroker", "PerceptionCore", "SeatCore", "SeatCapture",

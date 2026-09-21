@@ -3,28 +3,6 @@ import CoreGraphics
 @testable import CVBackend
 
 final class ImageOpsTests: XCTestCase {
-    func testEqualLuminanceColorsStillHaveAnEdge() {
-        let img = makeCGImage(width: 100, height: 100) { ctx in
-            ctx.setFillColor(CGColor(srgbRed: 200.0/255, green: 0, blue: 0, alpha: 1))
-            ctx.fill(CGRect(x: 0, y: 0, width: 100, height: 100))
-            ctx.setFillColor(CGColor(srgbRed: 0, green: 102.0/255, blue: 0, alpha: 1))
-            ctx.fill(CGRect(x: 50, y: 0, width: 50, height: 100))
-        }
-        XCTAssertLessThan(ImageOps.sobelMagnitude(ImageOps.grayscale(img)).pixels.max()!, 5)
-        XCTAssertGreaterThan(ImageOps.colorSobelMagnitude(img).pixels.max()!, 700)
-        XCTAssertGreaterThan(ImageOps.colorSobelMagnitude(img, downsampleBy: 2).pixels.max()!, 700)
-    }
-
-    func testColorGradientMatchesNeutralGradient() {
-        let img = makeCGImage(width: 100, height: 100) { ctx in
-            ctx.setFillColor(gray: 0.2, alpha: 1); ctx.fill(CGRect(x: 0, y: 0, width: 100, height: 100))
-            ctx.setFillColor(gray: 0.8, alpha: 1); ctx.fill(CGRect(x: 30, y: 30, width: 40, height: 40))
-        }
-        let old = ImageOps.sobelMagnitude(ImageOps.grayscale(img)).pixels
-        let color = ImageOps.colorSobelMagnitude(img).pixels
-        for (a, b) in zip(old, color) { XCTAssertEqual(a, b, accuracy: 0.001) }
-    }
-
     func testBilinearResizeDoesNotExtrapolate() {
         // Upscaling must interpolate within the source range, never overshoot (the LOW-2 fix).
         let src = GrayImage(width: 2, height: 2, pixels: [0, 100, 100, 0])

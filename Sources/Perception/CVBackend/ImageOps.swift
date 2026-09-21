@@ -33,70 +33,6 @@ public enum ImageOps {
         return ok ? rgba : nil
     }
 
-    /// A cheap identity of a frame's pixels (FNV-1a over the normalized RGBA bytes, 64-bit words). Two
-    /// captures of an unchanged region hash equal, so a live viewer can skip re-perceiving it.
-    public static func frameHash(_ image: CGImage) -> UInt64 {
-        let w = image.width, h = image.height
-        guard let rgba = renderRGBA(image, width: w, height: h) else { return 0 }
-        var hash: UInt64 = 0xcbf29ce484222325
-        rgba.withUnsafeBytes { raw in
-            let words = raw.bindMemory(to: UInt64.self)
-            for word in words { hash = (hash ^ word) &* 0x100000001b3 }
-            for byte in raw.suffix(from: words.count * 8) { hash = (hash ^ UInt64(byte)) &* 0x100000001b3 }
-        }
-        return hash ^ UInt64(w) &* 31 ^ UInt64(h)
-    }
-
-    /// Strongest RGB-channel Sobel gradient. Equal-luminance colors can still form a visible UI
-    /// boundary; converting to grayscale first erases that evidence. One magnitude per pixel,
-    /// with no hue-to-role or hue-to-state inference. Downsampling averages every source pixel.
-    public static func colorSobelMagnitude(_ image: CGImage, downsampleBy scaleIn: Int = 1) -> GrayImage {
-        let sw = image.width, sh = image.height, scale = max(1, scaleIn)
-        guard sw > 0, sh > 0, var rgba = renderRGBA(image, width: sw, height: sh) else {
-            return GrayImage(width: 0, height: 0, pixels: [])
-        }
-        let w = max(1, sw / scale), h = max(1, sh / scale)
-        if scale > 1 {
-            var small = [UInt8](repeating: 0, count: w * h * 4)
-            rgba.withUnsafeBufferPointer { src in
-                small.withUnsafeMutableBufferPointer { dst in
-                    for y in 0..<h { for x in 0..<w {
-                        let x0 = x * sw / w, x1 = (x + 1) * sw / w
-                        let y0 = y * sh / h, y1 = (y + 1) * sh / h
-                        var r = 0, g = 0, b = 0
-                        for yy in y0..<y1 {
-                            var i = (yy * sw + x0) * 4
-                            for _ in x0..<x1 { r += Int(src[i]); g += Int(src[i + 1]); b += Int(src[i + 2]); i += 4 }
-                        }
-                        let n = (x1 - x0) * (y1 - y0), i = (y * w + x) * 4
-                        dst[i] = UInt8(r / n); dst[i + 1] = UInt8(g / n); dst[i + 2] = UInt8(b / n)
-                    } }
-                }
-            }
-            rgba = small
-        }
-        let n = w * h
-        guard w >= 3, h >= 3 else { return GrayImage(width: w, height: h, pixels: [Float](repeating: 0, count: n)) }
-        // Per channel: plane → Sobel gx, gy → gx²+gy²; keep the strongest channel; sqrt at the end.
-        // Every intermediate is an exact small integer in Float (|g| ≤ 1020, sum of squares < 2^21), so
-        // this matches the integer reference bit for bit.
-        var plane = [Float](repeating: 0, count: n), gx = plane, gy = plane, strongest = plane
-        let len = vDSP_Length(n)
-        rgba.withUnsafeBufferPointer { src in
-            for c in 0..<3 {
-                vDSP_vfltu8(src.baseAddress! + c, 4, &plane, 1, len)
-                sobelComponents(plane, w: w, h: h, gx: &gx, gy: &gy)
-                vDSP_vsq(gx, 1, &gx, 1, len)
-                vDSP_vsq(gy, 1, &gy, 1, len)
-                vDSP_vadd(gx, 1, gy, 1, &gx, 1, len)
-                vDSP_vmax(gx, 1, strongest, 1, &strongest, 1, len)
-            }
-        }
-        for i in 0..<n { strongest[i] = strongest[i].squareRoot() }
-        zeroBorder(&strongest, w: w, h: h)
-        return GrayImage(width: w, height: h, pixels: strongest)
-    }
-
     /// Normalize a `CGImage` to grayscale `Float` luminance via a fresh sRGB premultiplied-RGBA8 context.
     public static func grayscale(_ image: CGImage) -> GrayImage {
         let w = image.width, h = image.height
@@ -227,80 +163,6 @@ public enum ImageOps {
         for x in 0..<w { p[x] = 0; p[(h - 1) * w + x] = 0 }
         for y in 0..<h { p[y * w] = 0; p[y * w + w - 1] = 0 }
     }
-
-    // MARK: Binary morphology (for the connected-component segmenter)
-
-    /// Threshold a (gradient) map into a foreground mask.
-    static func binarize(_ g: GrayImage, threshold: Float) -> [Bool] {
-        g.pixels.map { $0 >= threshold }
-    }
-
-    /// Dilate: mark the r-radius square neighborhood of every foreground pixel (connects broken edges).
-    static func dilate(_ mask: [Bool], width w: Int, height h: Int, radius r: Int) -> [Bool] {
-        guard r > 0, w > 0, h > 0 else { return mask }
-        if let fast = boxMorphology(mask, width: w, height: h, kernel: 2 * r + 1, dilate: true) { return fast }
-        var out = [Bool](repeating: false, count: w * h)
-        for y in 0..<h {
-            for x in 0..<w where mask[y * w + x] {
-                let y0 = max(0, y - r), y1 = min(h - 1, y + r)
-                let x0 = max(0, x - r), x1 = min(w - 1, x + r)
-                for ny in y0...y1 { for nx in x0...x1 { out[ny * w + nx] = true } }
-            }
-        }
-        return out
-    }
-
-    /// Erode: keep a pixel only if its whole r-radius neighborhood is foreground (separates touching blobs).
-    /// Pixels whose neighborhood leaves the image are background (the reference semantics), so the
-    /// vImage path clears the r-pixel border after the min filter.
-    static func erode(_ mask: [Bool], width w: Int, height h: Int, radius r: Int) -> [Bool] {
-        guard r > 0, w > 0, h > 0 else { return mask }
-        if var fast = boxMorphology(mask, width: w, height: h, kernel: 2 * r + 1, dilate: false) {
-            for y in 0..<h { for x in 0..<w where y < r || y >= h - r || x < r || x >= w - r { fast[y * w + x] = false } }
-            return fast
-        }
-        var out = [Bool](repeating: false, count: w * h)
-        for y in 0..<h {
-            for x in 0..<w {
-                var all = true
-                let y0 = y - r, y1 = y + r, x0 = x - r, x1 = x + r
-                loop: for ny in y0...y1 {
-                    if ny < 0 || ny >= h { all = false; break }
-                    for nx in x0...x1 where nx < 0 || nx >= w || !mask[ny * w + nx] { all = false; break loop }
-                }
-                out[y * w + x] = all
-            }
-        }
-        return out
-    }
-
-    /// Square max (dilate) / min (erode) filter on a 0/1 mask via vImage. Edge-extend replicates border
-    /// pixels, which for a dilation is identical to ignoring out-of-image neighbours (the replicated
-    /// pixel is already inside the window). nil when vImage refuses — the caller falls back to scalar.
-    static func boxMorphology(_ mask: [Bool], width w: Int, height h: Int, kernel k: Int, dilate: Bool) -> [Bool]? {
-        guard let out = boxMorphology8(mask.withUnsafeBytes { Array($0) }, width: w, height: h, kernel: k, dilate: dilate) else { return nil }
-        return [Bool](unsafeUninitializedCapacity: out.count) { buf, count in
-            out.withUnsafeBytes { src in buf.withMemoryRebound(to: UInt8.self) { dst in _ = src.copyBytes(to: dst) } }
-            count = out.count
-        }
-    }
-
-    /// Same on a UInt8 plane (any values). nil when vImage refuses the call.
-    static func boxMorphology8(_ src: [UInt8], width w: Int, height h: Int, kernel k: Int, dilate: Bool) -> [UInt8]? {
-        guard w > 0, h > 0, k >= 1, src.count == w * h else { return nil }
-        var input = src
-        var out = [UInt8](repeating: 0, count: w * h)
-        let err: vImage_Error = input.withUnsafeMutableBufferPointer { s in
-            out.withUnsafeMutableBufferPointer { d in
-                var sb = vImage_Buffer(data: s.baseAddress, height: vImagePixelCount(h), width: vImagePixelCount(w), rowBytes: w)
-                var db = vImage_Buffer(data: d.baseAddress, height: vImagePixelCount(h), width: vImagePixelCount(w), rowBytes: w)
-                let kk = vImagePixelCount(k), flags = vImage_Flags(kvImageEdgeExtend)
-                return dilate ? vImageMax_Planar8(&sb, &db, nil, 0, 0, kk, kk, flags)
-                              : vImageMin_Planar8(&sb, &db, nil, 0, 0, kk, kk, flags)
-            }
-        }
-        return err == kvImageNoError ? out : nil
-    }
 }
 
 // MARK: - Scalar references (tests prove the Accelerate kernels match them bit for bit)
@@ -331,35 +193,5 @@ extension ImageOps {
             }
         }
         return GrayImage(width: w, height: h, pixels: out)
-    }
-
-    static func referenceDilate(_ mask: [Bool], width w: Int, height h: Int, radius r: Int) -> [Bool] {
-        guard r > 0 else { return mask }
-        var out = [Bool](repeating: false, count: w * h)
-        for y in 0..<h {
-            for x in 0..<w where mask[y * w + x] {
-                let y0 = max(0, y - r), y1 = min(h - 1, y + r)
-                let x0 = max(0, x - r), x1 = min(w - 1, x + r)
-                for ny in y0...y1 { for nx in x0...x1 { out[ny * w + nx] = true } }
-            }
-        }
-        return out
-    }
-
-    static func referenceErode(_ mask: [Bool], width w: Int, height h: Int, radius r: Int) -> [Bool] {
-        guard r > 0 else { return mask }
-        var out = [Bool](repeating: false, count: w * h)
-        for y in 0..<h {
-            for x in 0..<w {
-                var all = true
-                let y0 = y - r, y1 = y + r, x0 = x - r, x1 = x + r
-                loop: for ny in y0...y1 {
-                    if ny < 0 || ny >= h { all = false; break }
-                    for nx in x0...x1 where nx < 0 || nx >= w || !mask[ny * w + nx] { all = false; break loop }
-                }
-                out[y * w + x] = all
-            }
-        }
-        return out
     }
 }

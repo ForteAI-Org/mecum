@@ -1,6 +1,5 @@
 import XCTest
 import CoreGraphics
-import OCRSupport
 @testable import Relocation
 
 final class IncrementalOCRPlanTests: XCTestCase {
