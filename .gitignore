@@ -16,3 +16,6 @@ DerivedData/
 
 # Documents
 .scratch/
+
+# Python
+__pycache__/

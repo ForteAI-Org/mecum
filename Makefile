@@ -14,6 +14,14 @@
 #    green exit status and no summary at all (Documentation/Driver/SpiLedger.md).
 # 2. Every tier **asserts how many tests it reported**, because of the same
 #    defect: exit status 0 is not evidence that a run finished.
+# 3. The unit tier runs **serialized**. Every suite in it is `@MainActor`, and a
+#    wait inside an adoption turns the event loop synchronously (ADR 0008),
+#    which holds the main queue for its whole slice and not just the main actor.
+#    Run in parallel, the seat's own recovery loop gets one 250 ms lap in sixty
+#    seconds and its rows fail on a starved actor instead of on a budget.
+#    Parallelism buys nothing here to pay for that: the main actor is the whole
+#    bottleneck, so the tier measures 107 s serialized against 108 s parallel,
+#    and the ten bundles other than SeatSession are 1.5 s of it together.
 #
 # Counts change when tests are added, on purpose: a number here that nobody
 # updates is a number that stopped meaning anything.
@@ -25,6 +33,13 @@ TIER   := bash Tools/Driver/Scripts/run-tier.sh
 BASELINES := Tests/Driver/Benchmarks/Baselines
 BENCH_OUT := .build/bench
 REPORTS   := Documentation/Driver/compatibility
+
+# The unit tier runs unfiltered, so every test target in Package.swift reports
+# one summary line: the eleven `driverTests(...)` entries of lines 127 to 140.
+# This is the bundle count, not a test count, because test counts move with every
+# ticket (987 to 1018 in one day) and a number nobody updates stops meaning
+# anything, while a new test target is rare and worth failing over.
+UNIT_BUNDLES := 11
 
 # The seat cycle, alone in its own process.
 HOST_CYCLE_TESTS := 1
@@ -42,20 +57,26 @@ HOST_REST_TESTS := 29
 # third-party window watch row unless AGENTSEAT_FOLLOW_APP names a running
 # application, and the fullscreen rows unless AGENTSEAT_FULLSCREEN_PROBE=1 does:
 # they take a window in and out of fullscreen, which is the person's screen.
-LIVE_TESTS := 25
+# Verified by `xcrun swift test list | rg LiveTests` on 2026-09-21. This is an
+# assertion over the reported Live bundle, including intentionally skipped rows.
+LIVE_TESTS := 82
 
 # The measurements `make bench` gates on. Narrow it for a quick pass, for
 # example `make bench BENCH="fence-callback send-click"`; `seat-idle` alone
 # takes five minutes, which is the window its median and p95 are written over.
+# `focus-refresh` reports and gates nothing yet, and it needs an ordinary
+# application frontmost with a window on a physical display to be its
+# destination: without one the refresh it measures returns at its first guard,
+# so the row fails rather than report a zero.
 BENCH ?= fence-callback fence-clamp input-trace-overhead send-click display-lifecycle \
-         monitor-60 monitor-120 stage seat-idle window-watch recovery
+         monitor-60 monitor-120 stage seat-idle window-watch focus-refresh recovery
 
 .PHONY: all test host-tests live-tests bench compat-report promote-build clean help
 
 all: test
 
 help:
-	@echo 'make test           unit tier: pure, parallel, no permission needed'
+	@echo 'make test           unit tier: pure, serialized, no permission needed'
 	@echo 'make host-tests     host tier: TCC and a real display, two commands, counts asserted'
 	@echo 'make live-tests     live tier: real windows and a real browser'
 	@echo 'make bench          the measurements of spec section 8, each one a gate'
@@ -73,12 +94,14 @@ help:
 
 # MARK: The tiers
 
+# `--no-parallel` is load bearing, and it is fact 3 of the header: a pumping
+# wait holds the main queue, so concurrent suites starve the recovery loops.
 test:
 	@$(PYTHON) Tools/Driver/Scripts/test-run-tier.py
 	@$(PYTHON) Tools/Driver/Scripts/test-focus-latency.py
 	@$(PYTHON) Tools/Driver/Scripts/test-compat-report.py
 	@bash Tools/Driver/Scripts/test-seatbench-contract.sh
-	@$(TIER) unit - $(SWIFT) test
+	@TIER_BUNDLES=$(UNIT_BUNDLES) $(TIER) unit - $(SWIFT) test --no-parallel
 
 # Two commands, and the split is not a style choice: see the header.
 host-tests:

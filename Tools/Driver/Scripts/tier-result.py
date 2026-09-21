@@ -9,7 +9,7 @@ SUMMARY = re.compile(r'^.*?Test run with (\d+) tests?\b.*?\b(passed|failed)\b', 
 SKIPPED = re.compile(r'^[^\w\n]*Test (?!run with ).+ skipped(?:[.:].*)?$', re.MULTILINE)
 
 
-def summarize(text, expected, runner_status):
+def summarize(text, expected, runner_status, expected_runs):
     summaries = SUMMARY.findall(text)
     reported = sum(int(count) for count, _ in summaries)
     skip_details = SKIPPED.findall(text)
@@ -23,6 +23,11 @@ def summarize(text, expected, runner_status):
         problems.append('the runner reported a failed test run')
     if expected != '-' and reported != int(expected):
         problems.append(f'{reported} tests reported, {expected} expected')
+    # One test target prints one summary line, so a missing line is a bundle that
+    # died after its suites passed: seen four times in a day on the unit tier.
+    if expected_runs != '-' and len(summaries) != int(expected_runs):
+        problems.append(f'{len(summaries)} bundle summaries, {expected_runs} expected: '
+                        'a test bundle ended before reporting')
     if skipped > reported:
         problems.append('more skipped tests than reported tests')
     return dict(reported=reported, executed=max(0, reported - skipped), skipped=skipped,
@@ -31,8 +36,9 @@ def summarize(text, expected, runner_status):
 
 
 def main():
-    label, expected, runner_status, path = sys.argv[1:]
-    result = summarize(pathlib.Path(path).read_text(errors='replace'), expected, int(runner_status))
+    label, expected, runner_status, path, expected_runs = sys.argv[1:]
+    result = summarize(pathlib.Path(path).read_text(errors='replace'), expected, int(runner_status),
+                       expected_runs)
     print('TIER_RESULT ' + json.dumps(result, sort_keys=True))
     verdict = 'FAIL' if result['problems'] else 'OK  '
     print(f"{verdict} {label}: {result['executed']} executed, {result['skipped']} skipped, "

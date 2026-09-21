@@ -257,4 +257,9 @@ nonisolated enum Budget {
     /// How much worse than the saved baseline a latency may get before it
     /// counts as a regression, on p95.
     static let regressionTolerance = 0.10
+
+    // MARK: The focus recovery refresh
+
+    // No constant on purpose: `SeatSessionBench.runFocusRefresh` reports the
+    // once-a-second refresh's net cost and gates on nothing until a run decides.
 }

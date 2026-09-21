@@ -141,6 +141,20 @@ case SeatSessionBench.windowWatchName:
         baselineDirectory: baseline
     ) ? 0 : 1)
 
+case SeatSessionBench.focusRefreshName:
+    // Two halves again, the switch being `restoresUserFocus` this time, and
+    // the seconds are per half.
+    let seconds  = arguments.count > 2
+        ? (Double(arguments[2]) ?? SeatSessionBench.defaultFocusRefreshSeconds)
+        : SeatSessionBench.defaultFocusRefreshSeconds
+    let output   = argument(3)
+    let baseline = argument(4)
+    exit(SeatSessionBench.runFocusRefresh(
+        seconds          : seconds,
+        outputPath       : output,
+        baselineDirectory: baseline
+    ) ? 0 : 1)
+
 case SeatSessionBench.recoveryName:
     let episodes = arguments.count > 2 ? (Int(arguments[2]) ?? 10) : 10
     let output   = argument(3)
@@ -159,6 +173,6 @@ default:
         + "\(MonitorBench.thirtyName), \(MonitorBench.sixtyName), "
         + "\(MonitorBench.oneHundredTwentyName), \(StageBench.name), "
         + "\(SeatSessionBench.idleName), \(SeatSessionBench.windowWatchName), "
-        + "\(SeatSessionBench.recoveryName)")
+        + "\(SeatSessionBench.focusRefreshName), \(SeatSessionBench.recoveryName)")
     exit(2)
 }

@@ -6,13 +6,14 @@ import unittest
 ROOT = pathlib.Path(__file__).resolve().parent
 
 class TierTests(unittest.TestCase):
-    def run_tier(self, output, expected='2', status=0):
+    def run_tier(self, output, expected='2', status=0, bundles=None):
         with tempfile.TemporaryDirectory() as directory:
             emitter = pathlib.Path(directory) / 'emit.py'
             emitter.write_text('import sys\nprint(' + repr(output) + ')\nsys.exit(' + str(status) + ')\n')
             result = subprocess.run(['bash', str(ROOT / 'run-tier.sh'), 'sample', expected,
                                      'python3', str(emitter)], text=True, capture_output=True,
-                                    env={**__import__('os').environ, 'TMPDIR': directory})
+                                    env={**__import__('os').environ, 'TMPDIR': directory,
+                                         **({'TIER_BUNDLES': bundles} if bundles else {})})
             log = (pathlib.Path(directory) / 'agentseat-tier-sample.log').read_text()
             return result, log
 
@@ -37,6 +38,25 @@ class TierTests(unittest.TestCase):
     def test_wrong_count_fails(self):
         result, _ = self.run_tier('✔ Test run with 1 test passed after 0.1 seconds.')
         self.assertNotEqual(result.returncode, 0)
+
+    # The unit tier's defect: every suite passes, then a whole bundle dies before
+    # printing its summary line. Exit 0, no failed test, 278 tests simply absent.
+    def test_lost_bundle_fails(self):
+        result, _ = self.run_tier('✔ Test run with 2 tests in 1 suite passed after 0.1 seconds.',
+                                  expected='-', bundles='2')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('1 bundle summaries, 2 expected', result.stdout)
+
+    def test_every_bundle_reporting_passes(self):
+        result, _ = self.run_tier('✔ Test run with 2 tests in 1 suite passed after 0.1 seconds.\n'
+                                  '✔ Test run with 3 tests in 1 suite passed after 0.1 seconds.',
+                                  expected='-', bundles='2')
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn('5 reported in 2 run(s)', result.stdout)
+
+    def test_bundle_count_is_not_imposed_on_filtered_tiers(self):
+        result, _ = self.run_tier('✔ Test run with 2 tests in 1 suite passed after 0.1 seconds.')
+        self.assertEqual(result.returncode, 0, result.stdout)
 
     def test_failure_summary_with_zero_exit_fails(self):
         result, _ = self.run_tier('✘ Test run with 2 tests failed after 0.1 seconds.')

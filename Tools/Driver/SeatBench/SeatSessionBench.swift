@@ -48,9 +48,10 @@ final class BenchTargetView: NSView {
 @MainActor
 enum SeatSessionBench {
 
-    static let idleName        = "seat-idle"
-    static let recoveryName    = "recovery"
-    static let windowWatchName = "window-watch"
+    static let idleName         = "seat-idle"
+    static let recoveryName     = "recovery"
+    static let windowWatchName  = "window-watch"
+    static let focusRefreshName = "focus-refresh"
 
     /// The default idle window. Five minutes, which is what the budget says the
     /// median and the p95 have to hold over.
@@ -271,10 +272,23 @@ enum SeatSessionBench {
             return false
         }
 
-        guard let control = sampleWatch(following: false, home: home, seconds: seconds, clock: clock)
-        else { return false }
-        guard let watched = sampleWatch(following: true, home: home, seconds: seconds, clock: clock)
-        else { return false }
+        guard let control = sampleSeat(
+            configuration: SeatHostConfiguration(followsNewWindows: false),
+            benchmark    : windowWatchName,
+            label        : "watch off",
+            home         : home,
+            seconds      : seconds,
+            clock        : clock
+        ) else { return false }
+
+        guard let watched = sampleSeat(
+            configuration: SeatHostConfiguration(followsNewWindows: true),
+            benchmark    : windowWatchName,
+            label        : "watch on",
+            home         : home,
+            seconds      : seconds,
+            clock        : clock
+        ) else { return false }
 
         let netCpu = Sample(
             name       : windowWatchName,
@@ -361,14 +375,23 @@ enum SeatSessionBench {
         return passed
     }
 
-    /// One half of the pair: a whole seat holding this process's own window,
+    /// One half of a pair: a whole seat holding this process's own window,
     /// sampled while nothing happens. Nil is a setup that failed, which is a
     /// failed benchmark and never a zero.
-    private static func sampleWatch(
-        following: Bool,
-        home     : WindowReference,
-        seconds  : Double,
-        clock    : Clock
+    ///
+    /// The configuration is the caller's because the pairs this serves differ
+    /// in exactly one switch and share everything else. `inspect` runs once
+    /// with the window adopted and once when the sampling ends, outside the
+    /// sampled interval on both sides, and a sentence back from it is a half
+    /// that did not measure what it was asked to.
+    private static func sampleSeat(
+        configuration: SeatHostConfiguration,
+        benchmark    : String,
+        label        : String,
+        home         : WindowReference,
+        seconds      : Double,
+        clock        : Clock,
+        inspect      : ((SeatHost) -> String?)? = nil
     ) -> (
         cpuPercents     : [Double],
         cpuMedianPercent: Double,
@@ -376,14 +399,11 @@ enum SeatSessionBench {
         scansPerSecond  : Double
     )? {
 
-        let label = following ? "watch on" : "watch off"
-        let host  = SeatHost(
-            configuration: SeatHostConfiguration(followsNewWindows: following)
-        )
+        let host = SeatHost(configuration: configuration)
 
         do { try MonitorBench.awaiting { try await host.start() } }
         catch {
-            print("\(windowWatchName): FAIL, \(label): the host did not start: \(error)")
+            print("\(benchmark): FAIL, \(label): the host did not start: \(error)")
             return nil
         }
 
@@ -391,14 +411,20 @@ enum SeatSessionBench {
         var samples : (cpuPercents: [Double], cpuMedianPercent: Double, wakeupsPerSecond: Double)?
         var failure : String?
 
+        func inspected() -> String? { inspect?(host).map { "\(label): \($0)" } }
+
         do {
             let seat    = try host.makeSeat()
             let adopted = try MonitorBench.awaiting {
                 try await seat.adopt(home, platform: AppKitPlatform(), title: "")
             }
-            let before = seat.windowFollowScanCount
-            samples = sampleIdle(seconds: seconds, clock: clock, label: label)
-            scans   = seat.windowFollowScanCount - before
+            failure = inspected()
+            if failure == nil {
+                let before = seat.windowFollowScanCount
+                samples = sampleIdle(seconds: seconds, clock: clock, label: label)
+                scans   = seat.windowFollowScanCount - before
+                failure = inspected()
+            }
             _ = try MonitorBench.awaiting { await seat.release(adopted, .returnToUserSeat) }
         } catch {
             failure = "\(label): \(error)"
@@ -408,11 +434,11 @@ enum SeatSessionBench {
         MonitorBench.pump(0.5)
 
         if let failure {
-            print("\(windowWatchName): FAIL, \(failure)")
+            print("\(benchmark): FAIL, \(failure)")
             return nil
         }
         guard let samples, !samples.cpuPercents.isEmpty else {
-            print("\(windowWatchName): FAIL, \(label): no usable sample")
+            print("\(benchmark): FAIL, \(label): no usable sample")
             return nil
         }
 
@@ -423,6 +449,230 @@ enum SeatSessionBench {
             samples.wakeupsPerSecond,
             elapsed > 0 ? Double(scans) / elapsed : 0
         )
+    }
+
+    // MARK: focus-refresh
+
+    /// The default window each half of the focus pair is sampled over. The
+    /// refresh rides the heartbeat that already beats once a second, so a
+    /// minute is sixty of them, and the pair costs two minutes of the person's
+    /// machine rather than ten.
+    static let defaultFocusRefreshSeconds: Double = 60
+
+    /// What the focus recovery's preparation refresh costs a seat that holds a
+    /// window and does nothing else, **net of the same seat with
+    /// `restoresUserFocus` off**.
+    ///
+    /// ## The pair
+    ///
+    /// The window watch's shape, for the same reason: both halves bring up a
+    /// virtual display, install the fence, adopt this process's own window and
+    /// beat the same heartbeat for the same length of time, and the only
+    /// difference is the one switch. `allowUnvalidatedFocusRecovery` travels
+    /// with it because the activation export is deliberately absent from
+    /// `validated-builds.json`, and the facility refuses without that opt-in;
+    /// it relaxes no symbol, record or Accessibility check.
+    /// `followsNewWindows` is off in both halves, so the only refresh measured
+    /// here is the heartbeat's: the window-created wake-up is installed by the
+    /// watch, and at rest nothing creates a window anyway.
+    ///
+    /// ## What the number covers, and what it does not
+    ///
+    /// A refresh with no destination returns before it resolves an owner and
+    /// before it enumerates the window server, so a seat with nowhere to go
+    /// would report a cost of zero for work that costs something. This reads
+    /// the destination the recovery reads, through the host's own witness,
+    /// once with the window adopted and once when the sampling ends, on both
+    /// halves. A half without one, or one whose destination moved under it, is
+    /// a failed run and never a zero.
+    ///
+    /// The destination is the person's own frontmost window because it cannot
+    /// be one of ours: `rememberUserWindow` refuses a frontmost process the
+    /// seat has adopted, and the only window this process can adopt is its
+    /// own. A second cooperative process is what the stage benchmark needs a
+    /// fixture application for, and this driver has none to offer.
+    ///
+    /// So the number is the whole refresh, sixty times: the destination
+    /// reading, the owner and PSN resolution on the main actor, and the window
+    /// server enumeration off it. It is not the cost of an activation, of a
+    /// restoration or of its verification. Nothing activates during this run,
+    /// and those intervals have their own approved budgets.
+    ///
+    /// ## Reported, not gated
+    ///
+    /// No budget. The refresh's cost has never been measured on a real
+    /// machine, and a limit derived from arithmetic over other rows is the
+    /// thing this benchmark exists to replace. The owner promotes a row to a
+    /// gate once three runs have decided a number, which is the rule every
+    /// budget in `Budgets.swift` was written under.
+    static func runFocusRefresh(
+        seconds          : Double,
+        outputPath       : String?,
+        baselineDirectory: String?
+    ) -> Bool {
+
+        let clock = Clock()
+        NSApplication.shared.setActivationPolicy(.accessory)
+        NSApplication.shared.finishLaunching()
+        MonitorBench.pump(0.2)
+
+        guard AXIsProcessTrusted() else {
+            print("\(focusRefreshName): FAIL, Accessibility is not granted, nothing can be adopted")
+            return false
+        }
+
+        let window = NSWindow(
+            contentRect: NSRect(x: 200, y: 200, width: 420, height: 320),
+            styleMask  : [.titled],
+            backing    : .buffered,
+            defer      : false
+        )
+        window.title       = "AgentSeatKit focus refresh bench"
+        window.contentView = BenchTargetView(frame: NSRect(x: 0, y: 0, width: 420, height: 320))
+        window.orderFrontRegardless()
+        MonitorBench.pump(0.3)
+        defer { window.close() }
+
+        guard let home = WindowServerProbe.geometry(of: Int(window.windowNumber)) else {
+            print("\(focusRefreshName): FAIL, the window server does not know our own window")
+            return false
+        }
+
+        // One destination across the whole pair: its absence makes the measured
+        // half meaningless, and a change of it makes the subtraction meaningless.
+        var destination: WindowReference?
+        let inspect: (SeatHost) -> String? = { host in
+            guard let found = focusDestination(host) else {
+                return "no user window is a focus destination, so every refresh returns "
+                    + "before it resolves an owner: leave an ordinary application "
+                    + "frontmost, with a window on a physical display"
+            }
+            if let held = destination, !held.hasSameIdentity(as: found) {
+                return "the focus destination changed under the run, window "
+                    + "\(held.windowNumber) to \(found.windowNumber)"
+            }
+            destination = found
+            return nil
+        }
+
+        // The half with the recovery runs first, so a run with no destination
+        // costs one minute instead of two before it says so.
+        guard let restoring = sampleSeat(
+            configuration: SeatHostConfiguration(
+                restoresUserFocus            : true,
+                allowUnvalidatedFocusRecovery: true
+            ),
+            benchmark    : focusRefreshName,
+            label        : "recovery on",
+            home         : home,
+            seconds      : seconds,
+            clock        : clock,
+            inspect      : inspect
+        ) else { return false }
+
+        guard let control = sampleSeat(
+            configuration: SeatHostConfiguration(),
+            benchmark    : focusRefreshName,
+            label        : "recovery off",
+            home         : home,
+            seconds      : seconds,
+            clock        : clock,
+            inspect      : inspect
+        ) else { return false }
+
+        let netCpu = Sample(
+            name       : focusRefreshName,
+            nanoseconds: restoring.cpuPercents.map {
+                max(0, $0 - control.cpuMedianPercent) * 1_000
+            },
+            allocations: 0,
+            frees      : 0
+        )
+        let medianPercent = netCpu.p50 / 1_000
+        let p95Percent    = netCpu.p95 / 1_000
+        let netWakeups    = max(0, restoring.wakeupsPerSecond - control.wakeupsPerSecond)
+        let named         = describe(destination)
+
+        print("""
+            \(focusRefreshName): \(Int(seconds)) s a side, net CPU median \
+            \(format(medianPercent)) %, p95 \(format(p95Percent)) %, \
+            wake-ups \(format(netWakeups))/s
+            recovery off: CPU median \(format(control.cpuMedianPercent)) %, \
+            wake-ups \(format(control.wakeupsPerSecond))/s
+            destination: \(named), read again when each half ended
+            covers: the destination reading, the owner and PSN resolution and the \
+            window server enumeration, once a second. Not an activation, a \
+            restoration or a verification: nothing activated during this run.
+            """)
+
+        let results: [[String: Any]] = [
+            [
+                "name"  : "\(focusRefreshName)-cpu-median",
+                "unit"  : "percent",
+                "n"     : restoring.cpuPercents.count,
+                "p50"   : medianPercent,
+                "p95"   : p95Percent,
+                "mean"  : medianPercent,
+                "status": "measured",
+                "detail": "destination \(named)",
+            ],
+            [
+                "name"  : "\(focusRefreshName)-wakeups",
+                "unit"  : "per-second",
+                "n"     : restoring.cpuPercents.count,
+                "p50"   : netWakeups,
+                "mean"  : netWakeups,
+                "status": "measured",
+            ],
+            [
+                "name"  : "\(focusRefreshName)-control-cpu-median",
+                "unit"  : "percent",
+                "n"     : control.cpuPercents.count,
+                "p50"   : control.cpuMedianPercent,
+                "mean"  : control.cpuMedianPercent,
+                "status": "measured",
+            ],
+        ]
+
+        write(
+            results          : results,
+            clock            : clock,
+            outputPath       : outputPath,
+            baselineDirectory: baselineDirectory
+        )
+        print("\(focusRefreshName): REPORTED, no budget: a gate needs a real run to decide one")
+        return true
+    }
+
+    /// The destination reading `UserFocusRecovery` takes, taken here through the
+    /// host's own witness so the answer is the kit's own and not a second
+    /// implementation of it.
+    ///
+    /// It mirrors `currentUserWindow` and `validDestination` together. The one
+    /// clause written differently is theirs over the adopted processes, which
+    /// here is this process: its own window is the only one this driver adopts.
+    private static func focusDestination(_ host: SeatHost) -> WindowReference? {
+
+        guard let sensing = host.sensing,
+              let window  = sensing.focusedUserWindow,
+              sensing.frontmostProcessID == window.processID,
+              window.processID != getpid(),
+              let current = sensing.windowGeometry(of: window.windowNumber),
+              current.hasSameIdentity(as: window),
+              !current.frame.isEmpty,
+              !current.frame.intersects(sensing.virtualDisplayBounds),
+              sensing.windowIsVisibleOnPhysicalDisplay(current)
+        else { return nil }
+
+        return current
+    }
+
+    /// The destination as a person reads it: a number nobody can attribute to
+    /// an application is a number nobody can reproduce.
+    private static func describe(_ window: WindowReference?) -> String {
+        guard let window else { return "none" }
+        let name = NSRunningApplication(processIdentifier: window.processID)?.localizedName
+        return "\(name ?? "pid \(window.processID)") window \(window.windowNumber)"
     }
 
     // MARK: recovery

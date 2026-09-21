@@ -13,8 +13,15 @@
 # summary the runner printed and the reported, executed and skipped counts, which is why every
 # tier here declares how many tests it must report.
 #
+# A tier that runs unfiltered declares its bundle count in TIER_BUNDLES instead,
+# because one test target prints exactly one summary line: a whole bundle can die
+# after its suites pass and take its summary with it, which reads as a green tier
+# with a smaller `runs` number that nobody looks at. Measured on the unit tier:
+# 10 summaries instead of 11, 278 tests gone, exit 0.
+#
 # Usage: run-tier.sh <label> <expected-tests|-> <command...>
-#        `-` means "no count declared": exit status plus at least one summary.
+#        `-` means "no test count declared": exit status plus at least one summary.
+#        TIER_BUNDLES=<n> additionally requires n summary lines, one per bundle.
 
 set -uo pipefail
 
@@ -39,5 +46,6 @@ if [ "${pipeline_status[1]}" -ne 0 ]; then
 fi
 
 # Keep the validated result in the same log the compatibility report reads.
-python3 "$(dirname "$0")/tier-result.py" "$label" "$expected" "$status" "$log" | tee -a "$log"
+python3 "$(dirname "$0")/tier-result.py" "$label" "$expected" "$status" "$log" \
+    "${TIER_BUNDLES:--}" | tee -a "$log"
 exit "${PIPESTATUS[0]}"
