@@ -217,6 +217,37 @@ struct NestedModalStackTests {
         }
     }
 
+    /// The window server names a destroyed identity once. Whichever of the
+    /// seat's readings takes that pass is the only one that ever sees it, and
+    /// the presence probe a closure transition makes is not the reading that
+    /// ends a containment wait. Live, the proof landed in the probe, the fold
+    /// after it was told nothing, and the seat spent both containment budgets
+    /// on an auxiliary window that had already ended.
+    @Test("a destruction the presence probe consumed still ends the containment wait")
+    func aDestructionReadElsewhereStillEndsTheWait() async throws {
+        let (seat, reader, target, gone) = try await Self.auxiliary()
+        let goneIdentity = try #require(gone.reference.identity)
+
+        // The one pass carrying the proof is spent on a probe about the target.
+        reader.destroyed     = [goneIdentity]
+        reader.windowNumbers = [target.id]
+        #expect(seat.logicalSurfacePresence(of: try #require(target.reference.identity))
+                == .present)
+
+        // Every pass after it is silent, exactly as the window server is.
+        reader.destroyed = []
+        seat.refreshTargetReadings()
+
+        #expect(Self.held(seat) == [target.id], "the record goes with the window")
+        #expect(seat.assignmentKit.inventory.surfaces[gone.id] == nil)
+
+        let absent = seat.selectionKit.operability().causes.contains { cause in
+            guard case .containmentNotVerified(let blocks) = cause else { return false }
+            return blocks.contains(.surfaceAbsent(windowNumber: gone.id))
+        }
+        #expect(!absent, "a window proved destroyed is not a surface the seat waits for")
+    }
+
     // MARK: The focus suspension
 
     @Test("reconciliation keeps running while the input is suspended for the person's focus")

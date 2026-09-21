@@ -153,6 +153,11 @@ public final class AgentSeat {
     /// An unavailable fresh read never consults it.
     var logicalClosureEvidence: [WindowIdentity: LogicalSurfacePresence] = [:]
     var reconciledLogicalClosures: Set<WindowIdentity> = []
+    /// Window server destruction proofs a reading took but has not yet spent.
+    /// Only the fold and the reconciliation before a release end a containment
+    /// wait, so a proof that landed in the presence probe waits here for one of
+    /// them rather than being lost with the pass that carried it.
+    var pendingDestruction: Set<WindowIdentity> = []
     private var observer           : SeatObserver?
     private var observationSoFar   : SeatObservation?
     private var recoveryBudget     = RecoveryPolicy()
@@ -1451,8 +1456,9 @@ public final class AgentSeat {
 
         var settled: Set<Int> = []
 
-        let snapshot = surfaceReader.snapshot(ownedBy: session.processIDs)
-        var destroyed = Set(snapshot.destroyedByWindowServer)
+        let snapshot = readSurfaces()
+        var destroyed = pendingDestruction
+        pendingDestruction = pendingDestruction.filter { $0.process != instance }
         if snapshot.inventory.completeness.isQualified {
             let currentNumbers = Set(snapshot.inventory.rows.map { $0.surface.reference.windowNumber })
             for (identity, presence) in logicalClosureEvidence

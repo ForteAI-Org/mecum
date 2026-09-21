@@ -193,6 +193,28 @@ extension AgentSeat {
         observationIssuer.beginLifecycle()
     }
 
+    /// Takes one reading of the assigned instance's surfaces and keeps the one
+    /// piece of it no later reading can restate.
+    ///
+    /// A destruction proof is one-shot. The reader names a retained identity to
+    /// the window server exactly once, and the transition filter drops the
+    /// identity the moment an answer comes back destroyed, so every pass after
+    /// it is silent about the window. Whichever of the seat's readers happened
+    /// to take that pass is therefore the only one that will ever see it, and
+    /// two of the three, the presence probe the closure transition makes and
+    /// the reconciliation before a release, do not end containment waits. Every
+    /// reading goes through here so the proof is remembered for the fold that
+    /// does, instead of depending on which caller polled first.
+    func readSurfaces() -> AssignedSurfaceSnapshot {
+
+        let snapshot = surfaceReader.snapshot(ownedBy: session.processIDs)
+        for identity in snapshot.destroyedByWindowServer {
+            logicalClosureEvidence[identity] = .destroyed
+            pendingDestruction.insert(identity)
+        }
+        return snapshot
+    }
+
     /// Folds one reading of the assigned instance's surfaces through both nuclei.
     ///
     /// It is called where the seat already takes readings: after an adoption, at
@@ -207,7 +229,7 @@ extension AgentSeat {
     func foldCurrentReading(at now: UInt64 = DispatchTime.now().uptimeNanoseconds) {
 
         guard assignmentKit.lifecycle.isAssigned else { return }
-        let snapshot = surfaceReader.snapshot(ownedBy: session.processIDs)
+        let snapshot = readSurfaces()
         var reading  = snapshot.inventory
         let claims   = snapshot.claims
 
@@ -222,9 +244,6 @@ extension AgentSeat {
                     case .hiddenEstablished, .minimisedEstablished, .uncertain:
                         break
                 }
-            }
-            for identity in snapshot.destroyedByWindowServer {
-                logicalClosureEvidence[identity] = .destroyed
             }
             for identity in snapshot.withdrawnByApplication {
                 logicalClosureEvidence[identity] = .withdrawn
@@ -245,7 +264,9 @@ extension AgentSeat {
 
         // Before the fold, so the destroyed member is gone from membership for
         // this pass instead of spending another pass of its containment budget.
-        for identity in snapshot.destroyedByWindowServer {
+        // Proof another reader took is drained here too, because this is the
+        // only reading that ends a containment wait.
+        for identity in pendingDestruction.sorted(by: { $0.windowNumber < $1.windowNumber }) {
             AgentSeat.observationLog.info("""
                 the window server confirmed window \(identity.windowNumber, privacy: .public) \
                 was destroyed: ending its containment wait
@@ -253,6 +274,7 @@ extension AgentSeat {
             noteSurfaceGone(identity.windowNumber, evidence: .windowServerConfirmedDestruction)
             _ = dropDestroyedRecord(identity.windowNumber)
         }
+        pendingDestruction.removeAll()
 
         selectionKit.ingest(
             reading,
@@ -298,7 +320,7 @@ extension AgentSeat {
               session.processIdentities.contains(identity.process)
         else { return .unreadable }
 
-        let snapshot = surfaceReader.snapshot(ownedBy: session.processIDs)
+        let snapshot = readSurfaces()
         guard snapshot.inventory.completeness.isQualified else { return .unreadable }
 
         if let visibility = snapshot.claims.visibilities.first(where: { $0.surface == identity }) {
@@ -319,7 +341,6 @@ extension AgentSeat {
 
         switch snapshot.retained[identity] {
             case .destroyed?:
-                logicalClosureEvidence[identity] = .destroyed
                 return .destroyed
             case .withdrawn?:
                 logicalClosureEvidence[identity] = .withdrawn
@@ -891,6 +912,7 @@ extension AgentSeat {
     func endAssignmentAndObservation(reason: ObservationInvalidation) {
         logicalClosureEvidence.removeAll()
         reconciledLogicalClosures.removeAll()
+        pendingDestruction.removeAll()
         guard assignmentKit.lifecycle.isAssigned else {
             observationIssuer.invalidate(reason)
             outstandingGeometry = nil
