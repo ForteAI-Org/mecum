@@ -3,9 +3,12 @@
 `SeatBroker` is the reusable application-facing runtime, under
 `Sources/SeatBroker` with its tests under `Tests/SeatBrokerTests`. It turns a
 captured scene into `SemanticAction` values, asks Mecum to execute each action,
-and verifies the resulting scene. `MecumPerception` contains the independent
-locator, accessibility, capture, OCR, CV, and relocation components that the
-runtime uses.
+and verifies the resulting scene. The locator, accessibility, capture, OCR,
+CV and relocation modules it still reads scenes through (`LocatorCore`,
+`AXSupport`, `CaptureSupport`, `OCRSupport`, `CVBackend`, `Relocation`) are
+internal targets of this product and no part of `MecumPerception`, which is the
+Perception layer described in `Documentation/Perception/README.md`; the
+runtime is to consume that layer instead, ticket by ticket.
 
 Brokering a seat is all it does: it names no lease, scheduler, or other
 ownership model of its own. Those responsibilities already have precise owners

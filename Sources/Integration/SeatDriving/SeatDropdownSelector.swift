@@ -64,7 +64,8 @@ public struct SeatDropdownSelector {
         onMenu: @escaping @MainActor @Sendable (ContextMenu) -> Void,
         onCapture: @escaping @MainActor @Sendable (String, CGImage) throws -> Void
     ) async throws -> (outcome: ActOutcome, receipt: PopupMenuReceipt?) {
-        let beforeStill = try await target.windowStill()
+        let beforeDelivery = try await target.observe()
+        let beforeStill = beforeDelivery.frame
         let before = try await perceive(
             beforeStill, identity: identity, title: window.title,
             stage: "before", onCapture: onCapture
@@ -146,8 +147,10 @@ public struct SeatDropdownSelector {
                 return true
             }
         } else {
-            guard let geometry = beforeStill.geometry.windowObservation,
-                  let location = InputLocation(screenPoint: before.globalPoint(of: opener), observedIn: geometry) else {
+            // The observation's own geometry, which is what the seat converts a coordinate
+            // through: the opener is clicked under the picture it was read in.
+            guard let location = InputLocation(screenPoint: before.globalPoint(of: opener),
+                                               observedIn: beforeDelivery.geometry) else {
                 throw SeatDrivingFailure.frameUnusable
             }
             receipt = try await seat.useDropdownMenu(

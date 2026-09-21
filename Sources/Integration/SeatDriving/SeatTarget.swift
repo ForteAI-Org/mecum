@@ -17,18 +17,24 @@ import WindowPlacement
 /// display and the fence, the seat on it, and the window adopted there. It is the one owner of the
 /// Driver's lifecycle in this layer; the scene provider and the actuator borrow it.
 ///
-/// Main actor, like the seat it wraps. Every still it takes records the window's pixel-to-screen
-/// geometry, which is what authorizes a later click: the seat refuses a point that was not measured
-/// under an observation, and this is where the observation comes from.
+/// Main actor, like the seat it wraps. Every still it takes comes from `AgentSeat.observe()`, which
+/// hands the Frame together with the Observation Reference that binds it: that reference is what
+/// authorizes the next gesture, because a Command is addressed by the observation it was decided on
+/// and never by a window. This is where the observation is kept between the two.
 @MainActor
 public final class SeatTarget {
 
     private let host: SeatHost
     private var seat: AgentSeat?
     private var adopted: AdoptedWindow?
-    /// The geometry of the last full-window still, the coordinate authority for the next command.
+
+    /// The observation the last Frame was delivered with, and whether a Command already consumed it.
+    private var delivery: SeatObservationDelivery?
+    private var deliverySpent = false
+
+    /// The geometry of the last observation, the coordinate authority for the next command.
     public private(set) var lastWindowGeometry: WindowGeometryObservation?
-    /// The window whose pixels were last captured, which can be the held predecessor of a closed dialog.
+    /// The window whose pixels were last observed, resolved from the delivery's own recipient.
     public private(set) var lastCapturedWindow: AdoptedWindow?
 
     public init(configuration: SeatHostConfiguration = SeatHostConfiguration(restoresUserFocus: true)) {
@@ -75,40 +81,54 @@ public final class SeatTarget {
     /// The virtual display, once started.
     public var displayID: CGDirectDisplayID? { host.displayID }
 
-    /// One still of the adopted window at its own resolution. ScreenCaptureKit sometimes answers a
-    /// one-shot with no buffer right after a window moved, so a miss is retried before it is an error.
-    public func windowStill() async throws -> SeatFrame {
-        let frame = try await Self.retrying { [self] in
-            let window = try observationWindow()
-            guard let identity = window.reference.identity else { throw SeatDrivingFailure.notAdopted }
-            let captured = try await SeatCaptureStream.still(of: .attestedWindow(identity), timeout: .seconds(5))
-            lastCapturedWindow = window
-            return captured
+    /// One observation of the selected window: the Frame and the reference the next Command is
+    /// admitted under, kept here so the gesture that follows a scene is posted under the very
+    /// picture that scene was read from. ScreenCaptureKit sometimes answers a one-shot with no
+    /// buffer right after a window moved, so an unavailable observation is retried before it is an
+    /// error.
+    ///
+    /// Which window is observed is the seat's own choice and no longer this layer's: the seat
+    /// follows the application through a dialog's closure and selects the surviving surface, which
+    /// is what the predecessor reading here used to do by hand. Aiming a capture from outside would
+    /// produce pixels with no reference, and a Frame nobody can act on.
+    @discardableResult
+    public func observe() async throws -> SeatObservationDelivery {
+        let seat = try agentSeat()
+        let delivered = try await Self.retrying {
+            switch await seat.observe() {
+                case .success(let delivery): return delivery
+                case .failure(let reason)  : throw SeatDrivingFailure.notObservable(String(describing: reason))
+            }
         }
-        if let geometry = frame.geometry.windowObservation { lastWindowGeometry = geometry }
-        return frame
+        delivery           = delivered
+        deliverySpent      = false
+        lastWindowGeometry = delivered.geometry
+        lastCapturedWindow = seat.adoptedWindows.first {
+            $0.reference.identity == delivered.reference.recipient
+        }
+        return delivered
     }
 
-    /// Reads an already-held predecessor when the current dialog has disappeared. This does not
-    /// retarget input or recover a failed Seat: it supplies the evidence needed to confirm the
-    /// pending action, whose unknown effect would otherwise prevent Driver recovery.
-    private func observationWindow() throws -> AdoptedWindow {
-        let current = try currentWindow()
-        if let live = WindowServerProbe.geometry(of: current.id) {
-            guard live.hasSameIdentity(as: current.reference) else {
-                throw SeatDrivingFailure.windowNotAttested(number: current.id, processID: current.reference.processID)
-            }
-            return current
-        }
-        guard let seat else { throw SeatDrivingFailure.notAdopted }
-        for number in seat.targetHistory.reversed() where number != current.id {
-            guard let candidate = seat.adoptedWindows.first(where: { $0.id == number }),
-                  candidate.reference.identity?.process == current.reference.identity?.process,
-                  let live = WindowServerProbe.geometry(of: number),
-                  live.hasSameIdentity(as: candidate.reference) else { continue }
-            return candidate
-        }
-        throw SeatDrivingFailure.windowNotAttested(number: current.id, processID: current.reference.processID)
+    /// The observation the next Command is admitted under. A complete Command consumes its
+    /// observation, so one that already carried a Command is replaced by a new look rather than
+    /// handed out twice: the seat refuses the second gesture under the same reference, and that
+    /// refusal would arrive after the engine had already decided what to do.
+    public func currentObservation() async throws -> SeatObservationDelivery {
+        if let delivery, !deliverySpent { return delivery }
+        return try await observe()
+    }
+
+    /// Records that a Command went out under the kept observation, which ends its authority. A
+    /// Command refused before any effect leaves the observation exactly as it was, so this is
+    /// called only once the events have gone out.
+    public func spendObservation() {
+        deliverySpent = true
+    }
+
+    /// One still of the observed window, for perception. It is the observation's own Frame, so a
+    /// scene read from it and the gesture decided on that scene are bound to the same picture.
+    public func windowStill() async throws -> SeatFrame {
+        try await observe().frame
     }
 
     /// One still of the whole virtual display: the only capture that holds both the window and a
@@ -136,6 +156,8 @@ public final class SeatTarget {
         }
         adopted = nil
         seat = nil
+        delivery = nil
+        deliverySpent = false
         lastCapturedWindow = nil
         lastWindowGeometry = nil
         _ = await host.stop()
