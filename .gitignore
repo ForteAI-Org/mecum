@@ -19,3 +19,11 @@ DerivedData/
 
 # Python
 __pycache__/
+
+# Xcode build products. `xcodebuild` writes ./build relative to its working
+# directory when no -derivedDataPath is given, which is how these appear.
+/build/
+/MecumApp/build/
+/MecumApp/App/build/
+# A clang module cache left by a mis-parsed -Xcc flag.
+-Xcc/
