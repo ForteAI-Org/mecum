@@ -744,7 +744,7 @@ enum SeatErrorMapper {
             "The capture stream's configuration state is unknown, so it fails closed."
         case .screenRecordingPermissionMissing:
             "Capturing the window needs Screen Recording, and it is not granted. "
-                + "A fresh grant only reaches a new launch, so AgentLab has to be relaunched."
+                + "A fresh grant only reaches a new launch, so Mecum has to be relaunched."
         case .displayNotShareable(let displayID):
             "ScreenCaptureKit does not share the display \(displayID)."
         case .windowNotShareable(let windowNumber):
