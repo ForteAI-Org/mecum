@@ -1,52 +1,6 @@
 import Foundation
+import ModelTransports
 import SeatCore
-
-/// Raw plan as every provider returns it: `status`, `reason`, `steps` with a
-/// `"<index>:<action>"` target. One schema, one parser, four transports.
-struct RawPlan: Codable, Sendable {
-    struct Step: Codable, Sendable {
-        let target: String
-        let text: String?
-        /// The number of complete primary-button clicks for a `:click` step.
-        /// Omitted means one; all other verbs leave it null.
-        var count: Int? = nil
-        let reason: String
-
-        /// True only when the count asks for more than one click. Nil, 0 and 1
-        /// all mean the same single press, and a structured-output mode that
-        /// must emit the key fills one of those three on a step with nothing to
-        /// click: refusing them refuses every plan the schema allows.
-        var namesMultipleClicks: Bool { (count ?? 1) >= 2 }
-    }
-    let status: String
-    let reason: String
-    let steps: [Step]
-    /// The application `status: "open"` asks for. Optional so a provider that
-    /// leaves the key out entirely still decodes; validation is what refuses
-    /// an open without a name.
-    var application: String? = nil
-}
-
-struct PlanReply: Sendable {
-    let plan: RawPlan
-    let usage: ModelUsage?
-}
-
-/// A model transport. It receives the full prompt and the JSON schema the
-/// answer must satisfy, and returns the decoded plan. It never sees the seat.
-protocol ModelClient: Sendable {
-    var schemaFlavor: PlanSchema.Flavor { get }
-    /// Small local models get the short prompt: fewer rules, terser scene lines.
-    var prefersCompactPrompt: Bool { get }
-    /// How long one answer may take before the run gives up on it.
-    var requestTimeout: TimeInterval { get }
-    func plan(prompt: String, schema: Data, timeout: TimeInterval) async throws -> PlanReply
-}
-
-extension ModelClient {
-    var prefersCompactPrompt: Bool { false }
-    var requestTimeout: TimeInterval { 180 }
-}
 
 enum PlanValidationError: LocalizedError {
     case badTarget(String)
@@ -86,6 +40,27 @@ enum PlanSchema {
         case anthropic
         /// Gemini: OpenAPI subset, `nullable` instead of type unions, no `additionalProperties`.
         case gemini
+    }
+
+    /// The subset a provider's structured-output mode accepts. Planner
+    /// vocabulary, not the transport's: the schema is this layer's to write.
+    static func flavor(for provider: ModelProvider) -> Flavor {
+        switch provider {
+        case .codex: .full
+        case .claudeCode: .full
+        case .anthropic: .anthropic
+        case .gemini: .gemini
+        case .ollama: .full
+        }
+    }
+
+    /// Decodes the plan JSON a provider returned as text.
+    static func decodePlan(_ text: String) throws -> RawPlan {
+        do {
+            return try JSONDecoder().decode(RawPlan.self, from: Data(text.utf8))
+        } catch {
+            throw ProviderError.badResponse(String(text.prefix(300)))
+        }
     }
 
     /// Targets the model may copy for this scene.

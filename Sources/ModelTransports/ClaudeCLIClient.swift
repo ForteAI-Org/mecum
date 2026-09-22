@@ -4,18 +4,26 @@ import Foundation
 /// no API key. `claude -p` with `--json-schema` returns the structured answer
 /// in `structured_output`; every built-in tool is disabled so the planner can
 /// only answer. Same process runner and environment allow-list as Codex.
-actor ClaudeCLIClient: ModelClient {
+actor ClaudeCLIClient: ModelTransport {
     private let model: String
     private let effort: ReasoningEffort
     private var authenticated = false
-    nonisolated var schemaFlavor: PlanSchema.Flavor { .full }
+
+    /// `claude -p --output-format json` prints one object when the turn is
+    /// over, and the answer is read from the finished process. There is no
+    /// event line to hang a conversation on.
+    nonisolated var streaming: StreamingSupport {
+        .unsupported(reason: "the Claude Code CLI is run with --output-format json, which prints one "
+            + "object after the turn has finished")
+    }
 
     init(model: String, effort: ReasoningEffort) {
         self.model = model
         self.effort = effort
     }
 
-    func plan(prompt: String, schema: Data, timeout: TimeInterval) async throws -> PlanReply {
+    func complete(prompt: String, schema: Data, timeout: TimeInterval)
+        async throws -> (text: String, usage: ModelUsage) {
         if !authenticated {
             try await Self.checkAuthentication()
             authenticated = true
@@ -59,7 +67,7 @@ actor ClaudeCLIClient: ModelClient {
 
     /// `claude -p --output-format json` prints one JSON object. Success carries
     /// `structured_output`; a failure has `is_error` and a `subtype` naming why.
-    static func decode(_ result: CodexCLIClient.ProcessResult) throws -> PlanReply {
+    static func decode(_ result: CodexCLIClient.ProcessResult) throws -> (text: String, usage: ModelUsage) {
         guard let json = try? JSONSerialization.jsonObject(with: result.output) as? [String: Any] else {
             let stderr = String(decoding: result.errors.prefix(300), as: UTF8.self)
             throw ClaudeClientError.failed(stderr.isEmpty ? "no JSON answer (exit \(result.status))" : stderr)
@@ -71,12 +79,14 @@ actor ClaudeCLIClient: ModelClient {
         guard let structured = json["structured_output"] else {
             throw ClaudeClientError.failed("no structured_output in the answer (\(json["subtype"] as? String ?? "?"))")
         }
-        let plan = try JSONDecoder().decode(RawPlan.self, from: try JSONSerialization.data(withJSONObject: structured))
+        // The structured answer comes back as a JSON value; the caller's own
+        // decoder reads it, so it is handed on as the text it was.
+        let text = String(decoding: try JSONSerialization.data(withJSONObject: structured), as: UTF8.self)
         let usage = json["usage"] as? [String: Any]
         let milliseconds = (json["duration_api_ms"] as? Int) ?? 0
-        return PlanReply(plan: plan, usage: ModelUsage(inputTokens: usage?["input_tokens"] as? Int,
-                                                       outputTokens: usage?["output_tokens"] as? Int,
-                                                       duration: .milliseconds(milliseconds)))
+        return (text, ModelUsage(inputTokens: usage?["input_tokens"] as? Int,
+                                 outputTokens: usage?["output_tokens"] as? Int,
+                                 duration: .milliseconds(milliseconds)))
     }
 }
 

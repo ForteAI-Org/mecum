@@ -1,5 +1,6 @@
 import CoreGraphics
 import Foundation
+import ModelTransports
 
 /// The text a model plans from: rules, a legend of the scene format, goal,
 /// verified history and the scene with its allowed targets. Interface text
@@ -10,6 +11,16 @@ import Foundation
 /// below, so the one decision that is legal there is stated rather than
 /// discovered through a refusal.
 enum PlannerPrompt {
+    /// Small local models get the short prompt: fewer rules, terser scene
+    /// lines. Which model that is belongs to this prompt, not to the transport
+    /// that carries it.
+    static func prefersCompactPrompt(_ provider: ModelProvider) -> Bool {
+        switch provider {
+        case .codex, .claudeCode, .anthropic, .gemini: false
+        case .ollama: true
+        }
+    }
+
     /// What the model is told in place of a scene when nothing is adopted.
     /// It repeats the open contract in the imperative because it is read at
     /// the only moment when no other answer can be executed at all.

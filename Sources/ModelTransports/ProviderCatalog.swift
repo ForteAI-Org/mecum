@@ -4,9 +4,9 @@ import Foundation
 /// Codex asks the CLI's login state, the API providers need a key, Ollama a
 /// reachable server. Model lists come from the providers themselves where an
 /// endpoint exists.
-enum ProviderCatalog {
+public enum ProviderCatalog {
     /// nil when the provider is usable, otherwise the reason it is not.
-    static func status(_ provider: ModelProvider, settings: ProviderSettings) async -> String? {
+    public static func status(_ provider: ModelProvider, settings: ProviderSettings) async -> String? {
         switch provider {
         case .codex:
             do {
@@ -37,7 +37,7 @@ enum ProviderCatalog {
     }
 
     /// Models the provider reports as available to this account or server.
-    static func models(_ provider: ModelProvider, settings: ProviderSettings) async throws -> [String] {
+    public static func models(_ provider: ModelProvider, settings: ProviderSettings) async throws -> [String] {
         switch provider {
         case .codex, .claudeCode:
             return provider.knownModels
@@ -64,5 +64,11 @@ enum ProviderCatalog {
         case .ollama:
             return try await OllamaClient.models(host: settings.ollamaHost)
         }
+    }
+
+    /// Models the local Ollama server has pulled, for a host that is not the
+    /// one in the settings yet.
+    public static func ollamaModels(host: String) async throws -> [String] {
+        try await OllamaClient.models(host: host)
     }
 }

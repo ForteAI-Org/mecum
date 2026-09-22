@@ -1,4 +1,5 @@
 import Foundation
+import ModelTransports
 
 /// One executed step as it is kept on disk: no images, just the verdict.
 public struct RunStepRecord: Codable, Sendable, Hashable, Identifiable {

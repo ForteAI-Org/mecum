@@ -41,6 +41,21 @@ covered. Scrolling an element into view has no planner any more: `ActionEngine`
 has no scroll verb and this runtime posts a plain scroll through the seat, so a
 scroll role is written when a consumer asks for one.
 
+Talking to a model is not this runtime's job either. The transports live in
+`Sources/ModelTransports` behind `ModelTransport`, which offers one structured
+request (`complete`, returning the provider's raw text and its `ModelUsage`)
+and one streamed conversational turn (`converse`, a stream of text deltas
+closed by a single terminal element). A transport that cannot carry a
+conversation declares so through `streaming` and throws
+`ModelTransportError.streamingUnsupported`, which is what both CLI providers
+do. What stays here is the planner's own vocabulary: `AgentPlanner` builds the
+prompt and the schema, calls `complete`, and decodes the answer itself with
+`PlanSchema.decodePlan`; which schema flavor and which prompt shape a provider
+gets are `PlanSchema.flavor(for:)` and
+`PlannerPrompt.prefersCompactPrompt(_:)`, not properties of the transport. The
+app depends on `ModelTransports` directly, so it can hold a plain conversation
+with a model without acquiring a seat at all.
+
 Brokering a seat is all it does: it names no lease, scheduler, or other
 ownership model of its own. Those responsibilities already have precise owners
 in the driver:
@@ -63,12 +78,13 @@ and view state. It does not duplicate runtime or perception code.
 
 ```mermaid
 flowchart LR
-    Lab[AgentLab SwiftUI] --> Broker[SeatBroker]
+    Lab[Mecum SwiftUI] --> Broker[SeatBroker]
+    Lab -->|conversation, no seat| Transports[ModelTransports]
     Broker -->|ScenePipeline| Perception[MecumPerception]
     Broker --> Driver[MecumDriver]
+    Broker -->|plan| Transports
     Driver --> Seat[SeatHost and AgentSeat]
     Seat -->|frames| Broker
-    Locator[Lab locator targets: unused leftovers, deleted next ticket]
 ```
 
 A semantic click may carry a bounded `count`. The parser accepts `/click N`

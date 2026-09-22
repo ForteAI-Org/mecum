@@ -1,6 +1,7 @@
 import AppKit
 import EngineCore
 import Foundation
+import ModelTransports
 import os
 import Perception
 import PerceptionCore
@@ -450,8 +451,9 @@ public final class AgentSession {
                 var reason = ""
                 var usage = RunUsage()
                 do {
-                    let client = Self.makeClient(selection, settings: settings)
-                    try await AgentPlanner(session: self, client: client).run(goal: goal) { event in
+                    let transport = selection.transport(settings: settings)
+                    try await AgentPlanner(session: self, provider: selection.provider,
+                                           transport: transport).run(goal: goal) { event in
                         switch event {
                         case .thinking(let decision, _): decisions = decision
                         case .executed(let report): reports.append(report)
@@ -524,16 +526,6 @@ public final class AgentSession {
         record.outputTokens = usage.output
         record.modelSeconds = usage.seconds > 0 ? usage.seconds : nil
         recorder.append(record)
-    }
-
-    private static func makeClient(_ selection: ModelSelection, settings: ProviderSettings) -> any ModelClient {
-        switch selection.provider {
-        case .codex: CodexCLIClient(model: selection.model, effort: selection.effort)
-        case .claudeCode: ClaudeCLIClient(model: selection.model, effort: selection.effort)
-        case .anthropic: AnthropicClient(model: selection.model, effort: selection.effort, apiKey: settings.anthropicAPIKey)
-        case .gemini: GeminiClient(model: selection.model, effort: selection.effort, apiKey: settings.geminiAPIKey)
-        case .ollama: OllamaClient(model: selection.model, effort: selection.effort, settings: settings)
-        }
     }
 
     /// Closes the seat's input gate at once, which is the first thing a panic

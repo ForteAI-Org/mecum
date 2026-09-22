@@ -25,18 +25,27 @@ public enum CodexClientError: LocalizedError {
 /// read, no API key exists, and every desktop tool of the CLI is disabled so
 /// the planner can only answer. Ported from the research lab, which validated
 /// this exact argument list.
-actor CodexCLIClient: ModelClient {
+actor CodexCLIClient: ModelTransport {
     private let model: String
     private let effort: ReasoningEffort
     private var authenticated = false
-    nonisolated var schemaFlavor: PlanSchema.Flavor { .full }
+
+    /// The CLI's event lines are written to a file that is read once the child
+    /// has exited, and the request is one `exec` turn with no conversation
+    /// behind it. Nothing here carries a chat, and pretending otherwise would
+    /// mean buffering a whole answer and calling it a stream.
+    nonisolated var streaming: StreamingSupport {
+        .unsupported(reason: "the Codex CLI is run as one non-interactive exec whose output is read "
+            + "only after the process exits")
+    }
 
     init(model: String, effort: ReasoningEffort) {
         self.model = model
         self.effort = effort
     }
 
-    func plan(prompt: String, schema: Data, timeout: TimeInterval) async throws -> PlanReply {
+    func complete(prompt: String, schema: Data, timeout: TimeInterval)
+        async throws -> (text: String, usage: ModelUsage) {
         if !authenticated {
             try await Self.checkAuthentication()
             authenticated = true
@@ -47,8 +56,8 @@ actor CodexCLIClient: ModelClient {
                                         input: Data(prompt.utf8), schema: schema, timeout: timeout)
         let output = try Self.decodeStructuredOutput(output: result.output, exitStatus: result.status)
         // The CLI reports no token counts; only the wall clock is known.
-        return PlanReply(plan: try JSONDecoder().decode(RawPlan.self, from: output),
-                         usage: ModelUsage(inputTokens: nil, outputTokens: nil, duration: started.duration(to: .now)))
+        return (String(decoding: output, as: UTF8.self),
+                ModelUsage(inputTokens: nil, outputTokens: nil, duration: started.duration(to: .now)))
     }
 
     static func checkAuthentication() async throws {
@@ -163,7 +172,7 @@ actor CodexCLIClient: ModelClient {
         try Task.checkCancellation()
         guard input.count <= 1_000_000 else { throw CodexClientError.inputLimit }
         let directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("AgentLab-Codex-" + UUID().uuidString, isDirectory: true)
+            .appendingPathComponent("Mecum-Codex-" + UUID().uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false,
                                                 attributes: [.posixPermissions: 0o700])
         defer { try? FileManager.default.removeItem(at: directory) }

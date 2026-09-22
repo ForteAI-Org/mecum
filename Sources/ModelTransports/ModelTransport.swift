@@ -1,0 +1,94 @@
+//
+//  ModelTransport.swift
+//  Mecum
+//
+//  Created by Eliomar Alejandro Rodriguez Ferrer on 22/09/2026.
+//
+
+import Foundation
+
+/// ModelTransport is one way of talking to one model: a single structured
+/// request, or a streamed conversational turn. It knows nothing about seats,
+/// scenes or plans, and it decodes nothing: `complete` hands back the
+/// provider's own text for the caller's own vocabulary to read.
+///
+/// Not every provider can carry a conversation. `streaming` is where a
+/// transport says so, and `converse` on a transport that cannot throws
+/// `ModelTransportError.streamingUnsupported` rather than returning a stream
+/// that yields nothing.
+public protocol ModelTransport: Sendable {
+
+    /// How long one answer may take before the caller gives up on it. Transport
+    /// policy, not the caller's: a local model is slower than an API.
+    var requestTimeout: TimeInterval { get }
+
+    /// Whether this transport streams a conversational turn, and why not when
+    /// it does not.
+    var streaming: StreamingSupport { get }
+
+    /// One structured-output request. Returns the provider's raw answer text,
+    /// undecoded, and what the provider says the call cost.
+    func complete(prompt: String, schema: Data, timeout: TimeInterval)
+        async throws -> (text: String, usage: ModelUsage)
+
+    /// One conversational turn over the ordered messages, as text deltas
+    /// followed by a single terminal `.completed`.
+    ///
+    /// Throws before any request when the transport declares no streaming. The
+    /// stream fails with `ModelTransportError.streamEndedEarly` when the
+    /// provider stops sending before it declares the turn finished: a partial
+    /// answer is never finished silently. Terminating the stream cancels the
+    /// request.
+    func converse(_ messages: [TurnMessage], timeout: TimeInterval)
+        throws -> AsyncThrowingStream<TurnEvent, any Error>
+}
+
+public extension ModelTransport {
+
+    var requestTimeout: TimeInterval { 180 }
+
+    /// The refusal a transport without a conversational turn owes its caller.
+    /// A transport that declares `.incremental` overrides this; reaching it
+    /// with that declaration is the mismatch the reason names.
+    func converse(_ messages: [TurnMessage], timeout: TimeInterval)
+        throws -> AsyncThrowingStream<TurnEvent, any Error> {
+        throw ModelTransportError.streamingUnsupported(streaming.declaredReason)
+    }
+}
+
+/// Whether a transport can carry a conversational turn. An adapter declares
+/// what it cannot do rather than leaving the caller to find out from an empty
+/// answer.
+public enum StreamingSupport: Sendable, Hashable {
+
+    /// Text arrives in pieces as the model generates it.
+    case incremental
+
+    /// No conversational turn exists here, for the reason given.
+    case unsupported(reason: String)
+
+    /// What a caller that asked for a turn anyway is told.
+    var declaredReason: String {
+        switch self {
+        case .incremental:
+            "the transport declares incremental streaming but implements no conversational turn"
+        case .unsupported(let reason):
+            reason
+        }
+    }
+}
+
+public extension ModelSelection {
+
+    /// The transport this selection talks through. The only way to make one:
+    /// each provider's client stays inside this module.
+    func transport(settings: ProviderSettings = ProviderSettings()) -> any ModelTransport {
+        switch provider {
+        case .codex: CodexCLIClient(model: model, effort: effort)
+        case .claudeCode: ClaudeCLIClient(model: model, effort: effort)
+        case .anthropic: AnthropicClient(model: model, effort: effort, apiKey: settings.anthropicAPIKey)
+        case .gemini: GeminiClient(model: model, effort: effort, apiKey: settings.geminiAPIKey)
+        case .ollama: OllamaClient(model: model, effort: effort, settings: settings)
+        }
+    }
+}

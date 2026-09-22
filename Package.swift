@@ -199,6 +199,7 @@ let package = Package(
                       "Memory", "FileKnowledge", "LiveScenes"]
         ),
         .library(name: "SeatBroker", targets: ["SeatBroker"]),
+        .library(name: "ModelTransports", targets: ["ModelTransports"]),
     ],
     targets: [
         
@@ -234,13 +235,18 @@ let package = Package(
         // Read-only reader of another application's window.
         driver("TargetReader", ["SeatCore", "WindowPlacement"]),
 
+        // MARK: ModelTransports
+        // How a model is talked to: one structured request, one streamed
+        // conversation, and the providers behind both. No seat, no scene.
+        broker("ModelTransports", []),
+
         // MARK: SeatBroker
         broker(
             "SeatBroker",
             ["SeatCore", "PrivateSymbols", "VirtualScreens", "WindowPlacement", "SeatInput",
              "CursorGuard", "SeatCapture", "SeatSession", "TargetReader", "PerceptionCore",
              "Perception", "VisionText", "PixelRegions", "PixelSections", "PixelControlState",
-             "AccessibilityFacts", "EngineCore", "IncrementalText"]
+             "AccessibilityFacts", "EngineCore", "IncrementalText", "ModelTransports"]
         ),
 
         // MARK: Driver tools
@@ -271,8 +277,9 @@ let package = Package(
         brokerTests(
             "SeatBroker",
             ["SeatBroker", "PerceptionCore", "SeatCore", "SeatCapture",
-             "SeatSession", "SeatInput", "TargetReader", "EngineCore"]
+             "SeatSession", "SeatInput", "TargetReader", "EngineCore", "ModelTransports"]
         ),
+        brokerTests("ModelTransports", ["ModelTransports"]),
 
         // Host (TCC, real display) and Live (fixture and reader) tiers, gated by
         // AGENTSEAT_HOST_TESTS=1 and AGENTSEAT_LIVE_TESTS=1 and run serialized.

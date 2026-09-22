@@ -1,6 +1,7 @@
 import AccessibilityFacts
 import AppKit
 import Foundation
+import ModelTransports
 import Perception
 import PixelControlState
 import PixelRegions
@@ -99,7 +100,7 @@ public final class SeatBroker {
 
     /// Models the local Ollama server has pulled.
     public nonisolated func ollamaModels(host: String) async throws -> [String] {
-        try await OllamaClient.models(host: host)
+        try await ProviderCatalog.ollamaModels(host: host)
     }
 
     /// nil when the provider is usable now (signed in, key present, server
