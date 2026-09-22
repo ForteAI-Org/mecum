@@ -3,25 +3,36 @@ import SwiftUI
 
 @main
 struct MecumApp: App {
+
+    /// The window the desktop lab lives in, opened from the Window menu.
+    static let labWindowID = "desktop-lab"
+
     @State private var model = AppModel()
-    /// The workspace database. Nothing reads it yet: the team sidebar and the
-    /// conversation are T3. It is opened here so a store that cannot open says
-    /// so at launch rather than at the first click.
+
+    /// The workspace database, which the team window reads. It is opened here
+    /// so a store that cannot open says so at launch rather than at the first
+    /// click.
     @State private var workspace = WorkspaceLaunch()
     @NSApplicationDelegateAdaptor(SeatReleasingDelegate.self) private var delegate
 
     var body: some Scene {
 
+        // The team is the front door. It holds no seat and needs no grant.
         WindowGroup("Mecum") {
+            TeamWindowView(launch: workspace)
+                // The delegate is made by AppKit and the model by SwiftUI, so
+                // this window, the one that always exists, is where they meet.
+                .task { delegate.model = model }
+        }
+        .commands { LabWindowCommands() }
+
+        // The desktop lab, reachable on its own. Opening it is what asks for
+        // the desktop grants and starts the watchers; launching does not.
+        Window("Desktop Lab", id: Self.labWindowID) {
             NavigationStack {
                 ContentView(model: model)
             }
-            // The delegate is made by AppKit and the model by SwiftUI, so this
-            // is where the two meet. Quitting is all it uses the model for.
-            .task {
-                delegate.model = model
-                workspace.open()
-            }
+            .task { model.startDesktopSurface() }
         }
 
         Settings {

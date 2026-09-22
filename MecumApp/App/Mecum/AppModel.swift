@@ -59,10 +59,36 @@ final class AppModel {
     /// run, so a second click arrives while the first close is still unwinding.
     private var isClosing = false
 
+    /// True once `startDesktopSurface()` has run. Reopening the lab window
+    /// must not start a second pair of watchers against the same broker.
+    private var isWatchingDesktop = false
+
+    /// Constructing this model asks for nothing.
+    ///
+    /// `capabilities()` reads the grants the process already has and raises no
+    /// prompt, so the badge can report before anything is requested. The
+    /// request itself and the two watchers start in `startDesktopSurface()`.
     init() {
-        settings = ModelSettingsStore(broker: broker)
+        settings     = ModelSettingsStore(broker: broker)
         capabilities = broker.capabilities()
+    }
+
+    /// Asks for the desktop grants and starts watching them, once.
+    ///
+    /// This is the lab window's call, not the app's. The team is the front
+    /// door and needs no Accessibility, Screen Recording or microphone to keep
+    /// an identity or a draft, so a prompt at launch would be asking for a
+    /// capability nobody enabled. Opening the lab is what enables it.
+    ///
+    /// The watchers are unstructured on purpose: they report for as long as
+    /// the process runs, because a seat outlives the window that opened it.
+    /// Closing and reopening the lab therefore does not restart them, and the
+    /// guard is what keeps a second window from doubling the polling.
+    func startDesktopSurface() {
+        guard !isWatchingDesktop else { return }
+        isWatchingDesktop = true
         broker.requestMissingPermissions()
+        capabilities = broker.capabilities()
         Task { await watchPermissions() }
         Task { await watchSeat() }
     }
