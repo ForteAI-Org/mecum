@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		000000000000000200000001 /* SeatBroker in Frameworks */ = {isa = PBXBuildFile; productRef = 000000000000000200000011 /* SeatBroker */; };
 		000000000000000200000002 /* ModelTransports in Frameworks */ = {isa = PBXBuildFile; productRef = 000000000000000200000012 /* ModelTransports */; };
+		000000000000000200000003 /* MecumWorkspace in Frameworks */ = {isa = PBXBuildFile; productRef = 000000000000000200000013 /* MecumWorkspace */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -42,6 +43,7 @@
 			files = (
 				000000000000000200000001 /* SeatBroker in Frameworks */,
 				000000000000000200000002 /* ModelTransports in Frameworks */,
+				000000000000000200000003 /* MecumWorkspace in Frameworks */,
 			);
 		};
 /* End PBXFrameworksBuildPhase section */
@@ -83,6 +85,7 @@
 			packageProductDependencies = (
 				000000000000000200000011 /* SeatBroker */,
 				000000000000000200000012 /* ModelTransports */,
+				000000000000000200000013 /* MecumWorkspace */,
 			);
 			productName = Mecum;
 			productReference = 000000000000000000000120 /* Mecum.app */;
@@ -366,6 +369,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 000000000000000300000001 /* XCLocalSwiftPackageReference "../.." */;
 			productName = ModelTransports;
+		};
+		000000000000000200000013 /* MecumWorkspace */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 000000000000000300000001 /* XCLocalSwiftPackageReference "../.." */;
+			productName = MecumWorkspace;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

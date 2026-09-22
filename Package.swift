@@ -200,6 +200,7 @@ let package = Package(
         ),
         .library(name: "SeatBroker", targets: ["SeatBroker"]),
         .library(name: "ModelTransports", targets: ["ModelTransports"]),
+        .library(name: "MecumWorkspace", targets: ["Workspace"]),
     ],
     targets: [
         
@@ -239,6 +240,18 @@ let package = Package(
         // How a model is talked to: one structured request, one streamed
         // conversation, and the providers behind both. No seat, no scene.
         broker("ModelTransports", []),
+
+        // MARK: Workspace
+        // The persistent domain of the app: workers and their versioned
+        // configuration, conversations, messages and the operational event
+        // record, over SwiftData. No view, no seat, no perception: the store
+        // takes its directory from whoever opens it.
+        .target(
+            name         : "Workspace",
+            dependencies : [.target(name: "ModelTransports")],
+            path         : "Sources/Workspace",
+            swiftSettings: pure
+        ),
 
         // MARK: SeatBroker
         broker(
@@ -280,6 +293,14 @@ let package = Package(
              "SeatSession", "SeatInput", "TargetReader", "EngineCore", "ModelTransports"]
         ),
         brokerTests("ModelTransports", ["ModelTransports"]),
+
+        // MARK: Workspace tests
+        .testTarget(
+            name         : "WorkspaceTests",
+            dependencies : [.target(name: "Workspace"), .target(name: "ModelTransports")],
+            path         : "Tests/WorkspaceTests",
+            swiftSettings: suite
+        ),
 
         // Host (TCC, real display) and Live (fixture and reader) tiers, gated by
         // AGENTSEAT_HOST_TESTS=1 and AGENTSEAT_LIVE_TESTS=1 and run serialized.

@@ -1,0 +1,64 @@
+//
+//  WorkspaceStore+Events.swift
+//  Mecum
+//
+//  Created by Eliomar Alejandro Rodriguez Ferrer on 22/09/2026.
+//
+
+import Foundation
+import SwiftData
+
+extension WorkspaceStore: EventStoring {
+
+    /// Records the event and gives it the next local order.
+    ///
+    /// A terminal event for a subject that has already ended returns the row
+    /// that is there, untouched, whatever outcome the second arrival carries:
+    /// the first arrival keeps its type, its timestamp and its order, and no
+    /// work ends twice. The unique constraint on
+    /// `WorkspaceEvent.deduplicationKey` is what guarantees one row even for a
+    /// writer that does not come through here.
+    @discardableResult
+    public func append(_ event: NewEvent) throws -> RecordedEvent {
+        let key = event.deduplicationKey
+        if let existing = try first(WorkspaceEvent.self, where: #Predicate { $0.deduplicationKey == key }) {
+            return RecordedEvent(existing)
+        }
+
+        let recorded = WorkspaceEvent(event, localOrder: try nextLocalOrder(in: event.workspaceID))
+        modelContext.insert(recorded)
+        try modelContext.save()
+        return RecordedEvent(recorded)
+    }
+
+    public func events(matching query: EventQuery) throws -> [RecordedEvent] {
+        var descriptor = FetchDescriptor<WorkspaceEvent>(
+            predicate: Self.predicate(for: query.scope),
+            sortBy   : [SortDescriptor(\.localOrder, order: query.isAscending ? .forward : .reverse)]
+        )
+        if let limit = query.limit { descriptor.fetchLimit = limit }
+        return try modelContext.fetch(descriptor).map(RecordedEvent.init)
+    }
+
+    /// One predicate per scope. Written apart so each stays a single
+    /// comparison the fetch can meet with an index.
+    private static func predicate(for scope: EventQuery.Scope) -> Predicate<WorkspaceEvent> {
+        switch scope {
+        case .workspace(let id):    return #Predicate<WorkspaceEvent> { $0.workspaceID    == id }
+        case .worker(let id):       return #Predicate<WorkspaceEvent> { $0.workerID       == id }
+        case .conversation(let id): return #Predicate<WorkspaceEvent> { $0.conversationID == id }
+        case .subject(let id):      return #Predicate<WorkspaceEvent> { $0.subjectID      == id }
+        }
+    }
+
+    /// One past the highest order in the workspace. Exclusive within this
+    /// actor, which is why two appends cannot take the same number.
+    private func nextLocalOrder(in workspace: UUID) throws -> Int {
+        var descriptor = FetchDescriptor<WorkspaceEvent>(
+            predicate: #Predicate { $0.workspaceID == workspace },
+            sortBy   : [SortDescriptor(\.localOrder, order: .reverse)]
+        )
+        descriptor.fetchLimit = 1
+        return (try modelContext.fetch(descriptor).first?.localOrder ?? 0) + 1
+    }
+}

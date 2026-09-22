@@ -4,6 +4,10 @@ import SwiftUI
 @main
 struct MecumApp: App {
     @State private var model = AppModel()
+    /// The workspace database. Nothing reads it yet: the team sidebar and the
+    /// conversation are T3. It is opened here so a store that cannot open says
+    /// so at launch rather than at the first click.
+    @State private var workspace = WorkspaceLaunch()
     @NSApplicationDelegateAdaptor(SeatReleasingDelegate.self) private var delegate
 
     var body: some Scene {
@@ -14,7 +18,10 @@ struct MecumApp: App {
             }
             // The delegate is made by AppKit and the model by SwiftUI, so this
             // is where the two meet. Quitting is all it uses the model for.
-            .task { delegate.model = model }
+            .task {
+                delegate.model = model
+                workspace.open()
+            }
         }
 
         Settings {

@@ -1,0 +1,49 @@
+//
+//  WorkspaceLaunch.swift
+//  Mecum
+//
+//  Created by Eliomar Alejandro Rodriguez Ferrer on 22/09/2026.
+//
+
+import Foundation
+import Observation
+import Workspace
+
+/// WorkspaceLaunch opens the workspace store when the app starts.
+///
+/// The app is where the path is decided, because the library takes its
+/// directory as a parameter and resolves none of its own. This is the same
+/// `~/Library/Application Support/Mecum` the seat broker keeps `Runs` and
+/// `Perception` under, so the workspace database sits beside them.
+///
+/// Opening is attempted once. A failure is kept rather than thrown away: the
+/// team sidebar in T3 has to say that the store did not open instead of
+/// showing an empty team as if there were none.
+@Observable
+@MainActor
+final class WorkspaceLaunch {
+
+    private(set) var store: WorkspaceStore?
+
+    /// Why the store is not open, nil while it is or before the attempt.
+    private(set) var failure: String?
+
+    /// Where the store lives beside the kit's other directories.
+    static var directory: URL {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appending(path: "Mecum", directoryHint: .isDirectory)
+    }
+
+    /// Opens the store, or records why it could not be opened. Calling it
+    /// again once the store is open does nothing.
+    func open(in directory: URL = WorkspaceLaunch.directory) {
+        guard store == nil else { return }
+        do {
+            store   = try WorkspaceStore.opening(in: directory)
+            failure = nil
+        } catch {
+            store   = nil
+            failure = String(describing: error)
+        }
+    }
+}
