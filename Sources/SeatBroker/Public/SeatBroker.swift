@@ -16,6 +16,7 @@ import VisionText
 /// needs the application's own event loop turning.
 @MainActor
 public final class SeatBroker {
+    
     public let configuration: SeatBrokerConfiguration
     /// The one place the Perception layer is composed: Vision for text through
     /// the lab's best-effort wrapper, the pixel segmenter and its media filter
@@ -46,6 +47,12 @@ public final class SeatBroker {
     )
     private let recorder: RunRecorder
     private let ledger = LaunchLedger()
+
+    /// The way a consumer gets a seat, and the only way: see `SeatQueue`.
+    /// Built here rather than handed in because the queue needs the broker it
+    /// takes seats from, and a consumer that could supply its own would be a
+    /// consumer that could route around the wait.
+    public private(set) lazy var queue = SeatQueue(broker: self, capacity: configuration.seatCapacity)
 
     public init(configuration: SeatBrokerConfiguration = .init()) {
         self.configuration = configuration
@@ -147,13 +154,19 @@ public final class SeatBroker {
 
     /// A seat with nothing on it, and nothing brought up yet.
     ///
+    /// **Not public.** A seat is scarce and every consumer has to be able to
+    /// wait for one, so `SeatQueue` is the only thing that may make one: a
+    /// consumer holding this would be a consumer that can skip the queue, and
+    /// the wait would go back to being good manners rather than the structure.
+    ///
+    ///
     /// Neither synchronous nor failable by accident: the driver raises the
     /// background display on its first adoption, so making a session costs one
     /// allocation, needs no grant and cannot fail. That is what lets the chat
     /// exist before any application does. `AgentSession.use` puts the first one
     /// on the seat, `open(applicationNamed:)` is the planner's way in, and
     /// `AgentSession.close` takes the display back down.
-    public func openSession() -> AgentSession {
+    func openSession() -> AgentSession {
         AgentSession(driver: SeatDriver(), ledger: ledger, perception: perception,
                      recorder: recorder, environment: self)
     }

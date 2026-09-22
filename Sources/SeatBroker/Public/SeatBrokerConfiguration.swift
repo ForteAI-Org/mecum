@@ -11,9 +11,15 @@ public struct SeatBrokerConfiguration: Sendable {
     public var perceptionStoreDirectory: URL
     /// Where run records and their final frames are kept.
     public var recordingDirectory: URL
+    /// How many seats may act at once, which is what `SeatQueue.capacity`
+    /// becomes. One today: the kit refuses a second seat and a second host
+    /// cannot start, and the measured comfortable number on a Mac is about
+    /// eight once it can. Raising it here without that work makes every entry
+    /// past the first fail on a seat it cannot have.
+    public var seatCapacity: Int
 
     public init(allowUnvalidatedBuild: Bool = false, perceptionStoreDirectory: URL? = nil,
-                recordingDirectory: URL? = nil) {
+                recordingDirectory: URL? = nil, seatCapacity: Int = 1) {
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("AgentLab", isDirectory: true)
         self.allowUnvalidatedBuild = allowUnvalidatedBuild
@@ -21,5 +27,6 @@ public struct SeatBrokerConfiguration: Sendable {
             ?? support.appendingPathComponent("Perception", isDirectory: true)
         self.recordingDirectory = recordingDirectory
             ?? support.appendingPathComponent("Runs", isDirectory: true)
+        self.seatCapacity = max(1, seatCapacity)
     }
 }
