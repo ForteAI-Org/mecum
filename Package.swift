@@ -202,6 +202,8 @@ let package = Package(
         .library(name: "ModelTransports", targets: ["ModelTransports"]),
         .library(name: "MecumWorkspace", targets: ["Workspace"]),
         .library(name: "WorkerAgents", targets: ["WorkerAgents"]),
+        .library(name: "MecumTranscript", targets: ["Transcript"]),
+        .library(name: "MecumMascots", targets: ["Mascots"]),
         // Declared so the app can bundle it as the tool bridge a worker's agent launches.
         .executable(name: "mecum", targets: ["mecum"]),
     ],
@@ -256,6 +258,26 @@ let package = Package(
             swiftSettings: pure
         ),
 
+        // MARK: Mascots
+        // The mascot as a cached static image, drawn from the Workspace's `MascotDrawing`. AppKit only:
+        // the sidebar and the transcript render through this one place, and so does the snapshot.
+        .target(
+            name         : "Mascots",
+            dependencies : [.target(name: "Workspace")],
+            path         : "Sources/Mascots",
+            swiftSettings: pure
+        ),
+
+        // MARK: Transcript
+        // The conversation's AppKit transcript (§12): projection, measurement and the recycled
+        // collection view. Nonisolated by default; the AppKit types say main actor themselves.
+        .target(
+            name         : "Transcript",
+            dependencies : [.target(name: "Workspace"), .target(name: "Mascots")],
+            path         : "Sources/Transcript",
+            swiftSettings: pure
+        ),
+
         // MARK: SeatBroker
         broker(
             "SeatBroker",
@@ -305,6 +327,14 @@ let package = Package(
             name         : "WorkspaceTests",
             dependencies : [.target(name: "Workspace"), .target(name: "ModelTransports")],
             path         : "Tests/WorkspaceTests",
+            swiftSettings: suite
+        ),
+
+        // The snapshot row draws offscreen and runs only with MECUM_SNAPSHOTS=1.
+        .testTarget(
+            name         : "TranscriptTests",
+            dependencies : [.target(name: "Transcript"), .target(name: "Workspace")],
+            path         : "Tests/TranscriptTests",
             swiftSettings: suite
         ),
 

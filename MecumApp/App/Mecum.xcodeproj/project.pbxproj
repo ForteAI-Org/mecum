@@ -11,6 +11,8 @@
 		000000000000000200000002 /* ModelTransports in Frameworks */ = {isa = PBXBuildFile; productRef = 000000000000000200000012 /* ModelTransports */; };
 		000000000000000200000003 /* MecumWorkspace in Frameworks */ = {isa = PBXBuildFile; productRef = 000000000000000200000013 /* MecumWorkspace */; };
 		000000000000000200000004 /* WorkerAgents in Frameworks */ = {isa = PBXBuildFile; productRef = 000000000000000200000014 /* WorkerAgents */; };
+		000000000000000200000005 /* MecumTranscript in Frameworks */ = {isa = PBXBuildFile; productRef = 000000000000000200000016 /* MecumTranscript */; };
+		000000000000000200000006 /* MecumMascots in Frameworks */ = {isa = PBXBuildFile; productRef = 000000000000000200000017 /* MecumMascots */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -46,6 +48,8 @@
 				000000000000000200000002 /* ModelTransports in Frameworks */,
 				000000000000000200000003 /* MecumWorkspace in Frameworks */,
 				000000000000000200000004 /* WorkerAgents in Frameworks */,
+				000000000000000200000005 /* MecumTranscript in Frameworks */,
+				000000000000000200000006 /* MecumMascots in Frameworks */,
 			);
 		};
 /* End PBXFrameworksBuildPhase section */
@@ -91,6 +95,8 @@
 				000000000000000200000013 /* MecumWorkspace */,
 				000000000000000200000014 /* WorkerAgents */,
 				000000000000000200000015 /* mecum */,
+				000000000000000200000016 /* MecumTranscript */,
+				000000000000000200000017 /* MecumMascots */,
 			);
 			productName = Mecum;
 			productReference = 000000000000000000000120 /* Mecum.app */;
@@ -405,6 +411,16 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 000000000000000300000001 /* XCLocalSwiftPackageReference "../.." */;
 			productName = mecum;
+		};
+		000000000000000200000016 /* MecumTranscript */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 000000000000000300000001 /* XCLocalSwiftPackageReference "../.." */;
+			productName = MecumTranscript;
+		};
+		000000000000000200000017 /* MecumMascots */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 000000000000000300000001 /* XCLocalSwiftPackageReference "../.." */;
+			productName = MecumMascots;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

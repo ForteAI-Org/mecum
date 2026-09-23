@@ -41,8 +41,35 @@ extension WorkspaceStore: EventStoring {
             predicate: Self.predicate(for: query.scope),
             sortBy   : [SortDescriptor(\.localOrder, order: query.isAscending ? .forward : .reverse)]
         )
-        if let limit = query.limit { descriptor.fetchLimit = limit }
+        if let limit = query.limit {
+            // Zero would mean no limit to the fetch, the opposite of what was asked.
+            guard limit > 0 else { return [] }
+            descriptor.fetchLimit = limit
+        }
         return try modelContext.fetch(descriptor).map(RecordedEvent.init)
+    }
+
+    /// A conversation's events whose timestamp falls in `start ..< end`: the
+    /// latest `limit` of them, returned in local order.
+    ///
+    /// The transcript reads the events between two messages with this, so a
+    /// window of messages costs its own events and not the conversation's.
+    public func events(
+        inConversation conversation: UUID,
+        from start                 : Date,
+        before end                 : Date,
+        limit                      : Int
+    ) throws -> [RecordedEvent] {
+        // A fetch limit of zero means no limit, so zero asked for is answered without a fetch.
+        guard limit > 0 else { return [] }
+        var descriptor = FetchDescriptor<WorkspaceEvent>(
+            predicate: #Predicate {
+                $0.conversationID == conversation && $0.timestamp >= start && $0.timestamp < end
+            },
+            sortBy   : [SortDescriptor(\.localOrder, order: .reverse)]
+        )
+        descriptor.fetchLimit = limit
+        return try modelContext.fetch(descriptor).reversed().map(RecordedEvent.init)
     }
 
     /// One predicate per scope. Written apart so each stays a single

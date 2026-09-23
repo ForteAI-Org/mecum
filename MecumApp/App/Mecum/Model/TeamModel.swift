@@ -9,6 +9,7 @@ import Foundation
 import ModelTransports
 import Observation
 import SeatBroker
+import Transcript
 import WorkerAgents
 import Workspace
 
@@ -62,11 +63,15 @@ final class TeamModel {
     var problem: String?
 
     private(set) var conversation: ConversationSnapshot?
-    private(set) var messages    : [MessageSnapshot] = []
 
-    /// The open conversation's tool rows, failures and stops, in local order.
-    /// They are events, not messages, so a tool row is never a reply (§11.2).
-    private(set) var activity: [RecordedEvent] = []
+    /// Moves each time the store records something for the open conversation.
+    /// The transcript reads its own windows through `transcriptSource` and
+    /// refreshes on a change; nothing here holds the history.
+    private(set) var transcriptRevision = 0
+
+    /// The read-only seam the transcript loads windows through (§12.5).
+    /// Writes still go through this model only.
+    var transcriptSource: any ConversationWindowSource { store }
 
     /// Workers whose turn is running, each with the conversation it runs in.
     /// One turn at a time per worker; the others are unaffected.
@@ -172,8 +177,6 @@ final class TeamModel {
         await flushDraft()
         guard generation == openingGeneration else { return }
         conversation = nil
-        messages     = []
-        activity     = []
         draft        = ""
         savedDraft   = ""
 
@@ -192,14 +195,9 @@ final class TeamModel {
                 opened = try await store.createConversation(kind: .direct, participants: [id])
                 guard generation == openingGeneration else { return }
             }
-            let history = try await store.messages(in: opened.id)
-            let events  = try await Self.activity(in: opened.id, of: store)
-            guard generation == openingGeneration else { return }
             conversation = opened
             draft        = opened.draft
             savedDraft   = opened.draft
-            messages     = history
-            activity     = events
         } catch {
             guard generation == openingGeneration else { return }
             problem = "This worker's conversation could not be opened. \(describe(error))"
@@ -254,7 +252,7 @@ final class TeamModel {
             await restoreDraft(typed, in: conversation.id)
             return
         }
-        if self.conversation?.id == conversation.id { messages.append(message) }
+        if self.conversation?.id == conversation.id { transcriptRevision += 1 }
         if let workerID { startAnswer(to: message, in: conversation.id, by: workerID) }
 
         do {
@@ -391,34 +389,23 @@ final class TeamModel {
         }
     }
 
-    /// Reads the conversation's messages and activity again when it is the
-    /// one open; a turn in another conversation changes nothing shown here.
+    /// Tells the transcript the open conversation changed; a turn in another
+    /// conversation changes nothing shown here.
     private func reloadTranscript(of conversationID: UUID) async {
         guard conversation?.id == conversationID else { return }
-        do {
-            let history = try await store.messages(in: conversationID)
-            let events  = try await Self.activity(in: conversationID, of: store)
-            guard conversation?.id == conversationID else { return }
-            messages = history
-            activity = events
-        } catch {
-            problem = "The conversation could not be read again, so it may be out of date. \(describe(error))"
-        }
+        transcriptRevision += 1
     }
 
-    private static func activity(in conversationID: UUID, of store: WorkspaceStore) async throws
-        -> [RecordedEvent] {
-        try await store.events(matching: EventQuery(scope: .conversation(conversationID)))
-            .filter { WorkerTurnRecorder.text(of: $0) != nil }
-    }
-
-    /// Remembers which message the reader is anchored on.
-    func rememberReadingPosition(_ anchor: UUID?) async {
-        guard let conversation, conversation.readingAnchorMessageID != anchor else { return }
+    /// Remembers the message the reader is anchored on and the offset in
+    /// points from its top to the viewport's top. Nil means the end.
+    func rememberReadingPosition(_ anchor: UUID?, offset: Double) async {
+        guard let conversation,
+              conversation.readingAnchorMessageID != anchor || conversation.readingOffset != offset
+        else { return }
         do {
             let updated = try await store.update(
                 conversation: conversation.id,
-                .readingPosition(anchorMessageID: anchor, offset: 0)
+                .readingPosition(anchorMessageID: anchor, offset: offset)
             )
             guard self.conversation?.id == conversation.id else { return }
             self.conversation = updated

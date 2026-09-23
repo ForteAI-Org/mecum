@@ -142,9 +142,16 @@ extension WorkspaceStore {
         )
         later.fetchLimit = max(0, after)
 
-        let head = try modelContext.fetch(earlier).reversed().map(MessageSnapshot.init)
-        let tail = try modelContext.fetch(later).map(MessageSnapshot.init)
+        // A fetch limit of zero means no limit, so a side asked for none is not fetched at all.
+        let head = before > 0 ? try modelContext.fetch(earlier).reversed().map(MessageSnapshot.init) : []
+        let tail = after  > 0 ? try modelContext.fetch(later).map(MessageSnapshot.init) : []
         return head + tail
+    }
+
+    /// One message by its id, or nil when the store has none. The transcript
+    /// reads it to find the sequence a remembered reading anchor sits at.
+    public func message(_ id: UUID) throws -> MessageSnapshot? {
+        try first(Message.self, where: #Predicate { $0.id == id }).map(MessageSnapshot.init)
     }
 
     public func messageCount(in conversation: UUID) throws -> Int {
