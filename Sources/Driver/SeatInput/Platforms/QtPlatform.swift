@@ -9,20 +9,19 @@ import SeatCore
 ///
 /// DaVinci Resolve's Project Manager accepted background clicks, text, keys and
 /// text-selection drags with both prepared and unprepared delivery on 26A428.
-/// The prepared path is retained for mouse input and bulk insertion because a
-/// custom Qt widget may have different focus handling from that one window.
-/// Right clicks remain unprepared so restoring activation cannot dismiss a
-/// menu before the caller observes it. Menu, scroll and modal-window effects
-/// still need their own live qualification; this policy does not supply it.
+/// A prepared click on a followed Qt dialog caused an activation before its
+/// Cancel event, so the seat's focus gate refused that event. Clicks therefore
+/// use the measured unprepared path. Drag and bulk insertion retain the
+/// conservative preparation until those surfaces have their own measurements.
+/// Menu and scroll effects still need separate live qualification.
 nonisolated public struct QtPlatform: InputPlatform {
 
     public init() {}
 
     public func preparation(for command: InputCommand) -> Preparation {
         switch command {
-            case .click(_, .right, _): .none
-            case .click, .drag, .insertText: .internalAppKitState
-            case .key, .text, .scroll: .none
+            case .click, .key, .text, .scroll: .none
+            case .drag, .insertText: .internalAppKitState
         }
     }
 

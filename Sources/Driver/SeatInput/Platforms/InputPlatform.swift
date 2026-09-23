@@ -64,7 +64,7 @@ nonisolated public protocol InputPlatform: Sendable {
     var keyRepeatPacing: KeyRepeatPacing { get }
 
     /// A last field on an event, for a target family that needs one. The
-    /// default does nothing, and both platforms the kit ships keep it that way:
+    /// default does nothing, and all shipped platforms keep it that way:
     /// the Chromium stamping this hook was kept for turned out to change no
     /// outcome.
     func decorate(_ event: CGEvent, for command: InputCommand)

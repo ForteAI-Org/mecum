@@ -3977,11 +3977,23 @@ public final class AgentSeat {
         let bounds = sensing.virtualDisplayBounds
 
         var previousMatched = false
-        for _ in 0..<3 {
+        // Stage Manager can keep publishing a full-size transition surface
+        // after AX has already put a stashed window's body home. Give that
+        // transition time to become the physical thumbnail, without writing
+        // AXPosition again and restarting the animation on every reading.
+        let attempts = window.originalServerFrame == nil ? 8 : 3
+        for _ in 0..<attempts {
             guard Self.mayContinue(until: limit) else { return .refused }
             guard sensing.physicalTopologyIsUnchanged else { return .refused }
             do {
-                if !previousMatched { try restoreOriginalGeometry(of: window) }
+                if !previousMatched {
+                    let body = (try? placing.frame(of: window.reference)) ?? nil
+                    if body.map({ VirtualWindowPlacementCheck.framesMatch(
+                        $0, window.originalFrame
+                    ) }) != true {
+                        try restoreOriginalGeometry(of: window)
+                    }
+                }
             } catch {
                 // The Window ID is momentarily not associable with an element,
                 // which happens while a display transition is in flight. It is

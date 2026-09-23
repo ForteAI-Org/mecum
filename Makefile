@@ -59,7 +59,9 @@ HOST_REST_TESTS := 29
 # they take a window in and out of fullscreen, which is the person's screen.
 # Verified by `xcrun swift test list | rg LiveTests` on 2026-09-21. This is an
 # assertion over the reported Live bundle, including intentionally skipped rows.
-LIVE_TESTS := 87
+LIVE_TESTS := 89
+QT_LIVE_ROWS := discoverDaVinci adoptAndReturnDaVinci observeDaVinci \
+                clickDaVinciSearch openAndCancelDaVinciProjectDialog insertTextIntoDaVinciSearch
 
 # The measurements `make bench` gates on. Narrow it for a quick pass, for
 # example `make bench BENCH="fence-callback send-click"`; `seat-idle` alone
@@ -71,7 +73,7 @@ LIVE_TESTS := 87
 BENCH ?= fence-callback fence-clamp input-trace-overhead send-click display-lifecycle \
          monitor-60 monitor-120 stage seat-idle window-watch focus-refresh recovery
 
-.PHONY: all test host-tests live-tests bench compat-report promote-build clean help
+.PHONY: all test host-tests live-tests qt-live-tests bench compat-report promote-build clean help
 
 all: test
 
@@ -79,6 +81,7 @@ help:
 	@echo 'make test           unit tier: pure, serialized, no permission needed'
 	@echo 'make host-tests     host tier: TCC and a real display, two commands, counts asserted'
 	@echo 'make live-tests     live tier: real windows and a real browser'
+	@echo 'make qt-live-tests  Qt tier: open DaVinci Project Manager, one process per row'
 	@echo 'make bench          the measurements of spec section 8, each one a gate'
 	@echo 'make compat-report  runs the tiers and writes Documentation/Driver/compatibility/Build<build>.{md,json}'
 	@echo 'make promote-build BUILD=26A5425a   copies that draft into the ledger'
@@ -116,8 +119,19 @@ host-tests:
 # browser's pid, and the reader's own row disturbed by the matrix's target
 # coming up. Serialized, the matrix passes eight rows out of eight.
 live-tests: require-fixture
-	@AGENTSEAT_LIVE_TESTS=1 AGENTSEAT_FIXTURE_APP="$(AGENTSEAT_FIXTURE_APP)" \
+	@AGENTSEAT_LIVE_TESTS=1 AGENTSEAT_QT_TESTS=0 AGENTSEAT_FIXTURE_APP="$(AGENTSEAT_FIXTURE_APP)" \
 	    $(TIER) live $(LIVE_TESTS) $(SWIFT) test --filter LiveTests --no-parallel
+
+# Repeated virtual display creation can terminate one test process with a
+# successful exit status but no summary. Each Qt row therefore gets its own
+# process and the same count check as the other tiers. This target does not
+# need the consumer fixture or a browser; DaVinci must already be open.
+qt-live-tests:
+	@for row in $(QT_LIVE_ROWS); do \
+	    AGENTSEAT_LIVE_TESTS=1 AGENTSEAT_QT_TESTS=1 \
+	        $(TIER) "qt-$$row" 1 $(SWIFT) test --filter "QtDriverLiveTests.$$row" --no-parallel \
+	        || exit $$?; \
+	done
 
 # MARK: The measurements
 
