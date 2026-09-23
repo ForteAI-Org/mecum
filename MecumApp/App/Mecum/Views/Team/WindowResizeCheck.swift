@@ -11,9 +11,10 @@ import TeamShell
 import Workspace
 
 /// WindowResizeCheck puts the team shell in a real window on screen, with a real display cycle,
-/// and resizes it back and forth across the width where the inspector stops fitting, when the app
-/// is launched with MECUM_WINDOW_CHECK=1. It prints each step and quits with 0 once every step has
-/// run; an abort in AppKit's layout ends the process first, with its own exit status.
+/// and resizes it back and forth across the widths where the sidebar turns compact and where the
+/// inspector stops fitting, when the app is launched with MECUM_WINDOW_CHECK=1. It prints each
+/// step and quits with 0 once every step has run; an abort in AppKit's layout ends the process
+/// first, with its own exit status.
 ///
 /// It opens at 900 by 612 with the inspector requested, the sidebar shown and a worker selected,
 /// which is what the restored window that aborted had. The team is `WindowSnapshots`'s synthetic
@@ -23,8 +24,9 @@ enum WindowResizeCheck {
 
     static var isRequested: Bool { ProcessInfo.processInfo.environment["MECUM_WINDOW_CHECK"] == "1" }
 
-    /// The widths stepped through: around the threshold with the sidebar shown (1100) and back.
-    private static let widths: [Double] = [900, 1150, 1090, 1110, 1099, 1101, 1300, 980, 1105, 900, 1250, 820]
+    /// The widths stepped through: around the full sidebar's line (1100), the compact one (912) and back.
+    private static let widths: [Double] = [900, 1150, 1090, 1110, 1099, 1101, 1130, 980, 1105, 912, 911, 940,
+                                           1250, 900]
 
     static func runAndQuit() async {
         let store = URL.temporaryDirectory.appending(path: "MecumWindowCheck-\(UUID().uuidString)",
@@ -48,8 +50,7 @@ enum WindowResizeCheck {
     }
 
     private static func check(_ team: TeamModel, selected name: String) async throws {
-        let hosting = NSHostingView(rootView: WindowSnapshots.Root(team: team, isInspectorRequested: true,
-                                                                   columns: .all))
+        let hosting = NSHostingView(rootView: WindowSnapshots.Root(team: team, isInspectorRequested: true))
         // The scene's window resizes freely above its minimum; the default would follow the ideal size.
         hosting.sizingOptions = [.minSize]
         hosting.sceneBridgingOptions = [.toolbars, .title]

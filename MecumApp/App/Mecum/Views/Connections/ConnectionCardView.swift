@@ -8,25 +8,19 @@
 import ModelTransports
 import SwiftUI
 
-/// ConnectionCardView is one connection as §7.3 lays it out: name, type,
-/// destination, state and last check, with connect, verify, replace
-/// credential and disconnect.
+/// ConnectionCardView is one connection as a card, inside a worker's profile:
+/// name, type, destination, state and last check, and `ConnectionActions`
+/// under them. The connections sheet shows the same connection as a block of
+/// its form (`ConnectionSection`).
 ///
 /// Each state has its own symbol, tint and sentence, so an absent key, a
 /// refused one, a server that is down, a usage limit and a removed model do
 /// not read as one red line. The sentence is `ConnectionState.message`, the
 /// one the lab's Settings shows too.
-///
-/// A key is typed into a secure field, handed to the keychain and cleared from
-/// the field. The card never shows a key back.
 struct ConnectionCardView: View {
 
     let connections: ModelSettingsStore
     let provider   : ModelProvider
-
-    @State private var enteredKey  = ""
-    @State private var isReplacing = false
-    @State private var address     = ""
 
     private var connection: ProviderConnection {
         ProviderConnection(provider: provider, settings: connections.providerSettings)
@@ -49,19 +43,11 @@ struct ConnectionCardView: View {
             }
             .font(.callout)
 
-            if let failure = connections.credentialFailure[provider] {
-                Label(failure, systemImage: "exclamationmark.triangle")
-                    .font(.footnote)
-                    .foregroundStyle(.orange)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-
-            actions
+            ConnectionActions(connections: connections, provider: provider)
         }
         .padding(14)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(.background.secondary, in: RoundedRectangle(cornerRadius: 12))
-        .onAppear { address = connections.ollamaHost }
     }
 
     // MARK: State
@@ -122,85 +108,6 @@ struct ConnectionCardView: View {
         }
     }
 
-    // MARK: Actions
-
-    @ViewBuilder
-    private var actions: some View {
-        switch connection.authentication {
-        case .apiKey:              keyActions
-        case .signedInCommandLine: commandLineActions
-        case .localServer:         localServerActions
-        }
-    }
-
-    @ViewBuilder
-    private var keyActions: some View {
-        if !connections.hasCredential(provider) || isReplacing {
-            HStack(spacing: 8) {
-                SecureField("API key", text: $enteredKey, prompt: Text("Paste the key"))
-                    .textFieldStyle(.roundedBorder)
-                    .onSubmit(saveKey)
-                Button(connections.hasCredential(provider) ? "Replace credential" : "Connect", action: saveKey)
-                    .disabled(enteredKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                if isReplacing {
-                    Button("Cancel") {
-                        enteredKey  = ""
-                        isReplacing = false
-                    }
-                }
-            }
-            HStack(spacing: 12) {
-                Text("Kept in your keychain and sent only to \(connection.destination).")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                if let url = provider.consoleURL {
-                    Link("Get a key…", destination: url).font(.caption)
-                }
-            }
-        } else {
-            HStack(spacing: 8) {
-                verifyButton
-                Button("Replace credential") { isReplacing = true }
-                Button("Disconnect", role: .destructive) { connections.setCredential("", for: provider) }
-                    .help("Removes the key from your keychain. Workers keep their model and cannot answer until a key is back.")
-            }
-        }
-    }
-
-    @ViewBuilder
-    private var commandLineActions: some View {
-        Text(provider.accessHint)
-            .font(.callout)
-            .foregroundStyle(.secondary)
-            .fixedSize(horizontal: false, vertical: true)
-        HStack(spacing: 8) {
-            verifyButton
-            Text("Signed in outside this app, so the sign-in is replaced or removed in Terminal.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-        }
-    }
-
-    @ViewBuilder
-    private var localServerActions: some View {
-        HStack(spacing: 8) {
-            TextField("Address", text: $address, prompt: Text("http://127.0.0.1:11434"))
-                .textFieldStyle(.roundedBorder)
-                .onSubmit(saveAddress)
-            Button("Connect", action: saveAddress)
-                .disabled(address == connections.ollamaHost || address.isEmpty)
-            verifyButton
-        }
-        Text("A server on this Mac needs no credential.")
-            .font(.caption)
-            .foregroundStyle(.secondary)
-    }
-
-    private var verifyButton: some View {
-        Button("Verify") { connections.refresh([provider]) }
-            .disabled(connections.isChecking(provider))
-    }
-
     // MARK: Helpers
 
     private func row(_ label: String, _ value: String) -> some View {
@@ -208,18 +115,5 @@ struct ConnectionCardView: View {
             Text(label).foregroundStyle(.secondary)
             Text(value).textSelection(.enabled)
         }
-    }
-
-    private func saveKey() {
-        let key = enteredKey.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !key.isEmpty else { return }
-        connections.setCredential(key, for: provider)
-        enteredKey  = ""
-        isReplacing = false
-    }
-
-    private func saveAddress() {
-        guard !address.isEmpty else { return }
-        connections.ollamaHost = address
     }
 }

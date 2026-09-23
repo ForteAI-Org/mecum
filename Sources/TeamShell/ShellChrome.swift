@@ -19,9 +19,9 @@ import Workspace
 /// is doing, and no fact is shown twice.
 public enum ShellChrome {
 
-    /// A control that belongs to the window rather than to a worker.
+    /// A control that belongs to the window rather than to a worker. There is
+    /// no sidebar toggle: the sidebar turns compact and is never hidden.
     public enum ToolbarControl: Sendable, Hashable, CaseIterable {
-        case sidebarToggle
         case inspectorToggle
     }
 
@@ -37,7 +37,7 @@ public enum ShellChrome {
 
     /// Everything the toolbar holds, in order. Worker actions live with the
     /// worker (the composer, the menu bar, the row's context menu), not here.
-    public static let toolbar: [ToolbarControl] = [.sidebarToggle, .inspectorToggle]
+    public static let toolbar: [ToolbarControl] = [.inspectorToggle]
 
     /// The header for the selected worker, or nil when none is selected.
     public static func header(for worker: WorkerSnapshot?) -> Header? {

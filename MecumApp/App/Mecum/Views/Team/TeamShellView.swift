@@ -13,54 +13,75 @@ import Workspace
 /// column split of the team and the selected worker's conversation, and a
 /// hideable inspector beside the conversation.
 ///
+/// The sidebar is never hidden. There is no toggle for it, the View menu has
+/// no command for it (`MecumApp`), `SidebarBridge` stops a drag at the compact
+/// width, and any other path that hides it is undone by the guard on `columns`.
+/// It turns compact instead, when the person drags it narrow or when the window
+/// needs the room for the inspector.
+///
 /// The conversation takes what is left and is never divided. The columns are
 /// laid out at `ShellMetrics`'s constant widths, and each column reports a
-/// constant minimum, never one its own layout produced. Whether the inspector
-/// is shown is decided from the window's frame (`WindowWidthReader`), outside
-/// the split, so showing or hiding it cannot change the width it was decided
-/// from: a restored request that does not fit is resolved once, when the
-/// window first reports, and a resize closes it first and brings it back only
-/// with `ShellMetrics.hysteresis` to spare. Opening it on request in a window
-/// too narrow for both columns hides the sidebar instead.
+/// constant minimum, never one its own layout produced. How the window is
+/// divided is decided from its frame (`WindowWidthReader`), outside the split,
+/// so showing the inspector or compacting the sidebar cannot change the width
+/// it was decided from: a restored request is resolved once, when the window
+/// first reports, and a resize changes the division first and restores it
+/// only with `ShellMetrics.hysteresis` to spare.
+///
+/// A new division is applied in two steps, so the split never asks the window
+/// for more width than it has and the window never grows on its own: what
+/// gives room first (the sidebar turning compact, the inspector closing), and
+/// what takes it after (the inspector opening, the sidebar widening). The
+/// inspector closes over about a quarter of a second while the sidebar widens
+/// at once, so the second step waits `inspectorClosing` after a close.
 ///
 /// The request is the window's own memory, passed in as a binding, so the
 /// offscreen snapshot hosts this view without a scene. The column widths a
-/// person drags are the split view's to restore with the window.
+/// person drags are the split view's to restore with the window, and one the
+/// person dragged is also the width the sidebar returns to from compact.
 struct TeamShellView: View {
+
+    /// Longer than AppKit takes to close the inspector column: 250 ms, measured on macOS 26.
+    private static let inspectorClosing = Duration.milliseconds(300)
+
+    /// Long enough for the split to lay out the compact sidebar before the inspector opens beside it.
+    private static let sidebarCompacting = Duration.milliseconds(50)
 
     @Bindable
     var team: TeamModel
 
     @Binding var isInspectorRequested: Bool
 
-    @State private var columns: NavigationSplitViewVisibility
+    /// Always `.all`: the guard below puts back anything else.
+    @State private var columns = NavigationSplitViewVisibility.all
 
     /// The window's width as AppKit last reported it, nil before the first report.
     @State private var windowWidth: Double?
 
-    @State private var isInspectorShown = false
+    /// What the window shows now, which lags `target` while a division is applied in two steps.
+    @State private var division = ShellMetrics.Division.withoutInspector
 
-    /// `columns` is where the split starts; the snapshot passes what the
-    /// inspector toggle would have left.
-    init(
-        team                : TeamModel,
-        isInspectorRequested: Binding<Bool>,
-        columns             : NavigationSplitViewVisibility = .all
-    ) {
+    /// What the rule last decided, which a resize compares against.
+    @State private var target = ShellMetrics.Division.withoutInspector
+
+    /// The second step of the division being applied, cancelled by a newer one.
+    @State private var secondStep: Task<Void, Never>?
+
+    init(team: TeamModel, isInspectorRequested: Binding<Bool>) {
         self.team             = team
         _isInspectorRequested = isInspectorRequested
-        _columns              = State(initialValue: columns)
     }
-
-    private var isSidebarShown: Bool { columns != .detailOnly }
 
     var body: some View {
         NavigationSplitView(columnVisibility: $columns) {
             TeamSidebarView(team: team)
+                .toolbar(removing: .sidebarToggle)
+                // Outermost, since under another modifier the split reads no width at all.
+                // A change of these values moves the column to `ideal`, which is how it turns compact and back.
                 .navigationSplitViewColumnWidth(
-                    min  : ShellMetrics.sidebar.minimum,
-                    ideal: ShellMetrics.sidebar.ideal,
-                    max  : ShellMetrics.sidebar.maximum
+                    min  : ShellMetrics.compactSidebar,
+                    ideal: division.isSidebarCompact ? ShellMetrics.compactSidebar : ShellMetrics.sidebar.ideal,
+                    max  : division.isSidebarCompact ? ShellMetrics.compactSidebar : ShellMetrics.sidebar.maximum
                 )
         } detail: {
             detail
@@ -80,7 +101,9 @@ struct TeamShellView: View {
                 }
         }
         .background(WindowWidthReader(onWidth: windowResized))
-        .onChange(of: columns) { reconsiderInspector() }
+        .onChange(of: columns) {
+            if columns != .all { columns = .all }
+        }
         .onChange(of: team.selection) {
             Task { await team.openSelectedConversation() }
         }
@@ -111,9 +134,9 @@ struct TeamShellView: View {
 
     // MARK: Toolbar
 
-    /// The window's own controls, `ShellChrome.toolbar`: the split view's sidebar
-    /// toggle, the worker's header at the leading edge and the inspector toggle at the trailing edge,
-    /// the connections are at the foot of the sidebar, and Release the computer is
+    /// The window's own controls, `ShellChrome.toolbar`: the worker's header at
+    /// the leading edge and the inspector toggle at the trailing edge. The
+    /// connections are at the foot of the sidebar, and Release the computer is
     /// in the composer beside Send and in the worker's commands.
     @ToolbarContentBuilder
     private var toolbar: some ToolbarContent {
@@ -122,27 +145,25 @@ struct TeamShellView: View {
             .sharedBackgroundVisibility(.hidden)
         ToolbarSpacer(.flexible)
         ToolbarItem {
-            Button(isInspectorShown ? "Hide Inspector" : "Show Inspector", systemImage: "info.circle",
+            Button(target.isInspectorShown ? "Hide Inspector" : "Show Inspector", systemImage: "info.circle",
                    action: toggleInspector)
                 .keyboardShortcut("i", modifiers: [.control, .option, .command])
                 .help("Show or hide the inspector (Control-Option-Command-I)")
         }
     }
 
-    /// Closes a shown inspector, or opens it, hiding the sidebar when that is
-    /// what makes room. A request the window cannot hold yet is kept.
+    /// Closes a shown inspector and gives the sidebar back its width, or opens
+    /// it, compacting the sidebar when that is what makes room. A request the
+    /// window cannot hold yet is kept.
     private func toggleInspector() {
-        guard !isInspectorShown else {
+        guard !target.isInspectorShown else {
             isInspectorRequested = false
-            isInspectorShown     = false
+            divide(into: .withoutInspector)
             return
         }
         isInspectorRequested = true
         guard let windowWidth else { return }
-        if isSidebarShown, ShellMetrics.openingHidesSidebar(window: windowWidth) {
-            columns = .detailOnly
-        }
-        isInspectorShown = ShellMetrics.fitsInspector(window: windowWidth, isSidebarShown: columns != .detailOnly)
+        divide(into: ShellMetrics.division(window: windowWidth, previous: nil))
     }
 
     /// The first report resolves a restored request once; later ones apply the
@@ -152,27 +173,38 @@ struct TeamShellView: View {
         guard width != windowWidth else { return }
         windowWidth = width
         guard isInspectorRequested else { return }
-        isInspectorShown = isFirst
-            ? ShellMetrics.fitsInspector(window: width, isSidebarShown: isSidebarShown)
-            : ShellMetrics.showsInspectorAfterResize(window: width, isSidebarShown: isSidebarShown,
-                                                     isShown: isInspectorShown)
+        divide(into: ShellMetrics.division(window: width, previous: isFirst ? nil : target))
     }
 
-    /// The person showed or hid the sidebar: a sidebar that comes back closes
-    /// an inspector that no longer fits, and one that goes may make room.
-    private func reconsiderInspector() {
-        guard let windowWidth, isInspectorRequested else { return }
-        isInspectorShown = ShellMetrics.fitsInspector(window: windowWidth, isSidebarShown: isSidebarShown)
+    /// Applies `next` in two steps: at once what gives room, then, after the
+    /// split has made it, what takes room. A newer division cancels the second
+    /// step of an older one and starts from what is shown.
+    private func divide(into next: ShellMetrics.Division) {
+        secondStep?.cancel()
+        target = next
+        let first = ShellMetrics.Division(
+            isInspectorShown: division.isInspectorShown && next.isInspectorShown,
+            isSidebarCompact: division.isSidebarCompact || next.isSidebarCompact
+        )
+        let wait = division.isInspectorShown && !first.isInspectorShown ? Self.inspectorClosing
+                                                                          : Self.sidebarCompacting
+        division = first
+        guard first != next else { return }
+        secondStep = Task {
+            // A cancelled wait belongs to a division that a newer one replaced.
+            do { try await Task.sleep(for: wait) } catch { return }
+            division = next
+        }
     }
 
     /// What the inspector shows, and a close from the inspector's own edge.
     private var inspectorPresentation: Binding<Bool> {
         Binding(
-            get: { isInspectorShown },
+            get: { division.isInspectorShown },
             set: { isShown in
                 guard !isShown else { return }
                 isInspectorRequested = false
-                isInspectorShown     = false
+                divide(into: .withoutInspector)
             }
         )
     }

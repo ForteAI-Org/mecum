@@ -56,7 +56,8 @@ struct TeamOutlineTests {
         #expect(row.needsConfiguring)
         #expect(row.subtitle == TeamRow.toConfigure)
         #expect(row.accessibilityLabel.contains(TeamRow.toConfigure))
-        #expect(after.first { $0.id == head.id }?.subtitle == "Lead")
+        #expect(!row.accessibilityLabel.contains(TemporaryStore.secondSelection.model))
+        #expect(after.first { $0.id == head.id }?.subtitle == "claude-opus-5, High effort")
     }
 
     @Test("Changing a worker's state does not move it in the list")
@@ -77,8 +78,8 @@ struct TeamOutlineTests {
         #expect(after.first { $0.id == first.id }?.worker.isConfigured == true)
     }
 
-    @Test("The subtitle is the role, and says to configure while no model is attached")
-    func subtitleChoosesRoleOrConfiguration() async throws {
+    @Test("The subtitle is the model, and says to configure while no model is attached")
+    func subtitleChoosesModelOrConfiguration() async throws {
         let directory = TemporaryStore.directory()
         defer { TemporaryStore.discard(directory) }
 
@@ -94,9 +95,12 @@ struct TeamOutlineTests {
         try await store.configure(worker: roled.id, selection: TemporaryStore.firstSelection)
         try await store.configure(worker: roleless.id, selection: TemporaryStore.secondSelection)
 
+        // The role stays in the label and the inspector; the second line is the model, and only that.
         let attached = TeamOutline.rows(of: try await store.workers())
-        #expect(attached.first { $0.id == roled.id }?.subtitle == "Research lead")
-        #expect(attached.first { $0.id == roleless.id }?.subtitle == "")
+        #expect(attached.first { $0.id == roled.id }?.subtitle == "claude-opus-5, High effort")
+        #expect(attached.first { $0.id == roleless.id }?.subtitle == "qwen3:8b, No thinking")
+        #expect(attached.first { $0.id == roled.id }?.accessibilityLabel
+            == "Aaa, Research lead, claude-opus-5, High effort")
     }
 
     @Test("The accessible label keeps the whole name and the role behind a truncation")
@@ -121,8 +125,8 @@ struct TeamOutlineTests {
         #expect(row.accessibilityLabel.contains(TeamRow.toConfigure))
     }
 
-    @Test("An activity replaces the role in the subtitle and never moves the row")
-    func anActivityReplacesTheRoleAndKeepsTheOrder() async throws {
+    @Test("An activity replaces the model in the subtitle and never moves the row")
+    func anActivityReplacesTheModelAndKeepsTheOrder() async throws {
         let directory = TemporaryStore.directory()
         defer { TemporaryStore.discard(directory) }
 
@@ -142,8 +146,10 @@ struct TeamOutlineTests {
 
         #expect(after.map(\.id) == before.map(\.id))
         #expect(after.map(\.subtitle) == ["Using Calculator", "Waiting for the computer (1 ahead)", TeamRow.toConfigure])
-        #expect(before.map(\.subtitle) == ["Lead", "Scout", TeamRow.toConfigure])
+        let model = "claude-opus-5, High effort"
+        #expect(before.map(\.subtitle) == [model, model, TeamRow.toConfigure])
         let scoutRow = try #require(after.first { $0.id == scout.id })
-        #expect(scoutRow.accessibilityLabel == "Bbb, Scout, Waiting for the computer (1 ahead)")
+        #expect(scoutRow.accessibilityLabel
+            == "Bbb, Scout, Waiting for the computer (1 ahead), \(model)")
     }
 }

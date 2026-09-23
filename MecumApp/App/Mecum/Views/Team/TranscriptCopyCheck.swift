@@ -43,8 +43,7 @@ enum TranscriptCopyCheck {
     }
 
     private static func check(_ team: TeamModel) async throws -> Bool {
-        let hosting = NSHostingView(rootView: WindowSnapshots.Root(team: team, isInspectorRequested: false,
-                                                                   columns: .all))
+        let hosting = NSHostingView(rootView: WindowSnapshots.Root(team: team, isInspectorRequested: false))
         hosting.sceneBridgingOptions = [.toolbars, .title]
         let window = NSWindow(
             contentRect: NSRect(x: 120, y: 120, width: 1000, height: 640),

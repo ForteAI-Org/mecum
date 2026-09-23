@@ -118,6 +118,14 @@ final class ModelSettingsStore {
         }
     }
 
+    /// Stands `state` in for a check of `provider` that finished at `date`,
+    /// for the offscreen snapshots, which draw the connections without
+    /// running a command line or reaching the network.
+    func recordCheck(_ state: ConnectionState, for provider: ModelProvider, at date: Date) {
+        states[provider]    = state
+        checkedAt[provider] = date
+    }
+
     /// Waits for every check in flight, first starting one for each provider
     /// never checked. The lab's composer asks this before refusing a goal.
     func refreshAndWait() async {

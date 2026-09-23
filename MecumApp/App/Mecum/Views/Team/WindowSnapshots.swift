@@ -34,27 +34,44 @@ enum WindowSnapshots {
         do {
             let team = try await syntheticTeam(in: store)
             let output = try directory()
+            // The narrowest window holds the inspector only beside the compact sidebar.
+            let narrowest = Int(ShellMetrics.windowMinimum)
             let cases: [(name: String, width: Double, dark: Bool, inspector: Bool)] = [
                 ("1200-light", 1200, false, true), ("1200-dark", 1200, true, true),
-                ("820-light", 820, false, true), ("820-dark", 820, true, true),
-                ("820-light-inspector-closed", 820, false, false),
+                ("\(narrowest)-light", ShellMetrics.windowMinimum, false, true),
+                ("\(narrowest)-dark", ShellMetrics.windowMinimum, true, true),
+                ("\(narrowest)-light-inspector-closed", ShellMetrics.windowMinimum, false, false),
             ]
             for shot in cases {
-                let hidesSidebar = shot.inspector && ShellMetrics.openingHidesSidebar(window: shot.width)
-                let root = Root(team: team, isInspectorRequested: shot.inspector,
-                                columns: hidesSidebar ? .detailOnly : .all)
+                let root = Root(team: team, isInspectorRequested: shot.inspector)
                 try await write(root, width: shot.width, dark: shot.dark,
                                 to: output.appending(path: "window-\(shot.name).png"))
             }
-            // The split's sidebar is glass and draws blank offscreen, so its rows are drawn alone too.
-            for (name, dark) in [("light", false), ("dark", true)] {
-                try await write(TeamSidebarView(team: team), width: ShellMetrics.sidebar.ideal, dark: dark,
-                                to: output.appending(path: "sidebar-\(name).png"))
-            }
+            // The split's sidebar is glass and draws blank offscreen, so its rows are drawn alone too,
+            // full and compact, with two connections ready for the footer's badge.
             let badges = try await badgedTeam(in: store.appending(path: "Badges", directoryHint: .isDirectory))
+            for connections in [team.connections, badges.connections] {
+                for provider in [ModelProvider.codex, .claudeCode] {
+                    connections.recordCheck(.ready, for: provider, at: Self.checkedAt)
+                }
+            }
+            let sidebars: [(name: String, team: TeamModel, width: Double)] = [
+                ("sidebar", team, ShellMetrics.sidebar.ideal),
+                ("sidebar-badges", badges, ShellMetrics.sidebar.ideal),
+                ("sidebar-compact", team, ShellMetrics.compactSidebar),
+                ("sidebar-compact-badges", badges, ShellMetrics.compactSidebar),
+            ]
+            for sidebar in sidebars {
+                for (name, dark) in [("light", false), ("dark", true)] {
+                    try await write(TeamSidebarView(team: sidebar.team), width: sidebar.width, dark: dark,
+                                    to: output.appending(path: "\(sidebar.name)-\(name).png"))
+                }
+            }
+            let connections = syntheticConnections()
             for (name, dark) in [("light", false), ("dark", true)] {
-                try await write(TeamSidebarView(team: badges), width: ShellMetrics.sidebar.ideal, dark: dark,
-                                to: output.appending(path: "sidebar-badges-\(name).png"))
+                try await write(ConnectionsSheet(connections: connections, checksOnAppear: false),
+                                width: 560, height: 680, dark: dark,
+                                to: output.appending(path: "connections-\(name).png"))
             }
         } catch {
             FileHandle.standardError.write(Data("snapshots failed: \(error)\n".utf8))
@@ -174,11 +191,36 @@ enum WindowSnapshots {
         return team
     }
 
+    /// When the synthetic checks finished, fixed so the images do not change with the clock.
+    private static let checkedAt = Date(timeIntervalSinceReferenceDate: 780_000_000)
+
+    /// One connection in each kind of state the sheet draws, recorded rather
+    /// than checked. Whether a key is held still comes from the keychain,
+    /// which decides only which key actions show; no key is ever drawn.
+    private static func syntheticConnections() -> ModelSettingsStore {
+        let connections = ModelSettingsStore()
+        connections.recordCheck(.ready, for: .codex, at: checkedAt)
+        connections.recordCheck(.ready, for: .claudeCode, at: checkedAt.addingTimeInterval(-60))
+        connections.recordCheck(.credentialMissing, for: .anthropic, at: checkedAt)
+        connections.recordCheck(.credentialRejected(detail: "API key not valid. Please pass a valid API key."),
+                                for: .gemini, at: checkedAt)
+        connections.recordCheck(.unreachable(destination: connections.ollamaHost,
+                                             detail: "Could not connect to the server."),
+                                for: .ollama, at: checkedAt)
+        return connections
+    }
+
     // MARK: Drawing
 
-    /// Hosts `content` at `width`, lets its tasks and the transcript settle,
-    /// then draws the window's frame view, which holds the toolbar too.
-    private static func write(_ content: some View, width: Double, dark: Bool, to file: URL) async throws {
+    /// Hosts `content` at `width` by `height`, lets its tasks and the transcript
+    /// settle, then draws the window's frame view, which holds the toolbar too.
+    private static func write(
+        _ content: some View,
+        width    : Double,
+        height   : Double = 720,
+        dark     : Bool,
+        to file  : URL
+    ) async throws {
         // Offscreen, SwiftUI resolves its colours in the app's appearance rather than the window's.
         NSApp.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
         let hosting = NSHostingView(rootView: content
@@ -186,7 +228,7 @@ enum WindowSnapshots {
         hosting.sceneBridgingOptions = [.toolbars, .title]
 
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: width, height: 720),
+            contentRect: NSRect(x: 0, y: 0, width: width, height: height),
             styleMask  : [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
             backing    : .buffered,
             defer      : false
@@ -194,7 +236,7 @@ enum WindowSnapshots {
         window.isReleasedWhenClosed = false
         window.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
         window.contentView = hosting
-        window.setContentSize(NSSize(width: width, height: 720))
+        window.setContentSize(NSSize(width: width, height: height))
 
         // SwiftUI lays out over several passes and the transcript loads off the main actor.
         for _ in 0..<20 {
@@ -225,10 +267,9 @@ enum WindowSnapshots {
     struct Root: View {
         let team: TeamModel
         @State var isInspectorRequested: Bool
-        let columns: NavigationSplitViewVisibility
 
         var body: some View {
-            TeamShellView(team: team, isInspectorRequested: $isInspectorRequested, columns: columns)
+            TeamShellView(team: team, isInspectorRequested: $isInspectorRequested)
         }
     }
 }

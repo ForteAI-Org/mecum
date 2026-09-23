@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import ModelTransports
 
 /// TeamRow is one line of the team sidebar: a worker, its states, and the
 /// two texts the row is read with.
@@ -67,23 +68,29 @@ public struct TeamRow: Sendable, Hashable, Identifiable {
     public var id  : UUID   { worker.id }
     public var name: String { worker.name }
 
-    /// The role while there is no work in progress and the activity while
-    /// there is (§4.2), and the missing configuration before either, because
-    /// a worker that cannot answer must say so before it says what it is for.
-    /// A worker with no role has no idle subtitle; nothing invents a
-    /// specialisation from the name.
+    /// The line under the name: the model the worker answers with, the
+    /// activity in its place while there is work in progress (§4.2), and the
+    /// missing configuration before either, because a worker that cannot
+    /// answer must say so first. The activity is the passing fact and the
+    /// model the lasting one, so the row shows one at a time; the inspector
+    /// keeps the model in view.
     public var subtitle: String {
-        guard !needsConfiguring else { return Self.toConfigure }
-        return activity ?? role
+        guard !needsConfiguring, let selection = worker.configuration else { return Self.toConfigure }
+        return activity ?? selection.line
     }
 
-    /// The whole name, then the role, then the states, so a long name stays
-    /// readable to assistive technology after the view has truncated it.
+    /// The whole name, then the role, then the states and the model, so a
+    /// long name stays readable to assistive technology after the view has
+    /// truncated it, and a compact tile that shows only the name reads the rest.
     public var accessibilityLabel: String {
         var parts = [worker.name]
         if !role.isEmpty { parts.append(role) }
         if let activity { parts.append(activity) }
-        if needsConfiguring { parts.append(Self.toConfigure) }
+        if needsConfiguring {
+            parts.append(Self.toConfigure)
+        } else if let selection = worker.configuration {
+            parts.append(selection.line)
+        }
         if needsAttention { parts.append("Last turn did not finish") }
         if unread.replies > 0 {
             parts.append(unread.replies == 1 ? "1 unread reply" : "\(unread.replies) unread replies")

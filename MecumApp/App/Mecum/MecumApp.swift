@@ -40,6 +40,8 @@ struct MecumApp: App {
         // A snapshot run draws offscreen and quits; it opens no window and no workspace.
         .defaultLaunchBehavior(Self.isCheckRun ? .suppressed : .automatic)
         .commands {
+            // The team's sidebar turns compact and is never hidden, so the View menu has no place for it.
+            CommandGroup(replacing: .sidebar) {}
             LabWindowCommands()
             TextSizeCommands()
             TeamMenuCommands()

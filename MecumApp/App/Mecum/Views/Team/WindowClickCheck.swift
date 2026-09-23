@@ -14,15 +14,20 @@ import Workspace
 /// WindowClickCheck puts the team shell in a real key window, when the app is
 /// launched with MECUM_CLICK_CHECK=1, and drives the window's chrome with
 /// events sent through the window: a click on the worker header, which opens
-/// nothing, the inspector's shortcut both ways, and a click on the sidebar's
-/// Connections footer. It
-/// prints what each step found and quits with 0 when every step held, 1 otherwise.
+/// nothing, the inspector's shortcut both ways, Down and Up in the team, a
+/// click on the sidebar's Connections footer, a narrower window with the
+/// inspector open, where the sidebar must turn compact, and back, and every
+/// way a sidebar is hidden (the View menu, Control-Command-S, `toggleSidebar:`
+/// and a drag of the divider to the window's edge), none of which may hide it.
+/// It prints what each step found and quits with 0 when every step held, 1
+/// otherwise.
 ///
 /// SwiftUI builds no accessibility tree without an assistive client, so the
 /// targets are found by geometry: the header at the leading edge of the
-/// conversation's title bar, the footer at the bottom of the sidebar's. The
-/// events go to the window, so the pointer never moves. The team is
-/// `WindowSnapshots`'s synthetic one, in a temporary store.
+/// conversation's title bar, the footer at the bottom of the sidebar's, the
+/// divider at the sidebar pane's trailing edge. The events go to the window,
+/// so the pointer never moves. The team is `WindowSnapshots`'s synthetic one,
+/// in a temporary store.
 @MainActor
 enum WindowClickCheck {
 
@@ -127,6 +132,11 @@ enum WindowClickCheck {
         team.isShowingConnections = false
         try await Task.sleep(for: .seconds(1))
 
+        try await checkKeyboardSelection(team: team, hosting: hosting, window: window)
+        // Compaction first: after the person drags the divider, the split keeps their width over `ideal`.
+        try await checkCompaction(probe: probe, hosting: hosting, window: window)
+        try await checkTheSidebarStays(hosting: hosting, window: window)
+
         team.selection = nil
         try await Task.sleep(for: .seconds(1))
         print("click check: no worker selected, window title \"\(window.title)\"")
@@ -134,7 +144,141 @@ enum WindowClickCheck {
         window.close()
     }
 
+    // MARK: Steps
+
+    /// Down and Up in the team's list move the selection to the next worker and back.
+    private static func checkKeyboardSelection(team: TeamModel, hosting: NSView, window: NSWindow) async throws {
+        guard let table = firstView(of: NSTableView.self, in: try splitPanes(in: hosting)[0]) else {
+            throw CheckFailure(description: "no list in the sidebar")
+        }
+        window.makeFirstResponder(table)
+        let names = team.rows.map(\.name)
+        let first = team.selectedWorker?.name
+        for (key, character, expected) in [(UInt16(125), "\u{F701}", names.dropFirst().first),
+                                           (UInt16(126), "\u{F700}", first)] {
+            press(character, keyCode: key, modifiers: [.numericPad, .function], in: window, throughApp: false)
+            try await Task.sleep(for: .seconds(1))
+            print("click check: after key \(key) in the team, selected \(team.selectedWorker?.name ?? "none")")
+            try expect(team.selectedWorker?.name == expected, "the arrow key did not select \(expected ?? "none")")
+        }
+    }
+
+    /// Nothing that hides a sidebar hides this one: the View menu has no item for
+    /// it, and Control-Command-S, `toggleSidebar:` and a drag of the divider to
+    /// the window's edge leave it shown at every sample, the drag at the compact width.
+    private static func checkTheSidebarStays(hosting: NSView, window: NSWindow) async throws {
+        let items = menuItems(NSApp.mainMenu)
+        let viewMenu = NSApp.mainMenu?.items.first { $0.title == "View" }?.submenu?.items.map(\.title) ?? []
+        print("click check: View menu \(viewMenu)")
+        let sidebarItems = items.filter {
+            $0.action == #selector(NSSplitViewController.toggleSidebar(_:)) || $0.title.contains("Sidebar")
+        }
+        for item in sidebarItems {
+            print("click check: menu item \"\(item.title)\" in \"\(item.menu?.title ?? "none")\", action "
+                + "\(item.action.map(NSStringFromSelector) ?? "none"), key \"\(item.keyEquivalent)\", "
+                + "hidden \(item.isHidden), enabled \(item.isEnabled)")
+        }
+        // SwiftUI keeps a hidden Toggle Sidebar for Control-Command-S; the keys are tried below.
+        let shown = sidebarItems.filter { !$0.isHidden }
+        try expect(shown.isEmpty, "the menu bar offers \(shown.map(\.title))")
+
+        let width = try sidebarWidth(in: hosting)
+        press("s", keyCode: 1, modifiers: [.control, .command], in: window, throughApp: true)
+        var narrowest = try await narrowestSidebar(in: hosting, for: .seconds(1))
+        print("click check: after Control-Command-S, sidebar narrowest \(narrowest)")
+        try expect(narrowest == width, "Control-Command-S changed the sidebar from \(width) to \(narrowest)")
+
+        NSApp.sendAction(#selector(NSSplitViewController.toggleSidebar(_:)), to: nil, from: window)
+        narrowest = try await narrowestSidebar(in: hosting, for: .seconds(1))
+        print("click check: after toggleSidebar:, sidebar narrowest \(narrowest)")
+        try expect(narrowest == width, "toggleSidebar: changed the sidebar from \(width) to \(narrowest)")
+
+        let pane = try splitPanes(in: hosting)[0]
+        let divider = pane.convert(NSPoint(x: pane.bounds.maxX + 0.5, y: pane.bounds.midY), to: nil)
+        drag(from: divider, to: NSPoint(x: 4, y: divider.y), in: window)
+        narrowest = try await narrowestSidebar(in: hosting, for: .seconds(2))
+        let after = try sidebarWidth(in: hosting)
+        print("click check: after dragging the divider to the edge, sidebar narrowest \(narrowest), now \(after)")
+        try expect(narrowest >= ShellMetrics.compactSidebar - 1 && abs(after - ShellMetrics.compactSidebar) < 1,
+                   "the drag left the sidebar at \(after), narrowest \(narrowest)")
+    }
+
+    /// With the inspector open, a window too narrow for the full sidebar turns
+    /// it compact, a wide one brings it back, and closing the inspector does too.
+    private static func checkCompaction(probe: Probe, hosting: NSView, window: NSWindow) async throws {
+        let full    = ShellMetrics.sidebar.ideal
+        let compact = ShellMetrics.compactSidebar
+        func expectDivision(_ label: String, width: Double, sidebar: Double, inspector: Bool) throws {
+            let now = try sidebarWidth(in: hosting)
+            print("click check: \(label): window \(window.frame.width), sidebar \(now), "
+                + "inspector requested \(probe.isInspectorRequested)")
+            try expect(abs(window.frame.width - width) < 1, "\(label): the window is \(window.frame.width) wide")
+            try expect(abs(now - sidebar) < 1, "\(label): the sidebar is \(now) wide, not \(sidebar)")
+            try expect(showsInspector(hosting) == inspector,
+                       "\(label): the inspector is not \(inspector ? "shown" : "hidden")")
+        }
+
+        window.setContentSize(NSSize(width: 1000, height: 720))
+        try await Task.sleep(for: .seconds(1))
+        press("i", keyCode: 34, modifiers: [.control, .option, .command], in: window, throughApp: true)
+        try await Task.sleep(for: .seconds(1))
+        try expectDivision("inspector opened at 1000", width: 1000, sidebar: compact, inspector: true)
+
+        window.setContentSize(NSSize(width: 1200, height: 720))
+        try await Task.sleep(for: .seconds(1))
+        try expectDivision("widened to 1200", width: 1200, sidebar: full, inspector: true)
+
+        // The narrowest window the scene allows still holds the inspector beside the compact sidebar.
+        let narrowest = ShellMetrics.windowMinimum
+        window.setContentSize(NSSize(width: narrowest, height: 720))
+        try await Task.sleep(for: .seconds(1))
+        try expectDivision("narrowed to \(Int(narrowest))", width: narrowest, sidebar: compact, inspector: true)
+
+        press("i", keyCode: 34, modifiers: [.control, .option, .command], in: window, throughApp: true)
+        try await Task.sleep(for: .seconds(1))
+        try expectDivision("inspector closed at \(Int(narrowest))", width: narrowest, sidebar: full, inspector: false)
+
+        window.setContentSize(NSSize(width: 1200, height: 720))
+        try await Task.sleep(for: .seconds(1))
+    }
+
     // MARK: Geometry
+
+    /// The sidebar pane's width, which throws once the pane is hidden or gone.
+    private static func sidebarWidth(in root: NSView) throws -> Double {
+        guard let split = firstView(of: NSSplitView.self, in: root), let pane = split.arrangedSubviews.first,
+              !pane.isHidden, pane.frame.width > 1, split.arrangedSubviews.count > 1
+        else { throw CheckFailure(description: "the sidebar is hidden") }
+        return Double(pane.frame.width)
+    }
+
+    /// The narrowest the sidebar was over `duration`, sampled every 50 ms, and 0 if it was ever hidden.
+    private static func narrowestSidebar(in root: NSView, for duration: Duration) async throws -> Double {
+        var narrowest = Double.infinity
+        let clock = ContinuousClock()
+        let end = clock.now + duration
+        while clock.now < end {
+            do { narrowest = min(narrowest, try sidebarWidth(in: root)) } catch { narrowest = 0 }
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        return narrowest
+    }
+
+    /// The first view of `type` under `root`, breadth first.
+    private static func firstView<View: NSView>(of type: View.Type, in root: NSView) -> View? {
+        var queue = [root]
+        while !queue.isEmpty {
+            let view = queue.removeFirst()
+            if let match = view as? View { return match }
+            queue += view.subviews
+        }
+        return nil
+    }
+
+    /// Every item of `menu` and of its submenus.
+    private static func menuItems(_ menu: NSMenu?) -> [NSMenuItem] {
+        (menu?.items ?? []).flatMap { [$0] + menuItems($0.submenu) }
+    }
 
     /// The shown panes of the outermost split view: the sidebar, the conversation and, when shown, the inspector.
     private static func splitPanes(in root: NSView) throws -> [NSView] {
@@ -194,6 +338,25 @@ enum WindowClickCheck {
                 windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1
             ) {
                 window.sendEvent(event)
+            }
+        }
+    }
+
+    /// A drag from `start` to `end` in ten steps. A split view tracks a drag in
+    /// its own loop, reading the queue, so the events are posted rather than sent.
+    private static func drag(from start: NSPoint, to end: NSPoint, in window: NSWindow) {
+        print("click check: dragging from \(start) to \(end) in the window")
+        let steps = (1...10).map { step in
+            NSPoint(x: start.x + (end.x - start.x) * CGFloat(step) / 10, y: start.y)
+        }
+        let events = [(NSEvent.EventType.leftMouseDown, start)] + steps.map { (.leftMouseDragged, $0) }
+            + [(.leftMouseUp, end)]
+        for (type, point) in events {
+            if let event = NSEvent.mouseEvent(
+                with: type, location: point, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1
+            ) {
+                NSApp.postEvent(event, atStart: false)
             }
         }
     }
