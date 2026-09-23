@@ -1,3 +1,10 @@
+//
+//  ChatMessage.swift
+//  Mecum
+//
+//  Created by Eliomar Alejandro Rodriguez Ferrer on 22/09/2026.
+//
+
 import SeatBroker
 import Foundation
 
@@ -5,18 +12,20 @@ import Foundation
 /// an observation to draw, an executed action's report, or a planner run
 /// that fills in while it goes.
 struct ChatMessage: Identifiable {
+
     enum Role { case user, system }
 
     let id = UUID()
-    let role: Role
-    var text: String
+
+    let role       : Role
+    var text       : String
     var observation: SceneObservation? = nil
-    var report: ActionReport? = nil
+    var report     : ActionReport?     = nil
 
     // Planner run state. `isRunning` shows the live stream in the bubble;
     // once done, `finalObservation` is the last frame the agent saw.
-    var isRunning = false
-    var runStatus: String? = nil
-    var reports: [ActionReport] = []
+    var isRunning                           = false
+    var runStatus       : String?           = nil
+    var reports         : [ActionReport]    = []
     var finalObservation: SceneObservation? = nil
 }

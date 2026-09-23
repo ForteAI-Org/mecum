@@ -1,3 +1,10 @@
+//
+//  ContentView.swift
+//  Mecum
+//
+//  Created by Eliomar Alejandro Rodriguez Ferrer on 22/09/2026.
+//
+
 import SeatBroker
 import SwiftUI
 
@@ -12,18 +19,27 @@ struct ContentView: View {
 
     var body: some View {
         ChatView(model: model)
-            .frame(minWidth: 720, minHeight: 520)
+            .frame(
+                minWidth : 720,
+                minHeight: 520
+            )
             .toolbar {
                 ToolbarItem { seatBadge }
                 ToolbarItem { capabilityBadge }
                 ToolbarItem {
-                    Button("Run history", systemImage: "clock.arrow.circlepath") { model.showsHistory = true }
+                    Button(
+                        "Run history",
+                        systemImage: "clock.arrow.circlepath"
+                    ) { model.showsHistory = true }
                 }
                 ToolbarItem {
                     // Available whenever there is a seat, busy or not: it was
                     // grey for exactly as long as it was needed.
-                    Button("End seat", systemImage: "stop.circle") { Task { await model.closeSession() } }
-                        .disabled(model.session == nil)
+                    Button(
+                        "End seat",
+                        systemImage: "stop.circle"
+                    ) { Task { await model.closeSession() } }
+                    .disabled(model.session == nil)
                 }
             }
             // A Screen Recording grant only reaches a fresh process, so the app
@@ -31,16 +47,25 @@ struct ContentView: View {
             .overlay(alignment: .bottom) {
                 if model.relaunchPending {
                     Text("Screen Recording granted — relaunching Mecum…")
-                        .padding(10).glassEffect().padding()
+                        .padding(10)
+                        .glassEffect()
+                        .padding()
                 }
             }
             .sheet(isPresented: $model.showsHistory) {
                 RunHistoryView(broker: model.broker)
             }
-            .alert("The seat could not do that", isPresented: Binding(
-                get: { model.openError != nil }, set: { if !$0 { model.openError = nil } }
-            )) {
-                Button("OK", role: .cancel) {}
+            .alert(
+                "The seat could not do that",
+                isPresented: Binding(
+                    get: { model.openError != nil },
+                    set: { if !$0 { model.openError = nil } }
+                )
+            ) {
+                Button(
+                    "OK",
+                    role: .cancel
+                ) {}
                 Button("Request permissions") { model.requestPermissions() }
                 if !model.capabilities.allReady {
                     Button("Open Privacy Settings") { model.openPermissionSettings() }
@@ -48,9 +73,15 @@ struct ContentView: View {
             } message: {
                 Text((model.openError ?? "") + "\n\n" + model.capabilityLines)
             }
-            .alert("No model available", isPresented: $model.needsModel) {
+            .alert(
+                "No model available",
+                isPresented: $model.needsModel
+            ) {
                 Button("Open Settings") { model.openSettings() }
-                Button("Cancel", role: .cancel) {}
+                Button(
+                    "Cancel",
+                    role: .cancel
+                ) {}
             } message: {
                 Text("Mecum needs at least one usable model: sign in to Codex, add an Anthropic or Gemini API key, or run Ollama with a pulled model. Set it up in Settings.")
             }
@@ -72,7 +103,10 @@ struct ContentView: View {
             // picture is not a lost application.
             if let preview = model.previewSuspension { Text(preview) }
         } label: {
-            Label(model.seatActivity.title, systemImage: model.seatActivity.symbol)
+            Label(
+                model.seatActivity.title,
+                systemImage: model.seatActivity.symbol
+            )
         }
     }
 
@@ -82,14 +116,19 @@ struct ContentView: View {
         let report = model.capabilities
         return Menu {
             ForEach(report.entries) { entry in
-                Label("\(entry.name): \(entry.detail)", systemImage: entry.ready ? "checkmark.circle" : "xmark.circle")
+                Label(
+                    "\(entry.name): \(entry.detail)",
+                    systemImage: entry.ready ? "checkmark.circle" : "xmark.circle"
+                )
             }
             Divider()
             Button("Request missing permissions") { model.requestPermissions() }
             Button("Relaunch Mecum") { model.relaunch() }
         } label: {
-            Label(report.allReady ? "Permissions ready" : "Permissions missing",
-                  systemImage: report.allReady ? "checkmark.shield" : "exclamationmark.triangle")
+            Label(
+                report.allReady ? "Permissions ready" : "Permissions missing",
+                systemImage: report.allReady ? "checkmark.shield" : "exclamationmark.triangle"
+            )
         }
     }
 }

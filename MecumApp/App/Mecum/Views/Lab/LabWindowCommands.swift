@@ -22,7 +22,10 @@ struct LabWindowCommands: Commands {
     var body: some Commands {
         CommandGroup(after: .toolbar) {
             Button("Desktop Lab") { openWindow(id: MecumApp.labWindowID) }
-                .keyboardShortcut("l", modifiers: [.command, .shift])
+                .keyboardShortcut(
+                    "l",
+                    modifiers: [.command, .shift]
+                )
         }
     }
 }

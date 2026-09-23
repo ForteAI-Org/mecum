@@ -1,3 +1,10 @@
+//
+//  AppModel.swift
+//  Mecum
+//
+//  Created by Eliomar Alejandro Rodriguez Ferrer on 22/09/2026.
+//
+
 import ModelTransports
 import SeatBroker
 import AppKit
@@ -9,33 +16,42 @@ import Observation
 @Observable
 @MainActor
 final class AppModel {
+
     // The lab runs on whatever macOS build is installed; the driver flags
     // unvalidated builds on every receipt and the capability card shows it.
     let broker = SeatBroker(configuration: .init(allowUnvalidatedBuild: true))
 
     var capabilities: CapabilityReport
+
     /// The seat. It exists from the first message on and holds nothing until a
     /// decision opens something, so nil means "no seat", never "no application".
     var session: AgentSession?
+
     /// The queue's lease on that seat. The seat is not this app's to keep: with
     /// more than one worker the next entry waits on this being given back, so it
     /// is held for exactly as long as `session` is and released with it.
     private var lease: SeatLease?
+
     var messages: [ChatMessage] = []
-    var isBusy = false
-    var draft = ""
+    var isBusy                  = false
+    var draft                   = ""
+
     let settings: ModelSettingsStore
+
     /// Shown when a goal is typed and no provider is usable yet.
     var needsModel = false
+
     var selection: ModelSelection {
         get { settings.lastSelection }
         set { settings.lastSelection = newValue }
     }
+
     /// Shown as an alert over the chat when something the seat needed failed
     /// while a facility was not granted.
     var openError: String?
+
     var relaunchPending = false
-    var showsHistory = false
+    var showsHistory    = false
 
     /// What the seat is doing, read from the kit and never assembled from what
     /// this model hoped its last call did. The badge used to say "Seat ready"
@@ -87,8 +103,10 @@ final class AppModel {
     func startDesktopSurface() {
         guard !isWatchingDesktop else { return }
         isWatchingDesktop = true
+
         broker.requestMissingPermissions()
         capabilities = broker.capabilities()
+
         Task { await watchPermissions() }
         Task { await watchSeat() }
     }
@@ -113,8 +131,10 @@ final class AppModel {
     func refreshSeatState() {
         let activity = session?.seatActivity ?? .noSeat
         if activity != seatActivity { seatActivity = activity }
+
         let hold = session?.inputHold
         if hold != inputHold { inputHold = hold }
+
         let preview = session?.previewSuspension
         if preview != previewSuspension { previewSuspension = preview }
     }
@@ -145,6 +165,7 @@ final class AppModel {
         while !capabilities.allReady {
             try? await Task.sleep(for: .seconds(2))
             capabilities = broker.capabilities()
+
             if !relaunchPending, await broker.screenRecordingNeedsRelaunch() {
                 relaunchPending = true
                 try? await Task.sleep(for: .seconds(1))
@@ -157,14 +178,22 @@ final class AppModel {
     func relaunch() {
         let configuration = NSWorkspace.OpenConfiguration()
         configuration.createsNewApplicationInstance = true
-        NSWorkspace.shared.openApplication(at: Bundle.main.bundleURL, configuration: configuration) { _, _ in
+
+        NSWorkspace.shared.openApplication(
+            at           : Bundle.main.bundleURL,
+            configuration: configuration
+        ) { _, _ in
             Task { @MainActor in NSApp.terminate(nil) }
         }
     }
 
     /// Opens the app's Settings window (⌘,) from code.
     func openSettings() {
-        NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+        NSApp.sendAction(
+            Selector(("showSettingsWindow:")),
+            to  : nil,
+            from: nil
+        )
     }
 
     /// Ends the seat: the held window goes back to the person, an application
@@ -188,6 +217,7 @@ final class AppModel {
         isClosing = true
         defer { isClosing = false }
         isBusy = true
+
         // The gate first, then the cancellation and the bounded wait: the seat
         // used to keep admitting Commands for the whole of that wait.
         session.stopAdmittingCommands()
@@ -195,21 +225,27 @@ final class AppModel {
         // the poll next comes round: the gate is already shut.
         refreshSeatState()
         cancelRun()
+
         let deadline = ContinuousClock.now + .seconds(2)
         while runTask != nil, ContinuousClock.now < deadline {
             try? await Task.sleep(for: .milliseconds(50))
         }
-        let refusal = await session.close()
+
+        let refusal  = await session.close()
         self.session = nil
         // The queue takes the seat back here and lets the next entry in. A
         // closed session is not parked, so the next one gets a fresh seat.
         lease?.giveBack()
-        lease = nil
+        lease  = nil
         isBusy = false
+
         // Only the sentence that is true: an application left running is the
         // one case where the usual line claims something that did not happen.
-        post(.system, refusal.map { $0 + " The next message opens a new seat." }
-            ?? "Seat ended. Anything it was holding went back to you. The next message opens a new one.")
+        post(
+            .system,
+            refusal.map { $0 + " The next message opens a new seat." }
+                ?? "Seat ended. Anything it was holding went back to you. The next message opens a new one."
+        )
     }
 
     /// Raises the permissions alert when a failure arrives while a facility is
@@ -220,6 +256,7 @@ final class AppModel {
         // A seat holding nothing is not a missing grant: it says so itself and
         // there is no permission to ask for.
         if let refusal = error as? SeatBrokerError, case .noAdoptedApplication = refusal { return }
+
         capabilities = broker.capabilities()
         guard !capabilities.allReady else { return }
         openError = error.localizedDescription
@@ -241,62 +278,83 @@ final class AppModel {
         let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty, !isBusy else { return }
         draft = ""
-        post(.user, text)
+        post(
+            .user,
+            text
+        )
 
         // The one command that answers before anything exists, and the explicit
         // rescan that the grid's Refresh button used to be.
         if text == "/caps" {
             capabilities = broker.capabilities()
-            post(.system, capabilityLines)
+            post(
+                .system,
+                capabilityLines
+            )
             return
         }
+
         let isCommand = text.hasPrefix("/")
         // Nothing is checked before something asks, so a goal typed first
         // waits for the checks rather than being refused for want of them.
         if !isCommand, settings.availableProviders.isEmpty { await settings.refreshAndWait() }
         guard isCommand || !settings.availableProviders.isEmpty else {
             needsModel = true
-            post(.system, "No usable model is configured, so there is nothing to plan the goal with.")
+            post(
+                .system,
+                "No usable model is configured, so there is nothing to plan the goal with."
+            )
             return
         }
 
         isBusy = true
         defer { isBusy = false }
         do {
-            // The seat is asked of the queue and waited for, never made here:
-            // with one seat a second worker's message blocks at this line until
-            // the first gives its seat back. It outlives every application that
-            // passes through it and holds nothing until a decision opens
-            // something.
+            // The seat is asked of the queue and waited for, never made here: with one seat a second
+            // worker's message blocks at this line until the first gives it back. It outlives every application.
             let session: AgentSession
             if let existing = self.session {
                 session = existing
             } else {
-                let lease = try await broker.queue.acquire("Mecum")
-                self.lease = lease
+                let lease    = try await broker.queue.acquire("Mecum")
+                self.lease   = lease
                 self.session = lease.session
-                session = lease.session
+                session      = lease.session
             }
+
             if text == "/observe" {
                 let observation = try await session.observe()
-                messages.append(ChatMessage(role: .system, text: observation.text, observation: observation))
+                messages.append(ChatMessage(
+                    role       : .system,
+                    text       : observation.text,
+                    observation: observation
+                ))
             } else if let action = SemanticAction.parse(command: text) {
                 let report = try await session.execute(action)
-                // The note carries what an action could not do in its own
-                // words, and a contextual menu that offered other titles says
-                // so there and nowhere else. It went to the model's history and
-                // not to the person, who is the one holding the keyboard.
+                // The note carries what an action could not do in its own words, and a refused menu
+                // names the other titles; it once went to the model's history, not to the person.
                 let note = report.note.map { " — \($0)" } ?? ""
-                messages.append(ChatMessage(role: .system,
-                                            text: "\(action.verb) \(action.targetDescription) \(report.targetLabel): \(report.verification.summary)\(note)",
-                                            report: report))
+                messages.append(ChatMessage(
+                    role  : .system,
+                    text  : "\(action.verb) \(action.targetDescription) \(report.targetLabel): \(report.verification.summary)\(note)",
+                    report: report
+                ))
             } else if isCommand {
-                post(.system, "Unknown command. Use /observe, /click N [count], /type N text, /scroll N k, /key return|escape|tab|cmd+c…, /menu N title, /caps.")
+                post(
+                    .system,
+                    "Unknown command. Use /observe, /click N [count], /type N text, /scroll N k, /key return|escape|tab|cmd+c…, /menu N title, /caps."
+                )
             } else {
-                await run(goal: text, in: session)
+                await run(
+                    goal: text,
+                    in  : session
+                )
             }
         } catch {
-            post(.system, "Failed: \(error.localizedDescription)")
+            post(
+                .system,
+                "Failed: \(error.localizedDescription)"
+            )
             escalate(error)
         }
     }
@@ -308,52 +366,74 @@ final class AppModel {
     /// One planner run as one message that fills in: status line while the
     /// model thinks, the live stream while it acts, then the final frame and
     /// the list of verified actions as the correctness debug trail.
-    private func run(goal: String, in session: AgentSession) async {
-        messages.append(ChatMessage(role: .system, text: "", isRunning: true, runStatus: "Thinking…"))
-        let index = messages.count - 1
-        let selection = self.selection
+    private func run(
+        goal      : String,
+        in session: AgentSession
+    ) async {
+        messages.append(ChatMessage(
+            role     : .system,
+            text     : "",
+            isRunning: true,
+            runStatus: "Thinking…"
+        ))
+        let index            = messages.count - 1
+        let selection        = self.selection
         let providerSettings = settings.providerSettings
+
         let task = Task { @MainActor in
             do {
-                for try await event in session.run(goal: goal, model: selection, settings: providerSettings) {
+                for try await event in session.run(
+                    goal    : goal,
+                    model   : selection,
+                    settings: providerSettings
+                ) {
                     refreshSeatState()
                     switch event {
-                    case .thinking(let decision, let observation):
-                        // No observation is the empty seat: nothing has been
-                        // opened, so say that rather than "perceived 0 elements".
-                        var status = observation == nil
-                            ? "Nothing is open yet — choosing an application (\(selection.model) · \(selection.effort.title(for: selection.provider)))"
-                            : "Thinking… (decision \(decision), \(selection.model) · \(selection.effort.title(for: selection.provider)))"
-                        if let observation, let timing = observation.timing {
-                            status += "\nPerceived \(observation.elements.count) elements in \(timing.summary)"
-                        }
-                        messages[index].runStatus = status
-                    case .planned(let decision, let usage):
-                        // The open is the one decision with nothing to watch
-                        // while it runs: the display comes up and the
-                        // application launches with no frame to show yet.
-                        var status = switch decision.status {
-                        case .plan: "Executing \(decision.steps.count) step\(decision.steps.count == 1 ? "" : "s"): \(decision.reason)"
-                        case .open: "Opening \(decision.application ?? "an application")… \(decision.reason)"
-                        default: decision.reason
-                        }
-                        if let usage {
-                            var parts: [String] = []
-                            if let tps = usage.tokensPerSecond { parts.append("\(Int(tps.rounded())) tok/s") }
-                            if let out = usage.outputTokens { parts.append("\(out) out") }
-                            parts.append(usage.duration.formatted(.units(allowed: [.seconds], width: .narrow)))
-                            status += "  ·  " + parts.joined(separator: " · ")
-                        }
-                        messages[index].runStatus = status
-                    case .executed(let report):
-                        messages[index].reports.append(report)
-                    case .notice(let text):
-                        // Its own line and not the run's status, which the next
-                        // decision overwrites: a measurement has to stay.
-                        post(.system, text)
-                    case .finished(let status, let reason, let decisions, let actions):
-                        messages[index].text = "\(status.rawValue.capitalized) — \(reason)"
-                        messages[index].runStatus = "\(decisions) decision\(decisions == 1 ? "" : "s"), \(actions) action\(actions == 1 ? "" : "s")"
+                        case .thinking(let decision, let observation):
+                            // No observation is the empty seat: nothing has been
+                            // opened, so say that rather than "perceived 0 elements".
+                            var status = observation == nil
+                                ? "Nothing is open yet — choosing an application (\(selection.model) · \(selection.effort.title(for: selection.provider)))"
+                                : "Thinking… (decision \(decision), \(selection.model) · \(selection.effort.title(for: selection.provider)))"
+                            if let observation, let timing = observation.timing {
+                                status += "\nPerceived \(observation.elements.count) elements in \(timing.summary)"
+                            }
+                            messages[index].runStatus = status
+
+                        case .planned(let decision, let usage):
+                            // The open is the one decision with nothing to watch while it runs: the
+                            // display comes up and the application launches with no frame to show yet.
+                            var status = switch decision.status {
+                                case .plan : "Executing \(decision.steps.count) step\(decision.steps.count == 1 ? "" : "s"): \(decision.reason)"
+                                case .open : "Opening \(decision.application ?? "an application")… \(decision.reason)"
+                                default    : decision.reason
+                            }
+                            if let usage {
+                                var parts: [String] = []
+                                if let tps = usage.tokensPerSecond { parts.append("\(Int(tps.rounded())) tok/s") }
+                                if let out = usage.outputTokens { parts.append("\(out) out") }
+                                parts.append(usage.duration.formatted(.units(
+                                    allowed: [.seconds],
+                                    width  : .narrow
+                                )))
+                                status += "  ·  " + parts.joined(separator: " · ")
+                            }
+                            messages[index].runStatus = status
+
+                        case .executed(let report):
+                            messages[index].reports.append(report)
+
+                        case .notice(let text):
+                            // Its own line and not the run's status, which the next
+                            // decision overwrites: a measurement has to stay.
+                            post(
+                                .system,
+                                text
+                            )
+
+                        case .finished(let status, let reason, let decisions, let actions):
+                            messages[index].text      = "\(status.rawValue.capitalized) — \(reason)"
+                            messages[index].runStatus = "\(decisions) decision\(decisions == 1 ? "" : "s"), \(actions) action\(actions == 1 ? "" : "s")"
                     }
                 }
             } catch is CancellationError {
@@ -363,14 +443,21 @@ final class AppModel {
                 escalate(error)
             }
             messages[index].finalObservation = session.lastObservation
-            messages[index].isRunning = false
+            messages[index].isRunning        = false
         }
+
         runTask = task
         await task.value
         runTask = nil
     }
 
-    private func post(_ role: ChatMessage.Role, _ text: String) {
-        messages.append(ChatMessage(role: role, text: text))
+    private func post(
+        _ role: ChatMessage.Role,
+        _ text: String
+    ) {
+        messages.append(ChatMessage(
+            role: role,
+            text: text
+        ))
     }
 }
