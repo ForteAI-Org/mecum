@@ -34,14 +34,15 @@ struct ComposerSurface: ViewModifier {
     func body(content: Content) -> some View {
         switch kind {
         case .material:
-            floating(content, on: AnyShapeStyle(.regularMaterial))
+            // A white veil over the material lifts the bar a little above the conversation in either theme.
+            floating(content.background(Color.white.opacity(0.07), in: shape), on: AnyShapeStyle(.regularMaterial))
         case .solid:
             floating(content, on: AnyShapeStyle(Color(nsColor: .windowBackgroundColor)))
         }
     }
 
     /// A container lifted off the transcript by a hairline and a soft shadow.
-    private func floating(_ content: Content, on fill: AnyShapeStyle) -> some View {
+    private func floating(_ content: some View, on fill: AnyShapeStyle) -> some View {
         content
             .background(fill, in: shape)
             .overlay(shape.strokeBorder(Color(nsColor: .separatorColor), lineWidth: 0.5))
