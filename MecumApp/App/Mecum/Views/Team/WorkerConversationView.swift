@@ -41,8 +41,6 @@ struct WorkerConversationView: View {
             Divider()
             composer
         }
-        .navigationTitle(worker.name)
-        .navigationSubtitle(team.needsConfiguring(worker) ? TeamRow.toConfigure : "")
     }
 
     // MARK: Transcript
@@ -50,7 +48,7 @@ struct WorkerConversationView: View {
     private var transcriptArea: some View {
         Group {
             if let transcript {
-                TranscriptHost(controller: transcript)
+                TranscriptHost(controller: transcript, topInset: WorkerHeaderView.clearance)
             } else {
                 Color.clear
             }

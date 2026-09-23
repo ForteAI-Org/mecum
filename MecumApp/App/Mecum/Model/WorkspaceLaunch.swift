@@ -32,14 +32,14 @@ final class WorkspaceLaunch {
     ///
     /// `MECUM_APP_SUPPORT_DIR` replaces it for one launch, so a second copy of
     /// the app can run without opening the store another process holds. A
-    /// snapshot or window check run that names none gets a temporary one, so
+    /// check run (`MecumApp.isCheckRun`) that names none gets a temporary one, so
     /// those runs never open the person's workspace. Worker workspaces and the
     /// Brain follow it.
     static var directory: URL {
         if let override = ProcessInfo.processInfo.environment["MECUM_APP_SUPPORT_DIR"], !override.isEmpty {
             return URL(filePath: override, directoryHint: .isDirectory)
         }
-        if WindowSnapshots.isRequested || WindowResizeCheck.isRequested {
+        if MecumApp.isCheckRun {
             return URL.temporaryDirectory.appending(path: "MecumCheckSupport", directoryHint: .isDirectory)
         }
         return FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]

@@ -10,7 +10,7 @@ import Workspace
 
 /// WorkerCommands is what can be done to one worker, as menu items.
 ///
-/// The same content fills the row's context menu and a menu in the toolbar,
+/// The same content fills the row's context menu and the Team menu,
 /// so changing a manager and archiving are reachable from the keyboard and
 /// not only from a right click or a drag. That is the point: dragging a row
 /// onto another is a convenience this increment does not build, and the

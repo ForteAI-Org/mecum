@@ -64,6 +64,8 @@ struct TeamShellView: View {
                 )
         } detail: {
             detail
+                .overlay(alignment: .top) { header }
+                .navigationTitle(ShellChrome.windowTitle(for: team.selectedWorker))
                 // A constant zero minimum for the column: the conversation's own height follows its width,
                 // and a real minimum width would make AppKit grow the window rather than close the inspector.
                 .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
@@ -92,6 +94,9 @@ struct TeamShellView: View {
             WorkerProfileSheet(team: team, worker: worker)
         }
         .toolbar { toolbar }
+        // The window keeps the worker's name for Mission Control and the Window menu; the header shows it.
+        .toolbar(removing: .title)
+        .focusedSceneValue(\.team, team)
         .alert(
             "That could not be done",
             isPresented: Binding(
@@ -107,8 +112,9 @@ struct TeamShellView: View {
 
     // MARK: Toolbar
 
-    /// The worker's name is the window title, set by the conversation. No seat
-    /// badge, model or effort lives here (§3.4); the release is contextual.
+    /// The window's own controls, `ShellChrome.toolbar`: the split view's sidebar
+    /// toggle and the inspector toggle. The worker's name is the floating header,
+    /// the connections are at the foot of the sidebar, and the release is contextual.
     @ToolbarContentBuilder
     private var toolbar: some ToolbarContent {
         if let worker = team.selectedWorker, team.holdsComputer(worker.id) {
@@ -119,12 +125,6 @@ struct TeamShellView: View {
                 .labelStyle(.titleAndIcon)
                 .help("Give the computer back. \(worker.name) and this conversation stay as they are.")
             }
-        }
-        ToolbarItem {
-            Button("Connections", systemImage: "point.3.connected.trianglepath.dotted") {
-                team.isShowingConnections = true
-            }
-            .help("The model connections the team uses")
         }
         ToolbarItem {
             Button(isInspectorShown ? "Hide Inspector" : "Show Inspector", systemImage: "sidebar.trailing",
@@ -148,6 +148,13 @@ struct TeamShellView: View {
             columns = .detailOnly
         }
         isInspectorShown = ShellMetrics.fitsInspector(window: windowWidth, isSidebarShown: columns != .detailOnly)
+    }
+
+    /// The header's action: shows the worker's details, which for now are the
+    /// inspector. An inspector already shown stays shown.
+    private func showDetails() {
+        guard !isInspectorShown else { return }
+        toggleInspector()
     }
 
     /// The first report resolves a restored request once; later ones apply the
@@ -196,6 +203,13 @@ struct TeamShellView: View {
                 systemImage: "person.crop.circle",
                 description: Text("Choose a worker in the team to open its conversation.")
             )
+        }
+    }
+
+    @ViewBuilder
+    private var header: some View {
+        if let header = ShellChrome.header(for: team.selectedWorker) {
+            WorkerHeaderView(header: header, open: showDetails)
         }
     }
 

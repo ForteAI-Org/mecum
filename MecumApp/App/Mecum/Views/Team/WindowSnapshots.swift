@@ -34,15 +34,19 @@ enum WindowSnapshots {
         do {
             let team = try await syntheticTeam(in: store)
             let output = try directory()
-            let cases: [(name: String, width: Double, dark: Bool, inspector: Bool)] = [
-                ("1200-light", 1200, false, true), ("1200-dark", 1200, true, true),
-                ("820-light", 820, false, true), ("820-dark", 820, true, true),
-                ("820-light-inspector-closed", 820, false, false),
+            let cases: [(name: String, width: Double, dark: Bool, inspector: Bool, material: Bool)] = [
+                ("1200-light", 1200, false, true, false), ("1200-dark", 1200, true, true, false),
+                ("820-light", 820, false, true, false), ("820-dark", 820, true, true, false),
+                ("820-light-inspector-closed", 820, false, false, false),
+                // Glass may draw blank offscreen; the header's material fallback shows its shape and place.
+                ("1200-light-material", 1200, false, true, true), ("1200-dark-material", 1200, true, true, true),
+                ("820-light-material", 820, false, false, true), ("820-dark-material", 820, true, false, true),
             ]
             for shot in cases {
                 let hidesSidebar = shot.inspector && ShellMetrics.openingHidesSidebar(window: shot.width)
                 let root = Root(team: team, isInspectorRequested: shot.inspector,
                                 columns: hidesSidebar ? .detailOnly : .all)
+                    .environment(\.workerHeaderUsesMaterial, shot.material)
                 try await write(root, width: shot.width, dark: shot.dark,
                                 to: output.appending(path: "window-\(shot.name).png"))
             }
@@ -75,9 +79,9 @@ enum WindowSnapshots {
 
     // MARK: The team
 
-    /// Three workers, one reporting line, and Atlas's conversation with one
-    /// finished turn whose profile was changed afterwards, so the inspector
-    /// has to show the turn's model and not the profile's.
+    /// Three workers, one reporting line, and Atlas's conversation: an earlier
+    /// exchange, then one finished turn whose profile was changed afterwards, so
+    /// the inspector has to show the turn's model and not the profile's.
     static func syntheticTeam(in directory: URL) async throws -> TeamModel {
         let store = try WorkspaceStore.opening(in: directory)
         let iris  = try await store.createWorker(name: "Iris", role: "Research lead",
@@ -93,6 +97,17 @@ enum WindowSnapshots {
 
         let conversation = try await store.createConversation(kind: .direct, participants: [atlas.id])
         let origin = Date(timeIntervalSinceReferenceDate: 780_000_000)
+        // An earlier exchange long enough that, opened at its end, older messages pass under the header.
+        for index in 0..<8 {
+            let asked = origin.addingTimeInterval(Double(index - 8) * 300)
+            try await store.appendMessage(to: conversation.id, text: "Is step \(index + 1) of the release done?",
+                                          at: asked, delivery: .completed)
+            try await store.appendMessage(
+                to: conversation.id, author: atlas.id,
+                text: "Step \(index + 1) is done. The notes are in the release folder, "
+                    + "and nothing is blocking the next one.",
+                at: asked.addingTimeInterval(30), delivery: .completed)
+        }
         let ask = try await store.appendMessage(
             to: conversation.id, text: "Can you check this morning's build and tell me what failed?",
             at: origin, delivery: .completed)

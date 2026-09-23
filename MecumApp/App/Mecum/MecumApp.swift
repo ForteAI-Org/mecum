@@ -19,6 +19,7 @@ struct MecumApp: App {
     /// A snapshot or window check run, which draws its own windows and quits.
     static var isCheckRun: Bool {
         WindowSnapshots.isRequested || WindowResizeCheck.isRequested || TranscriptCopyCheck.isRequested
+            || WindowClickCheck.isRequested
     }
 
     init() {
@@ -41,6 +42,7 @@ struct MecumApp: App {
         .commands {
             LabWindowCommands()
             TextSizeCommands()
+            TeamMenuCommands()
         }
 
         // The desktop lab, reachable on its own. Opening it is what asks for
@@ -92,6 +94,8 @@ final class SeatReleasingDelegate: NSObject, NSApplicationDelegate {
             Task { await WindowResizeCheck.runAndQuit() }
         } else if TranscriptCopyCheck.isRequested {
             Task { await TranscriptCopyCheck.runAndQuit() }
+        } else if WindowClickCheck.isRequested {
+            Task { await WindowClickCheck.runAndQuit() }
         }
     }
 
