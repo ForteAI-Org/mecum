@@ -32,7 +32,7 @@ struct TranscriptSnapshotTests {
         }
     }
 
-    @Test("Short and long messages, a tool burst, an interrupted answer and dividers, at two widths and both themes")
+    @Test("Short and long messages, a tool burst and an interrupted answer, at two widths and both themes")
     func snapshots() async throws {
         let fixture = try await TranscriptFixture()
         defer { fixture.discard() }
@@ -96,8 +96,9 @@ struct TranscriptSnapshotTests {
         try await fixture.say("Rerun the capture suite first.", at: 20)
 
         let spanning: @MainActor (TranscriptController) -> Void = { controller in
-            guard controller.rows.count >= 2 else { return }
-            let (first, second) = (controller.rows[0], controller.rows[1])
+            let messages = controller.rows.filter { $0.item.messageID != nil }
+            guard messages.count >= 2 else { return }
+            let (first, second) = (messages[0], messages[1])
             controller.select(TranscriptSelection(anchor: .init(itemID: first.item.id, offset: 14),
                                                   focus : .init(itemID: second.item.id, offset: 60)))
         }
@@ -106,6 +107,126 @@ struct TranscriptSnapshotTests {
                             to: try directory.appending(path: "transcript-selection-600-\(name).png"),
                             adjust: spanning)
         }
+    }
+
+    @Test("Two days, grouped tails, a thinking bubble, tool lines collapsed and expanded, a failed step, code")
+    func contentSnapshots() async throws {
+        let fixture = try await TranscriptFixture()
+        defer { fixture.discard() }
+        try await twoDays(fixture)
+
+        // The second tool line, whose step failed, opened as a click would.
+        let expanding: @MainActor (TranscriptController) -> Void = { controller in
+            let lines = controller.rows.indices.filter {
+                if case .toolRun = controller.rows[$0].item.kind { true } else { false }
+            }
+            guard lines.count >= 2,
+                  let cell = controller.collectionView.item(at: IndexPath(item: lines[1], section: 0)) as? TranscriptCell
+            else { return }
+            cell.rowView.onActivate?()
+        }
+        // From the middle of the person's first message to the middle of their third.
+        let selecting: @MainActor (TranscriptController) -> Void = { controller in
+            let people = controller.rows.filter { $0.item.authorWorkerID == nil && $0.item.messageID != nil }
+            guard people.count >= 3 else { return }
+            controller.select(TranscriptSelection(anchor: .init(itemID: people[0].item.id, offset: 12),
+                                                  focus : .init(itemID: people[2].item.id, offset: 10)))
+        }
+        for width in [600.0, 900.0] {
+            for (name, appearance) in [("light", NSAppearance.Name.aqua), ("dark", .darkAqua)] {
+                try await write(fixture, width: width, appearance: appearance,
+                                to: try directory.appending(path: "content-\(Int(width))-\(name).png"))
+                try await write(fixture, width: width, appearance: appearance,
+                                to: try directory.appending(path: "content-expanded-\(Int(width))-\(name).png"),
+                                adjust: expanding)
+            }
+        }
+        for (name, appearance) in [("light", NSAppearance.Name.aqua), ("dark", .darkAqua)] {
+            try await write(fixture, width: 600, appearance: appearance,
+                            to: try directory.appending(path: "content-selection-600-\(name).png"), adjust: selecting)
+        }
+    }
+
+    /// Yesterday evening and today just after midnight, in the reader's time
+    /// zone: a group of three, a worker group of two, a failed step, the
+    /// person's code, a reply with Swift and Python, and a turn still running.
+    private func twoDays(_ fixture: TranscriptFixture) async throws {
+        let midnight = Calendar.autoupdatingCurrent.startOfDay(for: Date()).timeIntervalSince(TranscriptFixture.origin)
+        let (first, second, third, fourth) = (UUID(), UUID(), UUID(), UUID())
+        var clock = midnight - 1200
+        func tool(_ turn: UUID, _ text: String) async throws {
+            clock += 0.5
+            try await fixture.record(.toolActivity, subject: turn, at: clock, text: text)
+        }
+
+        try await fixture.say("Can you open Calculator and add 8 and 5?", at: midnight - 1200)
+        try await fixture.say("Use the keypad, not the menu.", at: midnight - 1195)
+        try await fixture.say("And tell me the result.", at: midnight - 1190)
+        clock = midnight - 1189
+        try await fixture.record(.executionStarted, subject: first, at: clock)
+        try await tool(first, "→ status {}")
+        try await tool(first, "← status {\"session\":null}")
+        try await tool(first, "→ open_session {\"app\":\"Calculator\"}")
+        try await tool(first, "← open_session {\"session\":\"s\"}")
+        for key in ["8", "+", "5", "="] {
+            try await tool(first, "→ act {\"session\":\"s\",\"target\":\"\(key)\"}")
+            try await tool(first, "← act {\"status\":\"found_acted\",\"message\":\"ok\"}")
+        }
+        for _ in 0..<3 {
+            try await tool(first, "→ observe {\"session\":\"s\"}")
+            try await tool(first, "← observe {\"scene\":\"…\"}")
+        }
+        try await fixture.say("Calculator is open, and I pressed 8, +, 5 and = on the keypad.", at: midnight - 1170,
+                              byWorker: true)
+        try await fixture.say("The display shows **13**.", at: midnight - 1169, byWorker: true)
+        try await fixture.record(.executionCompleted, subject: first, at: midnight - 1168)
+
+        try await fixture.say("Now set the size to Large.", at: midnight - 600)
+        clock = midnight - 599
+        try await fixture.record(.executionStarted, subject: second, at: clock)
+        try await tool(second, "→ observe {\"session\":\"s\"}")
+        try await tool(second, "← observe {\"scene\":\"…\"}")
+        try await tool(second, "→ select {\"session\":\"s\",\"control\":\"Size\",\"item\":\"Large\"}")
+        try await tool(second, "← select error: No control named Size on this screen. Observe before any retry.")
+        try await fixture.say("Calculator's window has no Size control, so nothing was changed.", at: midnight - 590,
+                              byWorker: true)
+        try await fixture.record(.executionCompleted, subject: second, at: midnight - 589)
+
+        try await fixture.say("""
+            Why does this not compile?
+
+            ```swift
+            let total = [8, 5].reduce(0, +)
+            print("total: \\(total)")
+            ```
+            It says `reduce` is ambiguous, and *this* stays literal.
+            """, at: midnight + 300)
+        try await fixture.record(.executionStarted, subject: third, at: midnight + 301)
+        try await fixture.say("""
+            The literal `[8, 5]` has no element type the compiler can pick for `+`. Name it:
+
+            ```swift
+            // An explicit element type settles the overload.
+            let total: Int = [8, 5].reduce(0, +)
+            print("total: \\(total)")
+            ```
+
+            The same sum in Python needs no annotation:
+
+            ```python
+            # sum() starts from 0
+            total = sum([8, 5])
+            print(f"total: {total}")
+            ```
+            """, at: midnight + 320, byWorker: true)
+        try await fixture.record(.executionCompleted, subject: third, at: midnight + 321)
+
+        try await fixture.say("Thanks. Close Calculator now.", at: midnight + 480)
+        clock = midnight + 481
+        try await fixture.record(.executionStarted, subject: fourth, at: clock)
+        try await tool(fourth, "→ observe {\"session\":\"s\"}")
+        try await tool(fourth, "← observe {\"scene\":\"…\"}")
+        try await tool(fourth, "→ close_session {\"session\":\"s\"}")
     }
 
     // MARK: Drawing
@@ -119,7 +240,7 @@ struct TranscriptSnapshotTests {
         to file   : URL,
         adjust    : (@MainActor (TranscriptController) -> Void)? = nil
     ) async throws {
-        let measuring = try await render(fixture, width: width, height: 600, appearance: appearance)
+        let measuring = try await render(fixture, width: width, height: 600, appearance: appearance, adjust: adjust)
         let backdrop  = try await render(fixture, width: width, height: measuring.contentHeight,
                                          appearance: appearance, adjust: adjust).backdrop
         try Self.png(of: backdrop).write(to: file)
@@ -143,6 +264,8 @@ struct TranscriptSnapshotTests {
                         readingAnchor: nil, readingOffset: 0)
         await controller.settle()
         adjust?(controller)
+        // An adjustment may queue a projection, such as a tool line expanding.
+        await controller.settle()
         backdrop.layoutSubtreeIfNeeded()
         return (backdrop, controller.contentHeight)
     }

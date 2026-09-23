@@ -36,6 +36,15 @@ public struct PreparedText: Sendable, Hashable {
         /// Code, inline or in a block, in the monospaced face and the body's colour.
         case code
 
+        /// Inline code in the person's bubble, in the monospaced face on the accent.
+        case codeOnAccent
+
+        /// A token of a code block, in the monospaced face and its token's colour.
+        case syntax(CodeToken.Kind)
+
+        /// A caption that marks a problem, such as a tool step that failed.
+        case captionAlert
+
         /// A link's own text. A model wrote it, so it looks like any link and
         /// never like a source that was consulted (§11.2).
         case link
@@ -129,6 +138,15 @@ public struct PreparedText: Sendable, Hashable {
         case .code:
             attributes = [.font: NSFont.monospacedSystemFont(ofSize: style.codePointSize, weight: .regular),
                           .foregroundColor: NSColor.labelColor]
+        case .codeOnAccent:
+            attributes = [.font: NSFont.monospacedSystemFont(ofSize: style.codePointSize, weight: .regular),
+                          .foregroundColor: NSColor.white]
+        case .syntax(let kind):
+            attributes = [.font: NSFont.monospacedSystemFont(ofSize: style.codePointSize, weight: .regular),
+                          .foregroundColor: TranscriptColors.syntax(kind)]
+        case .captionAlert:
+            attributes = [.font: NSFont.systemFont(ofSize: style.captionPointSize, weight: .semibold),
+                          .foregroundColor: NSColor.systemRed]
         case .link:
             attributes = [.font: NSFont.systemFont(ofSize: style.bodyPointSize), .foregroundColor: NSColor.linkColor,
                           .underlineStyle: NSUnderlineStyle.single.rawValue]

@@ -91,6 +91,30 @@ public struct PreparedBlock: Sendable, Hashable {
                                      hangs: hangs))
     }
 
+    /// A code block of `source`, coloured by `language` (`CodeTokenizer`). The
+    /// characters are the source's, so copying the block gives it byte for
+    /// byte; the tokens only split it into runs, in one linear pass.
+    static func code(_ source: String, language: String?, isComplete: Bool) -> PreparedBlock {
+        var block  = PreparedBlock(kind: .code(language: language, isComplete: isComplete))
+        block.string = source
+        let length = (source as NSString).length
+        var runs: [PreparedText.Run] = []
+        var cursor = 0
+        for token in CodeTokenizer.tokens(in: source, language: language) {
+            if token.range.location > cursor {
+                runs.append(PreparedText.Run(range: NSRange(location: cursor, length: token.range.location - cursor),
+                                             role: .code))
+            }
+            runs.append(PreparedText.Run(range: token.range, role: .syntax(token.kind)))
+            cursor = NSMaxRange(token.range)
+        }
+        if length > cursor {
+            runs.append(PreparedText.Run(range: NSRange(location: cursor, length: length - cursor), role: .code))
+        }
+        block.runs = runs
+        return block
+    }
+
     /// Records the cell just appended, for a table block.
     mutating func addCell(row: Int, column: Int, range: NSRange) {
         guard case .table(var table) = kind else { return }

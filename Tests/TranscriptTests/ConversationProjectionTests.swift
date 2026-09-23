@@ -13,20 +13,20 @@ import Workspace
 @Suite("Projection: merged order, aggregation, identity and targeted updates")
 struct ConversationProjectionTests {
 
-    /// A turn: the person asks, the worker starts, three tools, a reply, the end.
+    /// A turn: the person asks, the worker starts, three tool records, a reply, the end.
     private func turn(_ fixture: TranscriptFixture) async throws -> UUID {
         let execution = UUID()
         try await fixture.say("Open the report", at: 0, delivery: .completed)
         try await fixture.record(.executionStarted, subject: execution, at: 1)
-        try await fixture.record(.toolActivity, subject: execution, at: 2, text: "→ open {}")
-        try await fixture.record(.toolActivity, subject: execution, at: 3, text: "← open {}")
-        try await fixture.record(.toolActivity, subject: execution, at: 4, text: "← read error: denied")
+        try await fixture.record(.toolActivity, subject: execution, at: 2, text: "→ open_session {\"app\":\"Preview\"}")
+        try await fixture.record(.toolActivity, subject: execution, at: 3, text: "← open_session {\"session\":\"s\"}")
+        try await fixture.record(.toolActivity, subject: execution, at: 4, text: "← act error: denied")
         try await fixture.say("It is open.", at: 5, byWorker: true)
         try await fixture.record(.executionCompleted, subject: execution, at: 6)
         return execution
     }
 
-    @Test("Messages and events merge in one deterministic order")
+    @Test("Messages and events merge in one deterministic order, the tool line under the reply")
     func mergedOrder() async throws {
         let fixture = try await TranscriptFixture()
         defer { fixture.discard() }
@@ -41,14 +41,15 @@ struct ConversationProjectionTests {
             case .personMessage:        "person"
             case .workerReply:          "reply"
             case .toolRun:              "tools"
-            case .executionStarted:     "started"
-            case .executionCompleted:   "completed"
+            case .thinking:             "thinking"
+            case .daySeparator:         "day"
             case .executionFailed:      "failed"
             case .executionInterrupted: "interrupted"
             case .activityNotShown:     "notice"
             }
         }
-        #expect(kinds == ["person", "started", "tools", "reply", "completed"])
+        #expect(kinds == ["day", "person", "reply", "tools"])
+        #expect(first.last?.continuesGroup == true)
     }
 
     @Test("A tie between a message and an event puts the message first")
@@ -56,15 +57,15 @@ struct ConversationProjectionTests {
         let fixture = try await TranscriptFixture()
         defer { fixture.discard() }
         let execution = UUID()
-        try await fixture.record(.executionStarted, subject: execution, at: 10)
+        try await fixture.record(.executionFailed, subject: execution, at: 10, text: "exit 1")
         try await fixture.say("Same second", at: 10)
 
-        let items = try await fixture.items()
+        let items = TranscriptFixture.withoutDays(try await fixture.items())
         #expect(items.first?.messageID != nil)
-        #expect(items.last?.kind == .executionStarted)
+        #expect(items.last?.kind == .executionFailed(reason: "exit 1"))
     }
 
-    @Test("Consecutive tool records fold into one run with counts")
+    @Test("A turn's tool records fold into one line that says what was done")
     func aggregation() async throws {
         let fixture = try await TranscriptFixture()
         defer { fixture.discard() }
@@ -80,7 +81,8 @@ struct ConversationProjectionTests {
         #expect(lines.count == 3)
         #expect(!isExpanded)
         #expect(ending == .completed)
-        #expect(TranscriptWording.toolSummary(lines, ending: ending) == "1 tool call completed, 1 needs attention")
+        #expect(TranscriptWording.toolSummary(ToolStep.steps(from: lines), ending: ending)
+            == "Opened Preview · act failed")
     }
 
     @Test("Expanding a run changes that row only and reorders nothing")
@@ -156,7 +158,7 @@ struct ConversationProjectionTests {
         try await fixture.say("Two", at: 20, byWorker: true)
         try await fixture.say("Much later", at: 2000, byWorker: true)
 
-        let items = try await fixture.items()
+        let items = TranscriptFixture.withoutDays(try await fixture.items())
         #expect(items.map(\.continuesGroup) == [false, true, false])
         let label = TranscriptWording.accessibilityLabel(for: items[1], workerName: "Atlas")
         #expect(label.hasPrefix("Atlas, \(TranscriptWording.time(items[1].date))"))
@@ -192,7 +194,7 @@ struct ConversationProjectionTests {
         try await fixture.say("Stopped", at: 400, delivery: .interrupted)
         try await fixture.say("Never sent", at: 800, delivery: .savedLocally)
 
-        let items    = try await fixture.items()
+        let items    = TranscriptFixture.withoutDays(try await fixture.items())
         let prepared = await RowPreparation.prepare(items, workerName: "Atlas", width: 600, style: TranscriptStyle(),
                                                     cache: LayoutMeasurementCache(), pipeline: PlainTextContent())
         let rows = prepared.rows
@@ -218,34 +220,35 @@ struct ConversationProjectionTests {
         let execution = UUID()
         try await fixture.say("Go", at: 0)
         try await fixture.record(.executionStarted, subject: execution, at: 1)
-        try await fixture.record(.toolActivity, subject: execution, at: 2, text: "→ open {}")
+        try await fixture.record(.toolActivity, subject: execution, at: 2,
+                                 text: "→ act {\"session\":\"s\",\"target\":\"8\"}")
         if let ending { try await fixture.record(ending, subject: execution, at: 3, text: "reason") }
         let items = try await fixture.items()
         guard let run = items.first(where: { if case .toolRun = $0.kind { true } else { false } }),
               case .toolRun(let lines, _, let turnEnding) = run.kind
         else { return "no run" }
-        return TranscriptWording.toolSummary(lines, ending: turnEnding)
+        return TranscriptWording.toolSummary(ToolStep.steps(from: lines), ending: turnEnding)
     }
 
     @Test("A call without a result is running only while its turn is")
     func runningWhileInProgress() async throws {
         let fixture = try await TranscriptFixture()
         defer { fixture.discard() }
-        #expect(try await unansweredCall(fixture, ending: nil) == "1 running")
+        #expect(try await unansweredCall(fixture, ending: nil) == "Pressing 8…")
     }
 
     @Test("A call without a result in a stopped turn is summarised as stopped")
     func stoppedTurnIsNotRunning() async throws {
         let fixture = try await TranscriptFixture()
         defer { fixture.discard() }
-        #expect(try await unansweredCall(fixture, ending: .executionCancelled) == "1 stopped")
+        #expect(try await unansweredCall(fixture, ending: .executionCancelled) == "Pressing 8, stopped")
     }
 
     @Test("A call without a result in a failed turn is summarised as not finished")
     func failedTurnIsNotRunning() async throws {
         let fixture = try await TranscriptFixture()
         defer { fixture.discard() }
-        #expect(try await unansweredCall(fixture, ending: .executionFailed) == "1 did not finish")
+        #expect(try await unansweredCall(fixture, ending: .executionFailed) == "Pressing 8, did not finish")
     }
 
     @Test("A normal send never shows the unsent badge; a message left unsent past the grace does")
@@ -256,15 +259,17 @@ struct ConversationProjectionTests {
         let saved   = TranscriptFixture.at(0)
 
         // The instant between saved and sent, then sent: no badge at either point.
-        let justSaved = try await fixture.items(now: saved.addingTimeInterval(0.2))
+        let justSaved = TranscriptFixture.withoutDays(try await fixture.items(now: saved.addingTimeInterval(0.2)))
         #expect(DeliveryBadge(justSaved[0].kind) == nil)
         try await fixture.store.update(message: message.id, delivery: .sentToBackend)
-        let sent = try await fixture.items(now: saved.addingTimeInterval(0.3))
+        let sent = TranscriptFixture.withoutDays(try await fixture.items(now: saved.addingTimeInterval(0.3)))
         #expect(DeliveryBadge(sent[0].kind) == nil)
 
         // Nothing sent it: once the grace has passed, it is marked.
         try await fixture.store.update(message: message.id, delivery: .savedLocally)
-        let waiting = try await fixture.items(now: saved.addingTimeInterval(DeliveryBadge.unsentGrace))
+        let waiting = TranscriptFixture.withoutDays(
+            try await fixture.items(now: saved.addingTimeInterval(DeliveryBadge.unsentGrace))
+        )
         #expect(DeliveryBadge(waiting[0].kind) == .notSent)
         #expect(TranscriptWording.accessibilityLabel(for: waiting[0], workerName: "Atlas").hasSuffix("Saved"))
     }
@@ -294,6 +299,6 @@ struct ConversationProjectionTests {
         #expect(!items.contains { hidden.contains($0.id) })
         let runs = items.compactMap { if case .toolRun(let lines, _, _) = $0.kind { lines } else { nil } }
         #expect(runs == [["→ open {}", "← open {}"]])
-        #expect(items.count == 4)
+        #expect(TranscriptFixture.withoutDays(items).count == 2)
     }
 }

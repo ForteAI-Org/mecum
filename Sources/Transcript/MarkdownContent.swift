@@ -19,9 +19,13 @@ import Synchronization
 /// thousands of lines above it. When the fence closes, its chunk is parsed
 /// once as a code block.
 ///
-/// The person's own message is shown exactly as typed: Markdown is how a
-/// model formats, and reading the person's `*` or `_` as emphasis would hide
-/// characters they wrote.
+/// The person's own message renders only its code, fenced and inline, and
+/// shows every other character as typed (`PersonTextRendering`): Markdown is
+/// how a model formats, and reading the person's `*` or `_` as emphasis would
+/// hide characters they wrote. It is remembered whole, by its text.
+///
+/// Every code block is coloured by its fence's language (`CodeTokenizer`) as
+/// it is prepared, so colouring is remembered with the block.
 ///
 /// One instance serves every row of a controller. `prepare` runs off the main
 /// thread, possibly from more than one task; the memory of prepared chunks is
@@ -40,6 +44,7 @@ public final class MarkdownContent: MessageContentPipeline {
     private enum Source: Hashable {
         case markdown(String)
         case provisionalCode(String, language: String?)
+        case person(String)
     }
 
     private struct Memory {
@@ -58,7 +63,9 @@ public final class MarkdownContent: MessageContentPipeline {
     }
 
     public func prepare(_ text: String, isOnAccent: Bool) -> PreparedText {
-        guard !isOnAccent else { return PreparedText(text, role: .bodyOnAccent) }
+        guard !isOnAccent else {
+            return PreparedText(blocks: remembered(.person(text)) { PersonTextRendering.blocks(text) })
+        }
         var blocks: [PreparedBlock] = []
         for chunk in MarkdownSourceChunks.split(text) {
             switch chunk.kind {
@@ -70,9 +77,7 @@ public final class MarkdownContent: MessageContentPipeline {
                 for (group, start) in stride(from: 0, to: lines.count, by: Self.provisionalLines).enumerated() {
                     let slice = lines[start..<min(lines.count, start + Self.provisionalLines)].joined(separator: "\n")
                     let made = remembered(.provisionalCode(slice, language: language)) {
-                        var block = PreparedBlock(kind: .code(language: language, isComplete: false))
-                        block.append(slice, role: .code)
-                        return [block]
+                        [PreparedBlock.code(slice, language: language, isComplete: false)]
                     }
                     blocks += stamped(made, offset: chunk.offset, firstPart: group)
                 }

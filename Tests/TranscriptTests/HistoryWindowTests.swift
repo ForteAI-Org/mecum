@@ -68,7 +68,7 @@ struct HistoryWindowTests {
             #expect(try await sequences(controller, in: fixture.store) == Array(expected))
             #expect(controller.captureAnchor() == anchor)
         }
-        #expect(controller.rows.count == TranscriptWindow.messageLimit)
+        #expect(controller.rows.filter { $0.item.messageID != nil }.count == TranscriptWindow.messageLimit)
         #expect(!controller.isAtBottom)
 
         let lower  = try read(controller, row: controller.rows.count - 30)
@@ -178,15 +178,13 @@ struct HistoryWindowTests {
             there.refresh()
             try await Task.sleep(for: .milliseconds(5))
         }
-        var endings: [UUID: TranscriptItem.ID] = [:]
         for stream in streams {
             try await store.update(message: stream.message, delivery: .completed)
-            let ended = try await store.append(NewEvent(
+            _ = try await store.append(NewEvent(
                 workspaceID: TranscriptFixture.workspaceID, subjectID: stream.turn,
                 conversationID: stream.conversation, workerID: fixture.workerID,
                 timestamp: TranscriptFixture.at(30_000), type: .executionCompleted
             ))
-            endings[stream.message] = .event(ended.id)
         }
         here.refresh()
         there.refresh()
@@ -204,8 +202,8 @@ struct HistoryWindowTests {
             let shown = stream.conversation == fixture.conversation ? here : there
             let row   = shown.rows.first { $0.item.id == .message(stream.message) }
             #expect(row?.item.copyText == texts[stream.message])
-            let ended = endings[stream.message]
-            #expect(shown.rows.contains { $0.item.id == ended && $0.item.kind == .executionCompleted })
+            // The ending landed: no turn is shown as still thinking.
+            #expect(!shown.rows.contains { $0.item.kind == .thinking })
         }
     }
 }

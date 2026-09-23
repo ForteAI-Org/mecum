@@ -98,6 +98,11 @@ struct TranscriptFixture {
         return window
     }
 
+    /// Every row but the day separators, for a test about something else.
+    static func withoutDays(_ items: [TranscriptItem]) -> [TranscriptItem] {
+        items.filter { if case .daySeparator = $0.kind { false } else { true } }
+    }
+
     /// Removes the directory. A failure must not fail the test it cleans up after.
     func discard() {
         do { try FileManager.default.removeItem(at: directory) } catch { }
@@ -126,16 +131,26 @@ struct TranscriptFixture {
         ))
     }
 
+    /// A Gregorian calendar in `zone`, so day boundaries do not depend on the machine running the tests.
+    static func calendar(_ zone: String = "UTC") -> Calendar {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = TimeZone(identifier: zone) ?? .gmt
+        calendar.locale   = Locale(identifier: "en_US_POSIX")
+        return calendar
+    }
+
     /// The whole conversation as the transcript would project it.
-    /// Projected at `now`, by default long after every fixture time.
+    /// Projected at `now`, by default long after every fixture time, in UTC.
     func items(
         expanded  : Set<TranscriptItem.ID> = [],
         eventLimit: Int = TranscriptWindow.defaultEventLimit,
-        now       : Date = TranscriptFixture.at(100_000)
+        now       : Date = TranscriptFixture.at(100_000),
+        calendar  : Calendar = TranscriptFixture.calendar()
     ) async throws -> [TranscriptItem] {
         let window = try await TranscriptWindow.opening(conversation, around: nil, from: store,
                                                         eventLimit: eventLimit)
         return ConversationProjection.items(messages: window.messages, events: window.events,
-                                            expanded: expanded, elidedBefore: window.elidedBefore, now: now)
+                                            expanded: expanded, elidedBefore: window.elidedBefore, now: now,
+                                            calendar: calendar)
     }
 }

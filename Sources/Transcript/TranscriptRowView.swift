@@ -52,6 +52,7 @@ final class TranscriptRowView: NSView {
     private var didDrag       = false
     private(set) var stacks: [TextStack?] = []
     private var ranges     : [NSRange] = []
+    private var thinkingDots: ThinkingDotsView?
 
     override var isFlipped: Bool { true }
 
@@ -79,8 +80,26 @@ final class TranscriptRowView: NSView {
             }
             return block.kind == .rule ? nil : RowPreparation.textStack(block.attributed(style), width: frame.width)
         }
+        showThinking(row)
         configureAccessibility(row)
         needsDisplay = true
+    }
+
+    /// The dots of a thinking row, in its text's place; hidden for any other row.
+    private func showThinking(_ row: PreparedRow) {
+        guard row.item.kind == .thinking else {
+            thinkingDots?.stop()
+            thinkingDots?.isHidden = true
+            return
+        }
+        let dots = thinkingDots ?? ThinkingDotsView()
+        if thinkingDots == nil {
+            thinkingDots = dots
+            addSubview(dots)
+        }
+        dots.frame    = row.geometry.text
+        dots.isHidden = false
+        dots.start(reducesMotion: NSWorkspace.shared.accessibilityDisplayShouldReduceMotion)
     }
 
     /// Replaces the drawn selection and nothing else.
@@ -128,7 +147,8 @@ final class TranscriptRowView: NSView {
             break
         }
         guard let (_, manager, container) = stacks[index] else { return }
-        drawSelection(in: text, block: index, clip: frame, isOnAccent: isOnAccent)
+        // A code block in the person's bubble has its own light surface, so it selects as any text does.
+        drawSelection(in: text, block: index, clip: frame, isOnAccent: isOnAccent && !block.isCompleteCode)
         let glyphs = manager.glyphRange(for: container)
         manager.drawBackground(forGlyphRange: glyphs, at: text.origin)
         manager.drawGlyphs(forGlyphRange: glyphs, at: text.origin)
@@ -141,7 +161,7 @@ final class TranscriptRowView: NSView {
         let surface = geometry.surface
         switch RowGeometry.shape(of: row.item.kind) {
         case .bubble:
-            let path = NSBezierPath(roundedRect: surface, xRadius: 14, yRadius: 14)
+            let path = BubblePath.path(surface: surface, tail: geometry.tail)
             (isPerson ? TranscriptColors.personBubble : TranscriptColors.neutralSurface).setFill()
             path.fill()
             if isFocusedRow { strokeFocus(path) }
@@ -159,14 +179,10 @@ final class TranscriptRowView: NSView {
             path.stroke()
             if isFocusedRow { strokeFocus(path) }
 
-        case .divider:
-            // Two hairlines beside the centred caption.
-            NSColor.separatorColor.setFill()
-            let y = geometry.text.midY.rounded()
-            NSRect(x: surface.minX, y: y, width: max(0, geometry.text.minX - 8 - surface.minX), height: 1).fill()
-            NSRect(x: geometry.text.maxX + 8, y: y, width: max(0, surface.maxX - geometry.text.maxX - 8),
-                   height: 1).fill()
-            if isFocusedRow { strokeFocus(NSBezierPath(roundedRect: surface, xRadius: 4, yRadius: 4)) }
+        case .line, .divider:
+            // A quiet caption with no surface of its own; focus still outlines it.
+            let frame = geometry.text.insetBy(dx: -6, dy: -2)
+            if isFocusedRow { strokeFocus(NSBezierPath(roundedRect: frame, xRadius: 4, yRadius: 4)) }
         }
     }
 

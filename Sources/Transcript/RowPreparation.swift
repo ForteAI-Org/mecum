@@ -95,16 +95,13 @@ enum RowPreparation {
             return pipeline.prepare(text, isOnAccent: false)
 
         case .toolRun(let lines, let isExpanded, let ending):
-            var result = PreparedText((isExpanded ? "▾ " : "▸ ") + TranscriptWording.toolSummary(lines, ending: ending),
-                                      role: .caption)
-            if isExpanded { result.append("\n" + lines.joined(separator: "\n"), role: .monospaced) }
-            return result
+            return toolLine(ToolStep.steps(from: lines), isExpanded: isExpanded, ending: ending)
 
-        case .executionStarted:
-            return PreparedText("\(TranscriptWording.started(by: workerName)) · \(when)", role: .caption)
+        case .thinking:
+            return PreparedText()
 
-        case .executionCompleted:
-            return PreparedText("\(TranscriptWording.completed) · \(when)", role: .caption)
+        case .daySeparator(let label):
+            return PreparedText(label, role: .caption)
 
         case .executionFailed(let reason):
             var result = PreparedText(TranscriptWording.failed(by: workerName), role: .alert)
@@ -120,4 +117,25 @@ enum RowPreparation {
             return PreparedText(TranscriptWording.activityNotShown, role: .caption)
         }
     }
+
+    /// The tool line: a gear, or the error mark when a step failed, the
+    /// summary and a disclosure; expanded, one indented line per step.
+    private static func toolLine(_ steps: [ToolStep], isExpanded: Bool, ending: TranscriptItem.TurnEnding?)
+        -> PreparedText {
+        let hasFailure = steps.contains { if case .failed = $0.state { true } else { false } }
+        var block = PreparedBlock(kind: .text)
+        block.append(hasFailure ? errorMark : "⚙\u{FE0E} ", role: hasFailure ? .captionAlert : .caption)
+        block.append(TranscriptWording.toolSummary(steps, ending: ending) + (isExpanded ? " ⌄" : " ›"),
+                     role: .caption)
+        guard isExpanded else { return PreparedText(blocks: [block]) }
+        for line in TranscriptWording.toolSteps(steps, ending: ending) {
+            block.append("\n", role: .caption, indent: 1)
+            if line.isFailed { block.append(errorMark, role: .captionAlert, indent: 1) }
+            block.append(line.text, role: .caption, indent: 1)
+        }
+        return PreparedText(blocks: [block])
+    }
+
+    /// The mark a tool line or step carries when something failed.
+    private static let errorMark = "⚠\u{FE0E} "
 }

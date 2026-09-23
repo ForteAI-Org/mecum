@@ -246,6 +246,9 @@ enum MarkdownRendering {
             if case .table(let table) = block.kind {
                 block = tableBlock(table)
             }
+            if case .code(let language, let isComplete) = block.kind {
+                block = .code(block.string, language: language, isComplete: isComplete)
+            }
             if block.length > 0 || block.kind == .rule { blocks.append(block) }
         }
 

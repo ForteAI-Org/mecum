@@ -44,14 +44,35 @@ public struct RowGeometry: Sendable, Hashable {
     /// Where the delivery badge sits, beside the bubble, when the row has one.
     public let badge     : CGRect?
 
+    /// The tail of the last bubble of a group, outside the surface at its
+    /// bottom corner on the author's side, or nil. It lies within the gutter,
+    /// clear of the mascot, and moves no text; the bubble is surface and tail.
+    public let tail      : CGRect?
+
+    static let tailSize = CGSize(width: 6, height: 11)
+
     /// The widest a row's prose may be laid out at, before it is measured.
     public static func textWidthLimit(
         for kind: TranscriptItem.Kind,
         rowWidth: CGFloat,
         style   : TranscriptStyle
     ) -> CGFloat {
-        let padding = shape(of: kind) == .bubble ? bubblePadding.width : cardPadding.width
-        return max(40, surfaceLimit(for: kind, rowWidth: rowWidth, style: style, isWide: false) - 2 * padding)
+        max(40, surfaceLimit(for: kind, rowWidth: rowWidth, style: style, isWide: false) - 2 * padding(of: kind))
+    }
+
+    /// The room between a surface's edge and its text, on each side.
+    private static func padding(of kind: TranscriptItem.Kind) -> CGFloat {
+        switch shape(of: kind) {
+        case .bubble:          bubblePadding.width
+        case .line:            0
+        case .card, .divider:  cardPadding.width
+        }
+    }
+
+    /// The three dots of a thinking bubble take the place of one body line.
+    static func thinkingSize(_ style: TranscriptStyle) -> CGSize {
+        let dot = (style.bodyPointSize * 0.5).rounded()
+        return CGSize(width: 3 * dot + 2 * (dot * 0.7).rounded(), height: (style.bodyPointSize * 1.2).rounded(.up))
     }
 
     /// The width `block`'s text is laid out and measured at, in whole points.
@@ -63,8 +84,7 @@ public struct RowGeometry: Sendable, Hashable {
     ) -> CGFloat {
         let column: CGFloat
         if isWide(block) {
-            let padding = shape(of: kind) == .bubble ? bubblePadding.width : cardPadding.width
-            column = surfaceLimit(for: kind, rowWidth: rowWidth, style: style, isWide: true) - 2 * padding
+            column = surfaceLimit(for: kind, rowWidth: rowWidth, style: style, isWide: true) - 2 * padding(of: kind)
         } else {
             column = textWidthLimit(for: kind, rowWidth: rowWidth, style: style)
         }
@@ -98,7 +118,9 @@ public struct RowGeometry: Sendable, Hashable {
             stackWidth  = max(stackWidth, frame.width)
             stackHeight = frame.maxY
         }
-        let textSize = CGSize(width: stackWidth, height: stackHeight)
+        let textSize = item.kind == .thinking
+            ? Self.thinkingSize(style)
+            : CGSize(width: stackWidth, height: stackHeight)
         let isWide   = blocks.contains(where: Self.isWide)
 
         let caption = style.captionLineHeight
@@ -128,6 +150,11 @@ public struct RowGeometry: Sendable, Hashable {
             self.badge   = hasBadge
                 ? CGRect(x: bubbleX - 6 - caption, y: surface.maxY - caption - 6, width: caption, height: caption)
                 : nil
+            let tail     = Self.tailSize
+            self.tail    = item.endsGroup
+                ? CGRect(x: isPerson ? surface.maxX : surface.minX - tail.width, y: surface.maxY - tail.height,
+                         width: tail.width, height: tail.height)
+                : nil
             self.height  = max(surface.maxY, self.avatar?.maxY ?? 0).rounded(.up)
 
         case .card:
@@ -139,6 +166,19 @@ public struct RowGeometry: Sendable, Hashable {
             self.header  = nil
             self.avatar  = nil
             self.badge   = nil
+            self.tail    = nil
+            self.height  = surface.maxY.rounded(.up)
+
+        case .line:
+            // No surface: a caption under the worker's bubble, at its column.
+            let x       = Self.gutter + Self.avatarSide + Self.avatarGap
+            let surface = CGRect(x: x, y: 0, width: min(limit, textSize.width), height: textSize.height + 4)
+            self.surface = surface
+            self.text    = surface.insetBy(dx: 0, dy: 2)
+            self.header  = nil
+            self.avatar  = nil
+            self.badge   = nil
+            self.tail    = nil
             self.height  = surface.maxY.rounded(.up)
 
         case .divider:
@@ -151,6 +191,7 @@ public struct RowGeometry: Sendable, Hashable {
             self.header  = nil
             self.avatar  = nil
             self.badge   = nil
+            self.tail    = nil
             self.height  = surface.maxY.rounded(.up)
         }
 
@@ -207,13 +248,14 @@ public struct RowGeometry: Sendable, Hashable {
 
     // MARK: Shape
 
-    enum Shape { case bubble, card, divider }
+    enum Shape { case bubble, card, line, divider }
 
     static func shape(of kind: TranscriptItem.Kind) -> Shape {
         switch kind {
-        case .personMessage, .workerReply:                   .bubble
-        case .toolRun, .executionFailed, .executionInterrupted: .card
-        case .executionStarted, .executionCompleted, .activityNotShown: .divider
+        case .personMessage, .workerReply, .thinking:  .bubble
+        case .executionFailed, .executionInterrupted:  .card
+        case .toolRun:                                 .line
+        case .daySeparator, .activityNotShown:         .divider
         }
     }
 
@@ -237,12 +279,12 @@ public struct RowGeometry: Sendable, Hashable {
     ) -> CGFloat {
         let indent  = gutter + avatarSide + avatarGap
         let measure = isWide ? style.wideMeasure
-            : isLong(kind) || shape(of: kind) == .card ? style.longMeasure : style.shortMeasure
+            : isLong(kind) || shape(of: kind) != .bubble ? style.longMeasure : style.shortMeasure
         switch kind {
         case .personMessage:
             // The person's bubble leaves room on the left, so it never spans the row.
             return max(60, min(measure, (rowWidth - 2 * gutter) * 0.8))
-        case .executionStarted, .executionCompleted, .activityNotShown:
+        case .daySeparator, .activityNotShown:
             return max(60, rowWidth - 2 * gutter)
         default:
             return max(60, min(measure, rowWidth - indent - gutter))

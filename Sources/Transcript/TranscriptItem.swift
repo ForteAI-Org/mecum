@@ -12,13 +12,14 @@ import Workspace
 /// produces it: a value, with an identity that survives every later update.
 ///
 /// The kinds are distinct on purpose (§11.2). A person's message, a worker's
-/// reply, a run of tool activity, an execution divider and a failure are drawn
-/// differently and none of them borrows another's bubble.
+/// reply, the bubble of a worker still thinking, a turn's tool line, a day
+/// separator and a failure are drawn differently and none of them borrows
+/// another's shape.
 public struct TranscriptItem: Sendable, Hashable, Identifiable {
 
-    /// Stable across updates. A message is its message id, an execution
-    /// boundary is its event id, and a run of tool activity is its first
-    /// event, which a run only ever grows after.
+    /// Stable across updates. A message is its message id, a failure or stop
+    /// card is its event id, and a turn's tool line is its first event, which
+    /// a line only ever grows after.
     public enum ID: Sendable, Hashable {
         case message(UUID)
         case event(UUID)
@@ -26,6 +27,13 @@ public struct TranscriptItem: Sendable, Hashable, Identifiable {
 
         /// The notice placed before the event the window's read was cut at.
         case notice(UUID)
+
+        /// The thinking bubble of a running execution after `replies` of its
+        /// reply blocks. A new block takes the bubble's place, and a new id follows it.
+        case thinking(execution: UUID, replies: Int)
+
+        /// The separator above a day's first message: that day's start.
+        case day(Date)
     }
 
     /// How the turn a row belongs to ended.
@@ -45,12 +53,18 @@ public struct TranscriptItem: Sendable, Hashable, Identifiable {
         /// that failed or was stopped: what arrived stays, marked (§11.5).
         case workerReply(text: String, isInterrupted: Bool)
 
-        /// Consecutive tool records folded into one row. Collapsed, it shows
-        /// the counts; expanded, each line. `ending` is nil while the turn runs.
+        /// A turn's tool records folded into one line under its reply.
+        /// Collapsed, it says what was done; expanded, each step. `ending` is
+        /// nil while the turn runs.
         case toolRun(lines: [String], isExpanded: Bool, ending: TurnEnding?)
 
-        case executionStarted
-        case executionCompleted
+        /// A running turn's worker, before its next reply block. Never stored:
+        /// derived from an execution that started and has no terminal event.
+        case thinking
+
+        /// The day the messages below it were sent, as the reader's calendar names it.
+        case daySeparator(label: String)
+
         case executionFailed(reason: String)
         case executionInterrupted(note: String)
 
@@ -68,8 +82,13 @@ public struct TranscriptItem: Sendable, Hashable, Identifiable {
 
     /// True when the row above is a message by the same author, a little
     /// earlier: the name and mascot are drawn once for the group, and the
-    /// accessibility label still carries both.
+    /// accessibility label still carries both. A tool line sets it under its
+    /// worker's bubble, so it sits close to it.
     public let continuesGroup: Bool
+
+    /// True for the last bubble of a group, the one that carries the tail: no
+    /// bubble below it continues its group. A tool line or a separator below ends it.
+    public internal(set) var endsGroup = false
 
     /// The message id when this row is a message, which is what a reading
     /// position can anchor on.
@@ -82,10 +101,23 @@ public struct TranscriptItem: Sendable, Hashable, Identifiable {
         switch kind {
         case .personMessage(let text, _, _), .workerReply(let text, _): text
         case .toolRun(let lines, _, _):                                  lines.joined(separator: "\n")
+        case .daySeparator(let label):                                label
         case .executionFailed(let reason):                            reason
         case .executionInterrupted(let note):                         note
         case .activityNotShown:                                       TranscriptWording.activityNotShown
-        case .executionStarted, .executionCompleted:                  ""
+        case .thinking:                                               ""
         }
+    }
+
+    /// The same row with another kind or grouping, and the same identity.
+    func with(kind: Kind? = nil, continuesGroup: Bool? = nil) -> TranscriptItem {
+        TranscriptItem(
+            id            : id,
+            kind          : kind ?? self.kind,
+            date          : date,
+            authorWorkerID: authorWorkerID,
+            continuesGroup: continuesGroup ?? self.continuesGroup,
+            endsGroup     : endsGroup
+        )
     }
 }

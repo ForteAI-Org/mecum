@@ -12,51 +12,58 @@ import Workspace
 /// conversation into ordered transcript rows.
 ///
 /// It is a pure function of its input: no store, no clock, no AppKit. It runs
-/// off the main thread, and the same messages, events and expanded runs always
-/// give the same rows in the same order.
+/// off the main thread, and the same messages, events, expanded lines, instant
+/// and calendar always give the same rows in the same order.
 ///
 /// The merged order. Messages keep their `sequence` order and events keep
 /// their `localOrder` order; neither is ever reordered. The two runs are then
 /// merged as in the merge step of a merge sort: the next row is the message
 /// when its `createdAt` is at or before the next event's `timestamp`, and the
-/// event otherwise. The clock therefore decides only where an event falls
-/// between two messages, a tie goes to the message, and a clock that stepped
-/// back can misplace an event between two messages but never reorders a stream.
+/// event otherwise. A tie goes to the message, and a clock that stepped back
+/// can misplace an event between two messages but never reorders a stream.
 ///
-/// Aggregation. Consecutive `toolActivity` events with nothing between them
-/// fold into one `toolRun` row identified by its first event, so a run that
-/// grows keeps its identity. Expanding a run changes that row's kind and
-/// nothing else, so no other row moves in the order.
+/// A turn's rows. An execution's start and completion draw nothing. Its tool
+/// records fold into one line identified by its first event, so a line that
+/// grows keeps its identity, and the line sits under the turn's last reply
+/// block, or where the turn ended when it replied nothing. A failed or stopped
+/// turn adds its card after that line. While the newest execution runs, a
+/// thinking bubble sits at the end where its next reply will land, with the
+/// running turn's line under it, unless a reply block is still streaming.
+///
+/// Days. Every day with a message gets a separator above its first message,
+/// the day changing at 00:00 in `calendar`'s time zone. Grouping is decided in
+/// the final order, so a separator or a tool line starts a new group.
 public enum ConversationProjection {
 
     /// Rows closer together than this, by one author, share a header.
     public static let groupingInterval: TimeInterval = 300
 
     /// Projects `messages`, in sequence order, and `events`, in local order.
-    /// Events of a type the transcript does not show are skipped.
+    /// Events of a type the transcript does not use are skipped.
     ///
     /// `elidedBefore` names the events a capped read was cut at. The first
-    /// shown event at or after each gets an `activityNotShown` row before it.
+    /// used event at or after each gets an `activityNotShown` row before it.
     ///
-    /// `now` decides only whether a saved message has waited long enough to
-    /// be marked unsent (`DeliveryBadge.unsentGrace`). It is passed in, so the
-    /// same input at the same instant always gives the same rows.
+    /// `now` decides whether a saved message has waited long enough to be
+    /// marked unsent (`DeliveryBadge.unsentGrace`) and what a day separator
+    /// says; `calendar` decides where a day starts and how it is written.
+    /// `isAtNewest` is false for a window that stops short of the newest
+    /// message, whose last turn may have ended past it: no bubble is shown there.
     public static func items(
         messages    : [MessageSnapshot],
         events      : [RecordedEvent],
         expanded    : Set<TranscriptItem.ID>,
         elidedBefore: Set<UUID> = [],
-        now         : Date
+        now         : Date,
+        calendar    : Calendar = .autoupdatingCurrent,
+        isAtNewest  : Bool = true
     ) -> [TranscriptItem] {
 
-        var rows          : [TranscriptItem] = []
-        var runStart      : Int?
-        var lastReplyIndex: Int?
-        var runsByTurn    : [UUID: [Int]] = [:]
-        var messageIndex  = 0
-        var eventIndex    = 0
-        let shown         = events.filter(isShown)
-        let notices       = noticePositions(events, elidedBefore: elidedBefore)
+        var merge = Merge()
+        var messageIndex = 0
+        var eventIndex   = 0
+        let shown        = events.filter(isShown)
+        let notices      = noticePositions(events, elidedBefore: elidedBefore)
 
         while messageIndex < messages.count || eventIndex < shown.count {
             let takesMessage: Bool
@@ -69,76 +76,34 @@ public enum ConversationProjection {
             }
 
             if takesMessage {
-                let message = messages[messageIndex]
+                merge.add(messages[messageIndex], now: now)
                 messageIndex += 1
-                runStart = nil
-                if !message.isFromPerson { lastReplyIndex = rows.count }
-                rows.append(row(for: message, after: rows.last, now: now))
-                continue
-            }
-
-            let event = shown[eventIndex]
-            eventIndex += 1
-            if notices.contains(event.id) {
-                runStart = nil
-                rows.append(TranscriptItem(id: .notice(event.id), kind: .activityNotShown, date: event.timestamp,
-                                           authorWorkerID: event.workerID, continuesGroup: false))
-            }
-            let text = event.payload.map { String(decoding: $0, as: UTF8.self) } ?? ""
-
-            switch event.type {
-            case .toolActivity:
-                if let start = runStart, case .toolRun(let lines, _, _) = rows[start].kind {
-                    rows[start] = TranscriptItem(
-                        id            : rows[start].id,
-                        kind          : .toolRun(lines: lines + [text],
-                                                 isExpanded: expanded.contains(rows[start].id), ending: nil),
-                        date          : rows[start].date,
-                        authorWorkerID: rows[start].authorWorkerID,
-                        continuesGroup: false
-                    )
-                } else {
-                    let id = TranscriptItem.ID.toolRun(event.id)
-                    runStart = rows.count
-                    runsByTurn[event.subjectID, default: []].append(rows.count)
-                    rows.append(TranscriptItem(
-                        id            : id,
-                        kind          : .toolRun(lines: [text], isExpanded: expanded.contains(id), ending: nil),
-                        date          : event.timestamp,
-                        authorWorkerID: event.workerID,
-                        continuesGroup: false
-                    ))
+            } else {
+                let event = shown[eventIndex]
+                eventIndex += 1
+                if notices.contains(event.id) {
+                    merge.rows.append(TranscriptItem(id: .notice(event.id), kind: .activityNotShown,
+                                                     date: event.timestamp, authorWorkerID: event.workerID,
+                                                     continuesGroup: false))
                 }
-                continue
-
-            case .executionStarted:
-                lastReplyIndex = nil
-                rows.append(boundary(event, .executionStarted))
-
-            case .executionCompleted:
-                end(runsByTurn[event.subjectID] ?? [], in: &rows, as: .completed)
-                rows.append(boundary(event, .executionCompleted))
-
-            case .executionFailed:
-                markInterrupted(&rows, at: lastReplyIndex)
-                end(runsByTurn[event.subjectID] ?? [], in: &rows, as: .failed)
-                rows.append(boundary(event, .executionFailed(reason: text)))
-
-            case .executionCancelled:
-                markInterrupted(&rows, at: lastReplyIndex)
-                end(runsByTurn[event.subjectID] ?? [], in: &rows, as: .stopped)
-                rows.append(boundary(event, .executionInterrupted(note: text)))
-
-            default:
-                break
+                merge.add(event)
             }
-            runStart = nil
-            if event.type.isTerminal { lastReplyIndex = nil }
         }
-        return rows
+        let ordered = merge.finish(expanded: expanded, showsThinking: isAtNewest)
+        return grouped(dated(ordered, now: now, calendar: calendar))
     }
 
-    /// The first shown event at or after each cut, which the notice goes before.
+    /// True for the event types the projection reads.
+    static func isShown(_ event: RecordedEvent) -> Bool {
+        switch event.type {
+        case .toolActivity, .executionStarted, .executionCompleted, .executionFailed, .executionCancelled:
+            true
+        default:
+            false
+        }
+    }
+
+    /// The first used event at or after each cut, which the notice goes before.
     private static func noticePositions(_ events: [RecordedEvent], elidedBefore: Set<UUID>) -> Set<UUID> {
         guard !elidedBefore.isEmpty else { return [] }
         var positions: Set<UUID> = []
@@ -153,72 +118,193 @@ public enum ConversationProjection {
         return positions
     }
 
-    /// True for the event types the transcript draws.
-    static func isShown(_ event: RecordedEvent) -> Bool {
-        switch event.type {
-        case .toolActivity, .executionStarted, .executionCompleted, .executionFailed, .executionCancelled:
-            true
-        default:
-            false
+    // MARK: Days and groups
+
+    /// `rows` with a separator above the first message of every day.
+    private static func dated(_ rows: [TranscriptItem], now: Date, calendar: Calendar) -> [TranscriptItem] {
+        var result : [TranscriptItem] = []
+        var lastDay: Date?
+        result.reserveCapacity(rows.count + 4)
+        for row in rows {
+            if row.messageID != nil {
+                let day = calendar.startOfDay(for: row.date)
+                if day != lastDay {
+                    let label = TranscriptWording.day(row.date, now: now, calendar: calendar)
+                    result.append(TranscriptItem(id: .day(day), kind: .daySeparator(label: label), date: day,
+                                                 authorWorkerID: nil, continuesGroup: false))
+                    lastDay = day
+                }
+            }
+            result.append(row)
+        }
+        return result
+    }
+
+    /// Each row's grouping in the final order. A message or a thinking bubble
+    /// continues a bubble by its author a little earlier; a tool line
+    /// continues its worker's bubble right above it. A bubble that no bubble
+    /// below continues ends its group and carries the tail.
+    private static func grouped(_ rows: [TranscriptItem]) -> [TranscriptItem] {
+        var result: [TranscriptItem] = []
+        result.reserveCapacity(rows.count)
+        for row in rows {
+            var continues = false
+            if let previous = result.last, isBubble(previous), previous.authorWorkerID == row.authorWorkerID {
+                switch row.kind {
+                case .personMessage, .workerReply, .thinking:
+                    continues = row.date.timeIntervalSince(previous.date) < groupingInterval
+                case .toolRun:
+                    continues = row.authorWorkerID != nil
+                default:
+                    continues = false
+                }
+            }
+            result.append(row.continuesGroup == continues ? row : row.with(continuesGroup: continues))
+        }
+        for index in result.indices where isBubble(result[index]) {
+            let next = index + 1 < result.count ? result[index + 1] : nil
+            result[index].endsGroup = !(next.map { isBubble($0) && $0.continuesGroup } ?? false)
+        }
+        return result
+    }
+
+    private static func isBubble(_ row: TranscriptItem) -> Bool {
+        switch row.kind {
+        case .personMessage, .workerReply, .thinking: true
+        default:                                      false
         }
     }
 
-    private static func row(for message: MessageSnapshot, after previous: TranscriptItem?, now: Date)
-        -> TranscriptItem {
-        let badge = DeliveryBadge(message.delivery, savedAt: message.createdAt, now: now)
-        let kind: TranscriptItem.Kind = message.isFromPerson
-            ? .personMessage(text: message.text, delivery: message.delivery, badge: badge)
-            : .workerReply(text: message.text, isInterrupted: false)
+    // MARK: Merging
 
-        var continues = false
-        if let previous, previous.messageID != nil, previous.authorWorkerID == message.authorWorkerID {
-            continues = message.createdAt.timeIntervalSince(previous.date) < groupingInterval
+    /// Merge is the state of one pass over the merged order: the rows so far,
+    /// each execution's tool line, and the turn still open.
+    private struct Merge {
+
+        /// A turn's tool records, and the row it goes after once placed.
+        struct ToolLine {
+            let id    : TranscriptItem.ID
+            let date  : Date
+            let worker: UUID?
+            var lines : [String]
+            var ending: TranscriptItem.TurnEnding?
+
+            /// The row index the line goes after: nil until its turn ends, -1 before every row.
+            var anchor: Int?
         }
-        return TranscriptItem(
-            id            : .message(message.id),
-            kind          : kind,
-            date          : message.createdAt,
-            authorWorkerID: message.authorWorkerID,
-            continuesGroup: continues
-        )
-    }
 
-    private static func boundary(_ event: RecordedEvent, _ kind: TranscriptItem.Kind) -> TranscriptItem {
-        TranscriptItem(
-            id            : .event(event.id),
-            kind          : kind,
-            date          : event.timestamp,
-            authorWorkerID: event.workerID,
-            continuesGroup: false
-        )
-    }
+        var rows: [TranscriptItem] = []
 
-    /// Records how the turn ended on each of its tool runs, so a call left
-    /// without a result is no longer called running.
-    private static func end(_ runs: [Int], in rows: inout [TranscriptItem], as ending: TranscriptItem.TurnEnding) {
-        for index in runs {
-            guard case .toolRun(let lines, let isExpanded, _) = rows[index].kind else { continue }
-            let run = rows[index]
-            rows[index] = TranscriptItem(
-                id            : run.id,
-                kind          : .toolRun(lines: lines, isExpanded: isExpanded, ending: ending),
-                date          : run.date,
-                authorWorkerID: run.authorWorkerID,
-                continuesGroup: run.continuesGroup
-            )
+        private var lines    : [UUID: ToolLine] = [:]
+        private var lineOrder: [UUID] = []
+
+        /// The latest started execution with no terminal event yet, and its reply blocks so far.
+        private var openTurn: (event: RecordedEvent, replies: Int)?
+
+        /// The current answer's last reply block, since the last start or ending.
+        private var lastReplyIndex: Int?
+        private var isLastReplyStreaming = false
+
+        mutating func add(_ message: MessageSnapshot, now: Date) {
+            let badge = DeliveryBadge(message.delivery, savedAt: message.createdAt, now: now)
+            let kind: TranscriptItem.Kind = message.isFromPerson
+                ? .personMessage(text: message.text, delivery: message.delivery, badge: badge)
+                : .workerReply(text: message.text, isInterrupted: false)
+            if !message.isFromPerson {
+                lastReplyIndex       = rows.count
+                isLastReplyStreaming = message.delivery == .responding
+                openTurn?.replies   += 1
+            }
+            rows.append(TranscriptItem(id: .message(message.id), kind: kind, date: message.createdAt,
+                                       authorWorkerID: message.authorWorkerID, continuesGroup: false))
         }
-    }
 
-    /// Marks the answer's last reply block as interrupted, when it has one.
-    private static func markInterrupted(_ rows: inout [TranscriptItem], at index: Int?) {
-        guard let index, case .workerReply(let text, _) = rows[index].kind else { return }
-        let reply = rows[index]
-        rows[index] = TranscriptItem(
-            id            : reply.id,
-            kind          : .workerReply(text: text, isInterrupted: true),
-            date          : reply.date,
-            authorWorkerID: reply.authorWorkerID,
-            continuesGroup: reply.continuesGroup
-        )
+        mutating func add(_ event: RecordedEvent) {
+            let text = event.payload.map { String(decoding: $0, as: UTF8.self) } ?? ""
+            switch event.type {
+            case .toolActivity:
+                if lines[event.subjectID] == nil {
+                    lineOrder.append(event.subjectID)
+                    lines[event.subjectID] = ToolLine(id: .toolRun(event.id), date: event.timestamp,
+                                                      worker: event.workerID, lines: [])
+                }
+                lines[event.subjectID]?.lines.append(text)
+
+            case .executionStarted:
+                openTurn       = (event, 0)
+                lastReplyIndex = nil
+
+            case .executionCompleted:
+                end(event, as: .completed)
+
+            case .executionFailed:
+                markInterrupted()
+                end(event, as: .failed)
+                rows.append(card(event, .executionFailed(reason: text)))
+
+            case .executionCancelled:
+                markInterrupted()
+                end(event, as: .stopped)
+                rows.append(card(event, .executionInterrupted(note: text)))
+
+            default:
+                break
+            }
+        }
+
+        /// The rows with each tool line in place: an ended turn's after its
+        /// anchor, any other at the end, below the thinking bubble when there is one.
+        mutating func finish(expanded: Set<TranscriptItem.ID>, showsThinking: Bool) -> [TranscriptItem] {
+            if showsThinking, let open = openTurn, let worker = open.event.workerID,
+               !(lastReplyIndex != nil && isLastReplyStreaming) {
+                rows.append(TranscriptItem(id: .thinking(execution: open.event.subjectID, replies: open.replies),
+                                           kind: .thinking, date: open.event.timestamp, authorWorkerID: worker,
+                                           continuesGroup: false))
+            }
+            var after: [Int: [TranscriptItem]] = [:]
+            var tail : [TranscriptItem] = []
+            for subject in lineOrder {
+                guard let line = lines[subject] else { continue }
+                let row = TranscriptItem(
+                    id            : line.id,
+                    kind          : .toolRun(lines: line.lines, isExpanded: expanded.contains(line.id),
+                                             ending: line.ending),
+                    date          : line.date,
+                    authorWorkerID: line.worker,
+                    continuesGroup: false
+                )
+                if let anchor = line.anchor { after[anchor, default: []].append(row) } else { tail.append(row) }
+            }
+            guard !after.isEmpty || !tail.isEmpty else { return rows }
+            var ordered = after[-1] ?? []
+            ordered.reserveCapacity(rows.count + lineOrder.count)
+            for (index, row) in rows.enumerated() {
+                ordered.append(row)
+                ordered += after[index] ?? []
+            }
+            return ordered + tail
+        }
+
+        /// Records how the turn ended on its tool line, and puts the line under
+        /// the answer's last reply block, or here when it replied nothing.
+        private mutating func end(_ event: RecordedEvent, as ending: TranscriptItem.TurnEnding) {
+            if lines[event.subjectID] != nil {
+                lines[event.subjectID]?.ending = ending
+                lines[event.subjectID]?.anchor = lastReplyIndex ?? rows.count - 1
+            }
+            if openTurn?.event.subjectID == event.subjectID { openTurn = nil }
+            lastReplyIndex = nil
+        }
+
+        /// Marks the answer's last reply block as interrupted, when it has one.
+        private mutating func markInterrupted() {
+            guard let index = lastReplyIndex, case .workerReply(let text, _) = rows[index].kind else { return }
+            rows[index] = rows[index].with(kind: .workerReply(text: text, isInterrupted: true))
+        }
+
+        private func card(_ event: RecordedEvent, _ kind: TranscriptItem.Kind) -> TranscriptItem {
+            TranscriptItem(id: .event(event.id), kind: kind, date: event.timestamp, authorWorkerID: event.workerID,
+                           continuesGroup: false)
+        }
     }
 }

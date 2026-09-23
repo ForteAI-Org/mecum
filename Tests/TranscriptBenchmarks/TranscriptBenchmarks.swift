@@ -217,7 +217,7 @@ struct TranscriptBenchmarks {
         let landed = streams.enumerated().allSatisfy { index, stream in
             let rows = controllers[index].rows
             return rows.first { $0.item.id == .message(stream.message) }?.item.copyText == texts[stream.message]
-                && rows.contains { $0.item.kind == .executionCompleted && $0.item.date == start.addingTimeInterval(60) }
+                && !rows.contains { $0.item.kind == .thinking }
         }
         let applied = zip(controllers, updates).map { $0.viewUpdateCount - $1 }
         BenchmarkRecord.row("main thread lateness, four streams", busy, unit: "ms", target: "longest < 100 ms",

@@ -348,7 +348,8 @@ public final class TranscriptController: NSObject {
     private static func project(_ window: TranscriptWindow, expanded: Set<TranscriptItem.ID>, now: Date) async
         -> [TranscriptItem] {
         ConversationProjection.items(messages: window.messages, events: window.events, expanded: expanded,
-                                     elidedBefore: window.elidedBefore, now: now)
+                                     elidedBefore: window.elidedBefore, now: now, calendar: .autoupdatingCurrent,
+                                     isAtNewest: window.isAtNewest)
     }
 
     /// Projects again when the earliest saved message still inside its grace
@@ -588,7 +589,7 @@ public final class TranscriptController: NSObject {
 
     private func noteActivity(_ update: TranscriptUpdate, followed: Bool) {
         guard !followed else { return }
-        let arrivedMessage = update.inserted.contains { rows[$0].item.messageID != nil }
+        let arrivedMessage = (update.inserted + update.replaced).contains { rows[$0].item.messageID != nil }
         if arrivedMessage {
             newActivity = .messages
         } else if !update.inserted.isEmpty || !update.changed.isEmpty, newActivity == nil {
@@ -619,7 +620,9 @@ public final class TranscriptController: NSObject {
 
     private func moveFocus(by step: Int) {
         guard !rows.isEmpty else { return }
-        let next = min(max(0, (focusedIndex ?? (step > 0 ? -1 : rows.count)) + step), rows.count - 1)
+        var next = min(max(0, (focusedIndex ?? (step > 0 ? -1 : rows.count)) + step), rows.count - 1)
+        // A day separator is a heading between rows, not a stop for the keyboard.
+        while case .daySeparator = rows[next].item.kind, rows.indices.contains(next + step) { next += step }
         let path = IndexPath(item: next, section: 0)
         setFocusedAction(nil)
         collectionView.selectionIndexPaths = [path]

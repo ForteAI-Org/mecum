@@ -49,12 +49,54 @@ enum TranscriptColors {
 
     /// The WCAG contrast ratio of white against an sRGB colour.
     static func contrastWithWhite(_ red: CGFloat, _ green: CGFloat, _ blue: CGFloat) -> Double {
+        1.05 / (luminance(red, green, blue) + 0.05)
+    }
+
+    /// The WCAG relative luminance of an sRGB colour.
+    static func luminance(_ red: CGFloat, _ green: CGFloat, _ blue: CGFloat) -> Double {
         func linear(_ channel: CGFloat) -> Double {
             let value = Double(min(max(channel, 0), 1))
             return value <= 0.04045 ? value / 12.92 : pow((value + 0.055) / 1.055, 2.4)
         }
-        let luminance = 0.2126 * linear(red) + 0.7152 * linear(green) + 0.0722 * linear(blue)
-        return 1.05 / (luminance + 0.05)
+        return 0.2126 * linear(red) + 0.7152 * linear(green) + 0.0722 * linear(blue)
+    }
+
+    // MARK: Code
+
+    /// The code surface's grey, light and dark, which the syntax colours are chosen against.
+    static let codeSurfaceWhite: (light: CGFloat, dark: CGFloat) = (0.985, 0.15)
+
+    /// A token's sRGB colour in the light or the dark appearance. Each keeps
+    /// WCAG AA (4.5:1) for the code size on `codeSurface`, which a test checks.
+    static func syntaxComponents(_ kind: CodeToken.Kind, isDark: Bool) -> (red: CGFloat, green: CGFloat,
+                                                                            blue: CGFloat) {
+        switch (kind, isDark) {
+        case (.comment, false): (0.40, 0.43, 0.47)
+        case (.comment, true):  (0.55, 0.58, 0.62)
+        case (.string, false):  (0.77, 0.10, 0.09)
+        case (.string, true):   (0.99, 0.42, 0.36)
+        case (.number, false):  (0.11, 0.00, 0.81)
+        case (.number, true):   (0.82, 0.75, 0.41)
+        case (.keyword, false): (0.61, 0.14, 0.58)
+        case (.keyword, true):  (0.99, 0.37, 0.64)
+        case (.type, false):    (0.04, 0.31, 0.47)
+        case (.type, true):     (0.36, 0.85, 1.00)
+        }
+    }
+
+    private static let syntaxColors: [CodeToken.Kind: NSColor] = Dictionary(
+        uniqueKeysWithValues: CodeToken.Kind.allCases.map { kind in
+            (kind, NSColor(name: "TranscriptSyntax\(kind)") { appearance in
+                let isDark = appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+                let (red, green, blue) = syntaxComponents(kind, isDark: isDark)
+                return NSColor(srgbRed: red, green: green, blue: blue, alpha: 1)
+            })
+        }
+    )
+
+    /// The colour of a code token, resolved per appearance when drawn.
+    static func syntax(_ kind: CodeToken.Kind) -> NSColor {
+        syntaxColors[kind] ?? .labelColor
     }
 
     static let neutralSurface = NSColor(name: "TranscriptNeutralSurface") { appearance in
@@ -72,7 +114,7 @@ enum TranscriptColors {
     /// A code block's own surface, inside the reply's bubble.
     static let codeSurface = NSColor(name: "TranscriptCodeSurface") { appearance in
         appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-            ? NSColor(white: 0.15, alpha: 1)
-            : NSColor(white: 0.985, alpha: 1)
+            ? NSColor(white: codeSurfaceWhite.dark, alpha: 1)
+            : NSColor(white: codeSurfaceWhite.light, alpha: 1)
     }
 }

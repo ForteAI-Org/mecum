@@ -28,9 +28,11 @@ struct CrossRowSelectionTests {
                 : "Message \(index), with a little more text to give it a line or two."
             try await fixture.say(text, at: Double(index) * 400, byWorker: index % 2 == 1)
             if index == 3 {
-                try await fixture.record(.executionStarted, subject: UUID(), at: Double(index) * 400 + 1)
-                try await fixture.record(.toolActivity, subject: UUID(), at: Double(index) * 400 + 2,
+                let turn = UUID()
+                try await fixture.record(.executionStarted, subject: turn, at: Double(index) * 400 + 1)
+                try await fixture.record(.toolActivity, subject: turn, at: Double(index) * 400 + 2,
                                          text: "→ read_log {}")
+                try await fixture.record(.executionCompleted, subject: turn, at: Double(index) * 400 + 3)
             }
         }
         let controller = TranscriptController(source: fixture.store, pasteboard: pasteboard)

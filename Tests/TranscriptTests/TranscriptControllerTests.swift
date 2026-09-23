@@ -56,14 +56,15 @@ struct TranscriptControllerTests {
         let fixture = try await TranscriptFixture()
         defer { fixture.discard() }
         let controller = try await opened(fixture, messages: 130)
-        #expect(controller.rows.count == TranscriptWindow.pageSize)
+        let messages   = { controller.rows.filter { $0.item.messageID != nil }.count }
+        #expect(messages() == TranscriptWindow.pageSize)
 
         controller.setVisibleTop(900)
         let anchor = try #require(controller.captureAnchor())
         controller.loadOlder()
         await controller.settle()
 
-        #expect(controller.rows.count == 2 * TranscriptWindow.pageSize)
+        #expect(messages() == 2 * TranscriptWindow.pageSize)
         let top = try #require(anchor.visibleTop(in: controller.frameMap()))
         #expect(top > 900)
         #expect(controller.captureAnchor() == anchor)
@@ -127,10 +128,10 @@ struct TranscriptControllerTests {
         // The reader looks elsewhere: the view is hidden, and the turn's end still applies.
         controller.view.isHidden = true
         await source.append(". Done.")
-        try await fixture.record(.executionCompleted, subject: UUID(), at: 5)
+        try await fixture.record(.executionFailed, subject: UUID(), at: 5, text: "exit 1")
         controller.refresh()
         await controller.settle()
-        #expect(controller.rows.last?.item.kind == .executionCompleted)
+        #expect(controller.rows.last?.item.kind == .executionFailed(reason: "exit 1"))
         #expect(controller.rows.first { $0.item.id == .message(id) }?.item.copyText == streamed + ". Done.")
     }
 

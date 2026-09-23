@@ -38,7 +38,7 @@ enum MarkdownSourceChunks {
         let kind  : Kind
     }
 
-    private struct Fence {
+    struct Fence {
         let marker  : Character
         let length  : Int
         let indent  : Int
@@ -115,7 +115,7 @@ enum MarkdownSourceChunks {
 
     /// A line of three or more backticks or tildes, indented at most three
     /// spaces. A backtick fence's info string may not contain a backtick.
-    private static func opening(_ line: Substring) -> Fence? {
+    static func opening(_ line: Substring) -> Fence? {
         let indent = leadingSpaces(line)
         guard indent <= 3 else { return nil }
         let rest = line.dropFirst(indent)
@@ -128,7 +128,7 @@ enum MarkdownSourceChunks {
         return Fence(marker: marker, length: length, indent: indent, language: language)
     }
 
-    private static func isClosing(_ line: Substring, of fence: Fence) -> Bool {
+    static func isClosing(_ line: Substring, of fence: Fence) -> Bool {
         let indent = leadingSpaces(line)
         guard indent <= 3 else { return false }
         let rest   = line.dropFirst(indent)
@@ -136,7 +136,7 @@ enum MarkdownSourceChunks {
         return length >= fence.length && rest.dropFirst(length).allSatisfy(\.isWhitespace)
     }
 
-    private static func outdent(_ line: Substring, by indent: Int) -> Substring {
+    static func outdent(_ line: Substring, by indent: Int) -> Substring {
         line.dropFirst(min(indent, leadingSpaces(line)))
     }
 }
