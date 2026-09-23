@@ -9,12 +9,12 @@ import Foundation
 import Workspace
 
 /// ShellChrome decides what the team window's chrome says about the selected
-/// worker (§3.4): the floating header over the conversation, the window's
-/// title, and the controls the toolbar keeps.
+/// worker (§3.4): the header floating at the conversation's top centre, the
+/// window's title, and the controls the toolbar keeps.
 ///
 /// The header is the only place the worker's name is drawn above the
 /// conversation. The window title still carries it, so Mission Control and the
-/// Window menu name the window, but the toolbar does not show it a second time.
+/// Window menu name the window, but the toolbar shows no title beside the header.
 /// The header has no status line: the sidebar row already says what the worker
 /// is doing, and no fact is shown twice.
 public enum ShellChrome {
@@ -25,7 +25,7 @@ public enum ShellChrome {
         case inspectorToggle
     }
 
-    /// What the floating header shows for one worker.
+    /// What the header shows for one worker.
     public struct Header: Sendable, Hashable {
         public let workerID  : UUID
         public let name      : String

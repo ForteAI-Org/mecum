@@ -8,12 +8,13 @@
 import SwiftUI
 import TeamShell
 
-/// WorkerHeaderView floats the selected worker's mascot and name at the top of
-/// its conversation (§3.4), the way a messaging app names the other side.
+/// WorkerHeaderView floats the selected worker's mascot and name at the top
+/// centre of its conversation (§3.4), the way a messaging app names the other side.
 ///
-/// It floats over the transcript: messages scroll under it, and the transcript
-/// keeps `clearance` points free above its first message so the oldest one
-/// scrolls clear of it. Its surface is Liquid Glass, the composer's language;
+/// It rises into the toolbar's band, `topMargin` below the window's edge, and
+/// hangs below it over the transcript, which keeps `clearance` points free
+/// above its first message so the oldest one scrolls clear of it. The band
+/// keeps presses for the titlebar, so `HeaderPressCatcher` takes them first. Its surface is Liquid Glass, the composer's language;
 /// Reduce Transparency gets a solid surface instead. It carries no status line.
 ///
 /// Clicking it, or Return or Space while it has focus, calls `open`, which
@@ -21,8 +22,10 @@ import TeamShell
 /// navigation is turned on, so the keyboard always reaches it.
 struct WorkerHeaderView: View {
 
-    /// The height the transcript keeps clear at its top: the header and its margin.
-    static let clearance: CGFloat = 72
+    /// The height the transcript keeps clear at its top: the part of the header
+    /// that hangs below the toolbar, and a margin.
+    // ponytail: assumes the unified toolbar's 52 points; measure the safe area if a compact toolbar ships.
+    static let clearance: CGFloat = 34
 
     let header: ShellChrome.Header
     let open  : () -> Void
@@ -32,6 +35,8 @@ struct WorkerHeaderView: View {
 
     @Environment(\.workerHeaderUsesMaterial)
     private var usesMaterial
+
+    @FocusState private var isFocused: Bool
 
     private let shape = RoundedRectangle(cornerRadius: 14, style: .continuous)
 
@@ -53,18 +58,27 @@ struct WorkerHeaderView: View {
         .contentShape(shape)
         .help(header.name)
         .focusable()
+        .focused($isFocused)
+        // A press focuses it so Space works next, and draws no ring for it.
+        .focusEffectDisabled()
         .onKeyPress(keys: [.return, .space]) { _ in
             open()
             return .handled
         }
-        .onTapGesture(perform: open)
+        .background(HeaderPressCatcher {
+            isFocused = true
+            open()
+        })
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(header.name)
         .accessibilityHint(header.accessibilityHint)
         .accessibilityAddTraits(.isButton)
         .accessibilityAction { open() }
-        .padding(.top, 8)
+        .padding(.top, Self.topMargin)
     }
+
+    /// The room between the window's top edge and the header.
+    static let topMargin: CGFloat = 20
 
     @ViewBuilder
     private func surface(_ content: some View) -> some View {

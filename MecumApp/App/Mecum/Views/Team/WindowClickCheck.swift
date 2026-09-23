@@ -98,7 +98,8 @@ enum WindowClickCheck {
         print("click check: panes \(panes.map { window.contentView?.convert($0.bounds, from: $0) ?? .zero })")
         try expect(!probe.isInspectorRequested && !showsInspector(hosting), "the inspector is shown before the click")
 
-        let header = point(in: panes[1], fromTop: 36, in: window)
+        // The mascot, in the toolbar's band above the conversation's safe area, where the titlebar keeps presses.
+        let header = point(in: panes[1], fromTop: -16, in: window)
         click(at: header, in: window)
         try await Task.sleep(for: .seconds(1))
         print("click check: after the header click, requested \(probe.isInspectorRequested)")
@@ -188,13 +189,14 @@ enum WindowClickCheck {
     // MARK: Events
 
     private static func click(at point: NSPoint, in window: NSWindow) {
+        // Through the app's queue, as a real press arrives, so the event monitors see it.
         print("click check: clicking \(point) in the window")
         for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
             if let event = NSEvent.mouseEvent(
                 with: type, location: point, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
                 windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1
             ) {
-                window.sendEvent(event)
+                NSApp.postEvent(event, atStart: false)
             }
         }
     }

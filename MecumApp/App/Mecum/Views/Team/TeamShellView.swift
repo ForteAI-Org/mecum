@@ -64,8 +64,9 @@ struct TeamShellView: View {
                 )
         } detail: {
             detail
-                .overlay(alignment: .top) { header }
+                .overlay(alignment: .top) { header.ignoresSafeArea(.container, edges: .top) }
                 .navigationTitle(ShellChrome.windowTitle(for: team.selectedWorker))
+                .toolbar { toolbar }
                 // A constant zero minimum for the column: the conversation's own height follows its width,
                 // and a real minimum width would make AppKit grow the window rather than close the inspector.
                 .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
@@ -93,7 +94,6 @@ struct TeamShellView: View {
         .sheet(item: profileWorker) { worker in
             WorkerProfileSheet(team: team, worker: worker)
         }
-        .toolbar { toolbar }
         // The window keeps the worker's name for Mission Control and the Window menu; the header shows it.
         .toolbar(removing: .title)
         .focusedSceneValue(\.team, team)
@@ -113,11 +113,13 @@ struct TeamShellView: View {
     // MARK: Toolbar
 
     /// The window's own controls, `ShellChrome.toolbar`: the split view's sidebar
-    /// toggle and the inspector toggle. The worker's name is the floating header,
+    /// toggle and the inspector toggle at the trailing edge. The worker's header floats over the band,
     /// the connections are at the foot of the sidebar, and Release the computer is
     /// in the composer beside Send and in the worker's commands.
     @ToolbarContentBuilder
     private var toolbar: some ToolbarContent {
+        // The window has no title, so the spacer is what takes the inspector toggle to the trailing edge.
+        ToolbarSpacer(.flexible)
         ToolbarItem {
             Button(isInspectorShown ? "Hide Inspector" : "Show Inspector", systemImage: "sidebar.trailing",
                    action: toggleInspector)
