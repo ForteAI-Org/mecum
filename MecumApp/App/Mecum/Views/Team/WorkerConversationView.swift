@@ -43,8 +43,28 @@ struct WorkerConversationView: View {
 
     var body: some View {
         transcriptArea
+            .overlay(alignment: .top) { titleBarEdge }
             .overlay(alignment: .bottom) { composer }
             .onGeometryChange(for: CGFloat.self) { $0.safeAreaInsets.top } action: { titleBarHeight = $0 }
+    }
+
+    /// The soft edge the messages fade under at the title bar, as a system scroll
+    /// view gets on its own: the system gives that edge only to SwiftUI's scroll
+    /// views, and the transcript is an AppKit one. It is the bar's material,
+    /// solid under the bar and fading out just below it, and it takes no clicks.
+    private var titleBarEdge: some View {
+        Rectangle()
+            .fill(.bar)
+            .mask {
+                LinearGradient(stops: [.init(color: .black, location: 0),
+                                       .init(color: .black, location: 0.6),
+                                       .init(color: .clear, location: 1)],
+                               startPoint: .top, endPoint: .bottom)
+            }
+            .frame(height: titleBarHeight + 20)
+            .ignoresSafeArea(.container, edges: .top)
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
     }
 
     // MARK: Transcript
