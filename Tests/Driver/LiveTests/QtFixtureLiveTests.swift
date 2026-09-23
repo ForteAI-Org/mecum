@@ -860,9 +860,12 @@ struct QtFixtureLiveTests {
             }
             _ = await stage.seat.concludeObservation()
             if let adopted {
-                let outcome = await stage.seat.release(adopted, .returnToUserSeat)
-                print("QT6_NATIVE release=\(outcome)")
-                #expect(outcome == .returned)
+                let report = await stage.seat.releaseAssignment()
+                print("QT6_NATIVE assignment-release=\(report.outcome)"
+                    + " window=\(String(describing: report.windows[adopted.id]))"
+                    + " obligations=\(report.obligations.count)")
+                #expect(report.isComplete)
+                #expect(report.windows[adopted.id] == .returned)
             }
         }
         if let failure { throw failure }
@@ -1286,6 +1289,12 @@ struct QtFixtureLiveTests {
                 let outcome = await stage.seat.release(adopted, .returnToUserSeat)
                 print("QT6 release=\(outcome)")
                 #expect(outcome == .returned)
+                if outcome == .returned && failure == nil {
+                    do {
+                        try stage.seat.releaseAssignedApplication()
+                        print("QT6 assignment-released=true")
+                    } catch { failure = error }
+                }
             }
         }
         if let failure { throw failure }

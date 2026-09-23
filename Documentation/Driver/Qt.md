@@ -59,6 +59,7 @@ window from an on-screen row alone.
 | Kit function | Qt policy | Measured evidence | State |
 |---|---|---|---|
 | `adopt` and `stage` | `QtPlatform` | DaVinci's exact AX and WindowServer identity matched; its 910 by 640 window and the owned Qt 6 window moved into the virtual display. | Passed on both targets |
+| `acquire`, `release(Turn)`, `confirm`, `concludeObservation` | Shared | Every input row acquired one Turn, confirmed the target-side effect of each posted command, concluded its observation and released the Turn. Held-key phases were completed before releasing their Turn. | Passed in measured rows |
 | `switchTarget` | Shared | The Qt 6 fixture opened a second top-level window; the watcher adopted its exact WindowServer and AX identity. An explicit switch to it and back to the parent changed the observed target, and a routed click incremented each window's own counter once. The secondary was closed and explicitly released, then the parent returned. | Passed between two Qt 6 windows |
 | `observe` / window capture | Shared | Qualified BGRA frame and reference for DaVinci's staged window; the Qt 6 menu's dedicated 128 by 26 frame was also captured. | Passed on measured surfaces |
 | `send(.click(..., .left, count: 1))` | No preparation | DaVinci Search changed `0 → 1 → 0`; New Project and Cancel opened and closed a dialog. The Qt 6 fixture's button counter incremented. A prepared DaVinci Cancel click caused `activationUnverified`, so clicks remain unprepared. | Passed on measured controls |
@@ -75,6 +76,7 @@ window from an on-screen row alone.
 | Qt widget `QFileDialog` | `QtPlatform` and shared watcher | The owned Qt 6 dialog was an adopted 654 by 491 window on the virtual display. Cancel was addressed from the widget's measured button frame; the target reported the dialog closed and `fileDialogAccepted == false`. Its child record was released, the parent returned and the User Seat stayed unchanged with zero physical HID events. | Passed on fixture widget dialog |
 | Native `QFileDialog` | Qt opener, shared surface route | After its native presentation settled, the owned Qt 6 target exposed a separate level-8, 891 by 448 panel window under the Qt PID; a companion panel-service process also existed. The watcher adopted the panel. The AX Cancel frame gave a scoped click location, and the target reported closed with `fileDialogAccepted == false`. The parent returned and the User Seat stayed unchanged. | Passed on fixture native dialog |
 | `release(..., .returnToUserSeat)` | Shared | Both Qt targets returned after the measured rows, with displays and fences removed. Stage Manager briefly publishes a full-size surface after DaVinci's AX body reaches home; the return path now allows eight observations without rewriting the already-correct AX position. A deterministic unit row verified it. When DaVinci's initial stashed AX body instead appeared at `(1082, 776)`, a separate run refused return with the body at `(1082, 1012)`; that geometry remains unsupported. | Partial across stashed placements |
+| `releaseAssignedApplication` / `releaseAssignment` | Shared | The Qt 6 command row explicitly ended the assignment after returning its window. The native-popup row used coordinated `releaseAssignment`: outcome `released`, the window `returned`, zero obligations. | Passed for one-window Qt 6 assignments |
 | `useDropdownMenu` | Shared | The Qt 6 combo opened a 648 by 62 popup. A scoped Down and Return selected `Beta` in the target state and closed it as `chosenItem`. | Passed on Qt 6 combo |
 | `useNativePopupMenu` | Shared | The fixture supplied a native `QComboBox.showPopup()` opener and a native choice callback through its local command channel. The scoped menu stayed on the virtual display, selected `Beta` in target state and closed as `chosenItem`. This qualifies the scope when a caller has a native Qt action; it does not imply the kit can invent that action for an external app. | Passed on fixture native action |
 
@@ -95,6 +97,17 @@ without selecting a file. They verified every `InputCommand` case on
 at least one Qt 6 widget, including right click, held-key phases and
 multi-cluster text. The menu choices cover one effect in each target; other
 commands exposed by a menu need their own semantic oracle.
+
+The other public seat controls (`inputPauseReasons`, `coherentState`, state
+subscriptions, `report`, and `stopAdmittingCommands`) operate on seat state,
+not on a Qt input route. `textCommands` only splits text into atomic commands;
+each resulting command still needs its own observation and Qt-policy `send`.
+The old `sendText`, `sendSequence`, and `useContextMenu` overloads are marked
+unavailable in the API and have no Qt implementation to qualify. A cancelled
+Qt 6 modal child kept a hidden WindowServer surface, so
+`logicalSurfacePresence` returned `unreadable` on this unvalidated build;
+`reconcileLogicalClosure` cannot treat that as proof of closure. The consumer
+released the child explicitly.
 
 The target sometimes publishes Search's text field without an AX description.
 The live locator accepts the only `AXTextField` in Project Manager while Search
