@@ -15,8 +15,8 @@ import SeatCore
 /// conservative preparation until those surfaces have their own measurements.
 /// A controlled Qt 6 widget fixture has also qualified scrolling, routed and
 /// native popup choices, and a context-menu action. DaVinci's menu has also
-/// opened, captured and closed after the Search locator correction; a menu
-/// item action in DaVinci remains unmeasured.
+/// opened and captured after the Search locator correction; its Select All
+/// action selected the temporary search text through a scoped menu click.
 nonisolated public struct QtPlatform: InputPlatform {
 
     public init() {}

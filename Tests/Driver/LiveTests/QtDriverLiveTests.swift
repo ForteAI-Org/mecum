@@ -431,7 +431,7 @@ struct QtDriverLiveTests {
     }
 
     @Test(
-        "DaVinci's Qt menu opens, is captured and closes on the virtual display",
+        "DaVinci's Qt menu selects Search text and restores the empty field",
         .enabled(
             if: liveSkipReason(optIn: "AGENTSEAT_QT_TESTS") == nil,
             Comment(rawValue: liveSkipReason(optIn: "AGENTSEAT_QT_TESTS") ?? "")))
@@ -499,6 +499,27 @@ struct QtDriverLiveTests {
                 try stage.seat.release(turn)
                 try #require(opened, "Search did not open")
 
+                for (command, effect): (InputCommand, @MainActor () -> Bool) in [
+                    (.click(try point(of: control("AXTextField"))), {
+                        (try? control("AXTextField").isFocused) == true
+                    }),
+                    (.insertText("qtbgprobe"), {
+                        (try? control("AXTextField").value) == "qtbgprobe"
+                    }),
+                ] {
+                    let textTurn = try await stage.seat.acquire()
+                    let textReference = try await liveObservation(stage.seat)
+                    let textReceipt = try await stage.seat.send(
+                        command, observation: textReference,
+                        turn: textTurn, platform: QtPlatform()
+                    )
+                    let changed = LivePump.run(until: effect, timeout: 2)
+                    try stage.seat.confirm(textReceipt, changed ? .observed : .absent)
+                    _ = await stage.seat.concludeObservation()
+                    try stage.seat.release(textTurn)
+                    try #require(changed)
+                }
+
                 let menuTurn = try await stage.seat.acquire()
                 let menuReference = try await liveObservation(stage.seat)
                 let menu = try await stage.seat.withContextMenu(
@@ -512,6 +533,27 @@ struct QtDriverLiveTests {
                         case .success(let delivery):
                             print("QT_MENU capture=qualified"
                                 + " pixels=\(delivery.frame.geometry.pixelSize)")
+                            do {
+                                let item = try MenuImageChoice.point(
+                                    for: ["Select All", "Seleziona tutto"],
+                                    in: interaction.menu.window
+                                )
+                                let frame = delivery.geometry.window.frame
+                                let action = try #require(InputLocation(
+                                    screenPoint: CGPoint(
+                                        x: frame.minX + item.x,
+                                        y: frame.minY + item.y
+                                    ),
+                                    observedIn: delivery.geometry
+                                ))
+                                let choice = try await interaction.send(
+                                    .click(action), observation: delivery.reference
+                                )
+                                print("QT_MENU item=Select All point=\(item)"
+                                    + " events=\(choice.eventCount)")
+                            } catch {
+                                Issue.record("DaVinci Select All could not be chosen: \(error)")
+                            }
                         case .failure(let reason):
                             Issue.record("DaVinci menu surface could not be observed: \(reason)")
                     }
@@ -528,6 +570,9 @@ struct QtDriverLiveTests {
                     case .notVerified: cleanupVerified = false
                 }
                 #expect(cleanupVerified, "The Qt context menu was not verified closed")
+                let selected = try control("AXTextField").selectedRange?.length
+                print("QT_MENU selected-length=\(String(describing: selected))")
+                #expect(selected == 9)
 
                 let closeTurn = try await stage.seat.acquire()
                 let closeReference = try await liveObservation(stage.seat)
@@ -542,6 +587,24 @@ struct QtDriverLiveTests {
                 _ = await stage.seat.concludeObservation()
                 try stage.seat.release(closeTurn)
                 #expect(closed, "Search remained open after the menu test")
+                let verifyTurn = try await stage.seat.acquire()
+                let verifyReference = try await liveObservation(stage.seat)
+                let reopening = try await stage.seat.send(
+                    .click(try point(of: control("AXCheckBox"))),
+                    observation: verifyReference, turn: verifyTurn, platform: QtPlatform()
+                )
+                let reopened = LivePump.run(until: {
+                    (try? control("AXCheckBox").value) == "1"
+                }, timeout: 2)
+                try stage.seat.confirm(reopening, reopened ? .observed : .absent)
+                _ = await stage.seat.concludeObservation()
+                try stage.seat.release(verifyTurn)
+                try #require(reopened)
+                let restoredValue = try control("AXTextField").value
+                print("QT_MENU restored-search-length=\(restoredValue.count)")
+                await closeResidualSearch(in: stage, processID: processID)
+                #expect(restoredValue.isEmpty)
+                #expect(try control("AXCheckBox").value == "0")
             } catch {
                 await closeResidualSearch(in: stage, processID: processID)
                 failure = error
