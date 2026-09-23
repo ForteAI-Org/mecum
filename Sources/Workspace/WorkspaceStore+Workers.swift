@@ -136,6 +136,16 @@ extension WorkspaceStore {
         try first(Execution.self, where: #Predicate { $0.id == id }).map(ExecutionSnapshot.init)
     }
 
+    /// The worker's most recently started attempt, or nil before its first.
+    public func latestExecution(of worker: UUID) throws -> ExecutionSnapshot? {
+        var descriptor = FetchDescriptor<Execution>(
+            predicate: #Predicate { $0.workerID == worker },
+            sortBy   : [SortDescriptor(\.startedAt, order: .reverse)]
+        )
+        descriptor.fetchLimit = 1
+        return try modelContext.fetch(descriptor).first.map(ExecutionSnapshot.init)
+    }
+
     // MARK: Hierarchy
 
     /// Throws when making `id` report to `manager` would close a loop.

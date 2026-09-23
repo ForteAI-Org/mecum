@@ -205,6 +205,7 @@ let package = Package(
         .library(name: "MecumTranscript", targets: ["Transcript"]),
         .library(name: "MecumComposer", targets: ["Composer"]),
         .library(name: "MecumMascots", targets: ["Mascots"]),
+        .library(name: "MecumTeamShell", targets: ["TeamShell"]),
         // Declared so the app can bundle it as the tool bridge a worker's agent launches.
         .executable(name: "mecum", targets: ["mecum"]),
     ],
@@ -288,6 +289,16 @@ let package = Package(
             swiftSettings: pure
         ),
 
+        // MARK: TeamShell
+        // The team window's rules apart from its views: the width tokens and how space is divided
+        // (§3.1), and the turn the inspector shows (§14.2). Foundation and the Workspace only.
+        .target(
+            name         : "TeamShell",
+            dependencies : [.target(name: "Workspace"), .target(name: "ModelTransports")],
+            path         : "Sources/TeamShell",
+            swiftSettings: pure
+        ),
+
         // MARK: SeatBroker
         broker(
             "SeatBroker",
@@ -353,6 +364,14 @@ let package = Package(
             name         : "ComposerTests",
             dependencies : [.target(name: "Composer")],
             path         : "Tests/ComposerTests",
+            swiftSettings: suite
+        ),
+
+        .testTarget(
+            name         : "TeamShellTests",
+            dependencies : [.target(name: "TeamShell"), .target(name: "Workspace"),
+                            .target(name: "ModelTransports")],
+            path         : "Tests/TeamShellTests",
             swiftSettings: suite
         ),
 

@@ -16,6 +16,14 @@ struct MecumApp: App {
     @State private var workspace = WorkspaceLaunch()
     @NSApplicationDelegateAdaptor(SeatReleasingDelegate.self) private var delegate
 
+    /// A snapshot or window check run, which draws its own windows and quits.
+    static var isCheckRun: Bool { WindowSnapshots.isRequested || WindowResizeCheck.isRequested }
+
+    init() {
+        // A restored team window would open the person's workspace; a snapshot run must not.
+        if Self.isCheckRun { UserDefaults.standard.register(defaults: ["ApplePersistenceIgnoreState": true]) }
+    }
+
     var body: some Scene {
 
         // The team is the front door. It asks for no grant until a worker first opens an app.
@@ -26,7 +34,12 @@ struct MecumApp: App {
                 // this window, the one that always exists, is where they meet.
                 .task { delegate.model = model }
         }
-        .commands { LabWindowCommands() }
+        // A snapshot run draws offscreen and quits; it opens no window and no workspace.
+        .defaultLaunchBehavior(Self.isCheckRun ? .suppressed : .automatic)
+        .commands {
+            LabWindowCommands()
+            TextSizeCommands()
+        }
 
         // The desktop lab, reachable on its own. Opening it is what asks for
         // the desktop grants and starts the watchers; launching does not.
@@ -69,6 +82,14 @@ final class SeatReleasingDelegate: NSObject, NSApplicationDelegate {
     /// Every team window's model, held weakly: a closed window's team goes
     /// with it.
     let teams = NSHashTable<TeamModel>.weakObjects()
+
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        if WindowSnapshots.isRequested {
+            Task { await WindowSnapshots.writeAndQuit() }
+        } else if WindowResizeCheck.isRequested {
+            Task { await WindowResizeCheck.runAndQuit() }
+        }
+    }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         let drafts    = teams.allObjects.filter(\.hasUnsavedDraft)

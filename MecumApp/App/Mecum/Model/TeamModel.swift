@@ -9,6 +9,7 @@ import Foundation
 import ModelTransports
 import Observation
 import SeatBroker
+import TeamShell
 import Transcript
 import WorkerAgents
 import Workspace
@@ -43,7 +44,7 @@ final class TeamModel {
     private(set) var archived: [WorkerSnapshot] = []
 
     /// Managers whose reports are folded away. It is view state, not stored
-    /// state: increment 2 remembers the open branches per window.
+    /// state: each window remembers its own, with the selection (§3.1).
     var collapsed: Set<UUID> = []
 
     var selection       : UUID?
@@ -371,6 +372,23 @@ final class TeamModel {
         )
         desktops[workerID] = desktop
         return desktop
+    }
+
+    /// What the worker is doing with the computer, in the words its row shows; nil while nothing.
+    func activity(of workerID: UUID) -> String? { desktops[workerID]?.activity }
+
+    /// True while the worker's desktop session holds the seat, the only time it can be released.
+    func holdsComputer(_ workerID: UUID) -> Bool { desktops[workerID]?.holdsComputer ?? false }
+
+    /// Gives the worker's seat back (§3.4). The conversation, a running turn and the worker stay
+    /// as they are; the next tool call that needs the computer waits in the queue for it again.
+    func releaseComputer(_ workerID: UUID) async {
+        await desktops[workerID]?.close()
+    }
+
+    /// The worker's current or last turn, with the settings it ran with. Nil before its first.
+    func latestTurn(of workerID: UUID) async throws -> TurnSummary? {
+        try await TurnSummary.latest(of: workerID, in: store, isRunning: isAnswering(workerID))
     }
 
     /// True while an agent host holds a loopback port and a temporary directory.

@@ -13,8 +13,8 @@ import Workspace
 /// (§6.3): provider, model and reasoning effort, edited as a draft with Save
 /// and Cancel and written through `configure` as a new version.
 ///
-/// It is a sheet because the hideable inspector is increment 2; the other
-/// three areas of the profile are not built yet.
+/// It stays a sheet, opened from the inspector and the worker's commands; the
+/// other three areas of the profile are not built yet.
 ///
 /// Every provider is offered. One with no agent in this build is marked so in
 /// the picker and explained the moment it is chosen, in `WorkerAnswer`'s

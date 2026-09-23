@@ -142,7 +142,7 @@ final class TranscriptRowView: NSView {
         switch RowGeometry.shape(of: row.item.kind) {
         case .bubble:
             let path = NSBezierPath(roundedRect: surface, xRadius: 14, yRadius: 14)
-            (isPerson ? NSColor.controlAccentColor : TranscriptColors.neutralSurface).setFill()
+            (isPerson ? TranscriptColors.personBubble : TranscriptColors.neutralSurface).setFill()
             path.fill()
             if isFocusedRow { strokeFocus(path) }
 
@@ -245,7 +245,7 @@ final class TranscriptRowView: NSView {
         let characters = NSRange(location: local.location - ranges[block].location, length: local.length)
         let glyphs     = manager.glyphRange(forCharacterRange: characters, actualCharacterRange: nil)
         if isOnAccent {
-            manager.addTemporaryAttribute(.foregroundColor, value: NSColor.controlAccentColor,
+            manager.addTemporaryAttribute(.foregroundColor, value: TranscriptColors.personBubble,
                                           forCharacterRange: characters)
         }
         (isOnAccent ? NSColor.white.withAlphaComponent(0.9) : NSColor.selectedTextBackgroundColor).setFill()

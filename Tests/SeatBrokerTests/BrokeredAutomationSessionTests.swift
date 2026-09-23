@@ -273,6 +273,30 @@ struct BrokeredAutomationSessionTests {
         lease.giveBack()
     }
 
+    @Test("the computer can be released only while the session holds it, not while it waits",
+          .timeLimit(.minutes(1)))
+    func releasingIsOfferedOnlyWhileTheSeatIsHeld() async throws {
+        let broker  = SeatBroker()
+        let desktop = try Self.seated(broker)
+        #expect(!desktop.holdsComputer)
+
+        let holder = try await broker.queue.acquire("holder")
+        let open   = Task { try await desktop.open(application: "Test", window: nil) }
+        await Self.letTheWaitBegin()
+        #expect(desktop.activity == "Waiting for the computer (1 ahead)")
+        #expect(!desktop.holdsComputer)
+
+        holder.giveBack()
+        _ = try await open.value
+        #expect(desktop.holdsComputer)
+
+        // What the toolbar's Release the computer calls: the lease goes back, the session stays usable.
+        await desktop.close()
+        #expect(!desktop.holdsComputer)
+        #expect(desktop.activity == nil)
+        #expect(broker.queue.entries.isEmpty)
+    }
+
     @Test("a worker alone keeps the seat across its turns")
     func aLoneHolderKeepsTheSeatAcrossTurns() async throws {
         let broker  = SeatBroker()

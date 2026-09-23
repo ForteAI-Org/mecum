@@ -14,6 +14,7 @@
 		000000000000000200000005 /* MecumTranscript in Frameworks */ = {isa = PBXBuildFile; productRef = 000000000000000200000016 /* MecumTranscript */; };
 		000000000000000200000006 /* MecumMascots in Frameworks */ = {isa = PBXBuildFile; productRef = 000000000000000200000017 /* MecumMascots */; };
 		000000000000000200000007 /* MecumComposer in Frameworks */ = {isa = PBXBuildFile; productRef = 000000000000000200000018 /* MecumComposer */; };
+		000000000000000200000021 /* MecumTeamShell in Frameworks */ = {isa = PBXBuildFile; productRef = 000000000000000200000031 /* MecumTeamShell */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -52,6 +53,7 @@
 				000000000000000200000005 /* MecumTranscript in Frameworks */,
 				000000000000000200000006 /* MecumMascots in Frameworks */,
 				000000000000000200000007 /* MecumComposer in Frameworks */,
+				000000000000000200000021 /* MecumTeamShell in Frameworks */,
 			);
 		};
 /* End PBXFrameworksBuildPhase section */
@@ -100,6 +102,7 @@
 				000000000000000200000016 /* MecumTranscript */,
 				000000000000000200000017 /* MecumMascots */,
 				000000000000000200000018 /* MecumComposer */,
+				000000000000000200000031 /* MecumTeamShell */,
 			);
 			productName = Mecum;
 			productReference = 000000000000000000000120 /* Mecum.app */;
@@ -429,6 +432,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 000000000000000300000001 /* XCLocalSwiftPackageReference "../.." */;
 			productName = MecumComposer;
+		};
+		000000000000000200000031 /* MecumTeamShell */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 000000000000000300000001 /* XCLocalSwiftPackageReference "../.." */;
+			productName = MecumTeamShell;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

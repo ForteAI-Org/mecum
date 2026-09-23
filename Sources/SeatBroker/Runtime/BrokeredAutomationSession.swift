@@ -148,6 +148,12 @@ public final class BrokeredAutomationSession: AutomationSessionOperating {
         }
     }
 
+    /// True from the queue's grant until `close` has given the lease back, which is when the
+    /// person can be offered to release the computer (§3.4). Waiting is not holding.
+    public var holdsComputer: Bool {
+        if case .holding = phase { true } else { false }
+    }
+
     /// "Waiting for the computer", with how many entries are ahead when exactly one waiting entry
     /// carries `label`. Entries list the acting ones first and the waiting ones in arrival order,
     /// so an entry's index is the number ahead of it.

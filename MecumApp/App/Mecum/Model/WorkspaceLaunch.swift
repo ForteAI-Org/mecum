@@ -28,9 +28,17 @@ final class WorkspaceLaunch {
     /// Why the store is not open, nil while it is or before the attempt.
     private(set) var failure: String?
 
-    /// Where the store lives beside the kit's other directories.
+    /// Where the store lives beside the kit's other directories: MECUM_APP_SUPPORT_DIR when set,
+    /// and a temporary one for a snapshot or window check run that names none, so those runs
+    /// never open the person's workspace. Worker workspaces and the Brain follow it.
     static var directory: URL {
-        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        if let override = ProcessInfo.processInfo.environment["MECUM_APP_SUPPORT_DIR"], !override.isEmpty {
+            return URL(filePath: override, directoryHint: .isDirectory)
+        }
+        if WindowSnapshots.isRequested || WindowResizeCheck.isRequested {
+            return URL.temporaryDirectory.appending(path: "MecumCheckSupport", directoryHint: .isDirectory)
+        }
+        return FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appending(path: "Mecum", directoryHint: .isDirectory)
     }
 
