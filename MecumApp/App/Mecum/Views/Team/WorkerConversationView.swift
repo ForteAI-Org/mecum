@@ -41,6 +41,9 @@ struct WorkerConversationView: View {
     /// The title bar's height, which the transcript scrolls under and keeps clear above its first message.
     @State private var titleBarHeight: CGFloat = 0
 
+    @Environment(\.accessibilityReduceMotion)
+    private var reducesMotion
+
     var body: some View {
         transcriptArea
             .overlay(alignment: .top) { titleBarEdge }
@@ -90,9 +93,16 @@ struct WorkerConversationView: View {
     private var transcriptArea: some View {
         Group {
             if let transcript {
+                let isShown = transcript.shownConversationID == team.conversation?.id
                 TranscriptHost(controller: transcript, topInset: titleBarHeight + 8, bottomInset: composerHeight)
                     // Under the title bar, so messages scroll beneath the worker's name as the system draws it.
                     .ignoresSafeArea(.container, edges: .top)
+                    // Another conversation leaves at once and the new one comes in once it is drawn,
+                    // so the old rows are never seen turning into the new ones.
+                    .opacity(isShown ? 1 : 0)
+                    .offset(y: isShown || reducesMotion ? 0 : 10)
+                    .animation(reducesMotion ? .easeOut(duration: 0.15) : .smooth(duration: 0.28),
+                               value: transcript.shownConversationID)
             } else {
                 Color.clear
             }

@@ -65,6 +65,10 @@ public final class TranscriptController: NSObject {
     public let view: NSView
 
     public private(set) var isEmpty = true
+
+    /// The conversation the rows on screen belong to, set once an `open` has drawn it, so a view
+    /// can bring a newly opened conversation in rather than show the old one changing.
+    public private(set) var shownConversationID: UUID?
     public private(set) var newActivity: NewActivity? {
         didSet {
             if newActivity == nil { newMessageCount = 0 }
@@ -189,6 +193,7 @@ public final class TranscriptController: NSObject {
                 self.newActivity = nil
                 let position = readingAnchor.map { ScrollAnchor(itemID: .message($0), offset: readingOffset) }
                 await self.apply(window, mode: .open(position))
+                if self.conversationID == conversationID { self.shownConversationID = conversationID }
             } catch {
                 self.problem = "This conversation could not be read. \(error.localizedDescription)"
             }
