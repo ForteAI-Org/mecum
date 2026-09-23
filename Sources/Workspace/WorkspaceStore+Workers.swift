@@ -60,7 +60,7 @@ extension WorkspaceStore {
             appearance  : appearance
         )
         modelContext.insert(worker)
-        try modelContext.save()
+        try saveOrRollBack()
         return WorkerSnapshot(worker, configuration: nil)
     }
 
@@ -88,7 +88,7 @@ extension WorkspaceStore {
             worker.managerID = value
         }
 
-        try modelContext.save()
+        try saveOrRollBack()
         return WorkerSnapshot(worker, configuration: try currentConfigurationRow(of: id))
     }
 
@@ -100,7 +100,7 @@ extension WorkspaceStore {
         guard try workerRow(id) != nil else { throw WorkspaceStoreError.workerNotFound(id) }
         let version = (try currentConfigurationRow(of: id)?.version ?? 0) + 1
         modelContext.insert(WorkerConfiguration(workerID: id, version: version, selection: selection))
-        try modelContext.save()
+        try saveOrRollBack()
         return version
     }
 
@@ -128,7 +128,7 @@ extension WorkspaceStore {
             selection           : configuration.selection
         )
         modelContext.insert(execution)
-        try modelContext.save()
+        try saveOrRollBack()
         return ExecutionSnapshot(execution)
     }
 

@@ -71,7 +71,8 @@ struct GeminiClient: ModelTransport {
     }
 
     /// One event of a `streamGenerateContent` stream. The usage block is resent
-    /// with every chunk, so the last one read is the turn's own total.
+    /// with every chunk, so the last one read is the turn's own total. Any
+    /// `finishReason` ends the turn, but only `STOP` is a whole answer.
     static func decode(_ payload: Data, progress: inout TurnProgress) throws -> String? {
         guard let event = (try? JSONSerialization.jsonObject(with: payload)) as? [String: Any] else { return nil }
         if let usage = event["usageMetadata"] as? [String: Any] {
@@ -82,9 +83,13 @@ struct GeminiClient: ModelTransport {
             throw ProviderError.badResponse(error["message"] as? String ?? "error event")
         }
         guard let candidate = (event["candidates"] as? [[String: Any]])?.first else { return nil }
-        if candidate["finishReason"] is String { progress.isFinished = true }
+        if let reason = candidate["finishReason"] as? String {
+            progress.isFinished = true
+            progress.recordStop(reason, wholeAnswerReasons: ["STOP"])
+        }
         let parts = (candidate["content"] as? [String: Any])?["parts"] as? [[String: Any]] ?? []
-        let text = parts.compactMap { $0["text"] as? String }.joined()
+        // A part marked as thought is the model's reasoning, not its answer.
+        let text = parts.filter { $0["thought"] as? Bool != true }.compactMap { $0["text"] as? String }.joined()
         return text.isEmpty ? nil : text
     }
 }

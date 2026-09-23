@@ -8,15 +8,18 @@
 /// One element of a streamed conversational turn: a piece of the answer, or
 /// the single terminal element that closes it.
 ///
-/// A turn that ends without `.completed` never arrives: the stream fails with
-/// `ModelTransportError.streamEndedEarly` instead, so a caller that saw the
-/// terminal element knows the text it assembled is the whole answer.
+/// `.completed` arrives only when the provider ended the turn with a reason
+/// that means the answer is whole. Otherwise the stream fails after the deltas
+/// it yielded: `ModelTransportError.streamEndedEarly` when the provider never
+/// said it ended, `ModelTransportError.stoppedShort` with the provider's reason
+/// when it ended short. A caller that saw the terminal element knows the text
+/// it assembled is the whole answer.
 public enum TurnEvent: Sendable, Hashable {
 
     /// Text to append to the answer, exactly as the provider sent it.
     case delta(String)
 
-    /// The provider declared the turn finished, and what it says it cost.
+    /// The provider declared the answer whole, and what it says it cost.
     case completed(ModelUsage)
 }
 

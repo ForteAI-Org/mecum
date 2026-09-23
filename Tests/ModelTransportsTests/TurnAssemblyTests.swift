@@ -41,7 +41,7 @@ private let anthropicStream = """
     data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"perché 🌊"}}
 
     event: message_delta
-    data: {"type":"message_delta","usage":{"output_tokens":7}}
+    data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":7}}
 
     event: message_stop
     data: {"type":"message_stop"}
@@ -51,9 +51,62 @@ private let anthropicStream = """
 private let ollamaStream = """
     {"message":{"content":"Ciao, "},"done":false}
     {"message":{"content":"perché 🌊"},"done":false}
-    {"done":true,"prompt_eval_count":11,"eval_count":7,"eval_duration":2000000000}
+    {"done":true,"done_reason":"stop","prompt_eval_count":11,"eval_count":7,"eval_duration":2000000000}
 
     """
+
+/// One stream fed whole, the deltas it yielded, and then what its end was
+/// worth: the terminal element, or the error thrown after those deltas.
+private func assemble(_ stream: String, format: EventStreamReader.Format,
+                      decode: @escaping TurnAssembler.PayloadDecoding) throws
+    -> (deltas: [String], ending: Result<TurnEvent, any Error>) {
+    var assembler = TurnAssembler(format: format, decode: decode)
+    let deltas = try assembler.accept(Data(stream.utf8))
+    return (deltas, Result { try assembler.completion(wallClock: .seconds(2)) })
+}
+
+/// A provider stream that ends the turn with `reason` after two deltas.
+struct StoppedStream: Sendable, CustomStringConvertible {
+    let provider: String
+    let reason  : String?
+    let stream  : String
+    let format  : EventStreamReader.Format
+    let decode  : TurnAssembler.PayloadDecoding
+
+    var description: String { "\(provider) \(reason ?? "without a reason")" }
+
+    static func anthropic(_ reason: String) -> StoppedStream {
+        StoppedStream(provider: "Anthropic", reason: reason, stream: """
+            data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"Ciao, "}}
+
+            data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"perché"}}
+
+            data: {"type":"message_delta","delta":{"stop_reason":"\(reason)"},"usage":{"output_tokens":7}}
+
+            data: {"type":"message_stop"}
+
+            """, format: .serverSentEvents, decode: AnthropicClient.decode)
+    }
+
+    static func ollama(_ reason: String?) -> StoppedStream {
+        let field = reason.map { #""done_reason":"\#($0)","# } ?? ""
+        return StoppedStream(provider: "Ollama", reason: reason, stream: """
+            {"message":{"content":"Ciao, "},"done":false}
+            {"message":{"content":"perché"},"done":false}
+            {"done":true,\(field)"eval_count":7}
+
+            """, format: .newlineDelimitedJSON, decode: OllamaClient.decode)
+    }
+
+    static func gemini(_ reason: String) -> StoppedStream {
+        StoppedStream(provider: "Gemini", reason: reason, stream: """
+            data: {"candidates":[{"content":{"parts":[{"text":"Ciao, "}]}}]}
+
+            data: {"candidates":[{"content":{"parts":[{"text":"perché"}]},"finishReason":"\(reason)"}]}
+
+            """, format: .serverSentEvents, decode: GeminiClient.decode)
+    }
+}
 
 @Suite("Assembling one streamed turn")
 struct TurnAssemblyTests {
@@ -125,5 +178,54 @@ struct TurnAssemblyTests {
                                           decode: GeminiClient.decode)
         #expect(text == "Ciao 🌊")
         #expect(terminal == .completed(ModelUsage(inputTokens: 3, outputTokens: 4, duration: .seconds(2))))
+    }
+
+    @Test("a whole answer completes on each provider's normal stop",
+          arguments: [StoppedStream.anthropic("end_turn"), .anthropic("stop_sequence"),
+                      .ollama("stop"), .gemini("STOP")])
+    func aNormalStopCompletes(stopped: StoppedStream) throws {
+        let (deltas, ending) = try assemble(stopped.stream, format: stopped.format, decode: stopped.decode)
+        #expect(deltas == ["Ciao, ", "perché"])
+        guard case .completed = try ending.get() else {
+            Issue.record("\(stopped) did not complete")
+            return
+        }
+    }
+
+    @Test("an answer the provider stopped short throws its reason after the partial deltas",
+          arguments: [StoppedStream.anthropic("max_tokens"), .anthropic("refusal"),
+                      .ollama("length"),
+                      .gemini("MAX_TOKENS"), .gemini("SAFETY"), .gemini("RECITATION"),
+                      .gemini("BLOCKLIST"), .gemini("PROHIBITED_CONTENT")])
+    func aTruncatedAnswerIsNotCompleted(stopped: StoppedStream) throws {
+        let (deltas, ending) = try assemble(stopped.stream, format: stopped.format, decode: stopped.decode)
+        #expect(deltas == ["Ciao, ", "perché"])
+        #expect(throws: ModelTransportError.stoppedShort(reason: stopped.reason, deltas: 2)) {
+            try ending.get()
+        }
+    }
+
+    @Test("a stop reason nobody recognises fails closed",
+          arguments: [StoppedStream.anthropic("a_reason_from_next_year"), .ollama("unload"), .ollama(nil),
+                      .gemini("FINISH_REASON_UNSPECIFIED")])
+    func anUnknownStopReasonIsNotAWholeAnswer(stopped: StoppedStream) throws {
+        let (_, ending) = try assemble(stopped.stream, format: stopped.format, decode: stopped.decode)
+        #expect(throws: ModelTransportError.stoppedShort(reason: stopped.reason, deltas: 2)) {
+            try ending.get()
+        }
+    }
+
+    @Test func geminiThoughtPartsAreNotPartOfTheAnswer() throws {
+        let stream = """
+            data: {"candidates":[{"content":{"parts":[{"text":"weighing it","thought":true},{"text":"Ciao"}]}}]}
+
+            data: {"candidates":[{"content":{"parts":[{"text":"still weighing","thought":true}]}}]}
+
+            data: {"candidates":[{"content":{"parts":[{"text":" 🌊"}]},"finishReason":"STOP"}]}
+
+            """
+        let (deltas, ending) = try assemble(stream, format: .serverSentEvents, decode: GeminiClient.decode)
+        #expect(deltas == ["Ciao", " 🌊"])
+        #expect(throws: Never.self) { try ending.get() }
     }
 }

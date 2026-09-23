@@ -43,9 +43,12 @@ struct TurnAssembler: Sendable {
     }
 
     /// The terminal element, or the refusal owed when the provider never
-    /// declared the turn finished.
+    /// declared the turn finished or ended it short of a whole answer.
     func completion(wallClock: Duration) throws -> TurnEvent {
         guard progress.isFinished else { throw ModelTransportError.streamEndedEarly(deltas: deltaCount) }
+        guard progress.isWholeAnswer else {
+            throw ModelTransportError.stoppedShort(reason: progress.stopReason, deltas: deltaCount)
+        }
         return .completed(progress.usage(wallClock: wallClock))
     }
 }

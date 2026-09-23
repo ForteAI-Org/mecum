@@ -36,6 +36,34 @@ public actor WorkspaceStore {
         WorkspaceStore(modelContainer: try WorkspaceStoreFile.open(in: directory))
     }
 
+    /// Saves every pending change, or leaves none behind.
+    ///
+    /// A save that throws keeps its changes pending, and the next unrelated
+    /// save commits them. Every write in the store saves through here and
+    /// nowhere else, so a refused write stays refused. The save's own error is
+    /// what is thrown.
+    ///
+    /// `rollback()` alone is not enough, measured on macOS 27 (SDK 27.0):
+    /// SwiftData's store keeps the failed change for this context, and the
+    /// next save writes it to disk anyway. The first fetch after the rollback
+    /// is what discards it, so one cheap count follows. `SaveFailureTests`
+    /// fails if that stops being true; the count can go when a rollback alone
+    /// passes it.
+    func saveOrRollBack() throws {
+        do {
+            try modelContext.save()
+        } catch {
+            modelContext.rollback()
+            do {
+                _ = try modelContext.fetchCount(FetchDescriptor<Worker>())
+            } catch {
+                // The save's failure is the one the caller acts on; this one
+                // only means the discard may not have happened.
+            }
+            throw error
+        }
+    }
+
     /// The single row matching `id`, or nil.
     func first<T: PersistentModel>(_ type: T.Type, where predicate: Predicate<T>) throws -> T? {
         var descriptor = FetchDescriptor<T>(predicate: predicate)

@@ -49,7 +49,11 @@ public struct NewEvent: Sendable, Hashable {
         self.correlationID  = correlationID
     }
 
-    /// What the store's unique constraint is taken on.
+    /// What the store's unique constraint is taken on, and what
+    /// `WorkspaceStore.append` looks up before it inserts. The constraint keeps
+    /// one row per key and, on a conflict, updates that row with the later
+    /// values; the first arrival is kept by `append`'s lookup, not by the
+    /// constraint.
     ///
     /// A terminal transition is identified by its subject alone, not by its
     /// subject and its type. An execution therefore ends once however it ends:

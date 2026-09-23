@@ -52,6 +52,14 @@ final class TeamModel {
 
     private var savedDraft: String = ""
 
+    /// Counts calls to `openSelectedConversation`. A call that sees a newer
+    /// number after a suspension was overtaken and writes nothing.
+    private var openingGeneration = 0
+
+    /// A send is between capturing the draft and the store's answer. A second
+    /// send in that window does nothing, so one Return is one message.
+    private var isSending = false
+
     init(store: WorkspaceStore) {
         self.store = store
     }
@@ -91,8 +99,17 @@ final class TeamModel {
     /// Opens the selected worker's direct conversation, creating it the first
     /// time. The outgoing draft is written first, so switching worker while
     /// something is typed does not lose it.
+    ///
+    /// The selection can change while this waits on the store, and a later
+    /// call can finish first. Each call takes a generation and, after every
+    /// suspension, drops its result when a newer call has started, so an
+    /// earlier reply never opens a worker that is no longer selected.
     func openSelectedConversation() async {
+        openingGeneration += 1
+        let generation = openingGeneration
+
         await flushDraft()
+        guard generation == openingGeneration else { return }
         conversation = nil
         messages     = []
         draft        = ""
@@ -105,27 +122,40 @@ final class TeamModel {
             let existing = try await store.conversations().first {
                 $0.kind == .direct && $0.participantIDs == [id]
             }
+            guard generation == openingGeneration else { return }
             let opened: ConversationSnapshot
             if let existing {
                 opened = existing
             } else {
                 opened = try await store.createConversation(kind: .direct, participants: [id])
+                guard generation == openingGeneration else { return }
             }
+            let history = try await store.messages(in: opened.id)
+            guard generation == openingGeneration else { return }
             conversation = opened
             draft        = opened.draft
             savedDraft   = opened.draft
-            messages     = try await store.messages(in: opened.id)
+            messages     = history
         } catch {
+            guard generation == openingGeneration else { return }
             problem = "This worker's conversation could not be opened. \(describe(error))"
         }
     }
 
-    /// Writes the draft if it differs from what the store holds.
+    /// Whether the draft as typed differs from what the store holds.
+    var hasUnsavedDraft: Bool { conversation != nil && draft != savedDraft }
+
+    /// Writes the draft if it differs from what the store holds. The text
+    /// written is the text at the call; what is typed meanwhile is the next
+    /// flush's, and a reply for a conversation no longer open is dropped.
     func flushDraft() async {
         guard let conversation, draft != savedDraft else { return }
+        let text = draft
         do {
-            self.conversation = try await store.update(conversation: conversation.id, .draft(draft))
-            savedDraft        = draft
+            let updated = try await store.update(conversation: conversation.id, .draft(text))
+            guard self.conversation?.id == conversation.id else { return }
+            self.conversation = updated
+            savedDraft        = text
         } catch {
             problem = "The draft could not be saved, so it may not survive quitting. \(describe(error))"
         }
@@ -134,18 +164,61 @@ final class TeamModel {
     /// Persists the message and stops. No model is attached to any worker in
     /// this increment, so nothing is routed and nothing answers; the message
     /// stays at the delivery state the store writes it with.
+    ///
+    /// The text leaves the draft before the first suspension, and a second
+    /// send while this one waits does nothing, so one Return is one message.
+    /// A message the store refuses goes back into the draft: nothing typed is
+    /// consumed by a failed attempt. A refused message and a saved message
+    /// whose draft could not be cleared are reported as the two facts they are.
     func send() async {
-        guard let conversation else { return }
-        let text = draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !isSending, let conversation else { return }
+        let typed = draft
+        let text  = typed.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
 
+        isSending = true
+        defer { isSending = false }
+        draft = ""
+
+        let message: MessageSnapshot
         do {
-            messages.append(try await store.appendMessage(to: conversation.id, text: text))
-            draft      = ""
-            savedDraft = ""
-            self.conversation = try await store.update(conversation: conversation.id, .draft(""))
+            message = try await store.appendMessage(to: conversation.id, text: text)
         } catch {
             problem = "The message was not saved, so it was not sent either. \(describe(error))"
+            await restoreDraft(typed, in: conversation.id)
+            return
+        }
+        if self.conversation?.id == conversation.id { messages.append(message) }
+
+        do {
+            let cleared = try await store.update(conversation: conversation.id, .draft(""))
+            guard self.conversation?.id == conversation.id else { return }
+            self.conversation = cleared
+            savedDraft        = ""
+        } catch {
+            problem = """
+            The message was saved, but its draft could not be cleared, so the same text may \
+            come back as a draft after relaunch. \(describe(error))
+            """
+        }
+    }
+
+    /// Puts a refused message's text back where it was typed. Whatever was
+    /// typed after it stays, below it.
+    private func restoreDraft(_ typed: String, in conversationID: UUID) async {
+        if self.conversation?.id == conversationID {
+            draft = draft.isEmpty ? typed : typed + "\n" + draft
+            return
+        }
+        // The person moved to another worker meanwhile, so the text goes back
+        // into the store's draft of the conversation it was written in.
+        do {
+            try await store.update(conversation: conversationID, .draft(typed))
+        } catch {
+            problem = """
+            The message was not saved, and its text could not be put back as a draft either, \
+            so here it is: \(typed)
+            """
         }
     }
 
@@ -153,10 +226,12 @@ final class TeamModel {
     func rememberReadingPosition(_ anchor: UUID?) async {
         guard let conversation, conversation.readingAnchorMessageID != anchor else { return }
         do {
-            self.conversation = try await store.update(
+            let updated = try await store.update(
                 conversation: conversation.id,
                 .readingPosition(anchorMessageID: anchor, offset: 0)
             )
+            guard self.conversation?.id == conversation.id else { return }
+            self.conversation = updated
         } catch {
             problem = "The reading position could not be remembered. \(describe(error))"
         }

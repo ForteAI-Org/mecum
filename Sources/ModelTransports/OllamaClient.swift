@@ -70,13 +70,15 @@ struct OllamaClient: ModelTransport {
         return url
     }
 
-    /// One line of a streamed `/api/chat`. The counts and the generation time
-    /// arrive only on the line that declares the turn done.
+    /// One line of a streamed `/api/chat`. The counts, the generation time and
+    /// the `done_reason` arrive only on the line that declares the turn done;
+    /// only `stop` is a whole answer, and `length` is the output limit.
     static func decode(_ payload: Data, progress: inout TurnProgress) throws -> String? {
         guard let event = (try? JSONSerialization.jsonObject(with: payload)) as? [String: Any] else { return nil }
         if let error = event["error"] as? String { throw ProviderError.badResponse(error) }
         if event["done"] as? Bool == true {
             progress.isFinished = true
+            progress.recordStop(event["done_reason"] as? String, wholeAnswerReasons: ["stop"])
             progress.inputTokens = event["prompt_eval_count"] as? Int
             progress.outputTokens = event["eval_count"] as? Int
             progress.generated = (event["eval_duration"] as? Int).map { Duration.nanoseconds($0) }

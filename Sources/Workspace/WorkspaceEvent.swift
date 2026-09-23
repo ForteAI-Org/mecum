@@ -15,9 +15,14 @@ import SwiftData
 /// caches are rebuilt from these rows.
 ///
 /// `deduplicationKey` is what makes a repeated terminal result land once. It
-/// is derived in `NewEvent`, never supplied by a caller, and the unique
-/// constraint below is the enforcement: a second arrival collapses onto the
-/// existing row instead of completing the same work twice.
+/// is derived in `NewEvent`, never supplied by a caller.
+///
+/// The unique constraint below keeps one row per key, but it does not keep the
+/// first arrival: SwiftData resolves a conflict by updating the existing row
+/// with the incoming values, which would rewrite an append-only record. First
+/// arrival wins only because `WorkspaceStore.append` finds the existing row and
+/// returns it before inserting, so `append` must stay the only code that
+/// inserts a `WorkspaceEvent`.
 @Model
 public final class WorkspaceEvent {
 

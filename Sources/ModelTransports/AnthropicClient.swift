@@ -66,6 +66,8 @@ struct AnthropicClient: ModelTransport {
 
     /// One server-sent event of a Messages stream. The counts arrive in their
     /// own events: the input with the message's start, the output with its end.
+    /// The stop reason arrives with the output count; only `end_turn` and
+    /// `stop_sequence` are a whole answer, as in `complete`.
     static func decode(_ payload: Data, progress: inout TurnProgress) throws -> String? {
         guard let event = (try? JSONSerialization.jsonObject(with: payload)) as? [String: Any],
               let type = event["type"] as? String else { return nil }
@@ -79,6 +81,8 @@ struct AnthropicClient: ModelTransport {
             return (event["delta"] as? [String: Any])?["text"] as? String
         case "message_delta":
             progress.outputTokens = (event["usage"] as? [String: Any])?["output_tokens"] as? Int
+            progress.recordStop((event["delta"] as? [String: Any])?["stop_reason"] as? String,
+                                wholeAnswerReasons: ["end_turn", "stop_sequence"])
         case "message_stop":
             progress.isFinished = true
         case "error":

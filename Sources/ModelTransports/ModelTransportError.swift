@@ -9,7 +9,7 @@ import Foundation
 
 /// What a conversational turn fails with. Provider-level failures (no key, a
 /// non-2xx status, an answer that makes no sense) stay `ProviderError`; these
-/// two are the transport's own.
+/// are the transport's own.
 public enum ModelTransportError: LocalizedError, Equatable {
 
     /// The transport declared it cannot carry a conversational turn. Thrown
@@ -20,6 +20,12 @@ public enum ModelTransportError: LocalizedError, Equatable {
     /// arrived is a fragment and is reported as one, never as the answer.
     case streamEndedEarly(deltas: Int)
 
+    /// The provider ended the turn, but for a reason that is not a whole answer:
+    /// the output limit, a safety filter, or a reason this module does not know.
+    /// The `deltas` already delivered are a fragment. Distinct from
+    /// `streamEndedEarly`, where the provider never said it ended at all.
+    case stoppedShort(reason: String?, deltas: Int)
+
     public var errorDescription: String? {
         switch self {
         case .streamingUnsupported(let reason):
@@ -27,6 +33,9 @@ public enum ModelTransportError: LocalizedError, Equatable {
         case .streamEndedEarly(let deltas):
             "The answer stopped after \(deltas) piece(s) without the provider ending the turn, "
                 + "so it is incomplete."
+        case .stoppedShort(let reason, let deltas):
+            "The provider stopped the answer after \(deltas) piece(s) with the reason "
+                + "\"\(reason ?? "none given")\", so it is incomplete."
         }
     }
 }

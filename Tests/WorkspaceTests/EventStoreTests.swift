@@ -65,25 +65,35 @@ struct EventStoreTests {
         #expect(recorded.map(\.localOrder) == [1, 2, 3])
     }
 
-    @Test("The constraint is in the schema, not in the store's own check")
-    func duplicateIsRefusedBelowTheStore() throws {
+    /// A tripwire, not a guarantee: SwiftData resolves a `#Unique` conflict by
+    /// updating the row already there with the incoming values. First arrival
+    /// is kept only by `WorkspaceStore.append`, which is why it is the only
+    /// writer. If this starts failing, SwiftData changed how it resolves the
+    /// conflict and the doc comments on `WorkspaceEvent` must change with it.
+    @Test("The unique constraint keeps one row per key and the later write's values")
+    func theConstraintUpdatesTheRowOnConflict() throws {
         let directory = TemporaryStore.directory()
         defer { TemporaryStore.discard(directory) }
 
         let container = try WorkspaceStoreFile.open(in: directory)
-        let context   = ModelContext(container)
         let workspace = UUID()
         let execution = UUID()
 
-        // Written straight into a context, past `WorkspaceStore.append` and
-        // the short circuit it makes: only the unique constraint is left.
-        for (order, type) in [EventType.executionCancelled, .executionCompleted].enumerated() {
-            let event = NewEvent(workspaceID: workspace, subjectID: execution, type: type)
+        // Written straight into two contexts, past `WorkspaceStore.append` and
+        // its check: only the unique constraint is left.
+        let arrivals: [(EventType, TimeInterval)] = [(.executionCancelled, 100), (.executionCompleted, 900)]
+        for (order, (type, seconds)) in arrivals.enumerated() {
+            let context = ModelContext(container)
+            let event   = NewEvent(workspaceID: workspace, subjectID: execution,
+                                   timestamp: Date(timeIntervalSince1970: seconds), type: type)
             context.insert(WorkspaceEvent(event, localOrder: order + 1))
+            try context.save()
         }
-        try context.save()
 
-        #expect(try context.fetchCount(FetchDescriptor<WorkspaceEvent>()) == 1)
+        let rows = try ModelContext(container).fetch(FetchDescriptor<WorkspaceEvent>())
+        #expect(rows.count == 1)
+        #expect(rows.first?.type == .executionCompleted)
+        #expect(rows.first?.timestamp == Date(timeIntervalSince1970: 900))
     }
 
     @Test("A late notification does not reopen work that was cancelled")

@@ -35,11 +35,12 @@ BENCH_OUT := .build/bench
 REPORTS   := Documentation/Driver/compatibility
 
 # The unit tier runs unfiltered, so every test target in Package.swift reports
-# one summary line: the eleven `driverTests(...)` entries of lines 127 to 140.
+# one summary line, the Driver's, the Engine's and the app libraries' alike: 28
+# on 2026-09-23 (`swift package describe --type json`, type "test").
 # This is the bundle count, not a test count, because test counts move with every
 # ticket (987 to 1018 in one day) and a number nobody updates stops meaning
 # anything, while a new test target is rare and worth failing over.
-UNIT_BUNDLES := 11
+UNIT_BUNDLES := 28
 
 # The seat cycle, alone in its own process.
 HOST_CYCLE_TESTS := 1

@@ -36,9 +36,13 @@ public protocol ModelTransport: Sendable {
     ///
     /// Throws before any request when the transport declares no streaming. The
     /// stream fails with `ModelTransportError.streamEndedEarly` when the
-    /// provider stops sending before it declares the turn finished: a partial
-    /// answer is never finished silently. Terminating the stream cancels the
-    /// request.
+    /// provider stops sending before it declares the turn finished, and with
+    /// `ModelTransportError.stoppedShort` when the provider ends the turn for a
+    /// reason other than a whole answer (the output limit, a safety filter, or
+    /// a reason not recognised). Either failure arrives after the deltas already
+    /// yielded, so the caller keeps the partial text and marks it incomplete: a
+    /// partial answer is never finished silently. Terminating the stream
+    /// cancels the request.
     func converse(_ messages: [TurnMessage], timeout: TimeInterval)
         throws -> AsyncThrowingStream<TurnEvent, any Error>
 }

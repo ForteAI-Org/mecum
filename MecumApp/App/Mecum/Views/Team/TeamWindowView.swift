@@ -22,6 +22,9 @@ struct TeamWindowView: View {
 
     var launch: WorkspaceLaunch
 
+    /// Told once the team is made, so quitting can write what is typed in it.
+    var didOpenTeam: (TeamModel) -> Void
+
     @Environment(\.openSettings)
     private var openSettings
 
@@ -34,6 +37,7 @@ struct TeamWindowView: View {
                 launch.open()
                 guard team == nil, let store = launch.store else { return }
                 let model = TeamModel(store: store)
+                didOpenTeam(model)
                 await model.load()
                 team = model
             }

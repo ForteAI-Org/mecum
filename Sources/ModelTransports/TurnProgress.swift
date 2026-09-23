@@ -23,6 +23,22 @@ struct TurnProgress: Sendable {
     /// The provider declared the turn finished. Nothing else may declare it.
     var isFinished = false
 
+    /// Why the provider says it stopped, in its own spelling. Nil until it says.
+    var stopReason: String?
+
+    /// The stop reason names a whole answer. Only the provider's decoder can
+    /// say so, because only it knows the vocabulary; an unknown reason leaves
+    /// this false, so a turn that stopped for a reason nobody recognises fails
+    /// closed rather than passing as complete.
+    var isWholeAnswer = false
+
+    /// Records the provider's stop reason and whether it is one of the few that
+    /// mean the answer is whole.
+    mutating func recordStop(_ reason: String?, wholeAnswerReasons: Set<String>) {
+        stopReason    = reason
+        isWholeAnswer = reason.map(wholeAnswerReasons.contains) ?? false
+    }
+
     func usage(wallClock: Duration) -> ModelUsage {
         ModelUsage(inputTokens: inputTokens, outputTokens: outputTokens, duration: generated ?? wallClock)
     }

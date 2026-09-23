@@ -15,9 +15,14 @@ extension WorkspaceStore: EventStoring {
     /// A terminal event for a subject that has already ended returns the row
     /// that is there, untouched, whatever outcome the second arrival carries:
     /// the first arrival keeps its type, its timestamp and its order, and no
-    /// work ends twice. The unique constraint on
-    /// `WorkspaceEvent.deduplicationKey` is what guarantees one row even for a
-    /// writer that does not come through here.
+    /// work ends twice.
+    ///
+    /// That guarantee is this method's, not the schema's. The unique constraint
+    /// on `WorkspaceEvent.deduplicationKey` keeps one row per key, but on a
+    /// conflict SwiftData updates the row with the later values. The lookup and
+    /// the insert below run under the actor with no suspension between them,
+    /// which is what makes first arrival hold, so this must stay the only code
+    /// that inserts a `WorkspaceEvent`.
     @discardableResult
     public func append(_ event: NewEvent) throws -> RecordedEvent {
         let key = event.deduplicationKey
@@ -27,7 +32,7 @@ extension WorkspaceStore: EventStoring {
 
         let recorded = WorkspaceEvent(event, localOrder: try nextLocalOrder(in: event.workspaceID))
         modelContext.insert(recorded)
-        try modelContext.save()
+        try saveOrRollBack()
         return RecordedEvent(recorded)
     }
 

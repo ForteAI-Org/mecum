@@ -21,7 +21,7 @@ extension WorkspaceStore {
     ) throws -> ConversationSnapshot {
         let conversation = Conversation(id: id, kind: kind, title: title, participantIDs: participants)
         modelContext.insert(conversation)
-        try modelContext.save()
+        try saveOrRollBack()
         return ConversationSnapshot(conversation)
     }
 
@@ -51,7 +51,7 @@ extension WorkspaceStore {
             row.readingOffset          = offset
         }
 
-        try modelContext.save()
+        try saveOrRollBack()
         return ConversationSnapshot(row)
     }
 
@@ -85,7 +85,7 @@ extension WorkspaceStore {
             delivery      : delivery
         )
         modelContext.insert(message)
-        try modelContext.save()
+        try saveOrRollBack()
         return MessageSnapshot(message)
     }
 
@@ -95,7 +95,7 @@ extension WorkspaceStore {
             throw WorkspaceStoreError.messageNotFound(id)
         }
         row.delivery = delivery
-        try modelContext.save()
+        try saveOrRollBack()
         return MessageSnapshot(row)
     }
 
