@@ -5,6 +5,7 @@
 //  Created by Eliomar Alejandro Rodriguez Ferrer on 22/09/2026.
 //
 
+import Composer
 import ModelTransports
 import SwiftUI
 import Transcript
@@ -107,50 +108,18 @@ struct WorkerConversationView: View {
         return nil
     }
 
+    /// The composer (§13). Its field hands the draft committed text only,
+    /// never a composition in progress, so the pause below writes finished text.
     private var composer: some View {
-        VStack(alignment: .leading, spacing: 8) {
-
-            if let notice = modelNotice {
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Label(notice, systemImage: "exclamationmark.circle")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                    Spacer(minLength: 0)
-                    Button("Choose a model") { team.profileWorkerID = worker.id }
-                        .controlSize(.small)
-                }
-            }
-
-            HStack(alignment: .bottom, spacing: 8) {
-                TextField("Message \(worker.name)", text: $team.draft, axis: .vertical)
-                    .textFieldStyle(.plain)
-                    .lineLimit(1...6)
-                    .accessibilityLabel("Message \(worker.name)")
-
-                if team.isAnswering(worker.id) {
-                    ProgressView()
-                        .controlSize(.small)
-                        .accessibilityLabel("\(worker.name) is answering")
-                    Button("Stop", systemImage: "stop.circle.fill") { team.stopAnswering(worker.id) }
-                        .labelStyle(.iconOnly)
-                        .buttonStyle(.borderless)
-                        .keyboardShortcut(".", modifiers: .command)
-                        .help("Stop the answer (Command Period)")
-                }
-
-                Button("Send", systemImage: "arrow.up.circle.fill") {
-                    Task { await team.send() }
-                }
-                .labelStyle(.iconOnly)
-                .buttonStyle(.borderless)
-                .keyboardShortcut(.return, modifiers: .command)
-                .disabled(team.draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                          || team.isAnswering(worker.id))
-                .help("Send (Command Return)")
-            }
-        }
-        .padding(12)
+        ComposerBar(
+            draft      : $team.draft,
+            recipient  : worker.name,
+            notice     : modelNotice,
+            isAnswering: team.isAnswering(worker.id),
+            send       : { Task { await team.send() } },
+            stop       : { team.stopAnswering(worker.id) },
+            chooseModel: { team.profileWorkerID = worker.id }
+        )
         // The draft reaches the store once typing pauses. A new keystroke
         // cancels this task and starts it again, so a burst writes once.
         .task(id: team.draft) {

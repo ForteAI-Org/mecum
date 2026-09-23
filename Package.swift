@@ -203,6 +203,7 @@ let package = Package(
         .library(name: "MecumWorkspace", targets: ["Workspace"]),
         .library(name: "WorkerAgents", targets: ["WorkerAgents"]),
         .library(name: "MecumTranscript", targets: ["Transcript"]),
+        .library(name: "MecumComposer", targets: ["Composer"]),
         .library(name: "MecumMascots", targets: ["Mascots"]),
         // Declared so the app can bundle it as the tool bridge a worker's agent launches.
         .executable(name: "mecum", targets: ["mecum"]),
@@ -278,6 +279,15 @@ let package = Package(
             swiftSettings: pure
         ),
 
+        // MARK: Composer
+        // The conversation's composer (§13): an AppKit text view in a SwiftUI bar. It knows no store and
+        // no model: the draft is a binding, and sending and stopping are the caller's actions.
+        .target(
+            name         : "Composer",
+            path         : "Sources/Composer",
+            swiftSettings: pure
+        ),
+
         // MARK: SeatBroker
         broker(
             "SeatBroker",
@@ -338,11 +348,19 @@ let package = Package(
             swiftSettings: suite
         ),
 
-        // The transcript's measurements over a synthetic 10,000 message store (§20.1, §20.2),
-        // apart from its functional tests and run only with MECUM_BENCH=1.
+        // The composer's keys, growth and draft path; its snapshot row runs only with MECUM_SNAPSHOTS=1.
+        .testTarget(
+            name         : "ComposerTests",
+            dependencies : [.target(name: "Composer")],
+            path         : "Tests/ComposerTests",
+            swiftSettings: suite
+        ),
+
+        // The transcript's measurements over a synthetic 10,000 message store (§20.1, §20.2), and the
+        // composer's typing latency under that load, apart from the functional tests and run only with MECUM_BENCH=1.
         .testTarget(
             name         : "TranscriptBenchmarks",
-            dependencies : [.target(name: "Transcript"), .target(name: "Workspace")],
+            dependencies : [.target(name: "Transcript"), .target(name: "Workspace"), .target(name: "Composer")],
             path         : "Tests/TranscriptBenchmarks",
             swiftSettings: suite
         ),

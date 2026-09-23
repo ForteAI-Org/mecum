@@ -8,6 +8,7 @@
 import AppKit
 import Foundation
 import Testing
+@testable import Composer
 @testable import Transcript
 @testable import Workspace
 
@@ -22,7 +23,7 @@ import Testing
 ///
 /// The transcript draws in a borderless window that is never ordered in, so
 /// the collection view tiles and recycles as on screen and the screen is not
-/// touched. Typing latency needs the composer (ticket 2.5) and is not here.
+/// touched. Typing latency hosts the composer under it in the same window.
 @Suite("Transcript benchmarks", .serialized,
        .enabled(if: ProcessInfo.processInfo.environment["MECUM_BENCH"] == "1"))
 @MainActor
@@ -226,6 +227,86 @@ struct TranscriptBenchmarks {
             + "selection kept \(selection != nil && reader.textSelection == selection), terminal updates landed "
             + "\(landed), view updates per controller \(applied), stream length \(texts.values.first?.count ?? 0)")
         #expect(landed)
+    }
+
+    @Test("Typing latency in the composer, key event to laid out character, with four streams in the open conversation")
+    func typing() async throws {
+        try await ensureDataset()
+        let copy = URL.temporaryDirectory.appending(path: "MecumComposerTyping-\(UUID().uuidString)",
+                                                    directoryHint: .isDirectory)
+        try Self.dataset.copy(to: copy)
+        defer { discard(copy) }
+        let store  = try WorkspaceStore.opening(in: copy)
+        let source = StreamingSource(store: store)
+
+        var streams: [UUID] = []
+        let start = SyntheticDataset.origin.addingTimeInterval(10_000_000)
+        for offset in 0..<4 {
+            let at = start.addingTimeInterval(Double(offset))
+            try await store.append(NewEvent(workspaceID: SyntheticDataset.workspaceID, subjectID: UUID(),
+                                            conversationID: Self.dataset.solo, timestamp: at, type: .executionStarted))
+            let message = try await store.appendMessage(to: Self.dataset.solo, author: UUID(), text: "",
+                                                        at: at.addingTimeInterval(0.5), delivery: .responding)
+            streams.append(message.id)
+        }
+        let (reader, window, _) = await timeOpen(source, Self.dataset.solo, anchor: nil)
+        defer { window.close() }
+
+        // The conversation view's layout: the transcript above, the composer along the bottom.
+        let composerHeight: CGFloat = 120
+        let container = NSView(frame: NSRect(origin: .zero, size: Self.size))
+        reader.view.frame = NSRect(x: 0, y: composerHeight, width: Self.size.width,
+                                   height: Self.size.height - composerHeight)
+        container.addSubview(reader.view)
+        window.contentView = container
+        container.layoutSubtreeIfNeeded()
+        await reader.settle()
+
+        // A fresh composer per run; its first keys pay for text system and SwiftUI warm up, reported apart.
+        let keys = 300, warmUp = 20, interval = Duration.milliseconds(50)
+        func typeKeys() async throws -> (BenchmarkRecord.Samples, first: Double, landed: Int) {
+            let composer = TypingComposer(in: container, height: composerHeight)
+            #expect(composer.isReady)
+            let probe = MainThreadProbe()
+            probe.start(interval: interval) { composer.typeNextKey() }
+            while probe.lateness.count < warmUp + keys { try await Task.sleep(for: .milliseconds(20)) }
+            _ = probe.stop()
+            let timed = Array(probe.lateness.dropFirst(warmUp).prefix(keys))
+            return (BenchmarkRecord.Samples(timed), probe.lateness.first ?? .nan, composer.landed)
+        }
+
+        let (idle, idleFirst, idleLanded) = try await typeKeys()
+
+        // Each round appends to the four replies and refreshes the transcript; every other round draws it.
+        let bitmap    = try #require(reader.view.bitmapImageRepForCachingDisplay(in: reader.view.bounds))
+        let streaming = Task { @MainActor in
+            var round = 0
+            while !Task.isCancelled {
+                for (index, stream) in streams.enumerated() {
+                    let delta = round == 0 ? "Working on it.\n\n```swift\n"
+                        : round % 6 == 0 ? "\n    let step\(round) = try await run(\(index))" : " // \(round)"
+                    await source.append(delta, to: stream)
+                    reader.refresh()
+                }
+                if round % 2 == 0 { reader.view.cacheDisplay(in: reader.view.bounds, to: bitmap) }
+                round += 1
+                do { try await Task.sleep(for: .milliseconds(8)) } catch { break }
+            }
+            return round
+        }
+        let (loaded, loadedFirst, loadedLanded) = try await typeKeys()
+        streaming.cancel()
+        let rounds = await streaming.value
+        let texts  = await source.texts
+
+        BenchmarkRecord.row("typing, key event to laid out character, four streams", loaded, unit: "ms",
+                            target: "p95 < 50 ms", note: loaded.p95 < 50 ? "met" : "missed")
+        BenchmarkRecord.row("control: typing, no stream", idle, unit: "ms")
+        BenchmarkRecord.line(String(format: "typing: a key every %d ms, %d timed keys per run after %d warm up keys; "
+                                    + "first key of a fresh composer %.2f ms with streams, %.2f ms without",
+                                    Int(BenchmarkRecord.milliseconds(interval)), keys, warmUp, loadedFirst, idleFirst)
+            + "; landed \(loadedLanded) and \(idleLanded) of \(warmUp + keys); \(rounds) stream rounds, "
+            + "reply length \(texts.values.first?.count ?? 0), transcript rows \(reader.rows.count)")
     }
 
     @Test("Layout and draw time per frame while scrolling up through the history, paging as it goes")

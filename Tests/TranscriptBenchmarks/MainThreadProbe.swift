@@ -16,6 +16,9 @@ import Foundation
 /// was busy with something else, and the largest is the longest block, to
 /// within one interval.
 ///
+/// With `work`, each block runs it before reading the time, so a lateness is
+/// the wait and the work together: a keystroke delivered and laid out.
+///
 /// Main actor isolated. `start` and `stop` bracket one measurement; the timer
 /// is cancelled by `stop` and holds the probe only weakly.
 @MainActor
@@ -24,23 +27,27 @@ final class MainThreadProbe {
     private(set) var lateness: [Double] = []
     private var timer: (any DispatchSourceTimer)?
 
-    func start(interval: Duration = .milliseconds(2)) {
+    func start(interval: Duration = .milliseconds(2), work: (@MainActor @Sendable () -> Void)? = nil) {
         lateness = []
         let source = DispatchSource.makeTimerSource(queue: DispatchQueue(label: "mecum.bench.probe"))
         let period = Int(BenchmarkRecord.milliseconds(interval) * 1000)
         source.schedule(deadline: .now(), repeating: .microseconds(period))
-        source.setEventHandler(handler: Self.post(to: self))
+        source.setEventHandler(handler: Self.post(to: self, work: work))
         source.resume()
         timer = source
     }
 
     /// The timer's handler, made outside the main actor: a closure formed in a
     /// main actor method would check that isolation on the timer's queue and trap.
-    private nonisolated static func post(to probe: MainThreadProbe) -> @Sendable () -> Void {
+    private nonisolated static func post(
+        to probe: MainThreadProbe,
+        work    : (@MainActor @Sendable () -> Void)?
+    ) -> @Sendable () -> Void {
         { [weak probe] in
             let sent = ContinuousClock.now
             DispatchQueue.main.async {
                 MainActor.assumeIsolated {
+                    work?()
                     probe?.lateness.append(BenchmarkRecord.milliseconds(ContinuousClock.now - sent))
                 }
             }
