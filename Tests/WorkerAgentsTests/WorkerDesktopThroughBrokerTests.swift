@@ -73,6 +73,7 @@ struct WorkerDesktopThroughBrokerTests {
             try await host.run(
                 prompt   : "open Calculator and press 8",
                 selection: ModelSelection(provider: .claudeCode, model: "claude-sonnet-5", effort: .low),
+                sessionID: nil,
                 role     : "open_session opens an installed application that is not running yet. "
                     + "Answer in one short sentence.",
                 onEvent  : receive

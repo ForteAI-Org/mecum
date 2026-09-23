@@ -11,20 +11,7 @@
 		000000000000000200000002 /* ModelTransports in Frameworks */ = {isa = PBXBuildFile; productRef = 000000000000000200000012 /* ModelTransports */; };
 		000000000000000200000003 /* MecumWorkspace in Frameworks */ = {isa = PBXBuildFile; productRef = 000000000000000200000013 /* MecumWorkspace */; };
 		000000000000000200000004 /* WorkerAgents in Frameworks */ = {isa = PBXBuildFile; productRef = 000000000000000200000014 /* WorkerAgents */; };
-		000000000000000200000005 /* mecum in Embed Helpers */ = {isa = PBXBuildFile; productRef = 000000000000000200000015 /* mecum */; };
 /* End PBXBuildFile section */
-
-/* Begin PBXCopyFilesBuildPhase section */
-		000000000000000150000000 /* Embed Helpers */ = {
-			isa = PBXCopyFilesBuildPhase;
-			dstPath = Contents/Helpers;
-			dstSubfolderSpec = 1;
-			files = (
-				000000000000000200000005 /* mecum in Embed Helpers */,
-			);
-			name = "Embed Helpers";
-		};
-/* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
 		000000000000000000000120 /* Mecum.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Mecum.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -90,7 +77,7 @@
 				000000000000000120000000 /* Sources */,
 				000000000000000130000000 /* Frameworks */,
 				000000000000000140000000 /* Resources */,
-				000000000000000150000000 /* Embed Helpers */,
+				000000000000000150000000 /* Embed Helper */,
 			);
 			buildRules = (
 			);
@@ -153,6 +140,22 @@
 			);
 		};
 /* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		000000000000000150000000 /* Embed Helper */ = {
+			isa = PBXShellScriptBuildPhase;
+			inputPaths = (
+				"$(PROJECT_DIR)/Scripts/embed-helper.sh",
+				"$(BUILT_PRODUCTS_DIR)/mecum",
+			);
+			name = "Embed Helper";
+			outputPaths = (
+				"$(TARGET_BUILD_DIR)/$(CONTENTS_FOLDER_PATH)/Helpers/mecum",
+			);
+			shellPath = /bin/sh;
+			shellScript = "exec \"$PROJECT_DIR/Scripts/embed-helper.sh\"\n";
+		};
+/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		000000000000000120000000 /* Sources */ = {

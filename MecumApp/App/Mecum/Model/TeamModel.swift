@@ -75,8 +75,8 @@ final class TeamModel {
     /// Stops asked for before the worker's agent had started.
     private var pendingStops: Set<UUID> = []
 
-    /// One agent host per conversation, kept for the process so a second turn
-    /// resumes the first one's provider session (T5a.2 persists it).
+    /// One agent host per conversation, kept for the process so its turns share
+    /// one loopback host. The provider session lives on the conversation.
     private var hosts: [UUID: WorkerAgentHost] = [:]
 
     /// The broker every worker's desktop goes through, the lab's own.
@@ -325,10 +325,10 @@ final class TeamModel {
                 pendingStops.remove(workerID)
             }
             do {
-                _ = try await recorder.run { frozen, emit in
+                _ = try await recorder.run { frozen, session, emit in
                     if pendingStops.remove(workerID) != nil { throw CancellationError() }
-                    try await host.run(prompt: message.text, selection: frozen, role: worker.instructions,
-                                       onEvent: emit)
+                    try await host.run(prompt: message.text, selection: frozen, sessionID: session,
+                                       role: worker.instructions, onEvent: emit)
                 }
             } catch {
                 problem = """

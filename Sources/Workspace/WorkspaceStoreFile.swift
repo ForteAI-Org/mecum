@@ -22,9 +22,9 @@ import SwiftData
 /// puts the copy back. Ordinary launches, where the versions agree, copy
 /// nothing.
 ///
-/// There is one schema version today, so no migration runs and the protection
-/// is exercised by its own test rather than by a real upgrade. The first real
-/// migration test arrives with v2.
+/// The current version is v2. `WorkspaceMigrationTests` opens a real v1 store
+/// through it, and `WorkspaceStoreFileTests` stages the failure a real upgrade
+/// cannot be made to produce on demand.
 public enum WorkspaceStoreFile {
 
     static let storeName         = "Workspace.store"
@@ -83,7 +83,7 @@ public enum WorkspaceStoreFile {
     // MARK: Version marker
 
     static func currentVersionIdentifier() -> String {
-        let version = WorkspaceSchemaV1.versionIdentifier
+        let version = WorkspaceSchemaV2.versionIdentifier
         return "\(version.major).\(version.minor).\(version.patch)"
     }
 
@@ -129,7 +129,7 @@ public enum WorkspaceStoreFile {
     // MARK: Container
 
     private static func makeContainer(at store: URL) throws -> ModelContainer {
-        let schema = Schema(versionedSchema: WorkspaceSchemaV1.self)
+        let schema = Schema(versionedSchema: WorkspaceSchemaV2.self)
         return try ModelContainer(
             for           : schema,
             migrationPlan : WorkspaceMigrationPlan.self,

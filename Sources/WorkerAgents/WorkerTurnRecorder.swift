@@ -16,7 +16,9 @@ import Workspace
 /// with, records `executionStarted` and moves the person's message to sent.
 /// Then it runs the agent once and writes what it reports in order: each reply
 /// block as a message authored by the worker, and each tool record as a
-/// `toolActivity` event, so a tool row is never a reply (§11.2).
+/// `toolActivity` event, so a tool row is never a reply (§11.2). A provider
+/// session it reports is stored on the conversation with that provider, and
+/// the next turn on the same provider is handed it to resume, across relaunches.
 ///
 /// The turn ends with exactly one terminal event: `executionCompleted`,
 /// `executionFailed` carrying the reason, or `executionCancelled` carrying the
@@ -73,22 +75,28 @@ public final class WorkerTurnRecorder {
 
     /// Runs `agent` once with the execution's frozen selection and records it.
     ///
+    /// `agent` receives the session to resume: the one stored on the
+    /// conversation when it belongs to the frozen selection's provider, else nil.
+    ///
     /// Throws before `agent` runs when the execution cannot be started, which
     /// leaves the message as it was. After that it always attempts the
     /// terminal event, and throws the first write that failed, if any.
     public func run(
-        _ agent: (ModelSelection, @escaping @MainActor (WorkerAgentEvent) -> Void) async throws -> Void
+        _ agent: (ModelSelection, String?, @escaping @MainActor (WorkerAgentEvent) -> Void) async throws -> Void
     ) async throws -> Ending {
+        let stored    = try await store.conversation(conversationID)
         let execution = try await store.startExecution(worker: workerID, conversation: conversationID)
+        let provider  = execution.selection.provider
+        let resumed   = stored?.resumableSession(for: provider)
         try await append(.executionStarted, subject: execution.id)
         try await store.update(message: messageID, delivery: .sentToBackend)
         await onRecorded()
 
         let (events, continuation) = AsyncStream.makeStream(of: WorkerAgentEvent.self)
         let writer = Task { @MainActor in
-            var state = WriteState()
+            var state = WriteState(session: resumed)
             for await event in events {
-                do { try await write(event, execution: execution.id, state: &state) }
+                do { try await write(event, execution: execution.id, provider: provider, state: &state) }
                 catch { state.firstFailure = state.firstFailure ?? error }
             }
             return state
@@ -96,7 +104,7 @@ public final class WorkerTurnRecorder {
 
         let thrown: (any Error)?
         do {
-            try await agent(execution.selection) { continuation.yield($0) }
+            try await agent(execution.selection, resumed) { continuation.yield($0) }
             thrown = nil
         } catch {
             thrown = error
@@ -121,9 +129,17 @@ public final class WorkerTurnRecorder {
         var hasReply       = false
         var reportedFailure: String?
         var firstFailure   : (any Error)?
+
+        /// The session the store holds for this provider, so a repeated id writes nothing.
+        var session: String?
     }
 
-    private func write(_ event: WorkerAgentEvent, execution: UUID, state: inout WriteState) async throws {
+    private func write(
+        _ event  : WorkerAgentEvent,
+        execution: UUID,
+        provider : ModelProvider,
+        state    : inout WriteState
+    ) async throws {
         switch event {
         case .provider(.assistant(let text)):
             try await store.appendMessage(to: conversationID, author: workerID, text: text, delivery: .completed)
@@ -137,7 +153,12 @@ public final class WorkerTurnRecorder {
             return
         case .tool(let text):
             try await append(.toolActivity, subject: execution, text: text)
-        case .provider(.session), .provider(.activity), .provider(.completed):
+        case .provider(.session(let id)):
+            guard id != state.session else { return }
+            try await store.update(conversation: conversationID, .providerSession(provider: provider, id: id))
+            state.session = id
+            return
+        case .provider(.activity), .provider(.completed):
             return
         }
         await onRecorded()

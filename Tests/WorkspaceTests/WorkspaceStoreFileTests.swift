@@ -13,12 +13,10 @@ import Testing
 /// What §18.4 asks for around a migration: the copy taken before one runs, and
 /// the previous store put back when it fails.
 ///
-/// There is one schema version, so no real migration runs yet. The upgrade is
-/// staged by writing an older version into the marker file, which is the same
-/// signal a real v2 would produce, and the failure is staged by a container
-/// factory that damages the store and throws, which is what a migration that
-/// dies halfway leaves behind. The first test of a real migration arrives with
-/// v2.
+/// The upgrade is staged by writing an older version into the marker file,
+/// the same signal a v1 store gives, and the failure by a container factory
+/// that damages the store and throws, which is what a migration that dies
+/// halfway leaves behind. The real v1 to v2 migration is `WorkspaceMigrationTests`.
 @Suite("Opening the store, and the copy a migration starts from")
 struct WorkspaceStoreFileTests {
 

@@ -23,8 +23,8 @@ import ModelTransports
 /// until `close`, so each turn's provider child reconnects to the same tools.
 ///
 /// One turn at a time: a second `run` while one is running is refused. The
-/// provider's session id is kept in memory and resumed by the next turn on the
-/// same provider; it does not survive this object.
+/// host keeps no provider session of its own: the caller passes the one to
+/// resume, and `WorkerTurnRecorder` keeps it on the conversation.
 ///
 /// Stopping follows `ChatSignals`: pause the router, interrupt the provider,
 /// then drain the router, close the session and wait for the child to stop,
@@ -39,6 +39,7 @@ public final class WorkerAgentHost {
     private let router          : MCPRouter
     private let host            : LocalMCPHost
     private let provider        = CLIProvider()
+    private let agents          : (ModelProvider) throws -> (ChatProvider, URL)
 
     private var temporary     : URL?
     private var connectionFile: URL?
@@ -49,11 +50,6 @@ public final class WorkerAgentHost {
     /// Set by `stop` so a stop that lands before the provider starts still stops the turn.
     private var isStopRequested = false
 
-    private var session: (provider: ChatProvider, id: String)?
-
-    /// The provider session the next turn resumes, or nil for a new one.
-    public var sessionID: String? { session?.id }
-
     /// True while a turn runs.
     public var isRunning: Bool { onEvent != nil }
 
@@ -63,13 +59,25 @@ public final class WorkerAgentHost {
     /// `mecum mcp-bridge --connection <file>`. `session` is called once, here,
     /// for the desktop the tools drive; the host closes it after a failed or
     /// stopped turn and in `close`, and never builds a seat of its own (§22.3).
-    public init(
+    public convenience init(
         workingDirectory: URL,
         bridgeExecutable: URL,
         session         : () -> any AutomationSessionOperating
     ) {
+        self.init(workingDirectory: workingDirectory, bridgeExecutable: bridgeExecutable,
+                  session: session, agents: Self.agent(for:))
+    }
+
+    /// `agents` finds the command line for a provider; a test passes a stand-in.
+    init(
+        workingDirectory: URL,
+        bridgeExecutable: URL,
+        session         : () -> any AutomationSessionOperating,
+        agents          : @escaping (ModelProvider) throws -> (ChatProvider, URL)
+    ) {
         self.workingDirectory = workingDirectory
         self.bridgeExecutable = bridgeExecutable
+        self.agents           = agents
         let tools  = AutomationTools(session: session())
         let router = MCPRouter(tools: AutomationTools.definitions) { name, arguments in
             try await tools.call(name, arguments)
@@ -94,11 +102,14 @@ public final class WorkerAgentHost {
     /// provider's failure otherwise; either way the router is drained and the
     /// session closed first, and nothing is retried.
     ///
+    /// `sessionID` is the provider session to resume, or nil for a new one;
+    /// the caller answers for it belonging to `selection.provider`.
     /// `inheritedEnvironment` is filtered through the Codex allow-list before
     /// it reaches the child, so no API key does (§7.3).
     public func run(
         prompt              : String,
         selection           : ModelSelection,
+        sessionID           : String?,
         role                : String?,
         inheritedEnvironment: [String: String] = ProcessInfo.processInfo.environment,
         onEvent             : @escaping @MainActor (WorkerAgentEvent) -> Void
@@ -110,7 +121,7 @@ public final class WorkerAgentHost {
         isStopRequested = false
         defer { self.onEvent = nil }
 
-        let (chatProvider, executable) = try Self.agent(for: selection.provider)
+        let (chatProvider, executable) = try agents(selection.provider)
         guard FileManager.default.isExecutableFile(atPath: bridgeExecutable.path) else {
             throw AutomationFailure("Mecum's tool bridge is missing at \(bridgeExecutable.path), so the "
                                     + "worker would answer without its tools. Nothing was sent.")
@@ -120,7 +131,7 @@ public final class WorkerAgentHost {
             prompt              : prompt,
             provider            : chatProvider,
             selection           : selection,
-            sessionID           : session?.provider == chatProvider ? session?.id : nil,
+            sessionID           : sessionID,
             role                : role,
             bridgeExecutable    : bridgeExecutable,
             connectionFile      : connection,
@@ -130,10 +141,7 @@ public final class WorkerAgentHost {
         do {
             // A stop during `start` found no child to interrupt; it ends the turn here instead.
             if isStopRequested { throw CancellationError() }
-            try await provider.run(turn, executable: executable) { [weak self] event in
-                if case .session(let id) = event { self?.session = (chatProvider, id) }
-                onEvent(.provider(event))
-            }
+            try await provider.run(turn, executable: executable) { event in onEvent(.provider(event)) }
         } catch {
             router.pause()
             await router.drain()

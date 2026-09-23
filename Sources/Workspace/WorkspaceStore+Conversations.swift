@@ -49,6 +49,10 @@ extension WorkspaceStore {
         case .readingPosition(let anchor, let offset):
             row.readingAnchorMessageID = anchor
             row.readingOffset          = offset
+
+        case .providerSession(let provider, let sessionID):
+            row.providerSessionProvider = provider
+            row.providerSessionID       = sessionID
         }
 
         try saveOrRollBack()

@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import ModelTransports
 
 /// ConversationChange names one edit to a conversation.
 public enum ConversationChange: Sendable, Equatable {
@@ -13,4 +14,8 @@ public enum ConversationChange: Sendable, Equatable {
     case participants([UUID])
     case draft(String)
     case readingPosition(anchorMessageID: UUID?, offset: Double)
+
+    /// The session `provider` reported for this conversation. It replaces any
+    /// earlier one, including one from another provider.
+    case providerSession(provider: ModelProvider, id: String)
 }

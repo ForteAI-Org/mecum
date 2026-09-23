@@ -14,6 +14,7 @@ import LocalMCP
 import ModelTransports
 import Testing
 @testable import WorkerAgents
+import Workspace
 
 @MainActor
 @Suite("A worker's agent host")
@@ -116,18 +117,72 @@ struct WorkerAgentHostTests {
         #expect(status["structuredContent"]["session"] == .null)
     }
 
-    /// The real `claude` CLI, signed in, with the built `mecum` as its bridge. No
-    /// TCC grant and no window is needed: `windows` only lists them.
-    @Test(.enabled(if: ProcessInfo.processInfo.environment["MECUM_LIVE_AGENT"] == "1"))
-    func theRealClaudeAnswersThroughTheToolsAndResumesItsSession() async throws {
+    /// Closing the host while its provider child runs, as quitting does. The
+    /// stand-in ignores SIGINT and SIGTERM, so only the escalation ends it.
+    @Test func closingWithAChildRunningLeavesNoChildAlive() async throws {
+        let root = URL.temporaryDirectory.appending(path: "mecum-close-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { remove(root) }
+        let pidFile = root.appending(path: "pid")
+        let standIn = root.appending(path: "agent")
+        try Data("""
+        #!/bin/sh
+        trap '' INT TERM
+        echo $$ > '\(pidFile.path).tmp' && mv '\(pidFile.path).tmp' '\(pidFile.path)'
+        exec /bin/sleep 600
+
+        """.utf8).write(to: standIn)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: standIn.path)
+
+        let host = WorkerAgentHost(workingDirectory: root.appending(path: "work"), bridgeExecutable: standIn,
+                                   session: { DesktopUnavailableSession() },
+                                   agents: { _ in (.claude, standIn) })
+        let selection = ModelSelection(provider: .claudeCode, model: "claude-sonnet-5", effort: .low)
+        let turn = Task {
+            try await host.run(prompt: "p", selection: selection, sessionID: nil, role: nil) { _ in }
+        }
+        var pid: pid_t?
+        for _ in 0..<400 where pid == nil {
+            try await Task.sleep(for: .milliseconds(25))
+            // The stand-in moves the file into place whole, so existing means complete.
+            guard FileManager.default.fileExists(atPath: pidFile.path) else { continue }
+            pid = pid_t(try String(contentsOf: pidFile, encoding: .utf8)
+                .trimmingCharacters(in: .whitespacesAndNewlines))
+        }
+        let child = try #require(pid)
+        #expect(kill(child, 0) == 0)
+        #expect(host.isRunning)
+
+        let clock   = ContinuousClock()
+        let started = clock.now
+        try await host.close()
+        print("close with a stubborn child took", clock.now - started)
+
+        #expect(kill(child, 0) == -1 && errno == ESRCH)
+        await #expect(throws: CancellationError.self) { try await turn.value }
+        #expect(!host.isRunning)
+    }
+
+    /// The real command line, signed in, with the built `mecum` as its bridge,
+    /// through the recorder and a store that is reopened as a relaunch would.
+    /// No TCC grant and no window is needed: `windows` only lists them.
+    @Test(.enabled(if: ProcessInfo.processInfo.environment["MECUM_LIVE_AGENT"] == "1"),
+          arguments: [
+              ModelSelection(provider: .claudeCode, model: "claude-sonnet-5", effort: .low),
+              ModelSelection(provider: .codex, model: "gpt-5.6-luna", effort: .low),
+          ])
+    func theRealAgentAnswersThroughTheToolsAndResumesItsSessionAfterARelaunch(
+        _ selection: ModelSelection
+    ) async throws {
         let bridge = URL(fileURLWithPath: ProcessInfo.processInfo.environment["MECUM_TEST_BRIDGE"]
             ?? URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
                 .deletingLastPathComponent().appendingPathComponent(".build/debug/mecum").path)
         let root = URL.temporaryDirectory.appending(path: "mecum-live-agent-\(UUID().uuidString)")
         defer { remove(root) }
-        let host = WorkerAgentHost(workingDirectory: root.appending(path: "work"), bridgeExecutable: bridge,
-                                   session: { DesktopUnavailableSession() })
-        let selection = ModelSelection(provider: .claudeCode, model: "claude-sonnet-5", effort: .low)
+        let directory = root.appending(path: "store", directoryHint: .isDirectory)
+        let work      = root.appending(path: "work", directoryHint: .isDirectory)
+        let role      = "You answer in one short sentence."
+        let label     = selection.provider.rawValue
 
         var tools   : [String] = []
         var replies : [String] = []
@@ -140,31 +195,74 @@ struct WorkerAgentHostTests {
             case .provider:                        break
             }
         }
-        try await host.run(
-            prompt   : "Which applications have windows open right now? Use the windows tool, then answer in one sentence.",
-            selection: selection,
-            role     : "You answer in one short sentence.",
-            onEvent  : receive
-        )
-        print("live turn 1 tools:", tools.map { String($0.prefix(160)) })
-        print("live turn 1 replies:", replies)
-        print("live turn 1 session:", sessions.last ?? "none")
-        #expect(tools.contains { $0.hasPrefix("→ windows") })
-        #expect(!replies.isEmpty)
-        let first = try #require(host.sessionID)
+        func turn(_ store: WorkspaceStore, _ host: WorkerAgentHost, _ worker: UUID, _ conversation: UUID,
+                  _ prompt: String) async throws -> (ending: WorkerTurnRecorder.Ending, resumed: String?) {
+            tools = []; replies = []; sessions = []
+            let message = try await store.appendMessage(to: conversation, text: prompt)
+            var resumed: String?
+            let recorder = WorkerTurnRecorder(store: store, workspaceID: UUID(), workerID: worker,
+                                              conversationID: conversation, messageID: message.id) {}
+            let ending = try await recorder.run { frozen, session, emit in
+                resumed = session
+                try await host.run(prompt: prompt, selection: frozen, sessionID: session, role: role) {
+                    receive($0); emit($0)
+                }
+            }
+            return (ending, resumed)
+        }
 
-        tools = []; replies = []; sessions = []
-        try await host.run(
-            prompt   : "Without calling any tool: which Mecum tool did you call in the previous turn? One word.",
-            selection: selection,
-            role     : "You answer in one short sentence.",
-            onEvent  : receive
-        )
-        print("live turn 2 replies:", replies)
-        print("live turn 2 sessions:", sessions)
-        #expect(!replies.isEmpty)
+        let worker      : UUID
+        let conversation: UUID
+        let first       : String
+        do {
+            let store = try WorkspaceStore.opening(in: directory)
+            worker = try await store.createWorker(
+                name: "Live", appearance: WorkerAppearance(seed: 1, generatorVersion: 3, palette: "dusk",
+                                                           roundness: 0.5, wobble: 0.5, glow: 0.5)).id
+            try await store.configure(worker: worker, selection: selection)
+            conversation = try await store.createConversation(participants: [worker]).id
+            let host = WorkerAgentHost(workingDirectory: work, bridgeExecutable: bridge,
+                                       session: { DesktopUnavailableSession() })
+
+            let one = try await turn(store, host, worker, conversation, "Which applications have windows open "
+                                     + "right now? Use the windows tool, then answer in one sentence.")
+            print("live \(label) turn 1:", one.ending, "resumed:", one.resumed ?? "none")
+            print("live \(label) turn 1 tools:", tools.map { String($0.prefix(160)) })
+            print("live \(label) turn 1 replies:", replies)
+            print("live \(label) turn 1 sessions:", Set(sessions))
+            #expect(one.ending == .completed)
+            #expect(one.resumed == nil)
+            #expect(tools.contains { $0.hasPrefix("→ windows") })
+            #expect(!replies.isEmpty)
+            first = try #require(try await store.conversation(conversation)?.resumableSession(for: selection.provider))
+
+            let two = try await turn(store, host, worker, conversation,
+                                     "Without calling any tool: which Mecum tool did you call in the previous "
+                                     + "turn? One word.")
+            print("live \(label) turn 2:", two.ending, "resumed:", two.resumed ?? "none")
+            print("live \(label) turn 2 replies:", replies)
+            print("live \(label) turn 2 sessions:", Set(sessions))
+            #expect(two.ending == .completed)
+            #expect(two.resumed == first)
+            #expect(!sessions.isEmpty && sessions.allSatisfy { $0 == first })
+            #expect(replies.joined().lowercased().contains("windows"))
+            try await host.close()
+        }
+
+        // A relaunch: the store reopened on the same directory, and a new host.
+        let store = try WorkspaceStore.opening(in: directory)
+        let host  = WorkerAgentHost(workingDirectory: work, bridgeExecutable: bridge,
+                                       session: { DesktopUnavailableSession() })
+        #expect(try await store.conversation(conversation)?.resumableSession(for: selection.provider) == first)
+        let three = try await turn(store, host, worker, conversation,
+                                   "Without calling any tool: which Mecum tool other than status did you "
+                                   + "call earlier in this conversation? One word.")
+        print("live \(label) turn 3 after reopen:", three.ending, "resumed:", three.resumed ?? "none")
+        print("live \(label) turn 3 replies:", replies)
+        print("live \(label) turn 3 sessions:", Set(sessions))
+        #expect(three.ending == .completed)
+        #expect(three.resumed == first)
         #expect(!sessions.isEmpty && sessions.allSatisfy { $0 == first })
-        #expect(host.sessionID == first)
         #expect(replies.joined().lowercased().contains("windows"))
         try await host.close()
     }

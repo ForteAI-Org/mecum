@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import ModelTransports
 
 /// ConversationSnapshot is a conversation as it leaves the store. It is a
 /// copy: the model it came from stays inside `WorkspaceStore`.
@@ -20,6 +21,9 @@ public struct ConversationSnapshot: Sendable, Hashable, Identifiable {
     public let readingOffset         : Double
     public let createdAt             : Date
 
+    let providerSessionProvider: ModelProvider?
+    let providerSessionID      : String?
+
     init(_ conversation: Conversation) {
         self.id                     = conversation.id
         self.kind                   = conversation.kind
@@ -29,5 +33,13 @@ public struct ConversationSnapshot: Sendable, Hashable, Identifiable {
         self.readingAnchorMessageID = conversation.readingAnchorMessageID
         self.readingOffset          = conversation.readingOffset
         self.createdAt              = conversation.createdAt
+        self.providerSessionProvider = conversation.providerSessionProvider
+        self.providerSessionID       = conversation.providerSessionID
+    }
+
+    /// The provider session to resume when `provider` answers next, or nil
+    /// when there is none or the stored one belongs to another provider.
+    public func resumableSession(for provider: ModelProvider) -> String? {
+        providerSessionProvider == provider ? providerSessionID : nil
     }
 }

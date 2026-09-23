@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import ModelTransports
 import SwiftData
 
 /// ConversationKind separates the three channels the product has.
@@ -54,6 +55,13 @@ public final class Conversation {
     public var readingOffset         : Double
 
     public internal(set) var createdAt: Date
+
+    /// The provider session a worker's agent resumes, and the provider that
+    /// issued it. Written only together, through `ConversationChange.providerSession`,
+    /// so an id recorded for one provider is never offered to another. Nil in
+    /// a conversation that has not run a turn yet, and in every v1 store.
+    public internal(set) var providerSessionProvider: ModelProvider?
+    public internal(set) var providerSessionID      : String?
 
     public init(
         id                    : UUID             = UUID(),

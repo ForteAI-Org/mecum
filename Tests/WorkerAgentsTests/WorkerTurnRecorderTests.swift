@@ -22,7 +22,7 @@ struct WorkerTurnRecorderTests {
         let fixture = try await Fixture()
         defer { fixture.discard() }
         var runs = 0
-        let ending = try await fixture.recorder.run { selection, emit in
+        let ending = try await fixture.recorder.run { selection, _, emit in
             runs += 1
             #expect(selection == Fixture.selection)
             emit(.provider(.session("session-1")))
@@ -50,7 +50,7 @@ struct WorkerTurnRecorderTests {
         let fixture = try await Fixture()
         defer { fixture.discard() }
         var runs = 0
-        let ending = try await fixture.recorder.run { _, emit in
+        let ending = try await fixture.recorder.run { _, _, emit in
             runs += 1
             emit(.provider(.assistant("Starting.")))
             emit(.provider(.failure("usage limit reached")))
@@ -74,7 +74,7 @@ struct WorkerTurnRecorderTests {
     @Test func aStopRecordsACancellationWithTheInterruptionNote() async throws {
         let fixture = try await Fixture()
         defer { fixture.discard() }
-        let ending = try await fixture.recorder.run { _, emit in
+        let ending = try await fixture.recorder.run { _, _, emit in
             emit(.tool(#"→ status {}"#))
             throw CancellationError()
         }
@@ -92,7 +92,7 @@ struct WorkerTurnRecorderTests {
         defer { fixture.discard() }
         var runs = 0
         await #expect(throws: WorkspaceStoreError.self) {
-            _ = try await fixture.recorder.run { _, _ in runs += 1 }
+            _ = try await fixture.recorder.run { _, _, _ in runs += 1 }
         }
         #expect(runs == 0)
         #expect(try await fixture.events().isEmpty)
