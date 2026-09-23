@@ -5,6 +5,7 @@
 //  Created by Eliomar Alejandro Rodriguez Ferrer on 23/09/2026.
 //
 
+import AppKit
 import CoreGraphics
 import Foundation
 import Testing
@@ -22,6 +23,34 @@ struct MeasurementAndWindowTests {
         authorWorkerID: UUID(),
         continuesGroup: false
     )
+
+    @Test("Measuring from many threads beside the main thread's layout keeps the process alive and enrols no background layout")
+    @MainActor
+    func measuringOffTheMainThread() async {
+        let background = Task.detached {
+            await withTaskGroup(of: Void.self) { group in
+                for _ in 0..<12 {
+                    group.addTask {
+                        let text = Self.wrappingText()
+                        for width in 0..<400 { _ = RowPreparation.measure(text, width: CGFloat(80 + width % 300)) }
+                    }
+                }
+            }
+        }
+        let text = Self.wrappingText()
+        for width in 0..<400 {
+            let (storage, manager, container) = RowPreparation.textStack(text, width: CGFloat(80 + width))
+            withExtendedLifetime(storage) { _ = manager.glyphRange(for: container) }
+            await Task.yield()
+        }
+        await background.value
+        let (storage, manager, _) = RowPreparation.textStack(text, width: 200)
+        withExtendedLifetime(storage) { #expect(!manager.backgroundLayoutEnabled) }
+    }
+
+    private static func wrappingText() -> NSAttributedString {
+        NSAttributedString(string: String(repeating: "A line that wraps at a narrow width. ", count: 12))
+    }
 
     @Test("The cache hits on the same content, width and style, and misses on another width or text size")
     func cacheKeys() async {

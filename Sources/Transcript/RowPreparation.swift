@@ -6,13 +6,14 @@
 //
 
 import AppKit
+import Synchronization
 
 /// RowPreparation builds each row's text and measures it block by block, off
 /// the main thread.
 ///
 /// Text is measured with a TextKit stack made for the call and dropped at its
-/// end, never attached to a view, which is the use AppKit allows off the main
-/// thread. `TranscriptRowView` lays out with the same configuration, so the
+/// end, never attached to a view and with background layout off, which is the
+/// use AppKit allows off the main thread. `TranscriptRowView` lays out with the same configuration, so the
 /// measured size is the drawn size.
 ///
 /// The cache arrives as a copy; what this pass measured comes back beside the
@@ -55,15 +56,23 @@ enum RowPreparation {
     }
 
     /// The size `text` lays out at when no line may exceed `width`.
+    ///
+    /// One measurement at a time across every window: TextKit in many threads
+    /// at once beside the main thread's drawing ended the test process a few
+    /// tests later, where one thread beside it never did.
     static func measure(_ text: NSAttributedString, width: CGFloat) -> CGSize {
-        let (storage, manager, container) = textStack(text, width: width)
-        // The layout manager does not retain its storage, so the storage must outlive the layout.
-        return withExtendedLifetime(storage) {
-            manager.ensureLayout(for: container)
-            let used = manager.usedRect(for: container)
-            return CGSize(width: used.width.rounded(.up), height: used.height.rounded(.up))
+        measuring.withLock { _ in
+            let (storage, manager, container) = textStack(text, width: width)
+            // The layout manager does not retain its storage, so the storage must outlive the layout.
+            return withExtendedLifetime(storage) {
+                manager.ensureLayout(for: container)
+                let used = manager.usedRect(for: container)
+                return CGSize(width: used.width.rounded(.up), height: used.height.rounded(.up))
+            }
         }
     }
+
+    private static let measuring = Mutex(())
 
     /// The TextKit 1 stack both measuring and drawing use.
     static func textStack(_ text: NSAttributedString, width: CGFloat)
@@ -73,6 +82,9 @@ enum RowPreparation {
         let container = NSTextContainer(size: CGSize(width: width, height: .greatestFiniteMagnitude))
         container.lineFragmentPadding = 0
         manager.usesFontLeading       = true
+        // Background layout enrols the manager in AppKit's main-thread list of dirty managers,
+        // and a stack released off the main thread then races it; both uses lay out on demand.
+        manager.backgroundLayoutEnabled = false
         manager.addTextContainer(container)
         storage.addLayoutManager(manager)
         return (storage, manager, container)
