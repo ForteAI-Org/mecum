@@ -54,7 +54,8 @@ final class TranscriptCollectionView: NSCollectionView {
         }
         switch event.keyCode {
         case 109 where modifiers.contains(.shift), 110: onContextMenu?()
-        case 119, 125 where modifiers.contains(.command): onScrollToEnd?()
+        case 119: onScrollToEnd?()
+        case 125 where modifiers.contains(.command): onScrollToEnd?()
         case 126 where modifiers.contains(.shift): onExtend?(-1)
         case 125 where modifiers.contains(.shift): onExtend?(1)
         case 126: onMove?(-1)
