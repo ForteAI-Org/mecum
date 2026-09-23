@@ -39,6 +39,7 @@ state = {
     "modalOpen": False,
 }
 measured_widgets = {}
+active_dialog = None
 
 
 def widget_frame(widget):
@@ -163,6 +164,8 @@ def poll_native_command():
     elif action == "chooseBeta":
         combo.setCurrentIndex(1)
         combo.hidePopup()
+    elif action == "closeModal" and active_dialog is not None:
+        active_dialog.reject()
     publish()
 
 scroll = QScrollArea()
@@ -182,17 +185,24 @@ layout.addWidget(scroll)
 
 
 def open_modal():
+    global active_dialog
     dialog = QDialog(window)
+    active_dialog = dialog
     dialog.setWindowTitle("Probe Modal")
     dialog_layout = QVBoxLayout(dialog)
     dialog_layout.addWidget(QLabel("Temporary modal"))
     cancel = QPushButton("Cancel")
+    cancel.setAccessibleName("Cancel modal")
     cancel.clicked.connect(dialog.reject)
     dialog_layout.addWidget(cancel)
+    measured_widgets["modalCancelFrame"] = cancel
     state["modalOpen"] = True
     publish()
     dialog.exec()
+    active_dialog = None
     state["modalOpen"] = False
+    measured_widgets.pop("modalCancelFrame", None)
+    state.pop("modalCancelFrame", None)
     publish()
 
 

@@ -13,7 +13,9 @@ import SeatCore
 /// Cancel event, so the seat's focus gate refused that event. Clicks therefore
 /// use the measured unprepared path. Drag and bulk insertion retain the
 /// conservative preparation until those surfaces have their own measurements.
-/// Menu and scroll effects still need separate live qualification.
+/// A controlled Qt 6 widget fixture has also qualified scrolling, routed and
+/// native popup choices, and a context-menu action. Those measurements do not
+/// qualify DaVinci's intermittently stalled context menu.
 nonisolated public struct QtPlatform: InputPlatform {
 
     public init() {}

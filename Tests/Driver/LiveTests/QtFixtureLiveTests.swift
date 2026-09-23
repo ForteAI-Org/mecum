@@ -118,6 +118,160 @@ private final class QtProbeTarget {
 struct QtFixtureLiveTests {
 
     @Test(
+        "a Qt 6 modal child is followed, cancelled and removed in the background",
+        .enabled(
+            if: qtFixtureSkipReason() == nil,
+            Comment(rawValue: qtFixtureSkipReason() ?? "")))
+    func modalChild() async throws {
+        let target = try QtProbeTarget()
+        defer { target.stop() }
+        let processID = target.processID
+        let original = try WindowReader.windowSnapshot(
+            processID: processID, allowUnvalidatedBuild: true
+        )
+        try #require(original.windowTitle == "Mecum Qt Probe")
+
+        func state() throws -> [String: Any] {
+            let data = try Data(contentsOf: URL(fileURLWithPath: target.statePath))
+            return try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        }
+
+        func location(_ frameKey: String, in windowNumber: Int) throws -> InputLocation {
+            let frame = try #require(state()[frameKey] as? [NSNumber])
+            try #require(frame.count == 4)
+            let server = try #require(WindowServerProbe.geometry(of: windowNumber))
+            let geometry = try #require(WindowGeometryProbe.observation(of: server))
+            return try #require(InputLocation(
+                screenPoint: CGPoint(
+                    x: frame[0].doubleValue + frame[2].doubleValue / 2,
+                    y: frame[1].doubleValue + frame[3].doubleValue / 2
+                ),
+                observedIn: geometry
+            ))
+        }
+
+        var failure: (any Error)?
+        try await LiveStage.run(
+            needsFixture: false,
+            needsChrome: false,
+            configuration: SeatHostConfiguration(
+                followsNewWindows: true,
+                restoresUserFocus: true,
+                allowUnvalidatedFocusRecovery: true
+            )
+        ) { stage in
+            let handBefore = stage.fence.snapshot().observedEventCount
+            let personBefore = UserSeatState.capture()
+            var adopted: AdoptedWindow?
+            do {
+                try #require(personBefore.frontmostProcessID != processID)
+                adopted = try await stage.seat.adopt(
+                    original.reference, platform: QtPlatform(), title: original.windowTitle
+                )
+                if let window = adopted, !stage.seat.isStaged(window) {
+                    adopted = try await stage.seat.stage(window)
+                }
+                let window = try #require(adopted)
+                let frameReady = LivePump.run(until: {
+                    guard let frame = try? state()["modalFrame"] as? [NSNumber], frame.count == 4
+                    else { return false }
+                    return stage.virtualBounds.contains(CGPoint(
+                        x: frame[0].doubleValue, y: frame[1].doubleValue
+                    ))
+                }, timeout: 3)
+                try #require(frameReady)
+
+                let openingTurn = try await stage.seat.acquire()
+                do {
+                    let reference = try await liveObservation(stage.seat)
+                    let receipt = try await stage.seat.send(
+                        .click(try location("modalFrame", in: window.id)),
+                        observation: reference, turn: openingTurn, platform: QtPlatform()
+                    )
+                    let opened = LivePump.run(until: {
+                        (try? state()["modalOpen"] as? Bool) == true
+                    }, timeout: 3)
+                    try stage.seat.confirm(receipt, opened ? .observed : .absent)
+                    _ = await stage.seat.concludeObservation()
+                    try stage.seat.release(openingTurn)
+                    try #require(opened)
+                } catch {
+                    _ = await stage.seat.concludeObservation()
+                    try? stage.seat.release(openingTurn)
+                    throw error
+                }
+
+                let dialog = try WindowReader.windowSnapshot(
+                    processID: processID, allowUnvalidatedBuild: true
+                )
+                try #require(dialog.windowTitle == "Probe Modal")
+                let followed = await LivePump.settle(until: {
+                    stage.seat.adoptedWindows.contains { $0.id == dialog.windowNumber }
+                }, timeout: 10)
+                let child = try #require(stage.seat.adoptedWindows.first {
+                    $0.id == dialog.windowNumber
+                })
+                let childServer = try #require(WindowServerProbe.geometry(of: child.id))
+                print("QT6_MODAL followed=\(followed) child=\(child.id)"
+                    + " frame=\(childServer.frame)")
+                try #require(followed)
+                try #require(stage.virtualBounds.contains(childServer.frame))
+                let cancelReady = LivePump.run(until: {
+                    (try? state()["modalCancelFrame"] as? [NSNumber])?.count == 4
+                }, timeout: 2)
+                try #require(cancelReady)
+
+                let cancelTurn = try await stage.seat.acquire()
+                do {
+                    let reference = try await liveObservation(stage.seat)
+                    let receipt = try await stage.seat.send(
+                        .click(try location("modalCancelFrame", in: child.id)),
+                        observation: reference, turn: cancelTurn, platform: QtPlatform()
+                    )
+                    let closed = LivePump.run(until: {
+                        (try? state()["modalOpen"] as? Bool) == false
+                    }, timeout: 3)
+                    try stage.seat.confirm(receipt, closed ? .observed : .absent)
+                    _ = await stage.seat.concludeObservation()
+                    try stage.seat.release(cancelTurn)
+                    print("QT6_MODAL cancelled=\(closed) events=\(receipt.eventCount)")
+                    try #require(closed)
+                    if let identity = child.reference.identity {
+                        let presence = stage.seat.logicalSurfacePresence(of: identity)
+                        print("QT6_MODAL presence=\(presence)")
+                    }
+                    print("QT6_MODAL server-after=\(String(describing: WindowServerProbe.geometry(of: child.id)?.frame))")
+                    let childRelease = await stage.seat.release(child, .leaveOnVirtualDisplay)
+                    print("QT6_MODAL child-release=\(childRelease)")
+                    #expect(childRelease == .leftOnVirtualDisplay)
+                    #expect(!stage.seat.adoptedWindows.contains { $0.id == child.id })
+                } catch {
+                    _ = await stage.seat.concludeObservation()
+                    try? stage.seat.release(cancelTurn)
+                    throw error
+                }
+                let physicalEvents = stage.fence.snapshot().observedEventCount - handBefore
+                if physicalEvents == 0 {
+                    #expect(UserSeatState.capture() == personBefore)
+                }
+            } catch {
+                try? target.sendNativeCommand("closeModal")
+                _ = LivePump.run(until: {
+                    (try? state()["modalOpen"] as? Bool) == false
+                }, timeout: 2)
+                failure = error
+            }
+            _ = await stage.seat.concludeObservation()
+            if let adopted {
+                let outcome = await stage.seat.release(adopted, .returnToUserSeat)
+                print("QT6_MODAL release=\(outcome)")
+                #expect(outcome == .returned)
+            }
+        }
+        if let failure { throw failure }
+    }
+
+    @Test(
         "a Qt 6 popup opened by the target's native API is scoped and closed",
         .enabled(
             if: qtFixtureSkipReason() == nil,

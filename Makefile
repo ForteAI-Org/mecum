@@ -59,10 +59,10 @@ HOST_REST_TESTS := 29
 # they take a window in and out of fullscreen, which is the person's screen.
 # Verified by `xcrun swift test list | rg LiveTests` on 2026-09-21. This is an
 # assertion over the reported Live bundle, including intentionally skipped rows.
-LIVE_TESTS := 93
+LIVE_TESTS := 94
 QT_LIVE_ROWS := discoverDaVinci adoptAndReturnDaVinci observeDaVinci \
                 clickDaVinciSearch openAndCancelDaVinciProjectDialog insertTextIntoDaVinciSearch
-QT_FIXTURE_ROWS := widgetCommands contextMenu dropdownMenu nativePopupMenu
+QT_FIXTURE_ROWS := widgetCommands contextMenu dropdownMenu nativePopupMenu modalChild
 QT_PYTHON ?= $(shell command -v python3)
 
 # The measurements `make bench` gates on. Narrow it for a quick pass, for
