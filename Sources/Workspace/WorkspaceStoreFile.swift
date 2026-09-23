@@ -22,7 +22,7 @@ import SwiftData
 /// puts the copy back. Ordinary launches, where the versions agree, copy
 /// nothing.
 ///
-/// The current version is v2. `WorkspaceMigrationTests` opens a real v1 store
+/// The current version is v3. `WorkspaceMigrationTests` opens real v1 and v2 stores
 /// through it, and `WorkspaceStoreFileTests` stages the failure a real upgrade
 /// cannot be made to produce on demand.
 public enum WorkspaceStoreFile {
@@ -83,7 +83,7 @@ public enum WorkspaceStoreFile {
     // MARK: Version marker
 
     static func currentVersionIdentifier() -> String {
-        let version = WorkspaceSchemaV2.versionIdentifier
+        let version = WorkspaceSchemaV3.versionIdentifier
         return "\(version.major).\(version.minor).\(version.patch)"
     }
 
@@ -129,7 +129,7 @@ public enum WorkspaceStoreFile {
     // MARK: Container
 
     private static func makeContainer(at store: URL) throws -> ModelContainer {
-        let schema = Schema(versionedSchema: WorkspaceSchemaV2.self)
+        let schema = Schema(versionedSchema: WorkspaceSchemaV3.self)
         return try ModelContainer(
             for           : schema,
             migrationPlan : WorkspaceMigrationPlan.self,

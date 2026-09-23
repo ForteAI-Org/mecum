@@ -15,8 +15,9 @@ import Workspace
 /// manager's mascot is the same size as its reports'. Indentation and the
 /// disclosure control are the only thing that says who reports to whom.
 ///
-/// The indicator is a symbol and not a colour, so it survives a person who
-/// cannot tell the colours apart, and it never repaints the mascot.
+/// The indicators are a symbol or a number and not a colour, so they survive a
+/// person who cannot tell the colours apart, and they never repaint the mascot.
+/// A badge changes the row's trailing edge only, never its height or place.
 struct WorkerRowView: View {
 
     let row   : TeamRow
@@ -46,12 +47,32 @@ struct WorkerRowView: View {
                 Image(systemName: "exclamationmark.circle")
                     .foregroundStyle(.secondary)
             }
+            badge
         }
         .padding(.leading, CGFloat(row.depth) * 14)
         .frame(minHeight: 56)
         .help(row.name)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(row.accessibilityLabel)
+    }
+
+    /// The unread replies as an accent capsule, or the attention mark when a
+    /// turn failed or stopped unseen. The mark is a symbol, never colour alone,
+    /// and a quiet row shows neither (§4.3).
+    @ViewBuilder
+    private var badge: some View {
+        if row.needsAttention {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(.red)
+        } else if let count = row.badgeText {
+            Text(count)
+                .font(.caption.weight(.semibold))
+                .monospacedDigit()
+                .foregroundStyle(.white)
+                .padding(.horizontal, 6)
+                .frame(minWidth: 20, minHeight: 20)
+                .background(Capsule().fill(Color.accentColor))
+        }
     }
 
     /// The control that folds a manager's reports away. A worker with no

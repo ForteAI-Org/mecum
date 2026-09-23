@@ -60,6 +60,10 @@ final class TeamModel {
     /// worker absent here has not been checked, which is not the same as fine.
     private(set) var modelStates: [UUID: ConnectionState] = [:]
 
+    /// What each worker's direct conversation holds unseen, as the store last
+    /// derived it from its read markers. A worker absent here has nothing.
+    private(set) var unread: [UUID: UnreadState] = [:]
+
     /// What the store refused, in a sentence. Nil while nothing is pending.
     var problem: String?
 
@@ -124,7 +128,7 @@ final class TeamModel {
     /// copy in step with two sources.
     var rows: [TeamRow] {
         TeamOutline.rows(of: active, collapsed: collapsed, modelUnavailable: workersWithRemovedModels,
-                         activities: desktops.compactMapValues(\.activity))
+                         activities: desktops.compactMapValues(\.activity), unread: unread)
     }
 
     /// No model attached, or one the catalogue no longer lists (§7.4).
@@ -166,6 +170,7 @@ final class TeamModel {
         } catch {
             problem = "The team could not be read, so the list below may be out of date. \(describe(error))"
         }
+        await refreshUnread()
     }
 
     // MARK: The conversation
@@ -206,6 +211,7 @@ final class TeamModel {
             conversation = opened
             draft        = opened.draft
             savedDraft   = opened.draft
+            await markReadIfAtEnd()
         } catch {
             guard generation == openingGeneration else { return }
             problem = "This worker's conversation could not be opened. \(describe(error))"
@@ -415,10 +421,33 @@ final class TeamModel {
     }
 
     /// Tells the transcript the open conversation changed; a turn in another
-    /// conversation changes nothing shown here.
+    /// conversation changes only the badges.
     private func reloadTranscript(of conversationID: UUID) async {
-        guard conversation?.id == conversationID else { return }
+        guard conversation?.id == conversationID else { return await refreshUnread() }
         transcriptRevision += 1
+        await markReadIfAtEnd()
+    }
+
+    /// Moves the open conversation's read marker while its reading position
+    /// is the end, which is where the transcript follows new replies, then
+    /// rereads the badges. A conversation read higher up keeps its count.
+    private func markReadIfAtEnd() async {
+        if let conversation, conversation.readingAnchorMessageID == nil {
+            do {
+                try await store.markRead(conversation: conversation.id)
+            } catch {
+                problem = "This conversation could not be marked as read, so its badge may stay. \(describe(error))"
+            }
+        }
+        await refreshUnread()
+    }
+
+    private func refreshUnread() async {
+        do {
+            unread = try await store.unreadByWorker()
+        } catch {
+            problem = "The unread replies could not be counted, so the badges may be out of date. \(describe(error))"
+        }
     }
 
     /// Remembers the message the reader is anchored on and the offset in
@@ -434,6 +463,7 @@ final class TeamModel {
             )
             guard self.conversation?.id == conversation.id else { return }
             self.conversation = updated
+            if anchor == nil { await markReadIfAtEnd() }
         } catch {
             problem = "The reading position could not be remembered. \(describe(error))"
         }

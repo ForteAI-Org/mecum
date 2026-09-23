@@ -63,6 +63,13 @@ public final class Conversation {
     public internal(set) var providerSessionProvider: ModelProvider?
     public internal(set) var providerSessionID      : String?
 
+    /// How far the person has read: the highest message sequence and the
+    /// highest event order in this conversation when it was last on screen at
+    /// its end. The reading anchor above cannot say this, because nil there
+    /// means "at the end" and the end moves. Written only by `markRead`.
+    public internal(set) var readUpToSequence  : Int = 0
+    public internal(set) var readUpToEventOrder: Int = 0
+
     public init(
         id                    : UUID             = UUID(),
         kind                  : ConversationKind = .direct,

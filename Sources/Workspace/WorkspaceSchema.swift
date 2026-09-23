@@ -65,15 +65,26 @@ public enum WorkspaceSchemaV1: VersionedSchema {
 ///
 /// v1 to v2 adds the conversation's provider session as two optional
 /// attributes, which SwiftData infers and fills with nil, so the stage is
-/// lightweight. `WorkspaceStoreFile` copies the store before any upgrade and
-/// puts it back when one fails; `WorkspaceMigrationTests` runs the real one.
+/// lightweight. v2 to v3 adds the read marker with a default of zero, then
+/// moves it to the end of every conversation: what was there before the
+/// marker existed was read, and an upgrade must not light up the whole team.
+/// `WorkspaceStoreFile` copies the store before any upgrade and puts it back
+/// when one fails; `WorkspaceMigrationTests` runs the real ones.
 public enum WorkspaceMigrationPlan: SchemaMigrationPlan {
 
     public static var schemas: [any VersionedSchema.Type] {
-        [WorkspaceSchemaV1.self, WorkspaceSchemaV2.self]
+        [WorkspaceSchemaV1.self, WorkspaceSchemaV2.self, WorkspaceSchemaV3.self]
     }
 
     public static var stages: [MigrationStage] {
-        [.lightweight(fromVersion: WorkspaceSchemaV1.self, toVersion: WorkspaceSchemaV2.self)]
+        [
+            .lightweight(fromVersion: WorkspaceSchemaV1.self, toVersion: WorkspaceSchemaV2.self),
+            .custom(
+                fromVersion : WorkspaceSchemaV2.self,
+                toVersion   : WorkspaceSchemaV3.self,
+                willMigrate : nil,
+                didMigrate  : { context in try WorkspaceStore.markEverythingRead(in: context) }
+            ),
+        ]
     }
 }

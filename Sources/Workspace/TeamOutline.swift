@@ -27,13 +27,15 @@ public enum TeamOutline {
     /// more behind it.
     ///
     /// `modelUnavailable` names workers whose model a check found missing,
-    /// and `activities` what a worker is doing, by worker. Both change what a
-    /// row says and never where it is.
+    /// `activities` what a worker is doing, and `unread` what its direct
+    /// conversation holds unseen, by worker. They change what a row says and
+    /// never where it is.
     public static func rows(
         of workers      : [WorkerSnapshot],
         collapsed       : Set<UUID>      = [],
         modelUnavailable: Set<UUID>      = [],
-        activities      : [UUID: String] = [:]
+        activities      : [UUID: String] = [:],
+        unread          : [UUID: UnreadState] = [:]
     ) -> [TeamRow] {
 
         let present = Set(workers.map(\.id))
@@ -66,7 +68,8 @@ public enum TeamOutline {
                         hasReports        : !children.isEmpty,
                         isCollapsed       : isFolded,
                         isModelUnavailable: modelUnavailable.contains(worker.id),
-                        activity          : activities[worker.id]
+                        activity          : activities[worker.id],
+                        unread            : unread[worker.id] ?? .none
                     )
                 )
             }

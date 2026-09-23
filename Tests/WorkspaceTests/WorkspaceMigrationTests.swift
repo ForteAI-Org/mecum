@@ -11,9 +11,9 @@ import SwiftData
 import Testing
 @testable import Workspace
 
-/// The first real migration: a store written by the v1 schema, opened by the
+/// The real migrations: stores written by the v1 and v2 schemas, opened by the
 /// current one through `WorkspaceStore.opening(in:)`.
-@Suite("Upgrading a v1 store to v2")
+@Suite("Upgrading older stores")
 struct WorkspaceMigrationTests {
 
     @Test("Workers, a draft and messages survive, and the provider session starts empty")
@@ -52,8 +52,8 @@ struct WorkspaceMigrationTests {
 
         let upgraded = try WorkspaceStore.opening(in: directory)
 
-        #expect(try String(contentsOf: marker, encoding: .utf8) == "2.0.0")
-        #expect(WorkspaceStoreFile.currentVersionIdentifier() == "2.0.0")
+        #expect(try String(contentsOf: marker, encoding: .utf8) == "3.0.0")
+        #expect(WorkspaceStoreFile.currentVersionIdentifier() == "3.0.0")
         let backup = directory.appending(path: WorkspaceStoreFile.storeName + WorkspaceStoreFile.backupSuffix)
         #expect(FileManager.default.fileExists(atPath: backup.path(percentEncoded: false)))
 
@@ -87,5 +87,46 @@ struct WorkspaceMigrationTests {
         #expect(try await upgraded.messages(in: conversationID).map(\.sequence) == [1, 2, 3])
         #expect(try await upgraded.conversation(conversationID)?.resumableSession(for: .claudeCode)
                 == "session-1")
+    }
+
+    @Test("A v2 store's history reads as seen, and a reply after the upgrade counts")
+    func aV2StoreStartsReadToTheEnd() async throws {
+        let directory = TemporaryStore.directory()
+        defer { TemporaryStore.discard(directory) }
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+
+        let workerID       = UUID()
+        let conversationID = UUID()
+        let store  = directory.appending(path: WorkspaceStoreFile.storeName)
+        let marker = directory.appending(path: WorkspaceStoreFile.versionMarkerName)
+
+        // Written exactly as the v2 app wrote it: the v2 schema, and its marker.
+        do {
+            let schema    = Schema(versionedSchema: WorkspaceSchemaV2.self)
+            let container = try ModelContainer(
+                for           : schema,
+                configurations: ModelConfiguration(schema: schema, url: store)
+            )
+            let context = ModelContext(container)
+            context.insert(Worker(id: workerID, name: "Atlas", appearance: TemporaryStore.appearance()))
+            context.insert(WorkspaceSchemaV2.Conversation(id: conversationID, participantIDs: [workerID]))
+            context.insert(Message(conversationID: conversationID, text: "ask", sequence: 1))
+            context.insert(Message(conversationID: conversationID, authorWorkerID: workerID,
+                                   text: "answer", sequence: 2, delivery: .completed))
+            context.insert(WorkspaceEvent(NewEvent(workspaceID: UUID(), subjectID: UUID(),
+                                                   conversationID: conversationID, workerID: workerID,
+                                                   type: .executionFailed), localOrder: 1))
+            try context.save()
+        }
+        try "2.0.0".write(to: marker, atomically: true, encoding: .utf8)
+
+        let upgraded = try WorkspaceStore.opening(in: directory)
+
+        #expect(try String(contentsOf: marker, encoding: .utf8) == "3.0.0")
+        #expect(try await upgraded.messages(in: conversationID).map(\.text) == ["ask", "answer"])
+        #expect(try await upgraded.unreadByWorker().isEmpty)
+
+        try await upgraded.appendMessage(to: conversationID, author: workerID, text: "later", delivery: .completed)
+        #expect(try await upgraded.unreadByWorker()[workerID] == UnreadState(replies: 1, hasUnseenProblem: false))
     }
 }

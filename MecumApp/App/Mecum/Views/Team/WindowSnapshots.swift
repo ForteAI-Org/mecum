@@ -51,6 +51,11 @@ enum WindowSnapshots {
                 try await write(TeamSidebarView(team: team), width: ShellMetrics.sidebar.ideal, dark: dark,
                                 to: output.appending(path: "sidebar-\(name).png"))
             }
+            let badges = try await badgedTeam(in: store.appending(path: "Badges", directoryHint: .isDirectory))
+            for (name, dark) in [("light", false), ("dark", true)] {
+                try await write(TeamSidebarView(team: badges), width: ShellMetrics.sidebar.ideal, dark: dark,
+                                to: output.appending(path: "sidebar-badges-\(name).png"))
+            }
         } catch {
             FileHandle.standardError.write(Data("snapshots failed: \(error)\n".utf8))
             status = 1
@@ -121,6 +126,40 @@ enum WindowSnapshots {
         await team.load()
         team.selection = atlas.id
         await team.openSelectedConversation()
+        return team
+    }
+
+    /// Four workers for the sidebar badge (§4.3): three unread replies, 120,
+    /// a failed turn not yet seen, and one with nothing new. None is selected,
+    /// so no conversation is on screen to mark read.
+    static func badgedTeam(in directory: URL) async throws -> TeamModel {
+        let store = try WorkspaceStore.opening(in: directory)
+        let selection = ModelSelection(provider: .claudeCode, model: "claude-opus-5", effort: .high)
+        let workspaceID = UUID()
+        let people: [(name: String, role: String, seed: Int64, palette: String, replies: Int, fails: Bool)] = [
+            ("Atlas", "Release engineer", 7, "tide", 3, false),
+            ("Nova", "Editor", 23, "ember", 120, false),
+            ("Iris", "Research lead", 11, "dusk", 0, true),
+            ("Milo", "Designer", 31, "dawn", 0, false),
+        ]
+        for person in people {
+            let worker = try await store.createWorker(name: person.name, role: person.role,
+                                                      appearance: WorkerAppearance(seed: person.seed,
+                                                                                   palette: person.palette))
+            try await store.configure(worker: worker.id, selection: selection)
+            let conversation = try await store.createConversation(kind: .direct, participants: [worker.id])
+            for index in 0..<person.replies {
+                try await store.appendMessage(to: conversation.id, author: worker.id, text: "Reply \(index)",
+                                              delivery: .completed)
+            }
+            if person.fails {
+                try await store.append(NewEvent(workspaceID: workspaceID, subjectID: UUID(),
+                                                conversationID: conversation.id, workerID: worker.id,
+                                                type: .executionFailed, payload: Data("timed out".utf8)))
+            }
+        }
+        let team = TeamModel(store: store, connections: ModelSettingsStore(), broker: SeatBroker())
+        await team.load()
         return team
     }
 
