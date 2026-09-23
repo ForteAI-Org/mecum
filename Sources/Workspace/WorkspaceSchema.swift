@@ -15,14 +15,15 @@ import SwiftData
 /// written before it is used is a schema to migrate for nothing.
 ///
 /// `Conversation` is frozen here as it was in v1, so SwiftData can still read
-/// a v1 store to migrate it. The other models are unchanged in v2 and shared.
+/// a v1 store to migrate it. `Worker` is frozen here too, as v1 to v3 stored it,
+/// and v2 and v3 share this copy. The other models are shared with later versions.
 public enum WorkspaceSchemaV1: VersionedSchema {
 
     public static var versionIdentifier: Schema.Version { Schema.Version(1, 0, 0) }
 
     public static var models: [any PersistentModel.Type] {
         [
-            Worker.self,
+            WorkspaceSchemaV1.Worker.self,
             WorkerConfiguration.self,
             Execution.self,
             WorkspaceSchemaV1.Conversation.self,
@@ -58,6 +59,41 @@ public enum WorkspaceSchemaV1: VersionedSchema {
             self.createdAt              = createdAt
         }
     }
+
+    /// Worker as v1 to v3 stored it, with the manager it reported to. Only the
+    /// migration and its test use it; the app reads the current `Worker`.
+    @Model
+    final class Worker {
+
+        #Unique<Worker>([\.id])
+        #Index<Worker>([\.isArchived, \.name])
+
+        var id          : UUID
+        var name        : String
+        var role        : String?
+        var instructions: String?
+        var managerID   : UUID?
+        var isArchived  : Bool
+        var createdAt   : Date
+        var appearance  : WorkerAppearance
+
+        init(
+            id        : UUID,
+            name      : String,
+            role      : String? = nil,
+            managerID : UUID?   = nil,
+            appearance: WorkerAppearance
+        ) {
+            self.id           = id
+            self.name         = name
+            self.role         = role
+            self.instructions = nil
+            self.managerID    = managerID
+            self.isArchived   = false
+            self.createdAt    = Date()
+            self.appearance   = appearance
+        }
+    }
 }
 
 /// WorkspaceMigrationPlan carries the ordered schema versions the store opens
@@ -68,12 +104,14 @@ public enum WorkspaceSchemaV1: VersionedSchema {
 /// lightweight. v2 to v3 adds the read marker with a default of zero, then
 /// moves it to the end of every conversation: what was there before the
 /// marker existed was read, and an upgrade must not light up the whole team.
+/// v3 to v4 drops the worker's manager, a column SwiftData removes on its own,
+/// so that stage is lightweight too.
 /// `WorkspaceStoreFile` copies the store before any upgrade and puts it back
 /// when one fails; `WorkspaceMigrationTests` runs the real ones.
 public enum WorkspaceMigrationPlan: SchemaMigrationPlan {
 
     public static var schemas: [any VersionedSchema.Type] {
-        [WorkspaceSchemaV1.self, WorkspaceSchemaV2.self, WorkspaceSchemaV3.self]
+        [WorkspaceSchemaV1.self, WorkspaceSchemaV2.self, WorkspaceSchemaV3.self, WorkspaceSchemaV4.self]
     }
 
     public static var stages: [MigrationStage] {
@@ -85,6 +123,7 @@ public enum WorkspaceMigrationPlan: SchemaMigrationPlan {
                 willMigrate : nil,
                 didMigrate  : { context in try WorkspaceStore.markEverythingRead(in: context) }
             ),
+            .lightweight(fromVersion: WorkspaceSchemaV3.self, toVersion: WorkspaceSchemaV4.self),
         ]
     }
 }

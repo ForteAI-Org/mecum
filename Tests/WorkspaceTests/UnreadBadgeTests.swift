@@ -186,8 +186,7 @@ struct UnreadBadgeTests {
         defer { TemporaryStore.discard(directory) }
         let store = try WorkspaceStore.opening(in: directory)
         let head  = try await Direct(in: store, name: "Aaa")
-        let lead  = try await store.createWorker(name: "Zzz", managerID: head.worker.id,
-                                                 appearance: TemporaryStore.appearance())
+        let lead  = try await store.createWorker(name: "Zzz", appearance: TemporaryStore.appearance())
         let last  = try await Direct(in: store, name: "Bbb")
         try await store.createConversation(kind: .direct, participants: [lead.id])
         let workers = try await store.workers()
@@ -199,7 +198,6 @@ struct UnreadBadgeTests {
         let busy = TeamOutline.rows(of: workers, unread: try await store.unreadByWorker())
 
         #expect(busy.map(\.id) == quiet.map(\.id))
-        #expect(busy.map(\.depth) == quiet.map(\.depth))
         #expect(busy.map(\.needsAttention) == quiet.map { $0.id == head.worker.id })
         #expect(busy.map(\.badgeText) == quiet.map { $0.id == last.worker.id ? "2" : nil })
     }

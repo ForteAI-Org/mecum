@@ -10,7 +10,7 @@ import SwiftData
 
 /// Worker is the persistent identity the person creates and keeps.
 ///
-/// The row holds identity and place in the hierarchy. Which model answers for
+/// The row holds identity. Which model answers for
 /// it lives in `WorkerConfiguration`, versioned, and the absence of any
 /// configuration row is what "to configure" means: no default connection is
 /// invented here.
@@ -20,9 +20,7 @@ import SwiftData
 /// is derived when it is shown; one stored enum would confuse having no work
 /// with having no credentials.
 ///
-/// Mutation goes through `WorkspaceStore`, which is what holds the invariants
-/// this class cannot: `managerID` is refused before the save when it would
-/// close a cycle.
+/// Mutation goes through `WorkspaceStore`.
 @Model
 public final class Worker {
 
@@ -42,10 +40,6 @@ public final class Worker {
     /// specialisation from its name.
     public var instructions: String?
 
-    /// Zero or one manager, several workers at the root. Written only by
-    /// `WorkspaceStore`, which refuses a cycle before it saves.
-    public internal(set) var managerID: UUID?
-
     /// Archiving is the ordinary removal from the active team. Hard deletion
     /// is a separate act and is not implemented here.
     public var isArchived: Bool
@@ -60,7 +54,6 @@ public final class Worker {
         name        : String,
         role        : String? = nil,
         instructions: String? = nil,
-        managerID   : UUID?   = nil,
         isArchived  : Bool    = false,
         createdAt   : Date    = Date(),
         appearance  : WorkerAppearance
@@ -69,7 +62,6 @@ public final class Worker {
         self.name         = name
         self.role         = role
         self.instructions = instructions
-        self.managerID    = managerID
         self.isArchived   = isArchived
         self.createdAt    = createdAt
         self.appearance   = appearance
@@ -86,5 +78,4 @@ public enum WorkerChange: Sendable, Equatable {
     case instructions(String?)
     case appearance(WorkerAppearance)
     case archived(Bool)
-    case manager(UUID?)
 }

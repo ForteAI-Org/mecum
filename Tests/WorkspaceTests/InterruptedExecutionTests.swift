@@ -165,6 +165,25 @@ struct InterruptedExecutionTests {
         #expect(try await relaunched.message(finished.message)?.delivery == .interrupted)
     }
 
+    @Test("A manager change an older build recorded reads back as unknown")
+    func aManagerChangeRowReadsBackAsUnknown() async throws {
+        let directory = TemporaryStore.directory()
+        defer { TemporaryStore.discard(directory) }
+
+        let earlier = try WorkspaceStore.opening(in: directory)
+        let turn    = try await Turn(in: earlier)
+        try await earlier.append(NewEvent(workspaceID: turn.workspace, subjectID: turn.execution,
+                                          type: .toolActivity, correlationID: turn.message))
+
+        // Builds before the flat team recorded a worker's move under its manager with this type.
+        let store = directory.appending(path: WorkspaceStoreFile.storeName)
+        #expect(try Self.rewrite(store, type: "toolActivity", to: "workerManagerChanged") == 1)
+
+        let relaunched = try WorkspaceStore.opening(in: directory)
+        let events = try await relaunched.events(matching: EventQuery(scope: .subject(turn.execution)))
+        #expect(events.map(\.type) == [.executionStarted, .unknown("workerManagerChanged")])
+    }
+
     @Test("A turn cut short before its start was recorded still ends, with no message to mark")
     func aTurnWithNoStartEventEndsInTheGivenWorkspace() async throws {
         let directory = TemporaryStore.directory()

@@ -110,14 +110,13 @@ struct SyntheticDataset: Sendable {
 
     // MARK: Writing
 
-    /// A lead and `size - 1` members reporting to them.
+    /// `size` workers.
     private func team(of size: Int, in store: WorkspaceStore, random: inout Generator) async throws -> [UUID] {
         var ids: [UUID] = []
         for index in 0..<size {
             let worker = try await store.createWorker(
                 id        : random.uuid(),
                 name      : "Worker \(size)-\(index)",
-                managerID : ids.first,
                 appearance: WorkerAppearance(seed: Int64(random.next() % 1000), palette: "tide")
             )
             ids.append(worker.id)

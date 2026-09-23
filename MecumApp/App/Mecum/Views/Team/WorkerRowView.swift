@@ -11,21 +11,17 @@ import Workspace
 /// WorkerRowView is one line of the team: mascot, name, subtitle and the
 /// indicator that says the worker wants attention.
 ///
-/// The row is 56 points and the mascot 32, and neither changes with rank: a
-/// manager's mascot is the same size as its reports'. Indentation and the
-/// disclosure control are the only thing that says who reports to whom.
+/// The row is 56 points and the mascot 32.
 ///
 /// The indicators are a symbol or a number and not a colour, so they survive a
 /// person who cannot tell the colours apart, and they never repaint the mascot.
 /// A badge changes the row's trailing edge only, never its height or place.
 struct WorkerRowView: View {
 
-    let row   : TeamRow
-    let toggle: () -> Void
+    let row: TeamRow
 
     var body: some View {
         HStack(spacing: 8) {
-            disclosure
             MascotView(appearance: row.worker.appearance)
 
             VStack(alignment: .leading, spacing: 1) {
@@ -49,7 +45,6 @@ struct WorkerRowView: View {
             }
             badge
         }
-        .padding(.leading, CGFloat(row.depth) * 14)
         .frame(minHeight: 56)
         .help(row.name)
         .accessibilityElement(children: .ignore)
@@ -72,25 +67,6 @@ struct WorkerRowView: View {
                 .padding(.horizontal, 6)
                 .frame(minWidth: 20, minHeight: 20)
                 .background(Capsule().fill(Color.accentColor))
-        }
-    }
-
-    /// The control that folds a manager's reports away. A worker with no
-    /// reports keeps the same width, so the names stay on one column.
-    @ViewBuilder
-    private var disclosure: some View {
-        if row.hasReports {
-            Button(action: toggle) {
-                Image(systemName: row.isCollapsed ? "chevron.right" : "chevron.down")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .frame(width: 14)
-            }
-            .buttonStyle(.borderless)
-            .help(row.isCollapsed ? "Show the reports of \(row.name)" : "Hide the reports of \(row.name)")
-            .accessibilityLabel(row.isCollapsed ? "Show reports" : "Hide reports")
-        } else {
-            Color.clear.frame(width: 14, height: 1)
         }
     }
 }

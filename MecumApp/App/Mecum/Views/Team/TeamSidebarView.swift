@@ -46,7 +46,7 @@ struct TeamSidebarView: View {
 
             Section {
                 ForEach(team.rows) { row in
-                    WorkerRowView(row: row) { toggle(row.id) }
+                    WorkerRowView(row: row)
                         .tag(row.id)
                         .contextMenu {
                             WorkerCommands(worker: row.worker, team: team)
@@ -104,13 +104,5 @@ struct TeamSidebarView: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
         .help("The model connections the team uses")
-    }
-
-    private func toggle(_ id: UUID) {
-        if team.collapsed.contains(id) {
-            team.collapsed.remove(id)
-        } else {
-            team.collapsed.insert(id)
-        }
     }
 }

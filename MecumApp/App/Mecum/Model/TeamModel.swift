@@ -43,10 +43,6 @@ final class TeamModel {
     private(set) var active  : [WorkerSnapshot] = []
     private(set) var archived: [WorkerSnapshot] = []
 
-    /// Managers whose reports are folded away. It is view state, not stored
-    /// state: each window remembers its own, with the selection (§3.1).
-    var collapsed: Set<UUID> = []
-
     var selection       : UUID?
     var isCreatingWorker = false
 
@@ -123,11 +119,10 @@ final class TeamModel {
 
     // MARK: Reading
 
-    /// The sidebar's rows, recomputed from the team and the folded managers.
-    /// The team is tens of workers, so this is cheaper than keeping a second
-    /// copy in step with two sources.
+    /// The sidebar's rows, recomputed from the team. The team is tens of
+    /// workers, so this is cheaper than keeping a second copy in step.
     var rows: [TeamRow] {
-        TeamOutline.rows(of: active, collapsed: collapsed, modelUnavailable: workersWithRemovedModels,
+        TeamOutline.rows(of: active, modelUnavailable: workersWithRemovedModels,
                          activities: desktops.compactMapValues(\.activity), unread: unread)
     }
 
@@ -146,13 +141,6 @@ final class TeamModel {
 
     func worker(_ id: UUID) -> WorkerSnapshot? {
         active.first { $0.id == id } ?? archived.first { $0.id == id }
-    }
-
-    /// Every other active worker. Which of them would close a loop is the
-    /// store's answer, not this list's: offering only the safe ones would be
-    /// a second copy of an invariant that already has an owner.
-    func candidateManagers(for id: UUID) -> [WorkerSnapshot] {
-        active.filter { $0.id != id }
     }
 
     func load() async {
@@ -526,15 +514,6 @@ final class TeamModel {
         modelStates[id] = state
     }
 
-    func changeManager(of id: UUID, to manager: UUID?) async {
-        do {
-            try await store.update(worker: id, .manager(manager))
-            await load()
-        } catch {
-            problem = describe(error)
-        }
-    }
-
     /// Archiving is the ordinary removal from the active team. The worker,
     /// its conversation and its attributions stay readable in the archive.
     func setArchived(_ isArchived: Bool, for id: UUID) async {
@@ -560,13 +539,6 @@ final class TeamModel {
         guard let refusal = error as? WorkspaceStoreError else { return String(describing: error) }
 
         switch refusal {
-        case .cycleInHierarchy(let workerID, let managerID):
-            return """
-            \(name(of: workerID)) cannot report to \(name(of: managerID)), because that \
-            manager already reports to it, directly or through someone else. Nothing was \
-            changed. Choose a manager from outside its own reports, or move that manager first.
-            """
-
         case .workerNotFound:
             return "That worker is no longer in the workspace. Nothing was changed; reopen the team."
 

@@ -20,10 +20,6 @@ public enum WorkspaceStoreError: Error {
     /// not. The original failure is kept either way.
     case migrationFailed(underlying: any Error, restoreFailure: (any Error)?)
 
-    /// The move was refused before the save: making `workerID` report to
-    /// `managerID` would have closed a loop in the hierarchy.
-    case cycleInHierarchy(workerID: UUID, managerID: UUID)
-
     case workerNotFound(UUID)
 
     case conversationNotFound(UUID)

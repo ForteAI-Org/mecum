@@ -40,23 +40,14 @@ extension WorkspaceStore {
         name        : String,
         role        : String? = nil,
         instructions: String? = nil,
-        managerID   : UUID?   = nil,
         appearance  : WorkerAppearance
     ) throws -> WorkerSnapshot {
-
-        if let managerID {
-            guard try workerRow(managerID) != nil else {
-                throw WorkspaceStoreError.workerNotFound(managerID)
-            }
-            try refuseCycle(worker: id, under: managerID)
-        }
 
         let worker = Worker(
             id          : id,
             name        : name,
             role        : role,
             instructions: instructions,
-            managerID   : managerID,
             appearance  : appearance
         )
         modelContext.insert(worker)
@@ -64,9 +55,7 @@ extension WorkspaceStore {
         return WorkerSnapshot(worker, configuration: nil)
     }
 
-    /// Applies one edit. A `.manager` that would close a loop is refused
-    /// before anything is written, so the hierarchy on disk is never a cycle,
-    /// not even briefly.
+    /// Applies one edit.
     @discardableResult
     public func update(worker id: UUID, _ change: WorkerChange) throws -> WorkerSnapshot {
         guard let worker = try workerRow(id) else { throw WorkspaceStoreError.workerNotFound(id) }
@@ -77,15 +66,6 @@ extension WorkspaceStore {
         case .instructions(let value): worker.instructions = value
         case .appearance(let value):   worker.appearance   = value
         case .archived(let value):     worker.isArchived   = value
-
-        case .manager(let value):
-            if let value {
-                guard try workerRow(value) != nil else {
-                    throw WorkspaceStoreError.workerNotFound(value)
-                }
-                try refuseCycle(worker: id, under: value)
-            }
-            worker.managerID = value
         }
 
         try saveOrRollBack()
@@ -145,30 +125,6 @@ extension WorkspaceStore {
         )
         descriptor.fetchLimit = 1
         return try modelContext.fetch(descriptor).first.map(ExecutionSnapshot.init)
-    }
-
-    // MARK: Hierarchy
-
-    /// Throws when making `id` report to `manager` would close a loop.
-    ///
-    /// Walks up from the proposed manager. The step budget is the number of
-    /// workers: a hierarchy without a cycle cannot be longer, and a store that
-    /// somehow already holds one must not spin here.
-    private func refuseCycle(worker id: UUID, under manager: UUID) throws {
-        let budget = try modelContext.fetchCount(FetchDescriptor<Worker>())
-        var cursor: UUID? = manager
-        var steps  = 0
-
-        while let current = cursor {
-            if current == id {
-                throw WorkspaceStoreError.cycleInHierarchy(workerID: id, managerID: manager)
-            }
-            steps += 1
-            guard steps <= budget else {
-                throw WorkspaceStoreError.cycleInHierarchy(workerID: id, managerID: manager)
-            }
-            cursor = try workerRow(current)?.managerID
-        }
     }
 
     // MARK: Rows

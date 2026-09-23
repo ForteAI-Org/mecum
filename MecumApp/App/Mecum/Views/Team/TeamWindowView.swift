@@ -14,9 +14,9 @@ import Workspace
 /// the team to `TeamShellView`, the three areas of the window.
 ///
 /// It is also the window's memory (§3.1). Whether the inspector was asked
-/// for, the selected worker and the folded branches are scene storage, so each
-/// window restores its own; the column widths are the split view's, restored
-/// with the window, and a new window starts from the tokens.
+/// for and the selected worker are scene storage, so each window restores its
+/// own; the column widths are the split view's, restored with the window, and
+/// a new window starts from the tokens.
 ///
 /// A store that did not open says so. It does not show an empty team, which
 /// would read as "you have no workers" when the truth is "nothing could be
@@ -43,10 +43,6 @@ struct TeamWindowView: View {
     @SceneStorage("team.selection")
     private var storedSelection = ""
 
-    /// The folded managers' ids, separated by commas.
-    @SceneStorage("team.collapsed")
-    private var storedCollapsed = ""
-
     var body: some View {
         content
             .frame(minWidth: ShellMetrics.windowMinimum, minHeight: 560)
@@ -70,9 +66,6 @@ struct TeamWindowView: View {
                 isInspectorRequested: $isInspectorRequested
             )
             .onChange(of: team.selection) { storedSelection = team.selection?.uuidString ?? "" }
-            .onChange(of: team.collapsed) {
-                storedCollapsed = team.collapsed.map(\.uuidString).sorted().joined(separator: ",")
-            }
         } else if let failure = launch.failure {
             ContentUnavailableView {
                 Label("The workspace did not open", systemImage: "externaldrive.badge.xmark")
@@ -89,12 +82,11 @@ struct TeamWindowView: View {
         }
     }
 
-    /// Puts back this window's selection and folded branches. A worker that
+    /// Puts back this window's selection. A worker that
     /// is no longer in the workspace is dropped rather than selected.
     private func restore(into team: TeamModel) {
         if let id = UUID(uuidString: storedSelection), team.worker(id) != nil {
             team.selection = id
         }
-        team.collapsed = Set(storedCollapsed.split(separator: ",").compactMap { UUID(uuidString: String($0)) })
     }
 }

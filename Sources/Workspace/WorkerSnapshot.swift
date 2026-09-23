@@ -20,7 +20,6 @@ public struct WorkerSnapshot: Sendable, Hashable, Identifiable {
     public let name        : String
     public let role        : String?
     public let instructions: String?
-    public let managerID   : UUID?
     public let isArchived  : Bool
     public let createdAt   : Date
     public let appearance  : WorkerAppearance
@@ -40,7 +39,6 @@ public struct WorkerSnapshot: Sendable, Hashable, Identifiable {
         self.name                 = worker.name
         self.role                 = worker.role
         self.instructions         = worker.instructions
-        self.managerID            = worker.managerID
         self.isArchived           = worker.isArchived
         self.createdAt            = worker.createdAt
         self.appearance           = worker.appearance

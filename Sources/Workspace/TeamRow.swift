@@ -7,8 +7,8 @@
 
 import Foundation
 
-/// TeamRow is one line of the team sidebar: a worker, its place in the
-/// outline, and the two texts the row is read with.
+/// TeamRow is one line of the team sidebar: a worker, its states, and the
+/// two texts the row is read with.
 ///
 /// The texts live here rather than in the view so they can be checked without
 /// running one. `name` is always the whole name: the view truncates it
@@ -20,10 +20,7 @@ public struct TeamRow: Sendable, Hashable, Identifiable {
     /// answer.
     public static let toConfigure = "To configure"
 
-    public let worker     : WorkerSnapshot
-    public let depth      : Int
-    public let hasReports : Bool
-    public let isCollapsed: Bool
+    public let worker: WorkerSnapshot
 
     /// The worker's model is no longer in its provider's catalogue (§7.4). The
     /// worker keeps its place and its configuration, and needs configuring.
@@ -54,17 +51,11 @@ public struct TeamRow: Sendable, Hashable, Identifiable {
 
     public init(
         worker            : WorkerSnapshot,
-        depth             : Int,
-        hasReports        : Bool,
-        isCollapsed       : Bool,
         isModelUnavailable: Bool,
         activity          : String?,
         unread            : UnreadState = .none
     ) {
         self.worker             = worker
-        self.depth              = depth
-        self.hasReports         = hasReports
-        self.isCollapsed        = isCollapsed
         self.isModelUnavailable = isModelUnavailable
         self.activity           = activity
         self.unread             = unread

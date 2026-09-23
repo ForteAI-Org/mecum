@@ -11,55 +11,8 @@ import SwiftData
 import Testing
 import Workspace
 
-@Suite("Workers, hierarchy and configuration")
+@Suite("Workers and configuration")
 struct WorkerStoreTests {
-
-    @Test("Several workers sit at the root and a worker may have no manager")
-    func rootsAndOrphans() async throws {
-        let directory = TemporaryStore.directory()
-        defer { TemporaryStore.discard(directory) }
-
-        let store = try WorkspaceStore.opening(in: directory)
-        let atlas = try await store.createWorker(name: "Atlas", appearance: TemporaryStore.appearance())
-        let nova  = try await store.createWorker(name: "Nova", appearance: TemporaryStore.appearance())
-        let milo  = try await store.createWorker(name: "Milo", managerID: atlas.id,
-                                                 appearance: TemporaryStore.appearance())
-
-        #expect(atlas.managerID == nil)
-        #expect(nova.managerID == nil)
-        #expect(milo.managerID == atlas.id)
-
-        let roots = try await store.workers().filter { $0.managerID == nil }
-        #expect(roots.count == 2)
-    }
-
-    @Test("A move that would close a loop is refused before the save")
-    func refusesCycle() async throws {
-        let directory = TemporaryStore.directory()
-        defer { TemporaryStore.discard(directory) }
-
-        let store = try WorkspaceStore.opening(in: directory)
-        let atlas = try await store.createWorker(name: "Atlas", appearance: TemporaryStore.appearance())
-        let milo  = try await store.createWorker(name: "Milo", managerID: atlas.id,
-                                                 appearance: TemporaryStore.appearance())
-        let iris  = try await store.createWorker(name: "Iris", managerID: milo.id,
-                                                 appearance: TemporaryStore.appearance())
-
-        await #expect(throws: WorkspaceStoreError.self) {
-            try await store.update(worker: atlas.id, .manager(iris.id))
-        }
-        await #expect(throws: WorkspaceStoreError.self) {
-            try await store.update(worker: atlas.id, .manager(atlas.id))
-        }
-
-        // The refusal happens before anything is written, so the store still
-        // holds the hierarchy it had, in this process and after a reopen.
-        #expect(try await store.worker(atlas.id)?.managerID == nil)
-
-        let reopened = try WorkspaceStore.opening(in: directory)
-        #expect(try await reopened.worker(atlas.id)?.managerID == nil)
-        #expect(try await reopened.worker(iris.id)?.managerID == milo.id)
-    }
 
     @Test("Identity and appearance survive a reopen and every ordinary edit")
     func identityIsStable() async throws {

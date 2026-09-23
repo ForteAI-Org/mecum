@@ -21,7 +21,7 @@ public enum WorkspaceSchemaV2: VersionedSchema {
 
     public static var models: [any PersistentModel.Type] {
         [
-            Worker.self,
+            WorkspaceSchemaV1.Worker.self,
             WorkerConfiguration.self,
             Execution.self,
             WorkspaceSchemaV2.Conversation.self,

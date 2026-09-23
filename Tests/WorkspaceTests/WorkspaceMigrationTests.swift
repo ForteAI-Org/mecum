@@ -11,7 +11,7 @@ import SwiftData
 import Testing
 @testable import Workspace
 
-/// The real migrations: stores written by the v1 and v2 schemas, opened by the
+/// The real migrations: stores written by the v1, v2 and v3 schemas, opened by the
 /// current one through `WorkspaceStore.opening(in:)`.
 @Suite("Upgrading older stores")
 struct WorkspaceMigrationTests {
@@ -36,9 +36,11 @@ struct WorkspaceMigrationTests {
                 configurations: ModelConfiguration(schema: schema, url: store)
             )
             let context = ModelContext(container)
-            context.insert(Worker(id: managerID, name: "Atlas", appearance: TemporaryStore.appearance()))
-            context.insert(Worker(id: workerID, name: "Nova", role: "Research", managerID: managerID,
-                                  appearance: TemporaryStore.appearance(palette: "dawn")))
+            context.insert(WorkspaceSchemaV1.Worker(id: managerID, name: "Atlas",
+                                                    appearance: TemporaryStore.appearance()))
+            context.insert(WorkspaceSchemaV1.Worker(id: workerID, name: "Nova", role: "Research",
+                                                    managerID: managerID,
+                                                    appearance: TemporaryStore.appearance(palette: "dawn")))
             context.insert(WorkerConfiguration(workerID: workerID, version: 1,
                                                selection: TemporaryStore.firstSelection))
             context.insert(WorkspaceSchemaV1.Conversation(id: conversationID, participantIDs: [workerID],
@@ -52,15 +54,14 @@ struct WorkspaceMigrationTests {
 
         let upgraded = try WorkspaceStore.opening(in: directory)
 
-        #expect(try String(contentsOf: marker, encoding: .utf8) == "3.0.0")
-        #expect(WorkspaceStoreFile.currentVersionIdentifier() == "3.0.0")
+        #expect(try String(contentsOf: marker, encoding: .utf8) == "4.0.0")
+        #expect(WorkspaceStoreFile.currentVersionIdentifier() == "4.0.0")
         let backup = directory.appending(path: WorkspaceStoreFile.storeName + WorkspaceStoreFile.backupSuffix)
         #expect(FileManager.default.fileExists(atPath: backup.path(percentEncoded: false)))
 
         let nova = try #require(try await upgraded.worker(workerID))
         #expect(nova.name == "Nova")
         #expect(nova.role == "Research")
-        #expect(nova.managerID == managerID)
         #expect(nova.appearance == TemporaryStore.appearance(palette: "dawn"))
         #expect(nova.configuration == TemporaryStore.firstSelection)
         #expect(try await upgraded.worker(managerID)?.name == "Atlas")
@@ -108,7 +109,8 @@ struct WorkspaceMigrationTests {
                 configurations: ModelConfiguration(schema: schema, url: store)
             )
             let context = ModelContext(container)
-            context.insert(Worker(id: workerID, name: "Atlas", appearance: TemporaryStore.appearance()))
+            context.insert(WorkspaceSchemaV1.Worker(id: workerID, name: "Atlas",
+                                                    appearance: TemporaryStore.appearance()))
             context.insert(WorkspaceSchemaV2.Conversation(id: conversationID, participantIDs: [workerID]))
             context.insert(Message(conversationID: conversationID, text: "ask", sequence: 1))
             context.insert(Message(conversationID: conversationID, authorWorkerID: workerID,
@@ -122,11 +124,63 @@ struct WorkspaceMigrationTests {
 
         let upgraded = try WorkspaceStore.opening(in: directory)
 
-        #expect(try String(contentsOf: marker, encoding: .utf8) == "3.0.0")
+        #expect(try String(contentsOf: marker, encoding: .utf8) == "4.0.0")
         #expect(try await upgraded.messages(in: conversationID).map(\.text) == ["ask", "answer"])
         #expect(try await upgraded.unreadByWorker().isEmpty)
 
         try await upgraded.appendMessage(to: conversationID, author: workerID, text: "later", delivery: .completed)
         #expect(try await upgraded.unreadByWorker()[workerID] == UnreadState(replies: 1, hasUnseenProblem: false))
+    }
+
+    @Test("A v3 worker that had a manager opens with its conversation and messages intact")
+    func aV3StoreDropsTheManager() async throws {
+        let directory = TemporaryStore.directory()
+        defer { TemporaryStore.discard(directory) }
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+
+        let managerID      = UUID()
+        let workerID       = UUID()
+        let conversationID = UUID()
+        let store  = directory.appending(path: WorkspaceStoreFile.storeName)
+        let marker = directory.appending(path: WorkspaceStoreFile.versionMarkerName)
+
+        // Written exactly as the v3 app wrote it: the v3 schema, and its marker.
+        do {
+            let schema    = Schema(versionedSchema: WorkspaceSchemaV3.self)
+            let container = try ModelContainer(
+                for           : schema,
+                configurations: ModelConfiguration(schema: schema, url: store)
+            )
+            let context = ModelContext(container)
+            context.insert(WorkspaceSchemaV1.Worker(id: managerID, name: "Iris",
+                                                    appearance: TemporaryStore.appearance()))
+            context.insert(WorkspaceSchemaV1.Worker(id: workerID, name: "Nova", role: "Editor",
+                                                    managerID: managerID,
+                                                    appearance: TemporaryStore.appearance(palette: "dawn")))
+            context.insert(WorkerConfiguration(workerID: workerID, version: 1,
+                                               selection: TemporaryStore.firstSelection))
+            context.insert(Conversation(id: conversationID, participantIDs: [workerID]))
+            context.insert(Message(conversationID: conversationID, text: "ask", sequence: 1))
+            context.insert(Message(conversationID: conversationID, authorWorkerID: workerID,
+                                   text: "answer", sequence: 2, delivery: .completed))
+            try context.save()
+        }
+        try "3.0.0".write(to: marker, atomically: true, encoding: .utf8)
+
+        let upgraded = try WorkspaceStore.opening(in: directory)
+
+        #expect(try String(contentsOf: marker, encoding: .utf8) == "4.0.0")
+        #expect(try await upgraded.workers().map(\.name) == ["Iris", "Nova"])
+
+        let nova = try #require(try await upgraded.worker(workerID))
+        #expect(nova.role == "Editor")
+        #expect(nova.appearance == TemporaryStore.appearance(palette: "dawn"))
+        #expect(nova.configuration == TemporaryStore.firstSelection)
+
+        let conversation = try #require(try await upgraded.conversation(conversationID))
+        #expect(conversation.participantIDs == [workerID])
+        let messages = try await upgraded.messages(in: conversationID)
+        #expect(messages.map(\.text) == ["ask", "answer"])
+        #expect(messages.last?.authorWorkerID == workerID)
     }
 }

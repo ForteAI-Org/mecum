@@ -75,16 +75,16 @@ enum WindowSnapshots {
 
     // MARK: The team
 
-    /// Three workers, one reporting line, and Atlas's conversation: an earlier
-    /// exchange, then one finished turn whose profile was changed afterwards, so
-    /// the inspector has to show the turn's model and not the profile's.
+    /// Three workers and Atlas's conversation: an earlier exchange, then one
+    /// finished turn whose profile was changed afterwards, so the inspector has
+    /// to show the turn's model and not the profile's.
     static func syntheticTeam(in directory: URL) async throws -> TeamModel {
         let store = try WorkspaceStore.opening(in: directory)
         let iris  = try await store.createWorker(name: "Iris", role: "Research lead",
                                                  appearance: WorkerAppearance(seed: 11, palette: "dusk"))
-        let atlas = try await store.createWorker(name: "Atlas", role: "Release engineer", managerID: iris.id,
+        let atlas = try await store.createWorker(name: "Atlas", role: "Release engineer",
                                                  appearance: WorkerAppearance(seed: 7, palette: "tide"))
-        try await store.createWorker(name: "Nova", role: "Editor", managerID: iris.id,
+        try await store.createWorker(name: "Nova", role: "Editor",
                                      appearance: WorkerAppearance(seed: 23, palette: "ember"))
         try await store.configure(worker: iris.id, selection: ModelSelection(
             provider: .claudeCode, model: "claude-opus-5", effort: .high))

@@ -21,7 +21,6 @@ public enum EventType: Sendable, Hashable {
 
     case workerCreated
     case workerConfigured
-    case workerManagerChanged
     case workerArchived
     case conversationOpened
     case messageRecorded
@@ -55,15 +54,15 @@ public enum EventType: Sendable, Hashable {
     public var isTerminal: Bool {
         switch self {
         case .executionCompleted, .executionFailed, .executionCancelled: true
-        case .workerCreated, .workerConfigured, .workerManagerChanged, .workerArchived,
-             .conversationOpened, .messageRecorded, .messageDeliveryChanged, .executionStarted,
-             .toolActivity, .agentProcessStarted, .unknown: false
+        case .workerCreated, .workerConfigured, .workerArchived, .conversationOpened,
+             .messageRecorded, .messageDeliveryChanged, .executionStarted, .toolActivity,
+             .agentProcessStarted, .unknown: false
         }
     }
 
     /// Every type this build knows, which is what decoding matches against.
     static let known: [EventType] = [
-        .workerCreated, .workerConfigured, .workerManagerChanged, .workerArchived, .conversationOpened,
+        .workerCreated, .workerConfigured, .workerArchived, .conversationOpened,
         .messageRecorded, .messageDeliveryChanged, .executionStarted, .executionCompleted, .executionFailed,
         .executionCancelled, .toolActivity, .agentProcessStarted,
     ]
@@ -80,7 +79,6 @@ extension EventType: RawRepresentable, Codable {
         switch self {
         case .workerCreated:          "workerCreated"
         case .workerConfigured:       "workerConfigured"
-        case .workerManagerChanged:   "workerManagerChanged"
         case .workerArchived:         "workerArchived"
         case .conversationOpened:     "conversationOpened"
         case .messageRecorded:        "messageRecorded"

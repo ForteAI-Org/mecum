@@ -18,23 +18,19 @@ import Workspace
 @Suite("Team outline and row texts")
 struct TeamOutlineTests {
 
-    @Test("A manager comes before its reports, and depth follows the chain")
-    func managersPrecedeReports() async throws {
+    @Test("The team is one flat list, in the store's order by name")
+    func theTeamIsFlatByName() async throws {
         let directory = TemporaryStore.directory()
         defer { TemporaryStore.discard(directory) }
 
         let store = try WorkspaceStore.opening(in: directory)
-        let head  = try await store.createWorker(name: "Aaa", appearance: TemporaryStore.appearance())
-        let lead  = try await store.createWorker(name: "Zzz", managerID: head.id,
-                                                 appearance: TemporaryStore.appearance())
-        let scout = try await store.createWorker(name: "Bbb", managerID: lead.id,
-                                                 appearance: TemporaryStore.appearance())
+        let last  = try await store.createWorker(name: "Zzz", appearance: TemporaryStore.appearance())
+        let first = try await store.createWorker(name: "Aaa", appearance: TemporaryStore.appearance())
+        let mid   = try await store.createWorker(name: "Bbb", appearance: TemporaryStore.appearance())
 
         let rows = TeamOutline.rows(of: try await store.workers())
 
-        #expect(rows.map(\.id) == [head.id, lead.id, scout.id])
-        #expect(rows.map(\.depth) == [0, 1, 2])
-        #expect(rows.map(\.hasReports) == [true, true, false])
+        #expect(rows.map(\.id) == [first.id, mid.id, last.id])
     }
 
     @Test("A worker whose model is gone keeps its place and reads as to configure")
@@ -44,7 +40,7 @@ struct TeamOutlineTests {
 
         let store = try WorkspaceStore.opening(in: directory)
         let head  = try await store.createWorker(name: "Aaa", role: "Lead", appearance: TemporaryStore.appearance())
-        let gone  = try await store.createWorker(name: "Bbb", role: "Research", managerID: head.id,
+        let gone  = try await store.createWorker(name: "Bbb", role: "Research",
                                                  appearance: TemporaryStore.appearance())
         try await store.configure(worker: head.id, selection: TemporaryStore.firstSelection)
         try await store.configure(worker: gone.id, selection: TemporaryStore.secondSelection)
@@ -54,7 +50,6 @@ struct TeamOutlineTests {
         let after   = TeamOutline.rows(of: workers, modelUnavailable: [gone.id])
 
         #expect(before.map(\.id) == after.map(\.id))
-        #expect(before.map(\.depth) == after.map(\.depth))
 
         let row = try #require(after.first { $0.id == gone.id })
         #expect(row.worker.isConfigured)
@@ -70,54 +65,16 @@ struct TeamOutlineTests {
         defer { TemporaryStore.discard(directory) }
 
         let store = try WorkspaceStore.opening(in: directory)
-        let head  = try await store.createWorker(name: "Aaa", appearance: TemporaryStore.appearance())
-        let first = try await store.createWorker(name: "Bbb", managerID: head.id,
-                                                 appearance: TemporaryStore.appearance())
-        _ = try await store.createWorker(name: "Ccc", managerID: head.id,
-                                         appearance: TemporaryStore.appearance())
+        _         = try await store.createWorker(name: "Aaa", appearance: TemporaryStore.appearance())
+        let first = try await store.createWorker(name: "Bbb", appearance: TemporaryStore.appearance())
+        _         = try await store.createWorker(name: "Ccc", appearance: TemporaryStore.appearance())
 
         let before = TeamOutline.rows(of: try await store.workers())
         try await store.configure(worker: first.id, selection: TemporaryStore.firstSelection)
         let after = TeamOutline.rows(of: try await store.workers())
 
         #expect(before.map(\.id) == after.map(\.id))
-        #expect(before.map(\.depth) == after.map(\.depth))
         #expect(after.first { $0.id == first.id }?.worker.isConfigured == true)
-    }
-
-    @Test("A report whose manager is archived is listed, at the top level")
-    func archivedManagerLeavesItsReportsVisible() async throws {
-        let directory = TemporaryStore.directory()
-        defer { TemporaryStore.discard(directory) }
-
-        let store = try WorkspaceStore.opening(in: directory)
-        let head  = try await store.createWorker(name: "Aaa", appearance: TemporaryStore.appearance())
-        let scout = try await store.createWorker(name: "Bbb", managerID: head.id,
-                                                 appearance: TemporaryStore.appearance())
-        try await store.update(worker: head.id, .archived(true))
-
-        let rows = TeamOutline.rows(of: try await store.workers())
-
-        #expect(rows.map(\.id) == [scout.id])
-        #expect(rows.first?.depth == 0)
-    }
-
-    @Test("A collapsed manager hides its reports and keeps the rest of the team")
-    func collapsedManagerHidesItsReports() async throws {
-        let directory = TemporaryStore.directory()
-        defer { TemporaryStore.discard(directory) }
-
-        let store = try WorkspaceStore.opening(in: directory)
-        let head  = try await store.createWorker(name: "Aaa", appearance: TemporaryStore.appearance())
-        _ = try await store.createWorker(name: "Bbb", managerID: head.id,
-                                         appearance: TemporaryStore.appearance())
-        let other = try await store.createWorker(name: "Ccc", appearance: TemporaryStore.appearance())
-
-        let rows = TeamOutline.rows(of: try await store.workers(), collapsed: [head.id])
-
-        #expect(rows.map(\.id) == [head.id, other.id])
-        #expect(rows.first?.isCollapsed == true)
-        #expect(rows.first?.hasReports == true)
     }
 
     @Test("The subtitle is the role, and says to configure while no model is attached")
@@ -171,8 +128,7 @@ struct TeamOutlineTests {
 
         let store = try WorkspaceStore.opening(in: directory)
         let head  = try await store.createWorker(name: "Aaa", role: "Lead", appearance: TemporaryStore.appearance())
-        let scout = try await store.createWorker(name: "Bbb", role: "Scout", managerID: head.id,
-                                                 appearance: TemporaryStore.appearance())
+        let scout = try await store.createWorker(name: "Bbb", role: "Scout", appearance: TemporaryStore.appearance())
         let idle  = try await store.createWorker(name: "Ccc", appearance: TemporaryStore.appearance())
         for worker in [head, scout] {
             try await store.configure(worker: worker.id, selection: TemporaryStore.firstSelection)
@@ -185,7 +141,6 @@ struct TeamOutlineTests {
         ])
 
         #expect(after.map(\.id) == before.map(\.id))
-        #expect(after.map(\.depth) == before.map(\.depth))
         #expect(after.map(\.subtitle) == ["Using Calculator", "Waiting for the computer (1 ahead)", TeamRow.toConfigure])
         #expect(before.map(\.subtitle) == ["Lead", "Scout", TeamRow.toConfigure])
         let scoutRow = try #require(after.first { $0.id == scout.id })
