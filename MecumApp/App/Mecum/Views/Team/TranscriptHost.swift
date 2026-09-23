@@ -22,6 +22,8 @@ struct TranscriptHost: NSViewRepresentable {
     let controller: TranscriptController
 
     var topInset   : CGFloat = 0
+    /// The height of what floats over the transcript's bottom edge, the composer,
+    /// which the last message scrolls clear of.
     var bottomInset: CGFloat = 0
 
     @AppStorage(TextSizeCommands.storageKey)
@@ -36,7 +38,9 @@ struct TranscriptHost: NSViewRepresentable {
         return view
     }
 
-    func updateNSView(_ view: NSView, context: Context) { applyStyle() }
+    func updateNSView(_ view: NSView, context: Context) {
+        applyStyle()
+    }
 
     /// Takes what it is offered and asks for no size of its own, so its minimum
     /// is zero whatever width the last layout gave it.

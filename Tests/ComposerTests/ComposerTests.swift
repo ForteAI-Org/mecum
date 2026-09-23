@@ -184,20 +184,39 @@ struct ComposerTests {
         #expect(harness.sends == 1)
     }
 
-    @Test("The field is labelled with its recipient for VoiceOver, and Tab leaves it")
+    @Test("The field is labelled with its recipient for VoiceOver, and its help names the keys")
     func accessibility() async throws {
         let harness  = ComposerHarness(recipient: "Atlas")
         defer { harness.close() }
         let textView = try #require(harness.textView)
         #expect(textView.accessibilityLabel() == "Message Atlas")
         #expect(textView.accessibilityPlaceholderValue() == "Message Atlas")
-        harness.focus()
-        harness.press("\t", keyCode: 48)
-        #expect(textView.string.isEmpty)
+        #expect(textView.accessibilityHelp()?.contains("Control-Tab moves to the next control") == true)
+        #expect(textView.accessibilityHelp()?.contains("Shift-Return") == true)
     }
 
-    private func bar(draft: String, isAnswering: Bool) -> ComposerBar {
-        ComposerBar(draft: .constant(draft), recipient: "Milo", notice: nil, isAnswering: isAnswering,
-                    send: {}, stop: {}, chooseModel: {})
+    @Test("A recipient that cannot answer shows the model placeholder, and neither Send nor Return sends")
+    func cannotAnswer() async throws {
+        let harness = ComposerHarness(recipient: "Milo")
+        defer { harness.close() }
+        harness.canAnswer = false
+        try await harness.settle()
+        let textView = try #require(harness.textView)
+        #expect(textView.placeholder == "Choose a model to message Milo")
+        #expect(textView.accessibilityLabel() == "Choose a model to message Milo")
+        harness.focus()
+        harness.type("saved anyway")
+        try await harness.settle()
+        harness.pressReturn()
+        try await harness.settle()
+        #expect(harness.sends == 0)
+        #expect(harness.draft == "saved anyway")
+        #expect(!bar(draft: "saved anyway", canAnswer: false).canSend)
+        #expect(bar(draft: "saved anyway", canAnswer: true).canSend)
+    }
+
+    private func bar(draft: String, isAnswering: Bool = false, canAnswer: Bool = true) -> ComposerBar {
+        ComposerBar(draft: .constant(draft), recipient: "Milo", canAnswer: canAnswer, isAnswering: isAnswering,
+                    send: {}, stop: {})
     }
 }

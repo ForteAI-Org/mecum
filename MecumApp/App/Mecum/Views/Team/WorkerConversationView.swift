@@ -35,12 +35,12 @@ struct WorkerConversationView: View {
     /// conversation reuses it, so the collection view is not rebuilt.
     @State private var transcript: TranscriptController?
 
+    /// The floating composer's height, which the transcript keeps clear below its last message.
+    @State private var composerHeight: CGFloat = 0
+
     var body: some View {
-        VStack(spacing: 0) {
-            transcriptArea
-            Divider()
-            composer
-        }
+        transcriptArea
+            .overlay(alignment: .bottom) { composer }
     }
 
     // MARK: Transcript
@@ -48,7 +48,8 @@ struct WorkerConversationView: View {
     private var transcriptArea: some View {
         Group {
             if let transcript {
-                TranscriptHost(controller: transcript, topInset: WorkerHeaderView.clearance)
+                TranscriptHost(controller: transcript, topInset: WorkerHeaderView.clearance,
+                               bottomInset: composerHeight)
             } else {
                 Color.clear
             }
@@ -88,36 +89,29 @@ struct WorkerConversationView: View {
 
     // MARK: Composer
 
-    /// Why this worker cannot answer, when that is known: no model, a model
-    /// the catalogue dropped, or a provider this build has no agent for.
-    private var modelNotice: String? {
-        guard let selection = worker.configuration else {
-            return "\(worker.name) has no model attached. What you write is saved and stays here, "
-                + "and nothing answers until a model is connected."
-        }
-        if case .modelRemoved(let model) = team.modelStates[worker.id] {
-            return "\(model) is no longer offered by \(selection.provider.title), so \(worker.name) needs "
-                + "configuring. Nothing was changed; choose a model to replace it."
-        }
-        if let refusal = WorkerAnswer(provider: selection.provider).refusal {
-            return "\(selection.provider.title) does not answer here yet: \(refusal). What you write is saved, "
-                + "and \(worker.name) answers once it uses Claude Code or Codex."
-        }
-        return nil
+    /// Whether this worker can answer: it has a model the catalogue still
+    /// offers, on a provider this build has an agent for. The inspector shows
+    /// which of these is missing; the composer only says to choose a model.
+    private var canAnswer: Bool {
+        guard let selection = worker.configuration else { return false }
+        if case .modelRemoved = team.modelStates[worker.id] { return false }
+        return WorkerAnswer(provider: selection.provider).refusal == nil
     }
 
-    /// The composer (§13). Its field hands the draft committed text only,
-    /// never a composition in progress, so the pause below writes finished text.
+    /// The composer (§13), floating over the transcript's bottom edge. Its field
+    /// hands the draft committed text only, never a composition in progress, so
+    /// the pause below writes finished text.
     private var composer: some View {
         ComposerBar(
             draft      : $team.draft,
             recipient  : worker.name,
-            notice     : modelNotice,
+            canAnswer  : canAnswer,
             isAnswering: team.isAnswering(worker.id),
             send       : { Task { await team.send() } },
             stop       : { team.stopAnswering(worker.id) },
-            chooseModel: { team.profileWorkerID = worker.id }
+            release    : team.holdsComputer(worker.id) ? { Task { await team.releaseComputer(worker.id) } } : nil
         )
+        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { composerHeight = $0 }
         // The draft reaches the store once typing pauses. A new keystroke
         // cancels this task and starts it again, so a burst writes once.
         .task(id: team.draft) {

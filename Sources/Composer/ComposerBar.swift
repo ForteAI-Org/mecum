@@ -7,86 +7,160 @@
 
 import SwiftUI
 
-/// ComposerBar is the conversation's composer (§13.1): the field, Send, Stop
-/// while a turn runs, and why the recipient cannot answer when that is known.
+/// ComposerBar is the conversation's composer (§13.1): a pill that floats over
+/// the bottom of the transcript, holding the field and one circle pinned to its
+/// bottom-trailing corner, Send, or Stop while a turn runs. While the recipient
+/// holds the computer, a quiet Release the computer button comes out of the
+/// circle toward the leading side; the circle itself never moves.
+///
+/// The bar is inset from the edges it is placed against and grows upward with
+/// its text. The caller lays it over the transcript and gives the transcript
+/// the bar's height as its bottom inset, so the last message scrolls clear of it.
 ///
 /// It carries no model, effort, tokens or provider, and no Add context or
 /// microphone: nothing supplies attachments or voice yet, and a control that
-/// does nothing is not shown (§21.2). The draft is the caller's binding and
-/// stays editable during a turn; only sending waits for the turn to end.
+/// does nothing is not shown (§21.2). A recipient that cannot answer says so
+/// only in the placeholder, with Send disabled; the draft stays editable, as
+/// it does during a turn, where only sending waits for the turn to end.
 public struct ComposerBar: View {
+
+    /// The circle's side, and the pill's height at one line with `padding` around it.
+    static let circleSide: CGFloat = 28
+
+    static let padding: CGFloat = 5
+
+    /// The pill is a capsule at one line and keeps these ends as it grows.
+    static let cornerRadius = circleSide / 2 + padding
+
+    /// The release button's symbol: a door with an arrow out of it, leaving the seat.
+    static let releaseSymbol = "rectangle.portrait.and.arrow.right"
 
     @Binding private var draft: String
 
     private let recipient  : String
-    private let notice     : String?
+    private let canAnswer  : Bool
     private let isAnswering: Bool
     private let send       : () -> Void
     private let stop       : () -> Void
-    private let chooseModel: () -> Void
+    private let release    : (() -> Void)?
+
+    /// The surface a snapshot draws instead of the platform's.
+    var surface: ComposerSurface.Kind?
+
+    @Environment(\.accessibilityReduceTransparency)
+    private var reducesTransparency
+
+    @Environment(\.accessibilityReduceMotion)
+    private var reducesMotion
+
+    @Namespace
+    private var glass
 
     /// - Parameters:
     ///   - recipient: the worker's name, in the placeholder and the labels.
-    ///   - notice: why the recipient cannot answer, or nil when it can.
-    ///   - isAnswering: a turn runs for the recipient, so Send waits and Stop shows.
+    ///   - canAnswer: the recipient has a model that can answer; without one Send is disabled.
+    ///   - isAnswering: a turn runs for the recipient, so the circle is Stop.
+    ///   - release: gives the computer back; nil while the recipient does not hold it,
+    ///     and the button is shown only while it is not nil.
     public init(
         draft      : Binding<String>,
         recipient  : String,
-        notice     : String?,
+        canAnswer  : Bool,
         isAnswering: Bool,
         send       : @escaping () -> Void,
         stop       : @escaping () -> Void,
-        chooseModel: @escaping () -> Void
+        release    : (() -> Void)? = nil
     ) {
         _draft           = draft
         self.recipient   = recipient
-        self.notice      = notice
+        self.canAnswer   = canAnswer
         self.isAnswering = isAnswering
         self.send        = send
         self.stop        = stop
-        self.chooseModel = chooseModel
+        self.release     = release
     }
 
-    /// Something to say and no turn running for the recipient.
+    /// Something to say, someone to answer it, and no turn running for them.
     var canSend: Bool {
-        !isAnswering && !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        canAnswer && !isAnswering && !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    /// "Message Milo", or what Milo needs before it can be messaged.
+    var placeholder: String {
+        canAnswer ? "Message \(recipient)" : "Choose a model to message \(recipient)"
+    }
+
+    private var kind: ComposerSurface.Kind {
+        surface ?? .resolved(reducesTransparency: reducesTransparency)
     }
 
     public var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        HStack(alignment: .bottom, spacing: 8) {
+            ComposerField(text: $draft, placeholder: placeholder, onSubmit: canSend ? send : nil)
+                .padding(.vertical, 2)
+            actions
+        }
+        .padding(.leading, 14)
+        .padding([.vertical, .trailing], Self.padding)
+        .modifier(ComposerSurface(
+            shape: RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous),
+            kind : kind
+        ))
+        .padding(.horizontal, 16)
+        .padding(.bottom, 12)
+    }
 
-            if let notice {
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Label(notice, systemImage: "exclamationmark.circle")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                    Spacer(minLength: 0)
-                    Button("Choose a model", action: chooseModel)
-                        .controlSize(.small)
+    /// Release, when shown, and the circle, as one control: on glass their
+    /// shapes merge, and Release morphs out of the circle and back into it.
+    private var actions: some View {
+        GlassEffectContainer(spacing: 6) {
+            HStack(spacing: 6) {
+                if let release {
+                    releaseButton(release)
+                        .transition(kind == .glass ? .identity : .scale(scale: 0.3, anchor: .trailing)
+                            .combined(with: .opacity))
                 }
-            }
-
-            HStack(alignment: .bottom, spacing: 8) {
-                ComposerField(text: $draft, placeholder: "Message \(recipient)", onSubmit: canSend ? send : nil)
-
-                if isAnswering {
-                    Button("Stop", systemImage: "stop.circle.fill", action: stop)
-                        .labelStyle(.iconOnly)
-                        .buttonStyle(.borderless)
-                        .keyboardShortcut(".", modifiers: .command)
-                        .help("Stop the answer (Command Period)")
-                        .accessibilityLabel("Stop \(recipient)'s answer")
-                }
-
-                Button("Send", systemImage: "arrow.up.circle.fill", action: send)
-                    .labelStyle(.iconOnly)
-                    .buttonStyle(.borderless)
-                    .keyboardShortcut(.return, modifiers: .command)
-                    .disabled(!canSend)
-                    .help("Send (Return)")
+                circle
             }
         }
-        .padding(12)
+        .animation(reducesMotion ? nil : .spring(duration: 0.35, bounce: 0.15), value: release != nil)
+    }
+
+    private func releaseButton(_ release: @escaping () -> Void) -> some View {
+        Button(action: release) {
+            Image(systemName: Self.releaseSymbol)
+                .font(.system(size: 13, weight: .medium))
+                .foregroundStyle(.secondary)
+                .frame(width: Self.circleSide, height: Self.circleSide)
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .modifier(ActionGlass(isGlass: kind == .glass, tint: nil, id: "release", namespace: glass))
+        .help("Release the computer")
+        .accessibilityLabel("Release the computer")
+    }
+
+    /// Send, which becomes Stop in the same place while a turn runs.
+    private var circle: some View {
+        let isEnabled = isAnswering || canSend
+        // On glass the tint is the glass's own; off glass the circle is filled.
+        let fill      = kind == .glass ? AnyShapeStyle(.clear)
+            : isEnabled ? AnyShapeStyle(.tint) : AnyShapeStyle(.quaternary)
+        return Button(action: isAnswering ? stop : send) {
+            Image(systemName: isAnswering ? "stop.fill" : "arrow.up")
+                .font(.system(size: isAnswering ? 11 : 13, weight: .bold))
+                .foregroundStyle(isEnabled ? AnyShapeStyle(.white) : AnyShapeStyle(.tertiary))
+                .frame(width: Self.circleSide, height: Self.circleSide)
+                .background(Circle().fill(fill))
+                .contentShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .modifier(ActionGlass(isGlass: kind == .glass, tint: isEnabled ? .accentColor : nil, id: "circle",
+                              namespace: glass))
+        .disabled(!isEnabled)
+        .keyboardShortcut(isAnswering ? KeyboardShortcut(".", modifiers: .command)
+                                      : KeyboardShortcut(.return, modifiers: .command))
+        .help(isAnswering ? "Stop the answer (Command Period)" : "Send (Return)")
+        .accessibilityLabel(isAnswering ? "Stop \(recipient)'s answer" : "Send")
     }
 }

@@ -8,7 +8,10 @@
 import AppKit
 
 /// ComposerTextView is the composer's editing surface (§13.2): Return sends,
-/// Option-Return inserts a line break.
+/// Shift-Return and Option-Return insert a line break that keeps the current
+/// line's indentation, and Tab and Shift-Tab indent and outdent, so code can
+/// be written in it. Control-Tab and Control-Shift-Tab move the focus, which
+/// is the macOS convention for a text view (§3.3).
 ///
 /// A send is only ever the `insertNewline(_:)` command, which the key bindings
 /// raise for a Return that no input method consumed. While marked text is
@@ -18,6 +21,9 @@ import AppKit
 ///
 /// Main actor, like every view. It owns no draft: `ComposerField` reads it.
 final class ComposerTextView: NSTextView {
+
+    /// One level of indentation, as Tab inserts it and Shift-Tab removes it.
+    static let indentation = "    "
 
     /// Called for a Return that should send. Nil while nothing can be sent, and
     /// a Return then does nothing.
@@ -34,6 +40,16 @@ final class ComposerTextView: NSTextView {
 
     private var isShowingPlaceholder = false
 
+    /// The key down being interpreted, so a command can tell which modifiers
+    /// raised it. Set only for the duration of `keyDown(with:)`.
+    private var interpretedKey: NSEvent?
+
+    override func keyDown(with event: NSEvent) {
+        interpretedKey = event
+        defer { interpretedKey = nil }
+        super.keyDown(with: event)
+    }
+
     override func insertNewline(_ sender: Any?) {
         if hasMarkedText() {
             // Return confirms the composition, as the input method's own Return does, and sends nothing.
@@ -41,13 +57,37 @@ final class ComposerTextView: NSTextView {
             didChangeText()
             return
         }
+        // Shift-Return reaches this command like Return does; only its modifier tells them apart.
+        if isInterpreting(.shift) {
+            insertLineBreak()
+            return
+        }
         onSubmit?()
     }
 
-    // Tab leaves the field, so the keyboard reaches Send and Stop after it (§3.3).
-    override func insertTab(_ sender: Any?) { window?.selectNextKeyView(sender) }
+    override func insertNewlineIgnoringFieldEditor(_ sender: Any?) { insertLineBreak() }
 
-    override func insertBacktab(_ sender: Any?) { window?.selectPreviousKeyView(sender) }
+    override func insertTab(_ sender: Any?) {
+        if isInterpreting(.control) {
+            window?.selectNextKeyView(sender)
+        } else if spansLines(selectedRange()) {
+            rewriteSelectedLines { Self.indentation + $0 }
+        } else {
+            insertText(Self.indentation, replacementRange: selectedRange())
+        }
+    }
+
+    override func insertBacktab(_ sender: Any?) {
+        if isInterpreting(.control) {
+            window?.selectPreviousKeyView(sender)
+            return
+        }
+        rewriteSelectedLines { line in
+            if line.hasPrefix("\t") { return String(line.dropFirst()) }
+            let spaces = line.prefix { $0 == " " }.count
+            return String(line.dropFirst(min(spaces, Self.indentation.count)))
+        }
+    }
 
     override func didChangeText() {
         super.didChangeText()
@@ -73,6 +113,53 @@ final class ComposerTextView: NSTextView {
         if let textStorage { undoManager?.removeAllActions(withTarget: textStorage) }
         needsDisplay = true
         textDidChangeShape()
+    }
+
+    private func isInterpreting(_ modifier: NSEvent.ModifierFlags) -> Bool {
+        interpretedKey?.modifierFlags.contains(modifier) ?? false
+    }
+
+    /// Breaks the line at the caret and repeats the indentation before it. A
+    /// composition in progress is committed first, so none of it is lost.
+    private func insertLineBreak() {
+        if hasMarkedText() { unmarkText() }
+        let text      = string as NSString
+        let selection = selectedRange()
+        let lineStart = text.lineRange(for: NSRange(location: selection.location, length: 0)).location
+        let before    = text.substring(with: NSRange(location: lineStart, length: selection.location - lineStart))
+        let indent    = before.prefix { $0 == " " || $0 == "\t" }
+        insertText("\n" + indent, replacementRange: selection)
+    }
+
+    /// A selection that holds a line break, so Tab indents its lines instead of replacing it.
+    private func spansLines(_ selection: NSRange) -> Bool {
+        selection.length > 0 && (string as NSString).substring(with: selection).contains("\n")
+    }
+
+    /// Rewrites each line the selection touches, as one undoable change. An
+    /// empty selection keeps the caret where it was on its line; any other
+    /// selects the rewritten lines.
+    private func rewriteSelectedLines(_ rewrite: (Substring) -> String) {
+        let text      = string as NSString
+        let selection = selectedRange()
+        // A selection ending just after a line break does not touch the line below it.
+        let touched   = NSRange(location: selection.location, length: max(0, selection.length - 1))
+        let lines     = text.lineRange(for: touched)
+        let old       = text.substring(with: lines)
+        let hasBreak  = old.hasSuffix("\n")
+        let body      = hasBreak ? old.dropLast() : Substring(old)
+        let new       = body.split(separator: "\n", omittingEmptySubsequences: false).map(rewrite)
+            .joined(separator: "\n") + (hasBreak ? "\n" : "")
+        guard new != old, shouldChangeText(in: lines, replacementString: new) else { return }
+        replaceCharacters(in: lines, with: new)
+        didChangeText()
+        let newLength = (new as NSString).length
+        if selection.length == 0 {
+            let moved = selection.location + newLength - lines.length
+            setSelectedRange(NSRange(location: max(lines.location, moved), length: 0))
+        } else {
+            setSelectedRange(NSRange(location: lines.location, length: newLength - (hasBreak ? 1 : 0)))
+        }
     }
 
     /// Redraws when the placeholder appears or goes, and asks the enclosing

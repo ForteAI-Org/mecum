@@ -49,8 +49,10 @@ final class ComposerScrollView: NSScrollView {
         textView.isHorizontallyResizable = false
         textView.autoresizingMask        = [.width]
         textView.textContainer?.widthTracksTextView = true
-        // The text starts where the notice above it does.
+        // The pill's own padding places the text; the container adds none.
         textView.textContainer?.lineFragmentPadding = 0
+        textView.setAccessibilityHelp("Return sends. Shift-Return or Option-Return starts a new line. "
+            + "Tab indents and Shift-Tab outdents. Control-Tab moves to the next control.")
         textView.frame = NSRect(origin: .zero, size: contentSize)
         documentView = textView
 

@@ -114,18 +114,10 @@ struct TeamShellView: View {
 
     /// The window's own controls, `ShellChrome.toolbar`: the split view's sidebar
     /// toggle and the inspector toggle. The worker's name is the floating header,
-    /// the connections are at the foot of the sidebar, and the release is contextual.
+    /// the connections are at the foot of the sidebar, and Release the computer is
+    /// in the composer beside Send and in the worker's commands.
     @ToolbarContentBuilder
     private var toolbar: some ToolbarContent {
-        if let worker = team.selectedWorker, team.holdsComputer(worker.id) {
-            ToolbarItem {
-                Button("Release the computer", systemImage: "hand.raised") {
-                    Task { await team.releaseComputer(worker.id) }
-                }
-                .labelStyle(.titleAndIcon)
-                .help("Give the computer back. \(worker.name) and this conversation stay as they are.")
-            }
-        }
         ToolbarItem {
             Button(isInspectorShown ? "Hide Inspector" : "Show Inspector", systemImage: "sidebar.trailing",
                    action: toggleInspector)

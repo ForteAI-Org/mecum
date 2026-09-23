@@ -31,6 +31,12 @@ struct WorkerCommands: View {
             Divider()
         }
 
+        // The composer's release button has this command behind it, reachable without a pointer (§3.3).
+        if team.holdsComputer(worker.id) {
+            Button("Release the computer") { Task { await team.releaseComputer(worker.id) } }
+            Divider()
+        }
+
         if !worker.isArchived {
             Button("Model and connection…") { team.profileWorkerID = worker.id }
             Divider()

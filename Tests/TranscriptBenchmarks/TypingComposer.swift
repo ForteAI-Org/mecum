@@ -41,11 +41,10 @@ final class TypingComposer {
         let hosting = NSHostingView(rootView: ComposerBar(
             draft      : Binding(get: { [weak self] in self?.draft ?? "" }, set: { [weak self] in self?.draft = $0 }),
             recipient  : "Worker",
-            notice     : nil,
+            canAnswer  : true,
             isAnswering: false,
             send       : {},
-            stop       : {},
-            chooseModel: {}
+            stop       : {}
         ))
         hosting.frame = NSRect(x: 0, y: 0, width: container.bounds.width, height: height)
         hosting.autoresizingMask = [.width]
