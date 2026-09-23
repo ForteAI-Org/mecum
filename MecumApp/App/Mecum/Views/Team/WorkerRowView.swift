@@ -33,9 +33,6 @@ struct WorkerRowView: View {
 
     private var isEmphasized: Bool { isSelected && isFocused }
 
-    @Environment(\.accessibilityReduceMotion)
-    private var reducesMotion
-
     var body: some View {
         content
             .frame(maxWidth: .infinity, alignment: isCompact ? .center : .leading)
@@ -48,8 +45,8 @@ struct WorkerRowView: View {
     }
 
     /// One layout that is a line in the full sidebar and a tile in the compact
-    /// one. The mascot, the name and the indicator are the same views in both,
-    /// so turning compact moves and resizes them rather than swapping one row for another.
+    /// one, with the same mascot, name and indicator in both. The change is not
+    /// animated: the list's rows change height at once, so a moving row only stuttered.
     private var content: some View {
         let layout = isCompact ? AnyLayout(VStackLayout(spacing: 4)) : AnyLayout(HStackLayout(spacing: 10))
         return layout {
@@ -84,8 +81,6 @@ struct WorkerRowView: View {
         .padding(.bottom, isCompact ? 7 : 8)
         .padding(.horizontal, isCompact ? 0 : SidebarBlock.contentInset - SidebarBlock.listContentInset)
         .frame(minHeight: isCompact ? nil : 48)
-        // Only the row's own parts move, the mascot and name gliding into the tile and back.
-        .animation(reducesMotion ? nil : .smooth(duration: 0.3), value: isCompact)
     }
 
     /// The attention mark when a turn failed or stopped unseen, else the unread

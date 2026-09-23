@@ -67,6 +67,9 @@ struct TeamShellView: View {
     /// The second step of the division being applied, cancelled by a newer one.
     @State private var secondStep: Task<Void, Never>?
 
+    @Environment(\.accessibilityReduceMotion)
+    private var reducesMotion
+
     init(team: TeamModel, isInspectorRequested: Binding<Bool>) {
         self.team             = team
         _isInspectorRequested = isInspectorRequested
@@ -226,11 +229,16 @@ struct TeamShellView: View {
         }
     }
 
-    @ViewBuilder
+    /// The selected worker's name and mascot; another worker's cross-fade in place of the last.
     private var header: some View {
-        if let header = ShellChrome.header(for: team.selectedWorker) {
-            WorkerHeaderView(header: header)
+        ZStack(alignment: .leading) {
+            if let header = ShellChrome.header(for: team.selectedWorker) {
+                WorkerHeaderView(header: header)
+                    .id(header.workerID)
+                    .transition(.opacity.combined(with: .offset(y: reducesMotion ? 0 : 3)))
+            }
         }
+        .animation(reducesMotion ? .easeOut(duration: 0.15) : .smooth(duration: 0.25), value: team.selection)
     }
 
     @ViewBuilder
