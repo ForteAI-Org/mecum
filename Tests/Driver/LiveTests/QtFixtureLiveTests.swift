@@ -118,6 +118,190 @@ private final class QtProbeTarget {
 struct QtFixtureLiveTests {
 
     @Test(
+        "two Qt 6 windows can switch the observed target without taking the User Seat",
+        .enabled(
+            if: qtFixtureSkipReason() == nil,
+            Comment(rawValue: qtFixtureSkipReason() ?? "")))
+    func switchTargets() async throws {
+        let target = try QtProbeTarget()
+        defer { target.stop() }
+        let processID = target.processID
+        let original = try WindowReader.windowSnapshot(
+            processID: processID, allowUnvalidatedBuild: true
+        )
+        try #require(original.windowTitle == "Mecum Qt Probe")
+
+        func state() throws -> [String: Any] {
+            let data = try Data(contentsOf: URL(fileURLWithPath: target.statePath))
+            return try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        }
+
+        func location(_ frameKey: String, in windowNumber: Int) throws -> InputLocation {
+            let frame = try #require(state()[frameKey] as? [NSNumber])
+            try #require(frame.count == 4)
+            let server = try #require(WindowServerProbe.geometry(of: windowNumber))
+            let geometry = try #require(WindowGeometryProbe.observation(of: server))
+            return try #require(InputLocation(
+                screenPoint: CGPoint(
+                    x: frame[0].doubleValue + frame[2].doubleValue / 2,
+                    y: frame[1].doubleValue + frame[3].doubleValue / 2
+                ),
+                observedIn: geometry
+            ))
+        }
+
+        var failure: (any Error)?
+        try await LiveStage.run(
+            needsFixture: false,
+            needsChrome: false,
+            configuration: SeatHostConfiguration(
+                followsNewWindows: true,
+                restoresUserFocus: true,
+                allowUnvalidatedFocusRecovery: true
+            )
+        ) { stage in
+            let handBefore = stage.fence.snapshot().observedEventCount
+            let personBefore = UserSeatState.capture()
+            var parent: AdoptedWindow?
+            var second: AdoptedWindow?
+            do {
+                try #require(personBefore.frontmostProcessID != processID)
+                parent = try await stage.seat.adopt(
+                    original.reference, platform: QtPlatform(), title: original.windowTitle
+                )
+                if let window = parent, !stage.seat.isStaged(window) {
+                    parent = try await stage.seat.stage(window)
+                }
+                let window = try #require(parent)
+                let frameReady = LivePump.run(until: {
+                    guard let frame = try? state()["secondOpenFrame"] as? [NSNumber], frame.count == 4
+                    else { return false }
+                    return stage.virtualBounds.contains(CGPoint(
+                        x: frame[0].doubleValue, y: frame[1].doubleValue
+                    ))
+                }, timeout: 3)
+                try #require(frameReady)
+
+                @MainActor
+                func click(
+                    _ frameKey: String,
+                    in windowNumber: Int,
+                    until effect: @MainActor () -> Bool
+                ) async throws {
+                    let turn = try await stage.seat.acquire()
+                    do {
+                        let reference = try await liveObservation(stage.seat)
+                        let receipt = try await stage.seat.send(
+                            .click(try location(frameKey, in: windowNumber)),
+                            observation: reference, turn: turn, platform: QtPlatform()
+                        )
+                        let changed = LivePump.run(until: effect, timeout: 3)
+                        try stage.seat.confirm(receipt, changed ? .observed : .absent)
+                        _ = await stage.seat.concludeObservation()
+                        try stage.seat.release(turn)
+                        try #require(changed)
+                    } catch {
+                        _ = await stage.seat.concludeObservation()
+                        try? stage.seat.release(turn)
+                        throw error
+                    }
+                }
+
+                try await click("secondOpenFrame", in: window.id) {
+                    (try? state()["secondOpen"] as? Bool) == true
+                }
+                var opened: ObservedWindow?
+                let discovered = LivePump.run(until: {
+                    let surfaces = WindowServerProbe.surfaces(
+                        ownedBy: Set([processID]), allowUnvalidatedBuild: true
+                    ) ?? []
+                    opened = surfaces.lazy
+                        .filter { $0.reference.windowNumber != window.id && $0.isVisible }
+                        .compactMap { surface in
+                            try? WindowReader.windowSnapshot(
+                                processID: processID,
+                                windowNumber: surface.reference.windowNumber,
+                                allowUnvalidatedBuild: true
+                            )
+                        }
+                        .first { $0.windowTitle == "Probe Secondary" }
+                    return opened != nil
+                }, timeout: 3)
+                try #require(discovered)
+                let auxiliaryWindow = try #require(opened)
+                let followed = await LivePump.settle(until: {
+                    stage.seat.adoptedWindows.contains { $0.id == auxiliaryWindow.windowNumber }
+                }, timeout: 10)
+                try #require(followed)
+                guard let auxiliary = stage.seat.adoptedWindows.first(where: {
+                    $0.id == auxiliaryWindow.windowNumber
+                }) else {
+                    throw LiveFailure.unsupported("The secondary Qt window was not adopted")
+                }
+                second = auxiliary
+                let switched = try await stage.seat.switchTarget(to: auxiliary)
+                try #require(switched.id == auxiliary.id)
+                print("QT6_SWITCH first=\(switched.id)"
+                    + " current=\(String(describing: stage.seat.currentTarget?.id))")
+                let auxiliaryReady = LivePump.run(until: {
+                    guard let frame = try? state()["secondButtonFrame"] as? [NSNumber], frame.count == 4
+                    else { return false }
+                    return stage.virtualBounds.contains(CGPoint(
+                        x: frame[0].doubleValue, y: frame[1].doubleValue
+                    ))
+                }, timeout: 3)
+                try #require(auxiliaryReady)
+                try await click("secondButtonFrame", in: auxiliary.id) {
+                    (try? state()["secondClicks"] as? NSNumber)?.intValue == 1
+                }
+
+                let returned = try await stage.seat.switchTarget(to: window)
+                try #require(returned.id == window.id)
+                try #require(stage.seat.currentTarget?.id == window.id)
+                let parentReady = LivePump.run(until: {
+                    guard let frame = try? state()["buttonFrame"] as? [NSNumber], frame.count == 4
+                    else { return false }
+                    return stage.virtualBounds.contains(CGPoint(
+                        x: frame[0].doubleValue, y: frame[1].doubleValue
+                    ))
+                }, timeout: 3)
+                try #require(parentReady)
+                try await click("buttonFrame", in: window.id) {
+                    (try? state()["clicks"] as? NSNumber)?.intValue == 1
+                }
+                print("QT6_SWITCH second=\(returned.id)"
+                    + " auxiliary-clicks=\((try state()["secondClicks"] as? NSNumber)?.intValue ?? -1)"
+                    + " parent-clicks=\((try state()["clicks"] as? NSNumber)?.intValue ?? -1)")
+
+                try target.sendNativeCommand("closeSecond")
+                let closed = LivePump.run(until: {
+                    (try? state()["secondOpen"] as? Bool) == false
+                }, timeout: 2)
+                try #require(closed)
+                let childRelease = await stage.seat.release(auxiliary, .leaveOnVirtualDisplay)
+                second = nil
+                #expect(childRelease == .leftOnVirtualDisplay)
+                let physicalEvents = stage.fence.snapshot().observedEventCount - handBefore
+                let personAfter = UserSeatState.capture()
+                print("QT6_SWITCH physical-events=\(physicalEvents)"
+                    + " user-seat-before=\(personBefore) after=\(personAfter)")
+                if physicalEvents == 0 { #expect(personAfter == personBefore) }
+            } catch {
+                try? target.sendNativeCommand("closeSecond")
+                failure = error
+            }
+            _ = await stage.seat.concludeObservation()
+            if let second { _ = await stage.seat.release(second, .leaveOnVirtualDisplay) }
+            if let parent {
+                let outcome = await stage.seat.release(parent, .returnToUserSeat)
+                print("QT6_SWITCH release=\(outcome)")
+                #expect(outcome == .returned)
+            }
+        }
+        if let failure { throw failure }
+    }
+
+    @Test(
         "a Qt 6 modal child is followed, cancelled and removed in the background",
         .enabled(
             if: qtFixtureSkipReason() == nil,

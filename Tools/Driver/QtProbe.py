@@ -33,6 +33,8 @@ state = {
     "slider": 0,
     "comboIndex": 0,
     "comboText": "Alpha",
+    "secondOpen": False,
+    "secondClicks": 0,
     "nativeCommandSequence": 0,
     "menuOpen": False,
     "menuChoices": 0,
@@ -146,6 +148,38 @@ combo.currentIndexChanged.connect(lambda index: (
 ))
 layout.addWidget(combo)
 
+second_window = QWidget()
+second_window.setWindowTitle("Probe Secondary")
+second_window.resize(340, 180)
+second_layout = QVBoxLayout(second_window)
+second_button = QPushButton("Secondary click")
+second_button.setAccessibleName("Secondary click")
+second_button.clicked.connect(lambda: (
+    state.__setitem__("secondClicks", state["secondClicks"] + 1), publish()
+))
+second_layout.addWidget(second_button)
+
+
+def open_second():
+    second_window.show()
+    measured_widgets["secondButtonFrame"] = second_button
+    state["secondOpen"] = True
+    publish()
+
+
+def close_second():
+    second_window.close()
+    measured_widgets.pop("secondButtonFrame", None)
+    state.pop("secondButtonFrame", None)
+    state["secondOpen"] = False
+    publish()
+
+
+second_opener = QPushButton("Open second window")
+second_opener.setAccessibleName("Open second window")
+second_opener.clicked.connect(open_second)
+layout.addWidget(second_opener)
+
 
 def poll_native_command():
     if COMMAND_PATH is None or not COMMAND_PATH.exists():
@@ -166,6 +200,8 @@ def poll_native_command():
         combo.hidePopup()
     elif action == "closeModal" and active_dialog is not None:
         active_dialog.reject()
+    elif action == "closeSecond":
+        close_second()
     publish()
 
 scroll = QScrollArea()
@@ -217,6 +253,7 @@ measured_widgets.update({
     "sliderFrame": slider,
     "scrollFrame": scroll.viewport(),
     "comboFrame": combo,
+    "secondOpenFrame": second_opener,
     "modalFrame": modal,
 })
 publish()

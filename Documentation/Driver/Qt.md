@@ -28,7 +28,7 @@ display creation ends a process with exit status zero before the suite ends.
 The ordinary `make live-tests` reports these rows as skipped and needs the
 consumer fixture and browser for its other rows.
 
-`make qt-fixture-live-tests QT_PYTHON=/absolute/path/to/python` runs five more
+`make qt-fixture-live-tests QT_PYTHON=/absolute/path/to/python` runs six more
 rows against an owned Qt 6 widget fixture. That interpreter must have
 `PySide6-Essentials` installed. Each row launches its own fixture in the
 background, reads target-side JSON counters and measured widget frames, then
@@ -59,6 +59,7 @@ window from an on-screen row alone.
 | Kit function | Qt policy | Measured evidence | State |
 |---|---|---|---|
 | `adopt` and `stage` | `QtPlatform` | DaVinci's exact AX and WindowServer identity matched; its 910 by 640 window and the owned Qt 6 window moved into the virtual display. | Passed on both targets |
+| `switchTarget` | Shared | The Qt 6 fixture opened a second top-level window; the watcher adopted its exact WindowServer and AX identity. An explicit switch to it and back to the parent changed the observed target, and a routed click incremented each window's own counter once. The secondary was closed and explicitly released, then the parent returned. | Passed between two Qt 6 windows |
 | `observe` / window capture | Shared | Qualified BGRA frame and reference for DaVinci's staged window; the Qt 6 menu's dedicated 128 by 26 frame was also captured. | Passed on measured surfaces |
 | `send(.click(..., .left, count: 1))` | No preparation | DaVinci Search changed `0 → 1 → 0`; New Project and Cancel opened and closed a dialog. The Qt 6 fixture's button counter incremented. A prepared DaVinci Cancel click caused `activationUnverified`, so clicks remain unprepared. | Passed on measured controls |
 | `send(.key)` | No preparation | Backspace removed one character and Right Arrow collapsed a selection in DaVinci. In Qt 6, `down`, three `repeated` key downs and `up` changed the target's key-down counter by 1, 3 and 0. Other virtual keys and modifier combinations need separate oracles. | Partial |
@@ -85,8 +86,9 @@ widgets and DaVinci's main editing workspace require separate effect-based
 rows before their functions can be marked passed.
 
 The Qt 6 fixture rows add a scroll offset, slider value, text and key counters,
-a measured context-menu action, both routed and native combo choices, and a
-modal child with a target-side open/closed flag. They verified every `InputCommand` case on
+a measured context-menu action, both routed and native combo choices, a
+modal child with a target-side open/closed flag, and a second top-level window
+for target switching. They verified every `InputCommand` case on
 at least one Qt 6 widget, including right click, held-key phases and
 multi-cluster text. The menu choices cover one effect in each target; other
 commands exposed by a menu need their own semantic oracle.
