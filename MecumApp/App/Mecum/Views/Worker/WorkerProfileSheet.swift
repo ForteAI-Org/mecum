@@ -41,7 +41,10 @@ struct WorkerProfileSheet: View {
     /// The sentence to consent to before a save that moves the worker.
     @State private var consent: String?
 
-    init(team: TeamModel, worker: WorkerSnapshot) {
+    init(
+        team  : TeamModel,
+        worker: WorkerSnapshot
+    ) {
         self.team   = team
         self.worker = worker
         _provider   = State(initialValue: worker.configuration?.provider)
@@ -50,25 +53,66 @@ struct WorkerProfileSheet: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            header
+        VStack(
+            alignment: .leading,
+            spacing  : 16
+        ) {
+            ProfileHeader(worker: worker)
 
             ScrollView {
-                VStack(alignment: .leading, spacing: 16) {
-                    providerPicker
+                VStack(
+                    alignment: .leading,
+                    spacing  : 16
+                ) {
+                    ProfileProviderPicker(
+                        connections: team.connections,
+                        provider   : $provider
+                    )
+
                     if let provider {
                         if let refusal = WorkerAnswer(provider: provider).refusal {
-                            deadEnd(provider, refusal)
+                            ProfileDeadEnd(
+                                provider: provider,
+                                refusal : refusal
+                            )
                         }
-                        ConnectionCardView(connections: team.connections, provider: provider)
-                        modelPicker(provider)
+
+                        ConnectionCardView(
+                            connections: team.connections,
+                            provider   : provider
+                        )
+
+                        ProfileModelPicker(
+                            provider          : provider,
+                            model             : $model,
+                            catalogue         : catalogue,
+                            isLoadingCatalogue: isLoadingCatalogue,
+                            catalogueFailed   : catalogueFailed
+                        )
+
                         if let removed = removedModel {
-                            proposal(removed, provider)
+                            ProfileModelProposal(
+                                removed   : removed,
+                                provider  : provider,
+                                workerName: worker.name,
+                                catalogue : catalogue,
+                                model     : $model
+                            )
                         }
-                        EffortControl(scale: EffortScale(provider: provider, model: model), effort: $effort)
+
+                        EffortControl(
+                            scale : EffortScale(
+                                provider: provider,
+                                model   : model
+                            ),
+                            effort: $effort
+                        )
                     }
                 }
-                .padding(.vertical, 2)
+                .padding(
+                    .vertical,
+                    2
+                )
             }
 
             Text("Changes apply from the next turn. Answers already given keep the model that produced them.")
@@ -77,15 +121,28 @@ struct WorkerProfileSheet: View {
 
             HStack {
                 Spacer()
-                Button("Cancel", role: .cancel) { dismiss() }
-                    .keyboardShortcut(.cancelAction)
-                Button("Save", action: save)
-                    .keyboardShortcut(.defaultAction)
-                    .disabled(!canSave)
+
+                Button(
+                    "Cancel",
+                    role: .cancel
+                ) {
+                    dismiss()
+                }
+                .keyboardShortcut(.cancelAction)
+
+                Button(
+                    "Save",
+                    action: save
+                )
+                .keyboardShortcut(.defaultAction)
+                .disabled(!canSave)
             }
         }
         .padding(20)
-        .frame(width: 540, height: 680)
+        .frame(
+            width : 540,
+            height: 680
+        )
         // A model picker appearing is what asks for the checks, and for this worker's model.
         .task {
             team.connections.refresh()
@@ -95,117 +152,29 @@ struct WorkerProfileSheet: View {
         .onChange(of: model) { clampEffort() }
         .confirmationDialog(
             "Change where \(worker.name) runs?",
-            isPresented: Binding(get: { consent != nil }, set: { if !$0 { consent = nil } }),
+            isPresented: Binding(
+                get: { consent != nil },
+                set: { if !$0 { consent = nil } }
+            ),
             presenting : consent
         ) { _ in
             Button("Change model") { commit() }
-            Button("Cancel", role: .cancel) {}
+            Button(
+                "Cancel",
+                role: .cancel
+            ) {}
         } message: { sentence in
             Text(sentence)
         }
     }
 
-    // MARK: Parts
-
-    private var header: some View {
-        HStack(spacing: 12) {
-            MascotView(appearance: worker.appearance, size: 36)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(worker.name).font(.title3.bold())
-                Text("Model and connection").foregroundStyle(.secondary)
-            }
-            Spacer()
-            if let version = worker.configurationVersion {
-                Text("Version \(version)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-        }
-    }
-
-    private var providerPicker: some View {
-        Picker("Provider", selection: $provider) {
-            Text("Choose a provider").tag(ModelProvider?.none)
-            ForEach(ModelProvider.allCases) { choice in
-                Text(label(for: choice)).tag(Optional(choice))
-            }
-        }
-    }
-
-    private func deadEnd(_ provider: ModelProvider, _ refusal: String) -> some View {
-        Label(
-            """
-            \(provider.title) does not answer here yet: \(refusal). A worker saved with it stays \
-            on the team and will not answer. Choose Claude Code or Codex for a worker that answers.
-            """,
-            systemImage: "exclamationmark.bubble"
-        )
-        .foregroundStyle(.orange)
-        .fixedSize(horizontal: false, vertical: true)
-    }
-
-    @ViewBuilder
-    private func modelPicker(_ provider: ModelProvider) -> some View {
-        if isLoadingCatalogue {
-            Text("Reading the catalogue…").shimmering()
-        } else if modelOptions.isEmpty {
-            Text(
-                catalogueFailed
-                    ? "The catalogue could not be read, so there is no model to choose. The connection above says why."
-                    : "\(provider.title) lists no model. For Ollama, pull one with “ollama pull <name>”."
-            )
-            .foregroundStyle(.secondary)
-            .fixedSize(horizontal: false, vertical: true)
-        } else {
-            Picker("Model", selection: $model) {
-                if model.isEmpty { Text("Choose a model").tag("") }
-                ForEach(modelOptions, id: \.self) { option in
-                    Text(catalogue.contains(option) ? option : "\(option) (not listed)").tag(option)
-                }
-            }
-        }
-    }
-
-    private func proposal(_ removed: String, _ provider: ModelProvider) -> some View {
-        let replacement = ProviderCatalog.replacement(for: removed, provider: provider, catalogue: catalogue)
-        return VStack(alignment: .leading, spacing: 8) {
-            Label(
-                """
-                \(removed) is no longer in \(provider.title)'s catalogue, so \(worker.name) needs \
-                configuring. Nothing was changed.
-                """,
-                systemImage: "questionmark.square.dashed"
-            )
-            .fixedSize(horizontal: false, vertical: true)
-            if let replacement {
-                Button("Use \(replacement) instead") { model = replacement }
-                    .help("Puts it in the draft. Nothing is saved until you press Save.")
-            }
-        }
-        .padding(10)
-        .background(.purple.opacity(0.08), in: RoundedRectangle(cornerRadius: 8))
-    }
-
     // MARK: State
 
     private func connection(_ provider: ModelProvider) -> ProviderConnection {
-        ProviderConnection(provider: provider, settings: team.connections.providerSettings)
-    }
-
-    /// The provider's name, its last known state, and how a worker on it answers.
-    private func label(for provider: ModelProvider) -> String {
-        var parts = [provider.title]
-        if let state = team.connections.states[provider] { parts.append(state.title) }
-        switch WorkerAnswer(provider: provider) {
-        case .agent:  parts.append("answers as an agent")
-        case .notYet: parts.append("does not answer yet")
-        }
-        return parts.joined(separator: " · ")
-    }
-
-    /// The catalogue, and the draft's model when the catalogue does not list it.
-    private var modelOptions: [String] {
-        catalogue.contains(model) || model.isEmpty ? catalogue : [model] + catalogue
+        ProviderConnection(
+            provider: provider,
+            settings: team.connections.providerSettings
+        )
     }
 
     /// The saved model, when the typed check found it gone and the draft still holds it.
@@ -214,16 +183,23 @@ struct WorkerProfileSheet: View {
               worker.configuration?.provider == provider,
               removed == model
         else { return nil }
+
         return removed
     }
 
     private var draft: ModelSelection? {
         guard let provider, !model.isEmpty else { return nil }
-        return ModelSelection(provider: provider, model: model, effort: effort)
+
+        return ModelSelection(
+            provider: provider,
+            model   : model,
+            effort  : effort
+        )
     }
 
     private var canSave: Bool {
         guard let draft else { return false }
+
         return draft != worker.configuration
     }
 
@@ -232,8 +208,10 @@ struct WorkerProfileSheet: View {
             catalogue = []
             return
         }
+
         isLoadingCatalogue = true
         defer { isLoadingCatalogue = false }
+
         do {
             catalogue       = try await team.connections.discoverModels(for: provider)
             catalogueFailed = false
@@ -242,7 +220,9 @@ struct WorkerProfileSheet: View {
             catalogue       = []
             catalogueFailed = true
         }
+
         guard self.provider == provider, !catalogue.contains(model) else { return clampEffort() }
+
         // Back on the saved provider the saved model returns, even one the catalogue dropped.
         if let saved = worker.configuration, saved.provider == provider {
             model = saved.model
@@ -255,8 +235,13 @@ struct WorkerProfileSheet: View {
     /// Keeps the draft's effort on a detent the chosen model has.
     private func clampEffort() {
         guard let provider else { return }
-        let scale = EffortScale(provider: provider, model: model)
+
+        let scale = EffortScale(
+            provider: provider,
+            model   : model
+        )
         guard !scale.isEmpty, scale.index(of: effort) == nil else { return }
+
         effort = scale.positions.contains(.medium) ? .medium : (scale.positions.last ?? effort)
     }
 
@@ -264,6 +249,7 @@ struct WorkerProfileSheet: View {
 
     private func save() {
         guard let draft else { return }
+
         if let previous = worker.configuration?.provider,
            let sentence = connection(draft.provider).consentNeeded(movingFrom: connection(previous)) {
             consent = sentence
@@ -274,7 +260,13 @@ struct WorkerProfileSheet: View {
 
     private func commit() {
         guard let draft else { return }
+
         dismiss()
-        Task { await team.configure(worker.id, selection: draft) }
+        Task {
+            await team.configure(
+                worker.id,
+                selection: draft
+            )
+        }
     }
 }

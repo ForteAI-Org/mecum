@@ -26,11 +26,18 @@ struct WindowWidthReader: NSViewRepresentable {
         return view
     }
 
-    func updateNSView(_ view: ReaderView, context: Context) {
+    func updateNSView(
+        _ view : ReaderView,
+        context: Context
+    ) {
         view.onWidth = onWidth
     }
 
-    func sizeThatFits(_ proposal: ProposedViewSize, nsView: ReaderView, context: Context) -> CGSize? {
+    func sizeThatFits(
+        _ proposal: ProposedViewSize,
+        nsView    : ReaderView,
+        context   : Context
+    ) -> CGSize? {
         .zero
     }
 
@@ -46,6 +53,7 @@ struct WindowWidthReader: NSViewRepresentable {
             if let observer { NotificationCenter.default.removeObserver(observer) }
             observer = nil
             guard let window else { return }
+
             observer = NotificationCenter.default.addObserver(
                 forName: NSWindow.didResizeNotification,
                 object : window,
@@ -59,6 +67,7 @@ struct WindowWidthReader: NSViewRepresentable {
 
         private func report() {
             guard let window else { return }
+
             onWidth?(window.frame.width)
         }
 

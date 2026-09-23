@@ -1,3 +1,10 @@
+//
+//  Keychain.swift
+//  Mecum
+//
+//  Created by Eliomar Alejandro Rodriguez Ferrer on 22/09/2026.
+//
+
 import Foundation
 import Security
 
@@ -8,45 +15,65 @@ import Security
 /// and the lab's Settings read and write the same items, so a key entered
 /// once serves both: they are one person's key to one provider, in one app.
 enum Keychain {
+
     private static let service = "dev.forte.Mecum"
 
     /// A write the keychain refused. It carries the status and never the value.
     struct WriteFailure: Error, CustomStringConvertible {
+
         let status: OSStatus
 
         var description: String {
-            (SecCopyErrorMessageString(status, nil) as String?) ?? "keychain status \(status)"
+            let message = SecCopyErrorMessageString(
+                status,
+                nil
+            )
+            return (message as String?) ?? "keychain status \(status)"
         }
     }
 
     static func string(for account: String) -> String {
         let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
+            kSecClass as String      : kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: account,
-            kSecReturnData as String: true,
-            kSecMatchLimit as String: kSecMatchLimitOne,
+            kSecReturnData as String : true,
+            kSecMatchLimit as String : kSecMatchLimitOne,
         ]
         var item: CFTypeRef?
-        guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess,
-              let data = item as? Data else { return "" }
-        return String(decoding: data, as: UTF8.self)
+        let found = SecItemCopyMatching(
+            query as CFDictionary,
+            &item
+        )
+        guard found == errSecSuccess, let data = item as? Data else { return "" }
+
+        return String(
+            decoding: data,
+            as      : UTF8.self
+        )
     }
 
     /// Replaces the item, or removes it when `value` is empty. Throws when the
     /// keychain refuses, so a key that was not kept is never reported as kept.
-    static func set(_ value: String, for account: String) throws {
+    static func set(
+        _ value    : String,
+        for account: String
+    ) throws {
         let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
+            kSecClass as String      : kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: account,
         ]
         let deleted = SecItemDelete(query as CFDictionary)
         guard deleted == errSecSuccess || deleted == errSecItemNotFound else { throw WriteFailure(status: deleted) }
         guard !value.isEmpty else { return }
+
         var item = query
         item[kSecValueData as String] = Data(value.utf8)
-        let added = SecItemAdd(item as CFDictionary, nil)
+        let added = SecItemAdd(
+            item as CFDictionary,
+            nil
+        )
         guard added == errSecSuccess else { throw WriteFailure(status: added) }
     }
 }

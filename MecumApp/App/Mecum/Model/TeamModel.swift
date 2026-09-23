@@ -112,7 +112,11 @@ final class TeamModel {
     /// send in that window does nothing, so one Return is one message.
     private var isSending = false
 
-    init(store: WorkspaceStore, connections: ModelSettingsStore, broker: SeatBroker) {
+    init(
+        store      : WorkspaceStore,
+        connections: ModelSettingsStore,
+        broker     : SeatBroker
+    ) {
         self.store       = store
         self.connections = connections
         self.broker      = broker
@@ -123,8 +127,12 @@ final class TeamModel {
     /// The sidebar's rows, recomputed from the team. The team is tens of
     /// workers, so this is cheaper than keeping a second copy in step.
     var rows: [TeamRow] {
-        TeamOutline.rows(of: active, modelUnavailable: workersWithRemovedModels,
-                         activities: desktops.compactMapValues(\.activity), unread: unread)
+        TeamOutline.rows(
+            of              : active,
+            modelUnavailable: workersWithRemovedModels,
+            activities      : desktops.compactMapValues(\.activity),
+            unread          : unread
+        )
     }
 
     /// No model attached, or one the catalogue no longer lists (§7.4).
@@ -147,11 +155,15 @@ final class TeamModel {
     func load() async {
         do {
             // The first load precedes every turn here: a turn a crash left unfinished ends first (§18.4).
-            try await WorkerTurnRecorder.endTurnsLeftUnfinished(in: store, workspaceID: Self.workspaceID)
+            try await WorkerTurnRecorder.endTurnsLeftUnfinished(
+                in         : store,
+                workspaceID: Self.workspaceID
+            )
         } catch {
             problem = "A turn left unfinished when Mecum last closed could not be marked interrupted. "
                 + describe(error)
         }
+
         do {
             let everyone = try await store.workers(includingArchived: true)
             active   = everyone.filter { !$0.isArchived }
@@ -159,6 +171,7 @@ final class TeamModel {
         } catch {
             problem = "The team could not be read, so the list below may be out of date. \(describe(error))"
         }
+
         await refreshUnread()
     }
 
@@ -178,11 +191,13 @@ final class TeamModel {
 
         await flushDraft()
         guard generation == openingGeneration else { return }
+
         conversation = nil
         draft        = ""
         savedDraft   = ""
 
         guard let id = selection else { return }
+
         do {
             // One direct conversation per worker, found by its participant, in
             // a linear scan over the handful a person has in increment 1.
@@ -190,19 +205,25 @@ final class TeamModel {
                 $0.kind == .direct && $0.participantIDs == [id]
             }
             guard generation == openingGeneration else { return }
+
             let opened: ConversationSnapshot
             if let existing {
                 opened = existing
             } else {
-                opened = try await store.createConversation(kind: .direct, participants: [id])
+                opened = try await store.createConversation(
+                    kind        : .direct,
+                    participants: [id]
+                )
                 guard generation == openingGeneration else { return }
             }
+
             conversation = opened
             draft        = opened.draft
             savedDraft   = opened.draft
             await markReadIfAtEnd()
         } catch {
             guard generation == openingGeneration else { return }
+
             problem = "This worker's conversation could not be opened. \(describe(error))"
         }
     }
@@ -215,10 +236,15 @@ final class TeamModel {
     /// flush's, and a reply for a conversation no longer open is dropped.
     func flushDraft() async {
         guard let conversation, draft != savedDraft else { return }
+
         let text = draft
         do {
-            let updated = try await store.update(conversation: conversation.id, .draft(text))
+            let updated = try await store.update(
+                conversation: conversation.id,
+                .draft(text)
+            )
             guard self.conversation?.id == conversation.id else { return }
+
             self.conversation = updated
             savedDraft        = text
         } catch {
@@ -237,8 +263,10 @@ final class TeamModel {
     /// whose draft could not be cleared are reported as the two facts they are.
     func send() async {
         guard !isSending, let conversation else { return }
+
         let workerID = conversation.participantIDs.first
         if let workerID, isAnswering(workerID) { return }
+
         let typed = draft
         let text  = typed.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
@@ -249,18 +277,35 @@ final class TeamModel {
 
         let message: MessageSnapshot
         do {
-            message = try await store.appendMessage(to: conversation.id, text: text)
+            message = try await store.appendMessage(
+                to  : conversation.id,
+                text: text
+            )
         } catch {
             problem = "The message was not saved, so it was not sent either. \(describe(error))"
-            await restoreDraft(typed, in: conversation.id)
+            await restoreDraft(
+                typed,
+                in: conversation.id
+            )
             return
         }
+
         if self.conversation?.id == conversation.id { transcriptRevision += 1 }
-        if let workerID { startAnswer(to: message, in: conversation.id, by: workerID) }
+        if let workerID {
+            startAnswer(
+                to: message,
+                in: conversation.id,
+                by: workerID
+            )
+        }
 
         do {
-            let cleared = try await store.update(conversation: conversation.id, .draft(""))
+            let cleared = try await store.update(
+                conversation: conversation.id,
+                .draft("")
+            )
             guard self.conversation?.id == conversation.id else { return }
+
             self.conversation = cleared
             savedDraft        = ""
         } catch {
@@ -273,15 +318,22 @@ final class TeamModel {
 
     /// Puts a refused message's text back where it was typed. Whatever was
     /// typed after it stays, below it.
-    private func restoreDraft(_ typed: String, in conversationID: UUID) async {
+    private func restoreDraft(
+        _ typed          : String,
+        in conversationID: UUID
+    ) async {
         if self.conversation?.id == conversationID {
             draft = draft.isEmpty ? typed : typed + "\n" + draft
             return
         }
+
         // The person moved to another worker meanwhile, so the text goes back
         // into the store's draft of the conversation it was written in.
         do {
-            try await store.update(conversation: conversationID, .draft(typed))
+            try await store.update(
+                conversation: conversationID,
+                .draft(typed)
+            )
         } catch {
             problem = """
             The message was not saved, and its text could not be put back as a draft either, \
@@ -297,26 +349,34 @@ final class TeamModel {
     /// Starts the worker's turn when its provider answers as an agent. The
     /// turn runs apart from `send`, so writing to another worker meanwhile is
     /// not held up, and a failed turn is reported and never retried.
-    private func startAnswer(to message: MessageSnapshot, in conversationID: UUID, by workerID: UUID) {
+    private func startAnswer(
+        to message       : MessageSnapshot,
+        in conversationID: UUID,
+        by workerID      : UUID
+    ) {
         guard let worker = worker(workerID), let selection = worker.configuration,
               WorkerAnswer(provider: selection.provider) == .agent, answering[workerID] == nil
         else { return }
 
         answering[workerID] = conversationID
-        let host: WorkerAgentHost
+
+        let host   : WorkerAgentHost
         let desktop: BrokeredAutomationSession
         if let existing = hosts[conversationID], let held = desktops[workerID] {
             (host, desktop) = (existing, held)
         } else {
             desktop = self.desktop(for: workerID)
-            host = WorkerAgentHost(
-                workingDirectory: WorkspaceLaunch.directory
-                    .appending(path: "WorkerWorkspaces/\(conversationID.uuidString)", directoryHint: .isDirectory),
+            host    = WorkerAgentHost(
+                workingDirectory: WorkspaceLaunch.directory.appending(
+                    path         : "WorkerWorkspaces/\(conversationID.uuidString)",
+                    directoryHint: .isDirectory
+                ),
                 bridgeExecutable: Bundle.main.bundleURL.appending(path: "Contents/Helpers/mecum"),
                 session         : { desktop }
             )
             hosts[conversationID] = host
         }
+
         let recorder = WorkerTurnRecorder(
             store         : store,
             workspaceID   : Self.workspaceID,
@@ -332,13 +392,19 @@ final class TeamModel {
                 answering[workerID] = nil
                 pendingStops.remove(workerID)
             }
+
             do {
                 _ = try await recorder.run { frozen, session, emit in
                     if pendingStops.remove(workerID) != nil { throw CancellationError() }
                     // The turn gives the seat back as it ends when another entry is waiting for it.
                     try await desktop.turn {
-                        try await host.run(prompt: message.text, selection: frozen, sessionID: session,
-                                           role: worker.instructions, onEvent: emit)
+                        try await host.run(
+                            prompt   : message.text,
+                            selection: frozen,
+                            sessionID: session,
+                            role     : worker.instructions,
+                            onEvent  : emit
+                        )
                     }
                 }
             } catch {
@@ -355,6 +421,7 @@ final class TeamModel {
     /// interruption note.
     func stopAnswering(_ workerID: UUID) {
         guard let conversationID = answering[workerID] else { return }
+
         if let host = hosts[conversationID], host.isRunning {
             host.stop()
         } else {
@@ -370,7 +437,10 @@ final class TeamModel {
         let desktop = BrokeredAutomationSession(
             broker            : broker,
             workerID          : workerID,
-            knowledgeDirectory: WorkspaceLaunch.directory.appending(path: "Knowledge", directoryHint: .isDirectory)
+            knowledgeDirectory: WorkspaceLaunch.directory.appending(
+                path         : "Knowledge",
+                directoryHint: .isDirectory
+            )
         )
         desktops[workerID] = desktop
         return desktop
@@ -386,7 +456,10 @@ final class TeamModel {
     func hasScreen(_ workerID: UUID) -> Bool { desktops[workerID]?.hasScreen ?? false }
 
     /// A live view of the worker's window, nil while there is none; see `hasScreen`.
-    func makeScreenView(of workerID: UUID, contentsScale: CGFloat) -> NSView? {
+    func makeScreenView(
+        of workerID  : UUID,
+        contentsScale: CGFloat
+    ) -> NSView? {
         desktops[workerID]?.makeScreenView(contentsScale: contentsScale)
     }
 
@@ -404,7 +477,11 @@ final class TeamModel {
 
     /// The worker's current or last turn, with the settings it ran with. Nil before its first.
     func latestTurn(of workerID: UUID) async throws -> TurnSummary? {
-        try await TurnSummary.latest(of: workerID, in: store, isRunning: isAnswering(workerID))
+        try await TurnSummary.latest(
+            of       : workerID,
+            in       : store,
+            isRunning: isAnswering(workerID)
+        )
     }
 
     /// True while an agent host holds a loopback port and a temporary directory.
@@ -427,6 +504,7 @@ final class TeamModel {
     /// conversation changes only the badges.
     private func reloadTranscript(of conversationID: UUID) async {
         guard conversation?.id == conversationID else { return await refreshUnread() }
+
         transcriptRevision += 1
         await markReadIfAtEnd()
     }
@@ -455,16 +533,24 @@ final class TeamModel {
 
     /// Remembers the message the reader is anchored on and the offset in
     /// points from its top to the viewport's top. Nil means the end.
-    func rememberReadingPosition(_ anchor: UUID?, offset: Double) async {
+    func rememberReadingPosition(
+        _ anchor: UUID?,
+        offset  : Double
+    ) async {
         guard let conversation,
               conversation.readingAnchorMessageID != anchor || conversation.readingOffset != offset
         else { return }
+
         do {
             let updated = try await store.update(
                 conversation: conversation.id,
-                .readingPosition(anchorMessageID: anchor, offset: offset)
+                .readingPosition(
+                    anchorMessageID: anchor,
+                    offset         : offset
+                )
             )
             guard self.conversation?.id == conversation.id else { return }
+
             self.conversation = updated
             if anchor == nil { await markReadIfAtEnd() }
         } catch {
@@ -504,14 +590,21 @@ final class TeamModel {
     /// versions before it stay, and the change applies from the next turn.
     /// The connection and the model are checked again afterwards, so what the
     /// profile and the row say follows the change.
-    func configure(_ id: UUID, selection: ModelSelection) async {
+    func configure(
+        _ id     : UUID,
+        selection: ModelSelection
+    ) async {
         do {
-            try await store.configure(worker: id, selection: selection)
+            try await store.configure(
+                worker   : id,
+                selection: selection
+            )
             await load()
         } catch {
             problem = "\(name(of: id))'s model was not changed, so it keeps the one it had. \(describe(error))"
             return
         }
+
         connections.refresh([selection.provider])
         await checkModel(of: id)
     }
@@ -523,17 +616,28 @@ final class TeamModel {
             modelStates[id] = nil
             return
         }
-        let state = await connections.check(selection.provider, model: selection.model)
+
+        let state = await connections.check(
+            selection.provider,
+            model: selection.model
+        )
         // The worker was reconfigured meanwhile, and this answer is about the old model.
         guard worker(id)?.configuration == selection else { return }
+
         modelStates[id] = state
     }
 
     /// Archiving is the ordinary removal from the active team. The worker,
     /// its conversation and its attributions stay readable in the archive.
-    func setArchived(_ isArchived: Bool, for id: UUID) async {
+    func setArchived(
+        _ isArchived: Bool,
+        for id      : UUID
+    ) async {
         do {
-            try await store.update(worker: id, .archived(isArchived))
+            try await store.update(
+                worker: id,
+                .archived(isArchived)
+            )
             if isArchived, selection == id {
                 selection = nil
                 await openSelectedConversation()

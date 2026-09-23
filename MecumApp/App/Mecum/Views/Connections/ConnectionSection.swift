@@ -26,7 +26,10 @@ struct ConnectionSection: View {
     let provider   : ModelProvider
 
     private var connection: ProviderConnection {
-        ProviderConnection(provider: provider, settings: connections.providerSettings)
+        ProviderConnection(
+            provider: provider,
+            settings: connections.providerSettings
+        )
     }
 
     var body: some View {
@@ -38,36 +41,62 @@ struct ConnectionSection: View {
                     .font(.headline)
                 Text(connection.authentication.title)
             }
+
             if let state = connections.states[provider], !state.isReady {
                 Text(state.message)
                     .font(.callout)
                     .textSelection(.enabled)
-                    .fixedSize(horizontal: false, vertical: true)
+                    .fixedSize(
+                        horizontal: false,
+                        vertical  : true
+                    )
             }
+
             if connection.authentication != .localServer {
                 LabeledContent("Destination") {
                     Text(connection.destination)
                         .textSelection(.enabled)
                 }
             }
-            ConnectionActions(connections: connections, provider: provider, note: lastCheck)
+
+            ConnectionActions(
+                connections: connections,
+                provider   : provider,
+                note       : lastCheck
+            )
         }
     }
 
     @ViewBuilder
     private var status: some View {
         if connections.isChecking(provider) {
-            StatusText("Checking…", tone: .waiting).shimmering()
+            StatusText(
+                "Checking…",
+                tone: .waiting
+            )
+            .shimmering()
         } else if let state = connections.states[provider] {
-            StatusText(state.title, tone: Self.tone(state))
+            StatusText(
+                state.title,
+                tone: Self.tone(state)
+            )
         } else {
-            StatusText("Not checked yet", tone: .quiet)
+            StatusText(
+                "Not checked yet",
+                tone: .quiet
+            )
         }
     }
 
     /// When the last check finished, or nil before the first, which the state already says.
     private var lastCheck: String? {
-        connections.checkedAt[provider].map { "Checked at \($0.formatted(date: .omitted, time: .shortened))" }
+        connections.checkedAt[provider].map { date in
+            let time = date.formatted(
+                date: .omitted,
+                time: .shortened
+            )
+            return "Checked at \(time)"
+        }
     }
 
     private static func tone(_ state: ConnectionState) -> StatusText.Tone {

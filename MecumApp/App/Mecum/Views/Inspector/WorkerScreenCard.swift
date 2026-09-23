@@ -25,25 +25,44 @@ struct WorkerScreenCard: View {
         if team.hasScreen(worker.id) {
             let frame = team.screenFrame(of: worker.id)
             let ratio = frame.width > 0 && frame.height > 0 ? frame.width / frame.height : 16.0 / 10.0
-            WorkerScreenView(team: team, workerID: worker.id)
-                .id(worker.id)
-                .aspectRatio(ratio, contentMode: .fit)
-                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                .overlay(alignment: .topTrailing) { moveButton.padding(6) }
-                .accessibilityElement(children: .contain)
-                .accessibilityLabel("\(worker.name)'s screen")
+            WorkerScreenView(
+                team    : team,
+                workerID: worker.id
+            )
+            .id(worker.id)
+            .aspectRatio(
+                ratio,
+                contentMode: .fit
+            )
+            .clipShape(RoundedRectangle(
+                cornerRadius: 8,
+                style       : .continuous
+            ))
+            .overlay(alignment: .topTrailing) { moveButton.padding(6) }
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel("\(worker.name)'s screen")
         }
     }
 
     private var moveButton: some View {
         let toConversation = place == .inspector
+
         return Button {
             withAnimation(.snappy) { team.showsScreenInConversation = toConversation }
         } label: {
             Image(systemName: toConversation ? "pip.enter" : "pip.exit")
-                .font(.system(size: 11, weight: .semibold))
-                .frame(width: 22, height: 22)
-                .background(.regularMaterial, in: Circle())
+                .font(.system(
+                    size  : 11,
+                    weight: .semibold
+                ))
+                .frame(
+                    width : 22,
+                    height: 22
+                )
+                .background(
+                    .regularMaterial,
+                    in: Circle()
+                )
         }
         .buttonStyle(.plain)
         .help(toConversation ? "Show the screen over the conversation" : "Put the screen back in the inspector")

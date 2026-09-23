@@ -70,7 +70,10 @@ struct TeamShellView: View {
     @Environment(\.accessibilityReduceMotion)
     private var reducesMotion
 
-    init(team: TeamModel, isInspectorRequested: Binding<Bool>) {
+    init(
+        team                : TeamModel,
+        isInspectorRequested: Binding<Bool>
+    ) {
         self.team             = team
         _isInspectorRequested = isInspectorRequested
     }
@@ -92,10 +95,20 @@ struct TeamShellView: View {
                 .toolbar { toolbar }
                 // A constant zero minimum for the column: the conversation's own height follows its width,
                 // and a real minimum width would make AppKit grow the window rather than close the inspector.
-                .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
+                .frame(
+                    minWidth : 0,
+                    maxWidth : .infinity,
+                    minHeight: 0,
+                    maxHeight: .infinity
+                )
                 .inspector(isPresented: inspectorPresentation) {
                     inspector
-                        .frame(minWidth: 0, maxWidth: .infinity, minHeight: 0, maxHeight: .infinity)
+                        .frame(
+                            minWidth : 0,
+                            maxWidth : .infinity,
+                            minHeight: 0,
+                            maxHeight: .infinity
+                        )
                         .inspectorColumnWidth(
                             min  : ShellMetrics.inspector.minimum,
                             ideal: ShellMetrics.inspector.ideal,
@@ -117,11 +130,17 @@ struct TeamShellView: View {
             ConnectionsSheet(connections: team.connections)
         }
         .sheet(item: profileWorker) { worker in
-            WorkerProfileSheet(team: team, worker: worker)
+            WorkerProfileSheet(
+                team  : team,
+                worker: worker
+            )
         }
         // The window keeps the worker's name for Mission Control and the Window menu; the header shows it.
         .toolbar(removing: .title)
-        .focusedSceneValue(\.team, team)
+        .focusedSceneValue(
+            \.team,
+            team
+        )
         .alert(
             "That could not be done",
             isPresented: Binding(
@@ -129,7 +148,10 @@ struct TeamShellView: View {
                 set: { if !$0 { team.problem = nil } }
             )
         ) {
-            Button("OK", role: .cancel) {}
+            Button(
+                "OK",
+                role: .cancel
+            ) {}
         } message: {
             Text(team.problem ?? "")
         }
@@ -146,12 +168,20 @@ struct TeamShellView: View {
         // The worker's name leads the conversation's side of the bar, in place of a title.
         ToolbarItem(placement: .navigation) { header }
             .sharedBackgroundVisibility(.hidden)
+
         ToolbarSpacer(.flexible)
+
         ToolbarItem {
-            Button(target.isInspectorShown ? "Hide Inspector" : "Show Inspector", systemImage: "info.circle",
-                   action: toggleInspector)
-                .keyboardShortcut("i", modifiers: [.control, .option, .command])
-                .help("Show or hide the inspector (Control-Option-Command-I)")
+            Button(
+                target.isInspectorShown ? "Hide Inspector" : "Show Inspector",
+                systemImage: "info.circle",
+                action     : toggleInspector
+            )
+            .keyboardShortcut(
+                "i",
+                modifiers: [.control, .option, .command]
+            )
+            .help("Show or hide the inspector (Control-Option-Command-I)")
         }
     }
 
@@ -164,9 +194,14 @@ struct TeamShellView: View {
             divide(into: .withoutInspector)
             return
         }
+
         isInspectorRequested = true
         guard let windowWidth else { return }
-        divide(into: ShellMetrics.division(window: windowWidth, previous: nil))
+
+        divide(into: ShellMetrics.division(
+            window  : windowWidth,
+            previous: nil
+        ))
     }
 
     /// The first report resolves a restored request once; later ones apply the
@@ -174,9 +209,14 @@ struct TeamShellView: View {
     private func windowResized(to width: Double) {
         let isFirst = windowWidth == nil
         guard width != windowWidth else { return }
+
         windowWidth = width
         guard isInspectorRequested else { return }
-        divide(into: ShellMetrics.division(window: width, previous: isFirst ? nil : target))
+
+        divide(into: ShellMetrics.division(
+            window  : width,
+            previous: isFirst ? nil : target
+        ))
     }
 
     /// Applies `next` in two steps: at once what gives room, then, after the
@@ -185,14 +225,16 @@ struct TeamShellView: View {
     private func divide(into next: ShellMetrics.Division) {
         secondStep?.cancel()
         target = next
+
         let first = ShellMetrics.Division(
             isInspectorShown: division.isInspectorShown && next.isInspectorShown,
             isSidebarCompact: division.isSidebarCompact || next.isSidebarCompact
         )
-        let wait = division.isInspectorShown && !first.isInspectorShown ? Self.inspectorClosing
-                                                                          : Self.sidebarCompacting
+        let wait  = division.isInspectorShown && !first.isInspectorShown ? Self.inspectorClosing
+                                                                         : Self.sidebarCompacting
         division = first
         guard first != next else { return }
+
         secondStep = Task {
             // A cancelled wait belongs to a division that a newer one replaced.
             do { try await Task.sleep(for: wait) } catch { return }
@@ -206,6 +248,7 @@ struct TeamShellView: View {
             get: { division.isInspectorShown },
             set: { isShown in
                 guard !isShown else { return }
+
                 isInspectorRequested = false
                 divide(into: .withoutInspector)
             }
@@ -217,9 +260,12 @@ struct TeamShellView: View {
     @ViewBuilder
     private var detail: some View {
         if let worker = team.selectedWorker {
-            WorkerConversationView(team: team, worker: worker)
+            WorkerConversationView(
+                team  : team,
+                worker: worker
+            )
         } else if team.active.isEmpty && team.archived.isEmpty {
-            firstLaunch
+            FirstLaunchView(team: team)
         } else {
             ContentUnavailableView(
                 "No worker selected",
@@ -239,13 +285,19 @@ struct TeamShellView: View {
                     .transition(reducesMotion ? AnyTransition.opacity : AnyTransition(.blurReplace))
             }
         }
-        .animation(reducesMotion ? .easeOut(duration: 0.15) : .smooth(duration: 0.25), value: team.selection)
+        .animation(
+            reducesMotion ? .easeOut(duration: 0.15) : .smooth(duration: 0.25),
+            value: team.selection
+        )
     }
 
     @ViewBuilder
     private var inspector: some View {
         if let worker = team.selectedWorker {
-            WorkerInspectorView(team: team, worker: worker)
+            WorkerInspectorView(
+                team  : team,
+                worker: worker
+            )
         } else {
             ContentUnavailableView(
                 "Nothing selected",
@@ -261,20 +313,5 @@ struct TeamShellView: View {
             get: { team.profileWorkerID.flatMap(team.worker) },
             set: { team.profileWorkerID = $0?.id }
         )
-    }
-
-    /// The first launch offers the two things there are to do. It invents no
-    /// team, and it asks for no desktop permission: talking to a worker never
-    /// needed one.
-    private var firstLaunch: some View {
-        ContentUnavailableView {
-            Label("No team yet", systemImage: "person.2")
-        } description: {
-            Text("Create the first worker, then connect a model. Nothing is created for you, and no desktop permission is needed to talk to a worker.")
-        } actions: {
-            Button("Create the first worker") { team.isCreatingWorker = true }
-                .buttonStyle(.borderedProminent)
-            Button("Connect a model") { team.isShowingConnections = true }
-        }
     }
 }

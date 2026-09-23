@@ -45,9 +45,20 @@ struct WorkerRowView: View {
 
     var body: some View {
         content
-            .frame(maxWidth: .infinity, alignment: isCompact ? .center : .leading)
-            .background { SidebarBlock(isSelected: isSelected, isEmphasized: isEmphasized) }
-            .padding(.vertical, SidebarBlock.spacing / 2)
+            .frame(
+                maxWidth : .infinity,
+                alignment: isCompact ? .center : .leading
+            )
+            .background {
+                SidebarBlock(
+                    isSelected  : isSelected,
+                    isEmphasized: isEmphasized
+                )
+            }
+            .padding(
+                .vertical,
+                SidebarBlock.spacing / 2
+            )
             .help(isCompact ? "\(row.name), \(row.subtitle)" : row.name)
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(row.accessibilityLabel)
@@ -58,23 +69,37 @@ struct WorkerRowView: View {
     /// one, with the same mascot and name in both, so the change moves them.
     private var content: some View {
         let layout = isCompact ? AnyLayout(VStackLayout(spacing: 4)) : AnyLayout(HStackLayout(spacing: 10))
-        return layout {
-            MascotView(appearance: row.worker.appearance, size: isCompact ? 32 : 28)
-                .overlay(alignment: .topTrailing) {
-                    if isCompact {
-                        indicator
-                            .matchedGeometryEffect(id: "indicator", in: morph)
-                            .offset(x: 7, y: -4)
-                    }
-                }
 
-            VStack(alignment: isCompact ? .center : .leading, spacing: 1) {
+        return layout {
+            MascotView(
+                appearance: row.worker.appearance,
+                size      : isCompact ? 32 : 28
+            )
+            .overlay(alignment: .topTrailing) {
+                if isCompact {
+                    indicator
+                        .matchedGeometryEffect(
+                            id: "indicator",
+                            in: morph
+                        )
+                        .offset(
+                            x: 7,
+                            y: -4
+                        )
+                }
+            }
+
+            VStack(
+                alignment: isCompact ? .center : .leading,
+                spacing  : 1
+            ) {
                 Text(row.name)
                     .font(isCompact ? .caption : .body)
                     .fontWeight(isCompact ? .regular : .medium)
                     .foregroundStyle(isEmphasized ? AnyShapeStyle(.white) : AnyShapeStyle(.primary))
                     .lineLimit(1)
                     .truncationMode(.tail)
+
                 if !isCompact {
                     Text(row.subtitle)
                         .font(.subheadline)
@@ -92,14 +117,26 @@ struct WorkerRowView: View {
             if !isCompact {
                 Spacer(minLength: 4)
                 indicator
-                    .matchedGeometryEffect(id: "indicator", in: morph)
+                    .matchedGeometryEffect(
+                        id: "indicator",
+                        in: morph
+                    )
             }
         }
         // The mascot and the name take their new size at once and move, rather than fading one into another.
         .contentTransition(.identity)
-        .padding(.top, 8)
-        .padding(.bottom, isCompact ? 7 : 8)
-        .padding(.horizontal, isCompact ? 0 : SidebarBlock.contentInset - SidebarBlock.gutter)
+        .padding(
+            .top,
+            8
+        )
+        .padding(
+            .bottom,
+            isCompact ? 7 : 8
+        )
+        .padding(
+            .horizontal,
+            isCompact ? 0 : SidebarBlock.contentInset - SidebarBlock.gutter
+        )
         .frame(minHeight: isCompact ? nil : 48)
     }
 
@@ -118,8 +155,14 @@ struct WorkerRowView: View {
                 .font((isCompact ? Font.caption2 : .caption).weight(.semibold))
                 .monospacedDigit()
                 .foregroundStyle(isEmphasized ? Color(nsColor: .selectedContentBackgroundColor) : .white)
-                .padding(.horizontal, isCompact ? 4 : 6)
-                .frame(minWidth: isCompact ? 16 : 20, minHeight: isCompact ? 16 : 20)
+                .padding(
+                    .horizontal,
+                    isCompact ? 4 : 6
+                )
+                .frame(
+                    minWidth : isCompact ? 16 : 20,
+                    minHeight: isCompact ? 16 : 20
+                )
                 .background(Capsule().fill(isEmphasized ? Color.white : .accentColor))
         }
     }

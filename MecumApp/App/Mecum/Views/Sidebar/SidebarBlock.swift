@@ -39,6 +39,7 @@ struct SidebarBlock: View {
 
     private var fill: Color {
         guard isSelected else { return Self.rest }
+
         return Color(nsColor: isEmphasized ? .selectedContentBackgroundColor
                                            : .unemphasizedSelectedContentBackgroundColor)
     }
@@ -47,7 +48,13 @@ struct SidebarBlock: View {
     /// appearances, clearly apart from the grey of an unfocused selection.
     private static let rest = Color(nsColor: NSColor(name: "SidebarBlockRest") { appearance in
         appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua
-            ? NSColor(white: 1, alpha: 0.05)
-            : NSColor(white: 1, alpha: 0.75)
+            ? NSColor(
+                white: 1,
+                alpha: 0.05
+            )
+            : NSColor(
+                white: 1,
+                alpha: 0.75
+            )
     })
 }

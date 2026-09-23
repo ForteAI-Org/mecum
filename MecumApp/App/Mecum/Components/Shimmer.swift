@@ -22,11 +22,17 @@ struct Shimmer: ViewModifier {
         content
             .overlay {
                 GeometryReader { proxy in
-                    let band = max(40, proxy.size.width * 0.5)
-                    LinearGradient(colors: [.clear, .white.opacity(0.55), .clear],
-                                   startPoint: .leading, endPoint: .trailing)
-                        .frame(width: band)
-                        .offset(x: -band + phase * (proxy.size.width + band))
+                    let band = max(
+                        40,
+                        proxy.size.width * 0.5
+                    )
+                    LinearGradient(
+                        colors    : [.clear, .white.opacity(0.55), .clear],
+                        startPoint: .leading,
+                        endPoint  : .trailing
+                    )
+                    .frame(width: band)
+                    .offset(x: -band + phase * (proxy.size.width + band))
                 }
                 .mask(content)
                 .blendMode(.plusLighter)
@@ -36,13 +42,8 @@ struct Shimmer: ViewModifier {
             }
             .onAppear {
                 guard !reducesMotion else { return }
+
                 withAnimation(.linear(duration: 1.2).repeatForever(autoreverses: false)) { phase = 1 }
             }
     }
-}
-
-extension View {
-
-    /// Marks the view as loading with a passing band of light; see `Shimmer`.
-    func shimmering() -> some View { modifier(Shimmer()) }
 }

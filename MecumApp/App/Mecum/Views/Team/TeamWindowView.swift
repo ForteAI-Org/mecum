@@ -46,11 +46,19 @@ struct TeamWindowView: View {
 
     var body: some View {
         content
-            .frame(minWidth: ShellMetrics.windowMinimum, minHeight: 560)
+            .frame(
+                minWidth : ShellMetrics.windowMinimum,
+                minHeight: 560
+            )
             .task {
                 launch.open()
                 guard team == nil, let store = launch.store else { return }
-                let model = TeamModel(store: store, connections: connections, broker: broker)
+
+                let model = TeamModel(
+                    store      : store,
+                    connections: connections,
+                    broker     : broker
+                )
                 didOpenTeam(model)
                 await model.load()
                 restore(into: model)
@@ -69,7 +77,10 @@ struct TeamWindowView: View {
             .onChange(of: team.selection) { storedSelection = team.selection?.uuidString ?? "" }
         } else if let failure = launch.failure {
             ContentUnavailableView {
-                Label("The workspace did not open", systemImage: "externaldrive.badge.xmark")
+                Label(
+                    "The workspace did not open",
+                    systemImage: "externaldrive.badge.xmark"
+                )
             } description: {
                 Text(
                     """

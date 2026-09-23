@@ -24,7 +24,10 @@ struct StatusText: View {
     private let text: String
     private let tone: Tone
 
-    init(_ text: String, tone: Tone) {
+    init(
+        _ text: String,
+        tone  : Tone
+    ) {
         self.text = text
         self.tone = tone
     }
@@ -33,11 +36,18 @@ struct StatusText: View {
         HStack(spacing: 6) {
             Circle()
                 .fill(fill)
-                .frame(width: 7, height: 7)
+                .frame(
+                    width : 7,
+                    height: 7
+                )
                 .accessibilityHidden(true)
+
             Text(text)
                 .foregroundStyle(tone == .trouble ? AnyShapeStyle(.red) : AnyShapeStyle(.primary))
-                .fixedSize(horizontal: false, vertical: true)
+                .fixedSize(
+                    horizontal: false,
+                    vertical  : true
+                )
         }
     }
 

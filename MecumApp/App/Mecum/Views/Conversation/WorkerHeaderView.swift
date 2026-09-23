@@ -20,7 +20,10 @@ struct WorkerHeaderView: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            MascotView(appearance: header.appearance, size: 26)
+            MascotView(
+                appearance: header.appearance,
+                size      : 26
+            )
             Text(header.name)
                 .font(.headline)
                 .lineLimit(1)

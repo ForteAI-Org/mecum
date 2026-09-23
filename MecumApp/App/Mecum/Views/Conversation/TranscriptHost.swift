@@ -33,18 +33,31 @@ struct TranscriptHost: NSViewRepresentable {
         applyStyle()
         let view = controller.view
         // Any width the column gives is fine; the transcript never pushes back horizontally.
-        view.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        view.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        view.setContentHuggingPriority(
+            .defaultLow,
+            for: .horizontal
+        )
+        view.setContentCompressionResistancePriority(
+            .defaultLow,
+            for: .horizontal
+        )
         return view
     }
 
-    func updateNSView(_ view: NSView, context: Context) {
+    func updateNSView(
+        _ view : NSView,
+        context: Context
+    ) {
         applyStyle()
     }
 
     /// Takes what it is offered and asks for no size of its own, so its minimum
     /// is zero whatever width the last layout gave it.
-    func sizeThatFits(_ proposal: ProposedViewSize, nsView: NSView, context: Context) -> CGSize? {
+    func sizeThatFits(
+        _ proposal: ProposedViewSize,
+        nsView    : NSView,
+        context   : Context
+    ) -> CGSize? {
         proposal.replacingUnspecifiedDimensions(by: .zero)
     }
 

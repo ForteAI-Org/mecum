@@ -37,19 +37,34 @@ final class WorkspaceLaunch {
     /// Brain follow it.
     static var directory: URL {
         if let override = ProcessInfo.processInfo.environment["MECUM_APP_SUPPORT_DIR"], !override.isEmpty {
-            return URL(filePath: override, directoryHint: .isDirectory)
+            return URL(
+                filePath     : override,
+                directoryHint: .isDirectory
+            )
         }
+
         if MecumApp.isCheckRun {
-            return URL.temporaryDirectory.appending(path: "MecumCheckSupport", directoryHint: .isDirectory)
+            return URL.temporaryDirectory.appending(
+                path         : "MecumCheckSupport",
+                directoryHint: .isDirectory
+            )
         }
-        return FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appending(path: "Mecum", directoryHint: .isDirectory)
+
+        return FileManager.default.urls(
+            for: .applicationSupportDirectory,
+            in : .userDomainMask
+        )[0]
+        .appending(
+            path         : "Mecum",
+            directoryHint: .isDirectory
+        )
     }
 
     /// Opens the store, or records why it could not be opened. Calling it
     /// again once the store is open does nothing.
     func open(in directory: URL = WorkspaceLaunch.directory) {
         guard store == nil else { return }
+
         do {
             store   = try WorkspaceStore.opening(in: directory)
             failure = nil

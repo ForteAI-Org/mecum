@@ -23,31 +23,62 @@ struct ConnectionCardView: View {
     let provider   : ModelProvider
 
     private var connection: ProviderConnection {
-        ProviderConnection(provider: provider, settings: connections.providerSettings)
+        ProviderConnection(
+            provider: provider,
+            settings: connections.providerSettings
+        )
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(
+            alignment: .leading,
+            spacing  : 10
+        ) {
             Text(connection.name)
                 .font(.headline)
 
             stateLine
 
-            Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 4) {
-                row("Type", connection.authentication.title)
-                row("Destination", connection.destination)
-                row("Last check", lastCheck)
+            Grid(
+                alignment        : .leading,
+                horizontalSpacing: 12,
+                verticalSpacing  : 4
+            ) {
+                row(
+                    "Type",
+                    connection.authentication.title
+                )
+                row(
+                    "Destination",
+                    connection.destination
+                )
+                row(
+                    "Last check",
+                    lastCheck
+                )
                 // No connection here has a source that reports a balance or a price, and a
                 // subscription exposes no per-token cost, so nothing is estimated either.
-                row("Credits and cost", "Non disponibile")
+                row(
+                    "Credits and cost",
+                    "Non disponibile"
+                )
             }
             .font(.callout)
 
-            ConnectionActions(connections: connections, provider: provider)
+            ConnectionActions(
+                connections: connections,
+                provider   : provider
+            )
         }
         .padding(14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(.background.secondary, in: RoundedRectangle(cornerRadius: 12))
+        .frame(
+            maxWidth : .infinity,
+            alignment: .leading
+        )
+        .background(
+            .background.secondary,
+            in: RoundedRectangle(cornerRadius: 12)
+        )
     }
 
     // MARK: State
@@ -55,30 +86,49 @@ struct ConnectionCardView: View {
     @ViewBuilder
     private var stateLine: some View {
         if let state = connections.states[provider] {
-            VStack(alignment: .leading, spacing: 4) {
-                Label(state.title, systemImage: Self.symbol(state))
-                    .font(.callout.weight(.semibold))
-                    .foregroundStyle(Self.tint(state))
+            VStack(
+                alignment: .leading,
+                spacing  : 4
+            ) {
+                Label(
+                    state.title,
+                    systemImage: Self.symbol(state)
+                )
+                .font(.callout.weight(.semibold))
+                .foregroundStyle(Self.tint(state))
+
                 if !state.isReady {
                     Text(state.message)
                         .font(.callout)
                         .textSelection(.enabled)
-                        .fixedSize(horizontal: false, vertical: true)
+                        .fixedSize(
+                            horizontal: false,
+                            vertical  : true
+                        )
                 }
             }
             .accessibilityElement(children: .combine)
         } else if connections.isChecking(provider) {
-            Text("Checking…").font(.callout).shimmering()
-        } else {
-            Label("Not checked yet", systemImage: "circle.dashed")
+            Text("Checking…")
                 .font(.callout)
-                .foregroundStyle(.secondary)
+                .shimmering()
+        } else {
+            Label(
+                "Not checked yet",
+                systemImage: "circle.dashed"
+            )
+            .font(.callout)
+            .foregroundStyle(.secondary)
         }
     }
 
     private var lastCheck: String {
         guard let date = connections.checkedAt[provider] else { return "Never" }
-        return date.formatted(date: .omitted, time: .standard)
+
+        return date.formatted(
+            date: .omitted,
+            time: .standard
+        )
     }
 
     private static func symbol(_ state: ConnectionState) -> String {
@@ -107,10 +157,15 @@ struct ConnectionCardView: View {
 
     // MARK: Helpers
 
-    private func row(_ label: String, _ value: String) -> some View {
+    private func row(
+        _ label: String,
+        _ value: String
+    ) -> some View {
         GridRow {
-            Text(label).foregroundStyle(.secondary)
-            Text(value).textSelection(.enabled)
+            Text(label)
+                .foregroundStyle(.secondary)
+            Text(value)
+                .textSelection(.enabled)
         }
     }
 }

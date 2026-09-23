@@ -5,7 +5,6 @@
 //  Created by Eliomar Alejandro Rodriguez Ferrer on 22/09/2026.
 //
 
-import ModelTransports
 import SwiftUI
 import TeamShell
 import Workspace
@@ -66,17 +65,31 @@ struct TeamSidebarView: View {
                     ForEach(team.rows) { row in
                         workerRow(row)
                     }
+
                     if !team.archived.isEmpty {
-                        archive
+                        TeamSidebarArchive(
+                            team        : team,
+                            showsArchive: $showsArchive,
+                            isCompact   : isCompact,
+                            isFocused   : isFocused && appearsActive,
+                            motion      : motion,
+                            select      : select
+                        )
                     }
                 }
-                .padding(.horizontal, SidebarBlock.gutter)
+                .padding(
+                    .horizontal,
+                    SidebarBlock.gutter
+                )
             }
             .focusable(interactions: .edit)
             .focused($isFocused)
             .focusEffectDisabled()
             .onMoveCommand { direction in
-                moveSelection(direction, scroller: scroller)
+                moveSelection(
+                    direction,
+                    scroller: scroller
+                )
             }
         }
         .accessibilityElement(children: .contain)
@@ -87,9 +100,28 @@ struct TeamSidebarView: View {
         } action: { isCompact in
             withAnimation(motion) { self.isCompact = isCompact }
         }
-        .safeAreaBar(edge: .top, spacing: 0) { header }
-        .safeAreaBar(edge: .bottom, spacing: 0) { connectionsFooter }
-        .frame(minWidth: 0, maxWidth: .infinity)
+        .safeAreaBar(
+            edge   : .top,
+            spacing: 0
+        ) {
+            TeamSidebarHeader(
+                team     : team,
+                isCompact: isCompact
+            )
+        }
+        .safeAreaBar(
+            edge   : .bottom,
+            spacing: 0
+        ) {
+            TeamSidebarFooter(
+                team     : team,
+                isCompact: isCompact
+            )
+        }
+        .frame(
+            minWidth: 0,
+            maxWidth: .infinity
+        )
     }
 
     /// The change to compact and back, and the archive folding; nothing moves under Reduce Motion.
@@ -102,7 +134,7 @@ struct TeamSidebarView: View {
     /// Makes `id` the selection and gives the sidebar focus, as a click on a list row does.
     private func select(_ id: UUID) {
         team.selection = id
-        isFocused = true
+        isFocused      = true
     }
 
     /// The rows Up and Down step through, in the order they are shown.
@@ -112,211 +144,61 @@ struct TeamSidebarView: View {
 
     /// Up and Down select the row above or below and stop at either end; with
     /// nothing selected, Down starts at the first row and Up at the last.
-    private func moveSelection(_ direction: MoveCommandDirection, scroller: ScrollViewProxy) {
+    private func moveSelection(
+        _ direction: MoveCommandDirection,
+        scroller   : ScrollViewProxy
+    ) {
         let ids = navigableIDs
         guard !ids.isEmpty else { return }
+
         let current = team.selection.flatMap(ids.firstIndex(of:))
         let next: Int
         switch direction {
-        case .down: next = current.map { min($0 + 1, ids.count - 1) } ?? 0
-        case .up:   next = current.map { max($0 - 1, 0) } ?? ids.count - 1
-        default:    return
+        case .down:
+            next = current.map {
+                min(
+                    $0 + 1,
+                    ids.count - 1
+                )
+            } ?? 0
+
+        case .up:
+            next = current.map {
+                max(
+                    $0 - 1,
+                    0
+                )
+            } ?? ids.count - 1
+
+        default:
+            return
         }
+
         team.selection = ids[next]
         scroller.scrollTo(ids[next])
     }
 
     private func workerRow(_ row: TeamRow) -> some View {
-        WorkerRowView(row: row, isCompact: isCompact, isSelected: team.selection == row.id,
-                      isFocused: isFocused && appearsActive)
-            // A little more room between the title and the first block than between blocks.
-            .padding(.top, row.id == team.rows.first?.id ? 5 : 0)
-            .contentShape(Rectangle())
-            .onTapGesture { select(row.id) }
-            .accessibilityAction { select(row.id) }
-            .contextMenu {
-                WorkerCommands(worker: row.worker, team: team)
-            }
-            .id(row.id)
-    }
-
-    // MARK: Title
-
-    /// The sidebar's title and the button that adds a worker, at the trailing
-    /// end of the same line as in a grouped form's header; alone and centred
-    /// over the tiles.
-    private var header: some View {
-        ZStack {
-            // Laid out in both widths and faded, so the change never squeezes it into a column.
-            Text("Team")
-                .font(.title3.weight(.semibold))
-                .fixedSize()
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.leading, SidebarBlock.contentInset)
-                .opacity(isCompact ? 0 : 1)
-                // Gone before the plus crosses it, and back once the plus has passed.
-                .animation(
-                    reducesMotion ? nil : (isCompact ? .easeOut(duration: 0.1) : .easeIn(duration: 0.15).delay(0.15)),
-                    value: isCompact
-                )
-                .accessibilityHidden(isCompact)
-                .accessibilityAddTraits(.isHeader)
-            Button("New Worker", systemImage: "plus") { team.isCreatingWorker = true }
-                .labelStyle(.iconOnly)
-                .buttonStyle(.borderless)
-                .font(.title3.weight(.medium))
-                .frame(width: 28, height: 28)
-                .contentShape(Rectangle())
-                .help("New worker (Command-N)")
-                .keyboardShortcut("n", modifiers: .command)
-                .frame(maxWidth: .infinity, alignment: isCompact ? .center : .trailing)
-                // The plus sits about 6 points inside its 28 point frame, so its edge meets the badges' edge.
-                .padding(.trailing, isCompact ? 0 : SidebarBlock.contentInset - 6)
-        }
-        .padding(.top, 2)
-        .padding(.bottom, 6)
-    }
-
-    // MARK: Archive
-
-    /// The archive's title, which folds and unfolds it, and its rows while unfolded.
-    private var archive: some View {
-        VStack(spacing: 0) {
-            Button {
-                withAnimation(motion) { showsArchive.toggle() }
-            } label: {
-                HStack(spacing: 4) {
-                    Text(isCompact ? "Archive" : "Archive (\(team.archived.count))")
-                    Spacer(minLength: 0)
-                    Image(systemName: "chevron.right")
-                        .rotationEffect(.degrees(showsArchive ? 90 : 0))
-                }
-                .font(.subheadline.weight(.semibold))
-                .foregroundStyle(.secondary)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .padding(.horizontal, isCompact ? 0 : SidebarBlock.contentInset - SidebarBlock.gutter)
-            .padding(.top, 14)
-            .padding(.bottom, 4)
-            .accessibilityValue(showsArchive ? "Expanded" : "Collapsed")
-
-            if showsArchive {
-                ForEach(team.archived) { worker in
-                    archivedRow(worker)
-                }
-            }
-        }
-    }
-
-    /// An archived worker, quieter than the team: a small mascot and the name,
-    /// or the mascot alone in the compact sidebar, with the name in its tooltip.
-    /// It has no block of its own, only the selection's while it is selected.
-    private func archivedRow(_ worker: WorkerSnapshot) -> some View {
-        let isSelected   = team.selection == worker.id
-        let isEmphasized = isSelected && isFocused && appearsActive
-        return HStack(spacing: 8) {
-            MascotView(appearance: worker.appearance, size: 20)
-            if !isCompact {
-                Text(worker.name)
-                    .foregroundStyle(isEmphasized ? AnyShapeStyle(.white) : AnyShapeStyle(.secondary))
-                    .lineLimit(1)
-                    .truncationMode(.tail)
-            }
-        }
-        .frame(maxWidth: .infinity, minHeight: 28, alignment: isCompact ? .center : .leading)
-        .padding(.horizontal, SidebarBlock.contentInset - SidebarBlock.gutter)
-        .background {
-            if isSelected { SidebarBlock(isSelected: true, isEmphasized: isEmphasized) }
-        }
-        .padding(.vertical, SidebarBlock.spacing / 2)
+        WorkerRowView(
+            row       : row,
+            isCompact : isCompact,
+            isSelected: team.selection == row.id,
+            isFocused : isFocused && appearsActive
+        )
+        // A little more room between the title and the first block than between blocks.
+        .padding(
+            .top,
+            row.id == team.rows.first?.id ? 5 : 0
+        )
         .contentShape(Rectangle())
-        .onTapGesture { select(worker.id) }
-        .help(worker.name)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(worker.name), archived")
-        .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
-        .accessibilityAction { select(worker.id) }
+        .onTapGesture { select(row.id) }
+        .accessibilityAction { select(row.id) }
         .contextMenu {
-            WorkerCommands(worker: worker, team: team)
+            WorkerCommands(
+                worker: row.worker,
+                team  : team
+            )
         }
-        .id(worker.id)
-    }
-
-    // MARK: Connections
-
-    /// How many providers the last checks found ready. A provider not checked
-    /// yet is not counted, since nothing is checked before the connections or
-    /// a worker's profile are opened.
-    private var readyConnections: Int {
-        ModelProvider.allCases.count { team.connections.states[$0]?.isReady == true }
-    }
-
-    /// The team's model connections, pinned at the foot of the sidebar so the
-    /// team scrolls and it stays, with the ready ones counted at the trailing
-    /// edge. The Team menu holds the same command.
-    private var connectionsFooter: some View {
-        Button {
-            team.isShowingConnections = true
-        } label: {
-            // One layout, as a worker's row. Compact, the badge sits under the symbol, where a tile
-            // has its name.
-            let layout = isCompact ? AnyLayout(VStackLayout(spacing: 4)) : AnyLayout(HStackLayout(spacing: 8))
-            layout {
-                Image(systemName: "point.3.connected.trianglepath.dotted")
-                    .font(isCompact ? .title3 : .body)
-                if !isCompact {
-                    Text("Connections")
-                        .fixedSize()
-                        // Leaving at once: a fading copy was drawn at the top of the sidebar during a resize.
-                        .transition(reducesMotion ? .identity : .asymmetric(
-                            insertion: .opacity.animation(.easeIn(duration: 0.15).delay(0.15)),
-                            removal  : .identity
-                        ))
-                    Spacer(minLength: 4)
-                }
-                readyBadge
-            }
-            // As on a row: the badge's number moves with its capsule instead of fading apart from it.
-            .contentTransition(.identity)
-            .frame(maxWidth: .infinity, alignment: isCompact ? .center : .leading)
-            .contentShape(Rectangle())
-        }
-        // Plain, so SwiftUI draws the label and moves its parts; a borderless one cross-faded it whole.
-        .buttonStyle(.plain)
-        .foregroundStyle(.secondary)
-        .padding(.horizontal, isCompact ? 0 : SidebarBlock.contentInset)
-        .padding(.vertical, 10)
-        .help("The model connections the team uses")
-        .accessibilityLabel("Connections")
-        .accessibilityValue(readyDescription)
-    }
-
-    /// A green dot and the count of ready connections, in a quiet capsule; nothing while none is ready.
-    @ViewBuilder
-    private var readyBadge: some View {
-        if readyConnections > 0 {
-            HStack(spacing: 4) {
-                Circle()
-                    .fill(.green)
-                    .frame(width: 6, height: 6)
-                Text("\(readyConnections)")
-                    .font(.caption.weight(.semibold))
-                    .monospacedDigit()
-            }
-            .foregroundStyle(.secondary)
-            .padding(.horizontal, 6)
-            .frame(minHeight: 18)
-            .background(Capsule().fill(.quaternary))
-            .accessibilityHidden(true)
-        }
-    }
-
-    private var readyDescription: String {
-        switch readyConnections {
-        case 0:  ""
-        case 1:  "1 connection ready"
-        default: "\(readyConnections) connections ready"
-        }
+        .id(row.id)
     }
 }

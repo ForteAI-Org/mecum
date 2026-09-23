@@ -30,22 +30,38 @@ struct NewWorkerSheet: View {
     @State private var appearance   = NewWorkerSheet.startingAppearance()
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        VStack(
+            alignment: .leading,
+            spacing  : 16
+        ) {
 
             Text("New worker")
                 .font(.title3.bold())
 
-            HStack(alignment: .top, spacing: 16) {
-                MascotView(appearance: appearance, size: 64)
-                    .accessibilityHidden(false)
-                    .accessibilityLabel("Mascot preview, \(appearance.palette)")
+            HStack(
+                alignment: .top,
+                spacing  : 16
+            ) {
+                MascotView(
+                    appearance: appearance,
+                    size      : 64
+                )
+                .accessibilityHidden(false)
+                .accessibilityLabel("Mascot preview, \(appearance.palette)")
 
-                VStack(alignment: .leading, spacing: 8) {
-                    Picker("Colour", selection: $appearance.palette) {
+                VStack(
+                    alignment: .leading,
+                    spacing  : 8
+                ) {
+                    Picker(
+                        "Colour",
+                        selection: $appearance.palette
+                    ) {
                         ForEach(MascotPalette.all) { palette in
                             Text(palette.name.capitalized).tag(palette.name)
                         }
                     }
+
                     Button("New shape") {
                         appearance.seed = Int64.random(in: Int64.min...Int64.max)
                     }
@@ -54,10 +70,20 @@ struct NewWorkerSheet: View {
             }
 
             Form {
-                TextField("Name", text: $name)
-                TextField("Role (optional)", text: $role)
-                TextField("Description (optional)", text: $instructions, axis: .vertical)
-                    .lineLimit(3...6)
+                TextField(
+                    "Name",
+                    text: $name
+                )
+                TextField(
+                    "Role (optional)",
+                    text: $role
+                )
+                TextField(
+                    "Description (optional)",
+                    text: $instructions,
+                    axis: .vertical
+                )
+                .lineLimit(3...6)
             }
             .formStyle(.columns)
 
@@ -70,12 +96,22 @@ struct NewWorkerSheet: View {
             )
             .font(.footnote)
             .foregroundStyle(.secondary)
-            .fixedSize(horizontal: false, vertical: true)
+            .fixedSize(
+                horizontal: false,
+                vertical  : true
+            )
 
             HStack {
                 Spacer()
-                Button("Cancel", role: .cancel) { dismiss() }
-                    .keyboardShortcut(.cancelAction)
+
+                Button(
+                    "Cancel",
+                    role: .cancel
+                ) {
+                    dismiss()
+                }
+                .keyboardShortcut(.cancelAction)
+
                 Button("Create") { create() }
                     .keyboardShortcut(.defaultAction)
                     .disabled(trimmedName.isEmpty)

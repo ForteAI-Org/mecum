@@ -20,8 +20,14 @@ struct WorkerScreenView: NSViewRepresentable {
     let workerID: UUID
 
     func makeNSView(context: Context) -> NSView {
-        team.makeScreenView(of: workerID, contentsScale: NSScreen.main?.backingScaleFactor ?? 2) ?? NSView()
+        team.makeScreenView(
+            of           : workerID,
+            contentsScale: NSScreen.main?.backingScaleFactor ?? 2
+        ) ?? NSView()
     }
 
-    func updateNSView(_ view: NSView, context: Context) {}
+    func updateNSView(
+        _ view : NSView,
+        context: Context
+    ) {}
 }

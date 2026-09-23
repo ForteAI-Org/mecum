@@ -27,20 +27,33 @@ struct TextSizeCommands: Commands {
     var body: some Commands {
         CommandGroup(before: .toolbar) {
             Button("Bigger") { set(style.bigger) }
-                .keyboardShortcut("+", modifiers: .command)
+                .keyboardShortcut(
+                    "+",
+                    modifiers: .command
+                )
                 .disabled(style.bigger == nil)
+
             Button("Smaller") { set(style.smaller) }
-                .keyboardShortcut("-", modifiers: .command)
+                .keyboardShortcut(
+                    "-",
+                    modifiers: .command
+                )
                 .disabled(style.smaller == nil)
+
             Button("Actual Size") { set(.actualSize) }
-                .keyboardShortcut("0", modifiers: .command)
+                .keyboardShortcut(
+                    "0",
+                    modifiers: .command
+                )
                 .disabled(style == .actualSize)
+
             Divider()
         }
     }
 
     private func set(_ next: TranscriptStyle?) {
         guard let next else { return }
+
         bodyPointSize = Double(next.bodyPointSize)
     }
 }

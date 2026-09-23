@@ -21,9 +21,15 @@ struct MascotView: View {
     var size      : CGFloat = 32
 
     var body: some View {
-        Image(nsImage: MascotImages.image(for: appearance, size: size))
-            .resizable()
-            .frame(width: size, height: size)
-            .accessibilityHidden(true)
+        Image(nsImage: MascotImages.image(
+            for : appearance,
+            size: size
+        ))
+        .resizable()
+        .frame(
+            width : size,
+            height: size
+        )
+        .accessibilityHidden(true)
     }
 }

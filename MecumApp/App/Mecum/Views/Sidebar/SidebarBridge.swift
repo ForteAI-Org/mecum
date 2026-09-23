@@ -27,9 +27,16 @@ struct SidebarBridge: NSViewRepresentable {
 
     func makeNSView(context: Context) -> BridgeView { BridgeView() }
 
-    func updateNSView(_ view: BridgeView, context: Context) {}
+    func updateNSView(
+        _ view : BridgeView,
+        context: Context
+    ) {}
 
-    func sizeThatFits(_ proposal: ProposedViewSize, nsView: BridgeView, context: Context) -> CGSize? {
+    func sizeThatFits(
+        _ proposal: ProposedViewSize,
+        nsView    : BridgeView,
+        context   : Context
+    ) -> CGSize? {
         .zero
     }
 
@@ -44,12 +51,14 @@ struct SidebarBridge: NSViewRepresentable {
             super.viewDidMoveToWindow()
             observation = nil
             guard window != nil else { return }
+
             // The split is assembled around this view in the same pass, and completes after it.
             DispatchQueue.main.async { [weak self] in self?.connect() }
         }
 
         private func connect() {
             guard observation == nil, let item = splitItem() else { return }
+
             self.item = item
             reapply()
             // SwiftUI changes it on the main thread, as AppKit requires of split items.

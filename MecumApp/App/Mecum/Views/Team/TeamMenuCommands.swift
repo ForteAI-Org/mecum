@@ -22,9 +22,14 @@ struct TeamMenuCommands: Commands {
         CommandMenu("Team") {
             Button("Connections…") { team?.isShowingConnections = true }
                 .disabled(team == nil)
+
             Divider()
+
             if let team, let worker = team.selectedWorker {
-                WorkerCommands(worker: worker, team: team)
+                WorkerCommands(
+                    worker: worker,
+                    team  : team
+                )
             } else {
                 Button("No worker selected") {}
                     .disabled(true)

@@ -33,21 +33,37 @@ struct ConnectionsSheet: View {
     var body: some View {
         VStack(spacing: 0) {
             // The title, the blocks and the buttons share one inset, the grouped form's own.
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(
+                alignment: .leading,
+                spacing  : 2
+            ) {
                 Text("Connections")
                     .font(.title2.weight(.semibold))
                     .accessibilityAddTraits(.isHeader)
                 Text("How the team's workers reach their models.")
                     .foregroundStyle(.secondary)
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.horizontal, 20)
-            .padding(.top, 20)
+            .frame(
+                maxWidth : .infinity,
+                alignment: .leading
+            )
+            .padding(
+                .horizontal,
+                20
+            )
+            .padding(
+                .top,
+                20
+            )
 
             Form {
                 ForEach(ModelProvider.allCases) { provider in
-                    ConnectionSection(connections: connections, provider: provider)
+                    ConnectionSection(
+                        connections: connections,
+                        provider   : provider
+                    )
                 }
+
                 Section {
                 } footer: {
                     Text("None of these connections reports credits or cost, so neither is shown.")
@@ -62,14 +78,25 @@ struct ConnectionsSheet: View {
             HStack {
                 Button("Check All") { connections.refresh() }
                     .disabled(ModelProvider.allCases.allSatisfy(connections.isChecking))
+
                 Spacer()
+
                 Button("Done") { dismiss() }
                     .keyboardShortcut(.defaultAction)
             }
-            .padding(.horizontal, 20)
-            .padding(.vertical, 14)
+            .padding(
+                .horizontal,
+                20
+            )
+            .padding(
+                .vertical,
+                14
+            )
         }
-        .frame(width: 560, height: 680)
+        .frame(
+            width : 560,
+            height: 680
+        )
         .task {
             if checksOnAppear { connections.refresh() }
         }

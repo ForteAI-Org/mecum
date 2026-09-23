@@ -5,11 +5,8 @@
 //  Created by Eliomar Alejandro Rodriguez Ferrer on 22/09/2026.
 //
 
-import Composer
-import ModelTransports
 import SwiftUI
 import Transcript
-import WorkerAgents
 import Workspace
 
 /// WorkerConversationView shows one worker's direct conversation.
@@ -43,46 +40,24 @@ struct WorkerConversationView: View {
 
     var body: some View {
         transcriptArea
-            .overlay(alignment: .top) { titleBarEdge }
-            .overlay(alignment: .topTrailing) { floatingScreen }
-            .overlay(alignment: .bottom) { composer }
-            .onGeometryChange(for: CGFloat.self) { $0.safeAreaInsets.top } action: { titleBarHeight = $0 }
-    }
-
-    /// The worker's live screen at the top right, below the title bar, when the
-    /// person moved it here from the inspector and there is a window to watch.
-    @ViewBuilder
-    private var floatingScreen: some View {
-        if team.showsScreenInConversation, team.hasScreen(worker.id) {
-            WorkerScreenCard(team: team, worker: worker, place: .conversation)
-                .padding(6)
-                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                .shadow(color: .black.opacity(0.18), radius: 10, y: 4)
-                .frame(width: 280)
-                .padding(.top, titleBarHeight + 8)
-                .padding(.trailing, 16)
-                .ignoresSafeArea(.container, edges: .top)
-                .transition(.scale(scale: 0.85, anchor: .topTrailing).combined(with: .opacity))
-        }
-    }
-
-    /// The soft edge the messages fade under at the title bar, as a system scroll
-    /// view gets on its own: the system gives that edge only to SwiftUI's scroll
-    /// views, and the transcript is an AppKit one. It is the bar's material,
-    /// solid under the bar and fading out just below it, and it takes no clicks.
-    private var titleBarEdge: some View {
-        Rectangle()
-            .fill(.bar)
-            .mask {
-                LinearGradient(stops: [.init(color: .black, location: 0),
-                                       .init(color: .black, location: 0.6),
-                                       .init(color: .clear, location: 1)],
-                               startPoint: .top, endPoint: .bottom)
+            .overlay(alignment: .top) {
+                ConversationTitleBarEdge(titleBarHeight: titleBarHeight)
             }
-            .frame(height: titleBarHeight + 20)
-            .ignoresSafeArea(.container, edges: .top)
-            .allowsHitTesting(false)
-            .accessibilityHidden(true)
+            .overlay(alignment: .topTrailing) {
+                ConversationFloatingScreen(
+                    team          : team,
+                    worker        : worker,
+                    titleBarHeight: titleBarHeight
+                )
+            }
+            .overlay(alignment: .bottom) {
+                ConversationComposer(
+                    team  : team,
+                    worker: worker,
+                    height: $composerHeight
+                )
+            }
+            .onGeometryChange(for: CGFloat.self) { $0.safeAreaInsets.top } action: { titleBarHeight = $0 }
     }
 
     // MARK: Transcript
@@ -90,10 +65,16 @@ struct WorkerConversationView: View {
     private var transcriptArea: some View {
         Group {
             if let transcript {
-                TranscriptHost(controller: transcript, topInset: titleBarHeight + 8, bottomInset: composerHeight)
-                    // Under the title bar, so messages scroll beneath the worker's name as the system draws it.
-                    .ignoresSafeArea(.container, edges: .top)
-
+                TranscriptHost(
+                    controller : transcript,
+                    topInset   : titleBarHeight + 8,
+                    bottomInset: composerHeight
+                )
+                // Under the title bar, so messages scroll beneath the worker's name as the system draws it.
+                .ignoresSafeArea(
+                    .container,
+                    edges: .top
+                )
             } else {
                 Color.clear
             }
@@ -114,13 +95,21 @@ struct WorkerConversationView: View {
     /// Opens the conversation at the position it was left at, or at the end.
     private func openTranscript() {
         guard let conversation = team.conversation else { return }
+
         let controller = transcript ?? TranscriptController(source: team.transcriptSource)
         transcript = controller
+
         let conversationID = conversation.id
         controller.onReadingPositionChange = { [team] anchor, offset in
             // A report that rests after a switch belongs to the conversation it was read in.
             guard team.conversation?.id == conversationID else { return }
-            Task { await team.rememberReadingPosition(anchor, offset: offset) }
+
+            Task {
+                await team.rememberReadingPosition(
+                    anchor,
+                    offset: offset
+                )
+            }
         }
         controller.open(
             conversationID,
@@ -129,38 +118,5 @@ struct WorkerConversationView: View {
             readingAnchor: conversation.readingAnchorMessageID,
             readingOffset: conversation.readingOffset
         )
-    }
-
-    // MARK: Composer
-
-    /// Whether this worker can answer: it has a model the catalogue still
-    /// offers, on a provider this build has an agent for. The inspector shows
-    /// which of these is missing; the composer only says to choose a model.
-    private var canAnswer: Bool {
-        guard let selection = worker.configuration else { return false }
-        if case .modelRemoved = team.modelStates[worker.id] { return false }
-        return WorkerAnswer(provider: selection.provider).refusal == nil
-    }
-
-    /// The composer (§13), floating over the transcript's bottom edge. Its field
-    /// hands the draft committed text only, never a composition in progress, so
-    /// the pause below writes finished text.
-    private var composer: some View {
-        ComposerBar(
-            draft      : $team.draft,
-            recipient  : worker.name,
-            canAnswer  : canAnswer,
-            isAnswering: team.isAnswering(worker.id),
-            send       : { Task { await team.send() } },
-            stop       : { team.stopAnswering(worker.id) },
-            release    : team.holdsComputer(worker.id) ? { Task { await team.releaseComputer(worker.id) } } : nil
-        )
-        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { composerHeight = $0 }
-        // The draft reaches the store once typing pauses. A new keystroke
-        // cancels this task and starts it again, so a burst writes once.
-        .task(id: team.draft) {
-            do { try await Task.sleep(for: .milliseconds(500)) } catch { return }
-            await team.flushDraft()
-        }
     }
 }

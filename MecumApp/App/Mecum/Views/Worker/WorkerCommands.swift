@@ -37,11 +37,21 @@ struct WorkerCommands: View {
 
         if worker.isArchived {
             Button("Restore to the team") {
-                Task { await team.setArchived(false, for: worker.id) }
+                Task {
+                    await team.setArchived(
+                        false,
+                        for: worker.id
+                    )
+                }
             }
         } else {
             Button("Archive") {
-                Task { await team.setArchived(true, for: worker.id) }
+                Task {
+                    await team.setArchived(
+                        true,
+                        for: worker.id
+                    )
+                }
             }
         }
     }

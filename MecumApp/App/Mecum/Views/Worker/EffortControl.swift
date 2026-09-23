@@ -27,11 +27,16 @@ struct EffortControl: View {
     private let inset: CGFloat = 12
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(
+            alignment: .leading,
+            spacing  : 8
+        ) {
             HStack {
                 Text("Impegno di ragionamento")
                     .font(.headline)
+
                 Spacer()
+
                 if !scale.isEmpty, !scale.isSwitch {
                     Text(effort.title(for: scale.provider))
                         .fontWeight(.semibold)
@@ -42,7 +47,10 @@ struct EffortControl: View {
                 Text("This model takes no reasoning effort setting, so there is no level to choose.")
                     .foregroundStyle(.secondary)
             } else if scale.isSwitch {
-                Toggle("Think before answering", isOn: thinking)
+                Toggle(
+                    "Think before answering",
+                    isOn: thinking
+                )
                 summary
             } else {
                 rail
@@ -58,7 +66,10 @@ struct EffortControl: View {
         Text(scale.summary(of: effort))
             .font(.callout)
             .foregroundStyle(.secondary)
-            .fixedSize(horizontal: false, vertical: true)
+            .fixedSize(
+                horizontal: false,
+                vertical  : true
+            )
     }
 
     private var thinking: Binding<Bool> {
@@ -72,7 +83,10 @@ struct EffortControl: View {
 
     private var rail: some View {
         GeometryReader { geometry in
-            let track  = max(1, geometry.size.width - inset * 2)
+            let track  = max(
+                1,
+                geometry.size.width - inset * 2
+            )
             let middle = geometry.size.height / 2
 
             ZStack {
@@ -82,15 +96,27 @@ struct EffortControl: View {
                 ForEach(scale.positions) { position in
                     Circle()
                         .fill(.secondary)
-                        .frame(width: 5, height: 5)
-                        .position(x: inset + track * scale.fraction(of: position), y: middle)
+                        .frame(
+                            width : 5,
+                            height: 5
+                        )
+                        .position(
+                            x: inset + track * scale.fraction(of: position),
+                            y: middle
+                        )
                 }
 
                 Circle()
                     .fill(.tint)
-                    .frame(width: 20, height: 20)
+                    .frame(
+                        width : 20,
+                        height: 20
+                    )
                     .shadow(radius: 1)
-                    .position(x: inset + track * scale.fraction(of: effort), y: middle)
+                    .position(
+                        x: inset + track * scale.fraction(of: effort),
+                        y: middle
+                    )
             }
             .contentShape(Capsule())
             // Zero distance, so a click is a drag that did not move and lands the same way.
@@ -103,7 +129,10 @@ struct EffortControl: View {
             )
         }
         .frame(height: 26)
-        .animation(.snappy(duration: 0.15), value: effort)
+        .animation(
+            .snappy(duration: 0.15),
+            value: effort
+        )
         .focusable()
         .onKeyPress(.leftArrow)  { step(-1) }
         .onKeyPress(.downArrow)  { step(-1) }
@@ -127,6 +156,7 @@ struct EffortControl: View {
                 Text(position.title(for: scale.provider))
                     .font(.caption2)
                     .foregroundStyle(position == effort ? .primary : .secondary)
+
                 if position != scale.positions.last { Spacer() }
             }
         }
@@ -134,7 +164,11 @@ struct EffortControl: View {
     }
 
     private func step(_ steps: Int) -> KeyPress.Result {
-        guard let landed = scale.effort(from: effort, steps: steps) else { return .ignored }
+        guard let landed = scale.effort(
+            from : effort,
+            steps: steps
+        ) else { return .ignored }
+
         effort = landed
         return .handled
     }
