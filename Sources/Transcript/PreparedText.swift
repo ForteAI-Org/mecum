@@ -7,13 +7,18 @@
 
 import AppKit
 
-/// PreparedText is a row's text after the content pipeline: the characters
-/// and the role of each run, with no font or colour object in it.
+/// PreparedText is a row's text after the content pipeline: its blocks, each
+/// with its characters and the role of each run, with no font or colour
+/// object in it.
 ///
 /// A value rather than an attributed string because it crosses from the
 /// preparation pass to the main actor, and `NSFont` is not `Sendable`. Turning
-/// it into an attributed string only applies attributes, so the parsing it
-/// came from happens once, off the main thread.
+/// a block into an attributed string only applies attributes, so the parsing
+/// it came from happens once, off the main thread.
+///
+/// The row's text as one string is its blocks joined by a newline. A
+/// selection is a range in that string, so it names a message and the blocks
+/// inside it without holding any view.
 public struct PreparedText: Sendable, Hashable {
 
     /// What a run of characters is, which decides its font and colour.
@@ -24,15 +29,47 @@ public struct PreparedText: Sendable, Hashable {
         case captionStrong
         case monospaced
         case alert
+
+        /// A Markdown heading, level 1 to 6.
+        case heading(level: Int)
+
+        /// Code, inline or in a block, in the monospaced face and the body's colour.
+        case code
+
+        /// A link's own text. A model wrote it, so it looks like any link and
+        /// never like a source that was consulted (§11.2).
+        case link
+
+        /// Where a link or an image points, shown beside it so it is never hidden.
+        case destination
+    }
+
+    /// Inline emphasis, which changes the face and not the role.
+    public struct Traits: OptionSet, Sendable, Hashable {
+        public let rawValue: Int
+        public init(rawValue: Int) { self.rawValue = rawValue }
+
+        public static let bold          = Traits(rawValue: 1 << 0)
+        public static let italic        = Traits(rawValue: 1 << 1)
+        public static let strikethrough = Traits(rawValue: 1 << 2)
     }
 
     public struct Run: Sendable, Hashable {
-        public let range: NSRange
-        public let role : Role
+        public let range : NSRange
+        public let role  : Role
+        public var traits: Traits = []
+
+        /// What an explicit click on the run opens, for a link or an image reference.
+        public var link  : String?
+
+        /// List nesting, in steps of `TranscriptStyle.indentStep`.
+        public var indent: Int = 0
+
+        /// The run's paragraph starts with a list marker that hangs into the indent.
+        public var hangs : Bool = false
     }
 
-    public private(set) var string: String = ""
-    public private(set) var runs  : [Run]  = []
+    public private(set) var blocks: [PreparedBlock] = []
 
     public init() {}
 
@@ -40,39 +77,90 @@ public struct PreparedText: Sendable, Hashable {
         append(string, role: role)
     }
 
-    /// Adds `string` as one run of `role`.
+    public init(blocks: [PreparedBlock]) {
+        self.blocks = blocks
+    }
+
+    /// Adds `string` as one run of `role` to the last block, which is a text
+    /// block made for it when there is none.
     public mutating func append(_ string: String, role: Role) {
-        let start = (self.string as NSString).length
-        self.string += string
-        runs.append(Run(range: NSRange(location: start, length: (string as NSString).length), role: role))
+        if blocks.isEmpty { blocks.append(PreparedBlock(kind: .text)) }
+        blocks[blocks.count - 1].append(string, role: role)
     }
 
-    /// The attributed form at `style`. Safe on any thread: it creates its
+    /// The whole row's text: the blocks joined by a newline.
+    public var string: String {
+        blocks.map(\.string).joined(separator: "\n")
+    }
+
+    /// Where each block sits in `string`, in UTF-16 units.
+    public var blockRanges: [NSRange] {
+        var location = 0
+        return blocks.map { block in
+            let length = (block.string as NSString).length
+            defer { location += length + 1 }
+            return NSRange(location: location, length: length)
+        }
+    }
+
+    /// The attributes of `run` at `style`. Safe on any thread: it creates its
     /// fonts and colours and shares none.
-    public func attributed(_ style: TranscriptStyle) -> NSAttributedString {
-        let result = NSMutableAttributedString(string: string)
-        for run in runs {
-            result.addAttributes(Self.attributes(run.role, style), range: run.range)
+    static func attributes(_ run: Run, _ style: TranscriptStyle) -> [NSAttributedString.Key: Any] {
+        var attributes: [NSAttributedString.Key: Any]
+        switch run.role {
+        case .body:
+            attributes = [.font: NSFont.systemFont(ofSize: style.bodyPointSize), .foregroundColor: NSColor.labelColor]
+        case .bodyOnAccent:
+            attributes = [.font: NSFont.systemFont(ofSize: style.bodyPointSize), .foregroundColor: NSColor.white]
+        case .caption:
+            attributes = [.font: NSFont.systemFont(ofSize: style.captionPointSize),
+                          .foregroundColor: NSColor.secondaryLabelColor]
+        case .captionStrong:
+            attributes = [.font: NSFont.boldSystemFont(ofSize: style.captionPointSize),
+                          .foregroundColor: NSColor.secondaryLabelColor]
+        case .monospaced:
+            attributes = [.font: NSFont.monospacedSystemFont(ofSize: style.monospacedPointSize, weight: .regular),
+                          .foregroundColor: NSColor.secondaryLabelColor]
+        case .alert:
+            attributes = [.font: NSFont.systemFont(ofSize: style.bodyPointSize), .foregroundColor: NSColor.systemRed]
+        case .heading(let level):
+            attributes = [.font: NSFont.systemFont(ofSize: style.headingPointSize(level: level), weight: .semibold),
+                          .foregroundColor: NSColor.labelColor]
+        case .code:
+            attributes = [.font: NSFont.monospacedSystemFont(ofSize: style.codePointSize, weight: .regular),
+                          .foregroundColor: NSColor.labelColor]
+        case .link:
+            attributes = [.font: NSFont.systemFont(ofSize: style.bodyPointSize), .foregroundColor: NSColor.linkColor,
+                          .underlineStyle: NSUnderlineStyle.single.rawValue]
+        case .destination:
+            attributes = [.font: NSFont.systemFont(ofSize: style.bodyPointSize),
+                          .foregroundColor: NSColor.secondaryLabelColor]
         }
-        return result
+        if !run.traits.isEmpty, let font = attributes[.font] as? NSFont {
+            attributes[.font] = Self.font(font, with: run.traits)
+            if run.traits.contains(.strikethrough) {
+                attributes[.strikethroughStyle] = NSUnderlineStyle.single.rawValue
+            }
+        }
+        if run.indent > 0 {
+            let step  = style.indentStep
+            let depth = CGFloat(run.indent)
+            let paragraph = NSMutableParagraphStyle()
+            paragraph.headIndent          = depth * step
+            paragraph.firstLineHeadIndent = run.hangs ? (depth - 1) * step : depth * step
+            paragraph.tabStops            = [NSTextTab(textAlignment: .left, location: depth * step)]
+            paragraph.paragraphSpacing    = 2
+            attributes[.paragraphStyle]   = paragraph
+        }
+        return attributes
     }
 
-    private static func attributes(_ role: Role, _ style: TranscriptStyle) -> [NSAttributedString.Key: Any] {
-        switch role {
-        case .body:
-            [.font: NSFont.systemFont(ofSize: style.bodyPointSize), .foregroundColor: NSColor.labelColor]
-        case .bodyOnAccent:
-            [.font: NSFont.systemFont(ofSize: style.bodyPointSize), .foregroundColor: NSColor.white]
-        case .caption:
-            [.font: NSFont.systemFont(ofSize: style.captionPointSize), .foregroundColor: NSColor.secondaryLabelColor]
-        case .captionStrong:
-            [.font: NSFont.boldSystemFont(ofSize: style.captionPointSize),
-             .foregroundColor: NSColor.secondaryLabelColor]
-        case .monospaced:
-            [.font: NSFont.monospacedSystemFont(ofSize: style.monospacedPointSize, weight: .regular),
-             .foregroundColor: NSColor.secondaryLabelColor]
-        case .alert:
-            [.font: NSFont.systemFont(ofSize: style.bodyPointSize), .foregroundColor: NSColor.systemRed]
-        }
+    /// `font` with bold or italic, through its descriptor, which is safe off
+    /// the main thread. A face without the trait keeps the plain one.
+    private static func font(_ font: NSFont, with traits: Traits) -> NSFont {
+        var symbolic = font.fontDescriptor.symbolicTraits
+        if traits.contains(.bold)   { symbolic.insert(.bold) }
+        if traits.contains(.italic) { symbolic.insert(.italic) }
+        return NSFont(descriptor: font.fontDescriptor.withSymbolicTraits(symbolic), size: font.pointSize) ?? font
     }
 }

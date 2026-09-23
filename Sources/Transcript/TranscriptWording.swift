@@ -73,14 +73,39 @@ public enum TranscriptWording {
         date.formatted(date: .omitted, time: .shortened)
     }
 
+    /// The control on a finished code block.
+    public static let copyBlock = "Copy"
+
+    public static func codeBlock(language: String?) -> String {
+        language.map { "Code block, \($0)" } ?? "Code block"
+    }
+
+    /// A row action as VoiceOver lists it.
+    public static func action(_ action: RowAction, in text: PreparedText) -> String {
+        switch action {
+        case .copyBlock(let index):
+            guard text.blocks.indices.contains(index), case .code(let language, _) = text.blocks[index].kind
+            else { return "Copy code block" }
+            return language.map { "Copy \($0) code block" } ?? "Copy code block"
+        case .openLink(let destination, _, _):
+            let shown = URL(string: destination).map(MarkdownRendering.shownDestination) ?? destination
+            return "Open link to \(shown)"
+        }
+    }
+
     /// The whole row as VoiceOver reads it: author, time, content, state.
-    public static func accessibilityLabel(for item: TranscriptItem, workerName: String) -> String {
+    /// `content` is the rendered text, without the Markdown that produced it.
+    public static func accessibilityLabel(
+        for item  : TranscriptItem,
+        workerName: String,
+        content   : String? = nil
+    ) -> String {
         let when = time(item.date)
         switch item.kind {
         case .personMessage(let text, let delivery, _):
-            return "You, \(when): \(text). \(self.delivery(delivery))"
+            return "You, \(when): \(content ?? text). \(self.delivery(delivery))"
         case .workerReply(let text, let isInterrupted):
-            return "\(workerName), \(when): \(text)" + (isInterrupted ? ". \(interrupted)" : "")
+            return "\(workerName), \(when): \(content ?? text)" + (isInterrupted ? ". \(interrupted)" : "")
         case .toolRun(let lines, let isExpanded, let ending):
             let detail = isExpanded ? ": " + lines.joined(separator: "; ") : ""
             return "\(workerName) tools, \(when): \(toolSummary(lines, ending: ending))\(detail)"

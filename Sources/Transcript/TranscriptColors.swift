@@ -7,7 +7,7 @@
 
 import AppKit
 
-/// TranscriptColors holds the transcript's two neutral surfaces, each with a
+/// TranscriptColors holds the transcript's neutral surfaces, each with a
 /// light and a dark value. The person's bubble takes the accent colour and a
 /// mascot keeps its own; neither is defined here.
 enum TranscriptColors {
@@ -22,5 +22,12 @@ enum TranscriptColors {
         appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
             ? NSColor(white: 0.16, alpha: 1)
             : NSColor(white: 0.97, alpha: 1)
+    }
+
+    /// A code block's own surface, inside the reply's bubble.
+    static let codeSurface = NSColor(name: "TranscriptCodeSurface") { appearance in
+        appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+            ? NSColor(white: 0.15, alpha: 1)
+            : NSColor(white: 0.985, alpha: 1)
     }
 }

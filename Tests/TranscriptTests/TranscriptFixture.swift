@@ -35,6 +35,55 @@ struct TranscriptFixture {
         conversation = try await store.createConversation(participants: [worker.id]).id
     }
 
+    /// A worker reply with every block kind the content pipeline renders.
+    static let richReply = """
+        # Release notes
+
+        The build is **green** again, and the `capture` suite passes on the *second* try. \
+        Read [the checklist](https://example.com/release/checklist) before tagging.
+
+        ## What changed
+
+        1. The sidebar layout
+           - fixed the width assertion from yesterday
+           - kept the old *minimum* width
+        2. The capture suite
+           - retries once on the virtual display
+
+        > A flaky test is a bug in the test until it is shown otherwise.
+
+        ---
+
+        ```swift
+        struct ReleaseCheck {
+            let suites: [String]
+            let retries: Int
+
+            func run(_ suite: String) async throws -> Bool {
+                for attempt in 0...retries {
+                    let passed = try await launch(suite, attempt: attempt)
+                    if passed { return true }
+                    print("retrying \\(suite), attempt \\(attempt + 1) of \\(retries + 1), after a failure that looked flaky")
+                }
+                return false
+            }
+
+            func launch(_ suite: String, attempt: Int) async throws -> Bool {
+                try await Task.sleep(for: .milliseconds(10))
+                return attempt > 0 || suite != "capture"
+            }
+        }
+        ```
+
+        | Suite | Result | Time |
+        |:--|:-:|--:|
+        | Layout | passed | 12.4 s |
+        | Capture | passed after one retry on the virtual display | 48.0 s |
+        | Transcript | passed | 3.1 s |
+
+        Raw HTML stays text: <b>not bold</b> <script>alert(1)</script>
+        """
+
     /// Removes the directory. A failure must not fail the test it cleans up after.
     func discard() {
         do { try FileManager.default.removeItem(at: directory) } catch { }

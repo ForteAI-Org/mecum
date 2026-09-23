@@ -7,14 +7,20 @@
 
 import AppKit
 
-/// TranscriptRowView draws one prepared row and lets its text be selected.
+/// TranscriptRowView draws one prepared row, block by block, and lets its
+/// text be selected.
 ///
 /// A recycled view: `configure` replaces everything it shows, including the
 /// selection, which the controller owns in logical terms (row id and character
-/// range) so a view that scrolls away and comes back as another row keeps
-/// nothing of the old one. Main actor only.
+/// range in the row's text) so a view that scrolls away and comes back as
+/// another row keeps nothing of the old one. Main actor only.
+///
+/// Nothing here runs on its own: a link opens and a code block is copied only
+/// on a click or on the controller's keyboard action, and nothing is fetched.
 @MainActor
 final class TranscriptRowView: NSView {
+
+    typealias TextStack = (NSTextStorage, NSLayoutManager, NSTextContainer)
 
     /// Called with the selected character range, or nil when it is cleared.
     var onSelectText: ((NSRange?) -> Void)?
@@ -22,7 +28,13 @@ final class TranscriptRowView: NSView {
     /// Called when the row's own action runs: a tool run expands or folds.
     var onActivate: (() -> Void)?
 
+    /// Called when a click or VoiceOver runs one of the row's actions.
+    var onAction: ((RowAction) -> Void)?
+
     var isFocusedRow = false { didSet { needsDisplay = true } }
+
+    /// The action the keyboard has reached inside the focused row, outlined.
+    var focusedAction: RowAction? { didSet { needsDisplay = true } }
 
     private var row        : PreparedRow?
     private var style      = TranscriptStyle()
@@ -30,7 +42,9 @@ final class TranscriptRowView: NSView {
     private var avatar     : NSImage?
     private var selection  : NSRange?
     private var dragStart  : Int?
-    private var textStack  : (NSTextStorage, NSLayoutManager, NSTextContainer)?
+    private var didDrag    = false
+    private(set) var stacks: [TextStack?] = []
+    private var ranges     : [NSRange] = []
 
     override var isFlipped: Bool { true }
 
@@ -41,15 +55,24 @@ final class TranscriptRowView: NSView {
         avatar    : NSImage?,
         selection : NSRange?
     ) {
+        // The same row again, as a streamed reply grows, keeps the laid out stacks of its unchanged blocks.
+        let previous    = self.row?.item.id == row.item.id && self.style == style ? self.row : nil
+        let oldStacks   = stacks
         self.row        = row
         self.style      = style
         self.workerName = workerName
         self.avatar     = avatar
         self.selection  = selection
-        textStack       = RowPreparation.textStack(row.text.attributed(style), width: row.geometry.text.width)
-        setAccessibilityElement(true)
-        setAccessibilityRole(Self.isToolRun(row) ? .button : .staticText)
-        setAccessibilityLabel(TranscriptWording.accessibilityLabel(for: row.item, workerName: workerName))
+        ranges          = row.text.blockRanges
+        stacks          = zip(row.text.blocks, row.geometry.blockTexts).enumerated().map { index, pair in
+            let (block, frame) = pair
+            if let previous, oldStacks.indices.contains(index), previous.text.blocks.indices.contains(index),
+               previous.text.blocks[index] == block, previous.geometry.blockTexts[index].width == frame.width {
+                return oldStacks[index]
+            }
+            return block.kind == .rule ? nil : RowPreparation.textStack(block.attributed(style), width: frame.width)
+        }
+        configureAccessibility(row)
         needsDisplay = true
     }
 
@@ -64,11 +87,40 @@ final class TranscriptRowView: NSView {
         drawSurface(row, geometry: geometry, isPerson: isPerson)
         if let avatar, let frame = geometry.avatar { avatar.draw(in: frame) }
         if let header = geometry.header { drawHeader(row, in: header, isPerson: isPerson) }
-        drawSelection(in: geometry.text, isOnAccent: isPerson)
-        if let (_, manager, container) = textStack {
-            manager.drawGlyphs(forGlyphRange: manager.glyphRange(for: container), at: geometry.text.origin)
+        for index in row.text.blocks.indices
+        where geometry.blocks.indices.contains(index) && geometry.blocks[index].intersects(dirtyRect) {
+            drawBlock(at: index, of: row, isOnAccent: isPerson)
         }
         if let frame = geometry.badge, let badge = DeliveryBadge(row.item.kind) { draw(badge, in: frame) }
+    }
+
+    private func drawBlock(at index: Int, of row: PreparedRow, isOnAccent: Bool) {
+        let block = row.text.blocks[index]
+        let frame = row.geometry.blocks[index]
+        let text  = row.geometry.blockTexts[index]
+
+        switch block.kind {
+        case .code(_, true):
+            TranscriptColors.codeSurface.setFill()
+            NSBezierPath(roundedRect: frame, xRadius: 6, yRadius: 6).fill()
+            drawCopyControl(in: frame, isFocused: focusedAction == .copyBlock(index: index))
+        case .quote:
+            NSColor.tertiaryLabelColor.setFill()
+            NSRect(x: frame.minX, y: frame.minY, width: 3, height: frame.height).fill()
+        case .rule:
+            NSColor.separatorColor.setFill()
+            NSRect(x: frame.minX, y: frame.midY.rounded(), width: frame.width, height: 1).fill()
+        default:
+            break
+        }
+        guard let (_, manager, container) = stacks[index] else { return }
+        drawSelection(in: text, block: index, clip: frame, isOnAccent: isOnAccent)
+        let glyphs = manager.glyphRange(for: container)
+        manager.drawBackground(forGlyphRange: glyphs, at: text.origin)
+        manager.drawGlyphs(forGlyphRange: glyphs, at: text.origin)
+        if case .openLink(_, index, let range)? = focusedAction {
+            strokeFocus(around: range, in: index, origin: text.origin)
+        }
     }
 
     private func drawSurface(_ row: PreparedRow, geometry: RowGeometry, isPerson: Bool) {
@@ -111,6 +163,30 @@ final class TranscriptRowView: NSView {
         path.stroke()
     }
 
+    private func strokeFocus(around range: NSRange, in block: Int, origin: CGPoint) {
+        guard let (_, manager, container) = stacks[block] else { return }
+        let glyphs = manager.glyphRange(forCharacterRange: range, actualCharacterRange: nil)
+        manager.enumerateEnclosingRects(
+            forGlyphRange           : glyphs,
+            withinSelectedGlyphRange: NSRange(location: NSNotFound, length: 0),
+            in                      : container
+        ) { rect, _ in
+            let frame = rect.offsetBy(dx: origin.x, dy: origin.y).insetBy(dx: -2, dy: -1)
+            self.strokeFocus(NSBezierPath(roundedRect: frame, xRadius: 3, yRadius: 3))
+        }
+    }
+
+    private func drawCopyControl(in block: CGRect, isFocused: Bool) {
+        let frame = RowGeometry.copyControl(in: block, style: style)
+        let label = NSAttributedString(
+            string    : TranscriptWording.copyBlock,
+            attributes: [.font: NSFont.systemFont(ofSize: style.captionPointSize),
+                         .foregroundColor: NSColor.secondaryLabelColor]
+        )
+        label.draw(at: CGPoint(x: frame.maxX - label.size().width, y: frame.minY))
+        if isFocused { strokeFocus(NSBezierPath(roundedRect: frame.insetBy(dx: -3, dy: -1), xRadius: 4, yRadius: 4)) }
+    }
+
     private func drawHeader(_ row: PreparedRow, in frame: CGRect, isPerson: Bool) {
         let size   = style.captionPointSize
         let parts  = TranscriptWording.header(for: row.item, workerName: workerName)
@@ -139,23 +215,34 @@ final class TranscriptRowView: NSView {
         symbol.draw(in: frame)
     }
 
-    private func drawSelection(in frame: CGRect, isOnAccent: Bool) {
-        guard let selection, selection.length > 0, let (_, manager, container) = textStack else { return }
-        let glyphs = manager.glyphRange(forCharacterRange: selection, actualCharacterRange: nil)
+    /// The part of the row's selection inside `block`, kept within its frame.
+    private func drawSelection(in frame: CGRect, block: Int, clip: CGRect, isOnAccent: Bool) {
+        guard let selection, selection.length > 0, let (_, manager, container) = stacks[block] else { return }
+        let local = NSIntersectionRange(selection, ranges[block])
+        guard local.length > 0 else { return }
+        let glyphs = manager.glyphRange(
+            forCharacterRange   : NSRange(location: local.location - ranges[block].location, length: local.length),
+            actualCharacterRange: nil
+        )
         (isOnAccent ? NSColor.white.withAlphaComponent(0.35) : NSColor.selectedTextBackgroundColor).setFill()
         manager.enumerateEnclosingRects(
             forGlyphRange             : glyphs,
             withinSelectedGlyphRange  : NSRange(location: NSNotFound, length: 0),
             in                        : container
         ) { rect, _ in
-            rect.offsetBy(dx: frame.minX, dy: frame.minY).fill()
+            rect.offsetBy(dx: frame.minX, dy: frame.minY).intersection(clip).fill()
         }
     }
 
     // MARK: Selection and action
 
     override func mouseDown(with event: NSEvent) {
-        guard let row, let index = characterIndex(at: convert(event.locationInWindow, from: nil)) else {
+        let point = convert(event.locationInWindow, from: nil)
+        if let row, let block = copyControl(at: point, in: row) {
+            onAction?(.copyBlock(index: block))
+            return
+        }
+        guard let row, let index = characterIndex(at: point) else {
             super.mouseDown(with: event)
             return
         }
@@ -168,17 +255,27 @@ final class TranscriptRowView: NSView {
             return
         }
         dragStart = index
+        didDrag   = false
         select(nil)
     }
 
     override func mouseDragged(with event: NSEvent) {
         guard let start = dragStart, let index = characterIndex(at: convert(event.locationInWindow, from: nil))
         else { return }
+        didDrag = didDrag || index != start
         select(NSRange(location: min(start, index), length: abs(index - start)))
     }
 
+    /// A click that did not drag, on a link, is the explicit action that opens it.
     override func mouseUp(with event: NSEvent) {
-        dragStart = nil
+        defer { dragStart = nil }
+        guard !didDrag, dragStart != nil, let row,
+              let (block, offset) = blockCharacter(at: convert(event.locationInWindow, from: nil)),
+              let action = RowAction.actions(in: row.text).first(where: {
+                  if case .openLink(_, block, let range) = $0 { NSLocationInRange(offset, range) } else { false }
+              })
+        else { return }
+        onAction?(action)
     }
 
     override func accessibilityPerformPress() -> Bool {
@@ -193,21 +290,91 @@ final class TranscriptRowView: NSView {
         onSelectText?(range)
     }
 
-    /// The character boundary nearest `point`, or nil outside the text.
+    private func copyControl(at point: CGPoint, in row: PreparedRow) -> Int? {
+        row.text.blocks.indices.first { index in
+            row.text.blocks[index].isCompleteCode && row.geometry.blocks.indices.contains(index)
+                && RowGeometry.copyControl(in: row.geometry.blocks[index], style: style)
+                    .insetBy(dx: -4, dy: -4).contains(point)
+        }
+    }
+
+    /// The character boundary nearest `point`, in the row's text, or nil outside it.
     private func characterIndex(at point: CGPoint) -> Int? {
-        guard let row, let (storage, manager, container) = textStack else { return nil }
-        let frame = row.geometry.text
-        guard frame.insetBy(dx: -4, dy: -4).contains(point) else { return nil }
+        guard let (block, offset) = blockCharacter(at: point, boundary: true) else { return nil }
+        return ranges[block].location + offset
+    }
+
+    /// The block under `point` and the character in it: the character hit,
+    /// or with `boundary` the nearest insertion point.
+    private func blockCharacter(at point: CGPoint, boundary: Bool = false) -> (block: Int, offset: Int)? {
+        guard let row else { return nil }
+        let frames = row.geometry.blocks
+        guard let block = frames.indices.first(where: {
+            stacks.indices.contains($0) && stacks[$0] != nil && frames[$0].insetBy(dx: -4, dy: -4).contains(point)
+        }), let (storage, manager, container) = stacks[block] else { return nil }
+        let frame = row.geometry.blockTexts[block]
         var fraction: CGFloat = 0
         let index = manager.characterIndex(
             for                                : CGPoint(x: point.x - frame.minX, y: point.y - frame.minY),
             in                                 : container,
             fractionOfDistanceBetweenInsertionPoints: &fraction
         )
-        return min(storage.length, index + (fraction > 0.5 ? 1 : 0))
+        return (block, min(storage.length, index + (boundary && fraction > 0.5 ? 1 : 0)))
     }
 
     private static func isToolRun(_ row: PreparedRow) -> Bool {
         if case .toolRun = row.item.kind { true } else { false }
+    }
+
+    // MARK: Accessibility
+
+    /// The row reads as a whole; a reply with structure also lists its blocks,
+    /// so headings are headings and code is named as code (§3.3). The row's
+    /// actions are VoiceOver actions. Nothing is announced when a row changes.
+    private func configureAccessibility(_ row: PreparedRow) {
+        let isMessage = row.item.messageID != nil
+        setAccessibilityElement(true)
+        setAccessibilityRole(Self.isToolRun(row) ? .button : .staticText)
+        setAccessibilityLabel(TranscriptWording.accessibilityLabel(
+            for: row.item, workerName: workerName, content: isMessage ? row.text.string : nil
+        ))
+
+        let isStructured = isMessage && row.text.blocks.contains { $0.kind != .text }
+        setAccessibilityChildren(isStructured ? blockElements(row) : nil)
+
+        let text = row.text
+        setAccessibilityCustomActions(RowAction.actions(in: text).map { action in
+            NSAccessibilityCustomAction(name: TranscriptWording.action(action, in: text)) { [weak self] in
+                self?.onAction?(action)
+                return true
+            }
+        })
+    }
+
+    private func blockElements(_ row: PreparedRow) -> [NSAccessibilityElement] {
+        zip(row.text.blocks, row.geometry.blocks).compactMap { block, frame -> NSAccessibilityElement? in
+            let element = NSAccessibilityElement()
+            element.setAccessibilityParent(self)
+            element.setAccessibilityFrameInParentSpace(frame)
+            switch block.kind {
+            case .rule:
+                return nil
+            case .heading:
+                element.setAccessibilityRole(.headingRole)
+                element.setAccessibilityLabel(block.string)
+            case .code(let language, _):
+                element.setAccessibilityRole(.staticText)
+                element.setAccessibilityLabel(TranscriptWording.codeBlock(language: language))
+                element.setAccessibilityValue(block.string)
+            case .table:
+                element.setAccessibilityRole(.staticText)
+                element.setAccessibilityRoleDescription("table")
+                element.setAccessibilityValue(block.string.replacingOccurrences(of: "\n", with: ", "))
+            case .text, .quote:
+                element.setAccessibilityRole(.staticText)
+                element.setAccessibilityValue(block.string)
+            }
+            return element
+        }
     }
 }

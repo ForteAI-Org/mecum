@@ -46,6 +46,21 @@ struct TranscriptSnapshotTests {
         }
     }
 
+    @Test("A rich reply: headings, nested lists, a long code block, inline code, a quote, a table and a link")
+    func richSnapshots() async throws {
+        let fixture = try await TranscriptFixture()
+        defer { fixture.discard() }
+        try await fixture.say("Where are we with the release?", at: 0)
+        try await fixture.say(TranscriptFixture.richReply, at: 10, byWorker: true)
+
+        for width in [480.0, 900.0] {
+            for (name, appearance) in [("light", NSAppearance.Name.aqua), ("dark", .darkAqua)] {
+                try await write(fixture, width: width, appearance: appearance,
+                                to: try directory.appending(path: "transcript-rich-\(Int(width))-\(name).png"))
+            }
+        }
+    }
+
     @Test("An interrupted turn and a failed turn, so both delivery badges show")
     func badges() async throws {
         let fixture = try await TranscriptFixture()

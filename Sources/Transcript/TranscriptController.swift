@@ -30,6 +30,13 @@ import Workspace
 /// back at the same distance from the viewport's top after it, unless the
 /// reader was at the bottom, which is then followed. New rows arriving while
 /// the reader is elsewhere raise `newActivity` instead of moving them.
+///
+/// Refreshes are grouped (§12.3). A burst of `refresh()` calls, one per
+/// delta a message receives, becomes one read and one view update per
+/// `FlushCadence` tick. The flush does not depend on the view being on
+/// screen, and a request that arrives while one is read schedules another,
+/// so the terminal update of a turn always lands. A selection survives an
+/// update that leaves its text where it was, or moves with its text.
 @MainActor
 @Observable
 public final class TranscriptController: NSObject {
@@ -61,14 +68,17 @@ public final class TranscriptController: NSObject {
         didSet { if style != oldValue { enqueue { await self.relayout() } } }
     }
 
-    /// Evidence for tests: full reloads so far, and the last applied difference.
-    @ObservationIgnored public private(set) var reloadCount = 0
-    @ObservationIgnored public private(set) var lastUpdate : TranscriptUpdate?
+    /// Evidence for tests: full reloads so far, the last applied difference,
+    /// and every pass that changed what the view shows.
+    @ObservationIgnored public private(set) var reloadCount     = 0
+    @ObservationIgnored public private(set) var lastUpdate      : TranscriptUpdate?
+    @ObservationIgnored public private(set) var viewUpdateCount = 0
 
     @ObservationIgnored private let source        : any ConversationWindowSource
     @ObservationIgnored private let pipeline      : any MessageContentPipeline
+    @ObservationIgnored private let pasteboard    : NSPasteboard
     @ObservationIgnored private let scrollView    = NSScrollView()
-    @ObservationIgnored private let collectionView = TranscriptCollectionView()
+    @ObservationIgnored let collectionView        = TranscriptCollectionView()
     @ObservationIgnored private let layout        = TranscriptLayout()
     @ObservationIgnored private let indicator     = NSButton()
 
@@ -80,21 +90,27 @@ public final class TranscriptController: NSObject {
     @ObservationIgnored private var preparedWidth : CGFloat = 0
     @ObservationIgnored private var workerName    = ""
     @ObservationIgnored private var avatar        : NSImage?
-    @ObservationIgnored private var textSelection : (id: TranscriptItem.ID, range: NSRange)?
+    @ObservationIgnored private(set) var textSelection: (id: TranscriptItem.ID, range: NSRange)?
+    @ObservationIgnored private var focusedAction : (id: TranscriptItem.ID, action: RowAction)?
     @ObservationIgnored private var chain         : Task<Void, Never>?
+    @ObservationIgnored private var flush         : Task<Void, Never>?
+    @ObservationIgnored private var cadence       = FlushCadence()
     @ObservationIgnored private var isApplying    = false
     @ObservationIgnored private var restingReport : Task<Void, Never>?
     @ObservationIgnored private var unsentCheck   : Task<Void, Never>?
     @ObservationIgnored private var observers     : [any NSObjectProtocol] = []
 
+    /// `pasteboard` receives Copy and Copy block; a test passes its own.
     public init(
-        source  : any ConversationWindowSource,
-        pipeline: any MessageContentPipeline = PlainTextContent(),
-        style   : TranscriptStyle = TranscriptStyle()
+        source    : any ConversationWindowSource,
+        pipeline  : any MessageContentPipeline = MarkdownContent(),
+        style     : TranscriptStyle = TranscriptStyle(),
+        pasteboard: NSPasteboard = .general
     ) {
-        self.source   = source
-        self.pipeline = pipeline
-        self.style    = style
+        self.source     = source
+        self.pipeline   = pipeline
+        self.style      = style
+        self.pasteboard = pasteboard
         self.view     = NSView()
         super.init()
         assemble()
@@ -125,6 +141,7 @@ public final class TranscriptController: NSObject {
                 self.avatar      = MascotImages.image(for: appearance, size: RowGeometry.avatarSide)
                 self.expanded    = []
                 self.textSelection = nil
+                self.focusedAction = nil
                 self.newActivity = nil
                 let position = readingAnchor.map { ScrollAnchor(itemID: .message($0), offset: readingOffset) }
                 await self.apply(window, mode: .open(position))
@@ -134,17 +151,27 @@ public final class TranscriptController: NSObject {
         }
     }
 
-    /// Reads the live tail again after the store recorded something.
+    /// Reads the live tail again after the store recorded something, at the
+    /// next flush: calls before it share one read.
     public func refresh() {
-        enqueue {
-            guard let window = self.window, window.conversationID == self.conversationID else { return }
-            do {
-                let fresh = try await window.refreshingTail(from: self.source)
-                guard fresh.conversationID == self.conversationID else { return }
-                await self.apply(fresh, mode: .live)
-            } catch {
-                self.problem = "The conversation could not be read again. \(error.localizedDescription)"
-            }
+        guard flush == nil else { return }
+        let wait = cadence.interval
+        flush = Task {
+            // A cancelled wait still flushes, so a terminal update is never dropped.
+            do { try await Task.sleep(for: wait) } catch {}
+            self.flush = nil
+            self.enqueue { await self.readTail() }
+        }
+    }
+
+    private func readTail() async {
+        guard let window, window.conversationID == conversationID else { return }
+        do {
+            let fresh = try await window.refreshingTail(from: source)
+            guard fresh.conversationID == conversationID else { return }
+            await apply(fresh, mode: .live)
+        } catch {
+            problem = "The conversation could not be read again. \(error.localizedDescription)"
         }
     }
 
@@ -153,11 +180,17 @@ public final class TranscriptController: NSObject {
         setVisibleTop(.greatestFiniteMagnitude)
     }
 
-    /// Waits for every queued load and relayout. Tests and snapshots use it.
+    /// Waits for the pending flush and every queued load and relayout. Tests
+    /// and snapshots use it.
     public func settle() async {
-        while let pending = chain {
+        while true {
+            if let pending = flush {
+                await pending.value
+                continue
+            }
+            guard let pending = chain else { return }
             await pending.value
-            if chain == pending { break }
+            if chain == pending, flush == nil { return }
         }
     }
 
@@ -191,13 +224,18 @@ public final class TranscriptController: NSObject {
                                                     cache: cache, pipeline: pipeline)
         guard window.conversationID == conversationID else { return }
 
+        let started = ContinuousClock.now
         self.cache.merge(result.measured)
         let update      = TranscriptUpdate(from: rows.map(\.item), to: result.rows.map(\.item))
         let wasAtBottom = isAtBottom
         let anchor      = captureAnchor()
+        keepSelection(in: result.rows)
 
         isApplying = true
-        defer { isApplying = false }
+        defer {
+            isApplying = false
+            cadence.record(applyDuration: ContinuousClock.now - started)
+        }
         self.window   = window
         preparedWidth = width
         problem       = nil
@@ -208,6 +246,7 @@ public final class TranscriptController: NSObject {
             setHeights()
             collectionView.reloadData()
             reloadCount += 1
+            viewUpdateCount += 1
             layoutNow()
             if let position, let top = position.visibleTop(in: frameMap()) {
                 setVisibleTop(top)
@@ -218,6 +257,7 @@ public final class TranscriptController: NSObject {
         case .live, .paging, .relayout:
             guard !update.isEmpty || mode == .relayout else { break }
             rows = result.rows
+            viewUpdateCount += 1
             setHeights()
             collectionView.performBatchUpdates({
                 collectionView.deleteItems(at: Set(update.removed.map { IndexPath(item: $0, section: 0) }))
@@ -294,6 +334,24 @@ public final class TranscriptController: NSObject {
         await apply(window, mode: .paging)
     }
 
+    /// Keeps the selection across an update of its row: where it was when
+    /// its text is still there, else on the first place that text now is.
+    /// A selection whose text is gone, or whose row is, is cleared.
+    private func keepSelection(in fresh: [PreparedRow]) {
+        guard let selection = textSelection,
+              let before = rows.first(where: { $0.item.id == selection.id })?.text.string as NSString?,
+              NSMaxRange(selection.range) <= before.length
+        else { return }
+        let selected = before.substring(with: selection.range)
+        guard let after = fresh.first(where: { $0.item.id == selection.id })?.text.string as NSString? else {
+            textSelection = nil
+            return
+        }
+        if NSMaxRange(selection.range) <= after.length, after.substring(with: selection.range) == selected { return }
+        let moved = after.range(of: selected)
+        textSelection = moved.location == NSNotFound ? nil : (selection.id, moved)
+    }
+
     // MARK: Collection view
 
     private func assemble() {
@@ -306,6 +364,7 @@ public final class TranscriptController: NSObject {
         collectionView.register(TranscriptCell.self, forItemWithIdentifier: TranscriptCell.identifier)
         collectionView.setAccessibilityLabel("Conversation")
         collectionView.onMove     = { [weak self] step in self?.moveFocus(by: step) }
+        collectionView.onMoveAction = { [weak self] step in self?.moveActionFocus(by: step) }
         collectionView.onActivate = { [weak self] in self?.activateFocused() }
         collectionView.onCopy     = { [weak self] in self?.copySelection() }
 
@@ -359,11 +418,13 @@ public final class TranscriptController: NSObject {
             avatar    : row.item.authorWorkerID == nil ? nil : avatar,
             selection : textSelection?.id == id ? textSelection?.range : nil
         )
+        cell.rowView.focusedAction = focusedAction?.id == id ? focusedAction?.action : nil
         cell.rowView.onSelectText = { [weak self] range in
             self?.textSelection = range.map { (id, $0) }
             self?.focus(id)
         }
         cell.rowView.onActivate = { [weak self] in self?.toggle(id) }
+        cell.rowView.onAction   = { [weak self] action in self?.perform(action, in: id) }
     }
 
     private func reconfigureVisible(_ ids: Set<TranscriptItem.ID>) {
@@ -487,6 +548,7 @@ public final class TranscriptController: NSObject {
         guard !rows.isEmpty else { return }
         let next = min(max(0, (focusedIndex ?? (step > 0 ? -1 : rows.count)) + step), rows.count - 1)
         let path = IndexPath(item: next, section: 0)
+        setFocusedAction(nil)
         collectionView.selectionIndexPaths = [path]
         collectionView.scrollToItems(at: [path], scrollPosition: .nearestHorizontalEdge)
         if let cell = collectionView.item(at: path) {
@@ -494,9 +556,47 @@ public final class TranscriptController: NSObject {
         }
     }
 
+    /// Moves through the focused row's actions; past either end, back to the row.
+    private func moveActionFocus(by step: Int) {
+        guard let index = focusedIndex, rows.indices.contains(index) else { return }
+        let row     = rows[index]
+        let actions = RowAction.actions(in: row.text)
+        guard !actions.isEmpty else { return }
+        let current = focusedAction?.id == row.item.id
+            ? focusedAction.flatMap { focused in actions.firstIndex(of: focused.action) }
+            : nil
+        let next = (current ?? (step > 0 ? -1 : actions.count)) + step
+        setFocusedAction(actions.indices.contains(next) ? (row.item.id, actions[next]) : nil)
+    }
+
+    private func setFocusedAction(_ focused: (id: TranscriptItem.ID, action: RowAction)?) {
+        let touched = Set([focusedAction?.id, focused?.id].compactMap { $0 })
+        focusedAction = focused
+        reconfigureVisible(touched)
+    }
+
     private func activateFocused() {
         guard let index = focusedIndex, rows.indices.contains(index) else { return }
-        if case .toolRun = rows[index].item.kind { toggle(rows[index].item.id) }
+        let id = rows[index].item.id
+        if let focused = focusedAction, focused.id == id {
+            perform(focused.action, in: id)
+        } else if case .toolRun = rows[index].item.kind {
+            toggle(id)
+        }
+    }
+
+    /// Runs a row's action, which only ever happens on the reader's request.
+    private func perform(_ action: RowAction, in id: TranscriptItem.ID) {
+        guard let row = rows.first(where: { $0.item.id == id }) else { return }
+        switch action {
+        case .copyBlock(let index):
+            guard row.text.blocks.indices.contains(index) else { return }
+            pasteboard.clearContents()
+            pasteboard.setString(row.text.blocks[index].string, forType: .string)
+        case .openLink(let destination, _, _):
+            guard let url = RowAction.openableURL(destination) else { return }
+            NSWorkspace.shared.open(url)
+        }
     }
 
     /// Copies the selected text, or the focused row when nothing is selected.
@@ -510,8 +610,8 @@ public final class TranscriptController: NSObject {
         } else {
             return
         }
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(text, forType: .string)
+        pasteboard.clearContents()
+        pasteboard.setString(text, forType: .string)
     }
 }
 

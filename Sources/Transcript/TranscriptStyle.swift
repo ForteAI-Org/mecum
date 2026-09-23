@@ -33,4 +33,23 @@ public struct TranscriptStyle: Sendable, Hashable {
 
     /// A long text gets a wider surface, still a readable line (about 75 characters).
     public var longMeasure: CGFloat { (bodyPointSize * 48).rounded() }
+
+    /// Code and tables may take this much, wider than prose (§11.1).
+    public var wideMeasure: CGFloat { (bodyPointSize * 72).rounded() }
+
+    /// Code, inline or in a block.
+    public var codePointSize: CGFloat { max(10, bodyPointSize - 1) }
+
+    /// One level of list nesting.
+    public var indentStep: CGFloat { (bodyPointSize * 1.6).rounded() }
+
+    /// A Markdown heading's size: three steps above the body, then the body's.
+    public func headingPointSize(level: Int) -> CGFloat {
+        switch level {
+        case 1:  (bodyPointSize * 1.45).rounded()
+        case 2:  (bodyPointSize * 1.25).rounded()
+        case 3:  (bodyPointSize * 1.1).rounded()
+        default: bodyPointSize
+        }
+    }
 }

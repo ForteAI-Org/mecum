@@ -9,7 +9,7 @@ import AppKit
 import Foundation
 import Testing
 @testable import Transcript
-import Workspace
+@testable import Workspace
 
 /// The AppKit engine driven offscreen: no window is ordered in and no
 /// permission is needed, so these run in the unit tier.
@@ -87,5 +87,186 @@ struct TranscriptControllerTests {
         await controller.settle()
 
         #expect(controller.captureAnchor() == ScrollAnchor(itemID: .message(id), offset: 12))
+    }
+
+    // MARK: Streaming
+
+    /// A conversation whose reply streams through `GrowingSource`, opened on a
+    /// controller with its own pipeline. Only a test that copies passes a pasteboard.
+    private func streaming(_ fixture: TranscriptFixture, reply: String, pipeline: MarkdownContent,
+                           pasteboard: NSPasteboard = .general)
+        async throws -> (TranscriptController, GrowingSource, UUID) {
+        try await fixture.say("Show me the build steps.", at: 0)
+        let message = try await fixture.say("", at: 2, byWorker: true, delivery: .responding)
+        let source  = GrowingSource(store: fixture.store, streaming: message.id, text: reply)
+        let controller = TranscriptController(source: source, pipeline: pipeline, pasteboard: pasteboard)
+        controller.view.frame = NSRect(x: 0, y: 0, width: 700, height: 500)
+        controller.view.layoutSubtreeIfNeeded()
+        controller.open(fixture.conversation, workerName: "Atlas", appearance: TranscriptFixture.appearance,
+                        readingAnchor: nil, readingOffset: 0)
+        await controller.settle()
+        return (controller, source, message.id)
+    }
+
+    @Test("A burst of deltas reaches the view in few updates, and the terminal update lands off screen")
+    func burstIsGrouped() async throws {
+        let fixture = try await TranscriptFixture()
+        defer { fixture.discard() }
+        let (controller, source, id) = try await streaming(fixture, reply: "Step", pipeline: MarkdownContent())
+        let before = controller.viewUpdateCount
+
+        for index in 0..<60 {
+            await source.append(" \(index)")
+            controller.refresh()
+        }
+        await controller.settle()
+        #expect(controller.viewUpdateCount - before <= 3)
+        let streamed = await source.text
+        #expect(controller.rows.first { $0.item.id == .message(id) }?.item.copyText == streamed)
+
+        // The reader looks elsewhere: the view is hidden, and the turn's end still applies.
+        controller.view.isHidden = true
+        await source.append(". Done.")
+        try await fixture.record(.executionCompleted, subject: UUID(), at: 5)
+        controller.refresh()
+        await controller.settle()
+        #expect(controller.rows.last?.item.kind == .executionCompleted)
+        #expect(controller.rows.first { $0.item.id == .message(id) }?.item.copyText == streamed + ". Done.")
+    }
+
+    @Test("Completing a streamed fence prepares only the changed blocks and keeps the reader's selection")
+    func selectionSurvivesCompletion() async throws {
+        let fixture  = try await TranscriptFixture()
+        defer { fixture.discard() }
+        let pipeline = MarkdownContent()
+        let (controller, source, id) = try await streaming(
+            fixture, reply: "Build it in two steps.\n\n```sh\nmake", pipeline: pipeline
+        )
+        let index = try #require(controller.rows.firstIndex { $0.item.id == .message(id) })
+        let cell  = try #require(controller.collectionView.item(at: IndexPath(item: index, section: 0))
+            as? TranscriptCell)
+        let chosen = NSRange(location: 9, length: 12)
+        cell.rowView.onSelectText?(chosen)
+        #expect(controller.textSelection?.range == chosen)
+
+        let spent = pipeline.preparedBlockCount
+        await source.append(" test\n```\n\nThat is all.")
+        controller.refresh()
+        await controller.settle()
+
+        let row = try #require(controller.rows.first { $0.item.id == .message(id) })
+        #expect(row.text.blocks.map(\.kind) == [.text, .code(language: "sh", isComplete: true), .text])
+        #expect(pipeline.preparedBlockCount - spent == 2)
+        #expect(controller.textSelection?.id == .message(id))
+        let selection = try #require(controller.textSelection?.range)
+        #expect((row.text.string as NSString).substring(with: selection) == "in two steps")
+    }
+
+    @Test("Copy block is reachable from the keyboard: focus the reply, move to its Copy, press Return")
+    func copyBlockFromKeyboard() async throws {
+        let fixture    = try await TranscriptFixture()
+        defer { fixture.discard() }
+        let pasteboard = NSPasteboard(name: .init("mecum.tests.\(UUID())"))
+        defer { pasteboard.releaseGlobally() }
+        let (controller, _, _) = try await streaming(
+            fixture, reply: "Run this:\n\n```sh\nmake test\n```", pipeline: MarkdownContent(), pasteboard: pasteboard
+        )
+        for code: UInt16 in [125, 125, 124, 36] {
+            let event = try #require(NSEvent.keyEvent(
+                with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil,
+                characters: "", charactersIgnoringModifiers: "", isARepeat: false, keyCode: code
+            ))
+            controller.collectionView.keyDown(with: event)
+        }
+        #expect(pasteboard.string(forType: .string) == "make test")
+    }
+
+    @Test("A wrapped code line continues under its own indentation, and Copy block returns the source exactly")
+    func wrappedCodeHangs() async throws {
+        let fixture    = try await TranscriptFixture()
+        defer { fixture.discard() }
+        let pasteboard = NSPasteboard(name: .init("mecum.tests.\(UUID())"))
+        defer { pasteboard.releaseGlobally() }
+        let long = "        let passed = try await launch(suite, attempt: attempt, retries: retries, timeout: 30)"
+        let code = "func run() {\n\tif ready {\n\(long)\n\t}\n}"
+        let (controller, _, id) = try await streaming(
+            fixture, reply: "```swift\n\(code)\n```", pipeline: MarkdownContent(), pasteboard: pasteboard
+        )
+        controller.view.frame.size.width = 480
+        controller.view.layoutSubtreeIfNeeded()
+        await controller.settle()
+
+        let index = try #require(controller.rows.firstIndex { $0.item.id == .message(id) })
+        let cell  = try #require(controller.collectionView.item(at: IndexPath(item: index, section: 0))
+            as? TranscriptCell)
+        let (storage, manager, _) = try #require(cell.rowView.stacks.first ?? nil)
+        let line = (storage.string as NSString).range(of: long)
+        #expect(line.location != NSNotFound)
+
+        // The x where a glyph sits inside its line fragment, as drawn.
+        func x(ofCharacter character: Int) -> CGFloat {
+            let glyph = manager.glyphIndexForCharacter(at: character)
+            return manager.lineFragmentRect(forGlyphAt: glyph, effectiveRange: nil).minX
+                + manager.location(forGlyphAt: glyph).x
+        }
+        let firstGlyph = manager.glyphIndexForCharacter(at: line.location)
+        var firstLine  = NSRange()
+        manager.lineFragmentRect(forGlyphAt: firstGlyph, effectiveRange: &firstLine)
+        let continuation = manager.characterIndexForGlyph(at: NSMaxRange(firstLine))
+        #expect(continuation < NSMaxRange(line), "the line must wrap at 480 points")
+
+        let indentation = x(ofCharacter: line.location + 8)
+        #expect(indentation > 0)
+        #expect(x(ofCharacter: continuation) >= indentation)
+        #expect(x(ofCharacter: line.location) == 0)
+
+        controller.collectionView.selectionIndexPaths = [IndexPath(item: index, section: 0)]
+        for key: UInt16 in [124, 36] {
+            let event = try #require(NSEvent.keyEvent(
+                with: .keyDown, location: .zero, modifierFlags: [], timestamp: 0, windowNumber: 0, context: nil,
+                characters: "", charactersIgnoringModifiers: "", isARepeat: false, keyCode: key
+            ))
+            controller.collectionView.keyDown(with: event)
+        }
+        #expect(pasteboard.string(forType: .string).map { Array($0.utf8) } == Array(code.utf8))
+    }
+}
+
+/// GrowingSource serves the store's windows with one message's text taken
+/// from a buffer that grows, the way a streamed reply's does between flushes.
+actor GrowingSource: ConversationWindowSource {
+
+    let store    : WorkspaceStore
+    let streaming: UUID
+    private(set) var text: String
+
+    init(store: WorkspaceStore, streaming: UUID, text: String) {
+        self.store     = store
+        self.streaming = streaming
+        self.text      = text
+    }
+
+    func append(_ delta: String) { text += delta }
+
+    func messages(in conversation: UUID, around position: Int, before: Int, after: Int) async throws
+        -> [MessageSnapshot] {
+        try await store.messages(in: conversation, around: position, before: before, after: after).map(streamed)
+    }
+
+    func message(_ id: UUID) async throws -> MessageSnapshot? {
+        try await store.message(id).map(streamed)
+    }
+
+    func events(inConversation conversation: UUID, from start: Date, before end: Date, limit: Int) async throws
+        -> [RecordedEvent] {
+        try await store.events(inConversation: conversation, from: start, before: end, limit: limit)
+    }
+
+    private func streamed(_ message: MessageSnapshot) -> MessageSnapshot {
+        guard message.id == streaming else { return message }
+        return MessageSnapshot(Message(id: message.id, conversationID: message.conversationID,
+                                       authorWorkerID: message.authorWorkerID, text: text,
+                                       createdAt: message.createdAt, sequence: message.sequence,
+                                       delivery: message.delivery))
     }
 }

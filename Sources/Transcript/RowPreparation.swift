@@ -7,7 +7,8 @@
 
 import AppKit
 
-/// RowPreparation builds each row's text and measures it, off the main thread.
+/// RowPreparation builds each row's text and measures it block by block, off
+/// the main thread.
 ///
 /// Text is measured with a TextKit stack made for the call and dropped at its
 /// end, never attached to a view, which is the use AppKit allows off the main
@@ -34,20 +35,20 @@ enum RowPreparation {
     ) async -> Result {
         var measured: [LayoutMeasurementCache.Key: CGSize] = [:]
         let rows = items.map { item in
-            let text = preparedText(for: item, workerName: workerName, pipeline: pipeline)
-            let limit = RowGeometry.textWidthLimit(for: item.kind, rowWidth: width, style: style)
-            let key   = LayoutMeasurementCache.Key(content: text, width: limit, style: style)
-            let size: CGSize
-            if let known = cache.size(for: key) ?? measured[key] {
-                size = known
-            } else {
-                size = measure(text.attributed(style), width: CGFloat(key.width))
+            let text  = preparedText(for: item, workerName: workerName, pipeline: pipeline)
+            let sizes = text.blocks.map { block in
+                let limit = RowGeometry.textWidthLimit(for: block.kind, in: item.kind, rowWidth: width, style: style)
+                let key   = LayoutMeasurementCache.Key(content: block, width: limit, style: style)
+                if let known = cache.size(for: key) ?? measured[key] { return known }
+                let size = block.kind == .rule ? .zero : measure(block.attributed(style), width: CGFloat(key.width))
                 measured[key] = size
+                return size
             }
             return PreparedRow(
                 item    : item,
                 text    : text,
-                geometry: RowGeometry(item: item, rowWidth: width, style: style, textSize: size)
+                geometry: RowGeometry(item: item, rowWidth: width, style: style, blocks: text.blocks.map(\.kind),
+                                      sizes: sizes)
             )
         }
         return Result(rows: rows, measured: measured)
