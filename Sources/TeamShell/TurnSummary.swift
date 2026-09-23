@@ -63,13 +63,7 @@ public struct TurnSummary: Sendable, Hashable {
     }
 
     /// The model, then the effort when the model takes one, in the provider's words.
-    public var modelLine: String {
-        let efforts = ModelSelection.supportedEfforts(provider: selection.provider, model: selection.model)
-        guard efforts.contains(selection.effort) else { return selection.model }
-        // Ollama's knob is thinking on or off, which reads as itself and not as an effort.
-        let effort = selection.effort.title(for: selection.provider)
-        return "\(selection.model), " + (selection.provider == .ollama ? effort : "\(effort) effort")
-    }
+    public var modelLine: String { selection.line }
 
     /// A few words for the state.
     public var stateTitle: String {

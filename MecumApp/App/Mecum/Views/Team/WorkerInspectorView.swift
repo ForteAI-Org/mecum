@@ -11,8 +11,9 @@ import TeamShell
 import Workspace
 
 /// WorkerInspectorView is the inspector for the selected worker (§14.2): what
-/// it is doing right now, from the computer it drives to the turn it runs and
-/// the connection that turn goes through, with the profile one click away.
+/// it is doing right now and the computer it drives, the model and connection
+/// its next turn will use, which is the way into its profile, and its current
+/// or last turn as it ran.
 ///
 /// It is a grouped form, the macOS inspector's own shape: one block per part of
 /// the flow, label and value in each row, the system's separators between
@@ -53,8 +54,8 @@ struct WorkerInspectorView: View {
             Section { identity }
             Section("Now") { now }
             screen
+            Section("Model") { model }
             Section(turnTitle) { turnRows }
-            Section("Connection") { connection }
         }
         .formStyle(.grouped)
         .task(id: TurnKey(workerID: worker.id, revision: team.transcriptRevision,
@@ -151,8 +152,8 @@ struct WorkerInspectorView: View {
                 .foregroundStyle(.secondary)
 
         case .read(let summary):
-            LabeledContent("Model", value: summary.modelLine)
-            LabeledContent("Provider", value: summary.selection.provider.title)
+            // What the turn ran with, which can differ from the profile above once it changes.
+            LabeledContent("Ran with", value: summary.modelLine)
             LabeledContent("Started") {
                 Text(summary.startedAt, format: .relative(presentation: .named))
             }
@@ -193,18 +194,39 @@ struct WorkerInspectorView: View {
         }
     }
 
-    // MARK: Connection
+    // MARK: Model
 
+    /// The worker's profile as it stands: the model a new turn will use, its
+    /// provider and that provider's connection. The model row is the way into
+    /// the profile, a navigation row as System Settings draws one.
     @ViewBuilder
-    private var connection: some View {
+    private var model: some View {
+        Button { team.profileWorkerID = worker.id } label: {
+            LabeledContent("Model") {
+                HStack(spacing: 6) {
+                    if let selection = worker.configuration {
+                        Text(selection.line)
+                            .foregroundStyle(.secondary)
+                    } else {
+                        Text("Choose…")
+                            .foregroundStyle(.tint)
+                    }
+                    Image(systemName: "chevron.right")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.tertiary)
+                }
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help("Change the model and connection")
+        .accessibilityHint("Opens the model and connection")
         if let selection = worker.configuration {
             LabeledContent("Provider", value: selection.provider.title)
-            LabeledContent("Status") { connectionState(selection.provider) }
-            Button("Model and connection…") { team.profileWorkerID = worker.id }
+            LabeledContent("Connection") { connectionState(selection.provider) }
         } else {
-            Text("No model attached, so \(worker.name) cannot answer yet.")
+            Text("\(worker.name) needs a model before it can answer.")
                 .foregroundStyle(.secondary)
-            Button("Choose a model") { team.profileWorkerID = worker.id }
         }
     }
 

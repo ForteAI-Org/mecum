@@ -122,7 +122,7 @@ struct TeamShellView: View {
             .sharedBackgroundVisibility(.hidden)
         ToolbarSpacer(.flexible)
         ToolbarItem {
-            Button(isInspectorShown ? "Hide Inspector" : "Show Inspector", systemImage: "sidebar.trailing",
+            Button(isInspectorShown ? "Hide Inspector" : "Show Inspector", systemImage: "info.circle",
                    action: toggleInspector)
                 .keyboardShortcut("i", modifiers: [.control, .option, .command])
                 .help("Show or hide the inspector (Control-Option-Command-I)")
@@ -215,7 +215,7 @@ struct TeamShellView: View {
         } else {
             ContentUnavailableView(
                 "Nothing selected",
-                systemImage: "sidebar.trailing",
+                systemImage: "info.circle",
                 description: Text("Select a worker to see what it is doing and the model its last turn ran with.")
             )
         }
