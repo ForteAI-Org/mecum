@@ -13,13 +13,14 @@ import Workspace
 
 /// WindowClickCheck puts the team shell in a real key window, when the app is
 /// launched with MECUM_CLICK_CHECK=1, and drives the window's chrome with
-/// events sent through the window: a click on the worker header, Space on it
-/// once it has focus, and a click on the sidebar's Connections footer. It
+/// events sent through the window: a click on the worker header, which opens
+/// nothing, the inspector's shortcut both ways, and a click on the sidebar's
+/// Connections footer. It
 /// prints what each step found and quits with 0 when every step held, 1 otherwise.
 ///
 /// SwiftUI builds no accessibility tree without an assistive client, so the
-/// targets are found by geometry: the header at the top centre of the
-/// conversation's safe area, the footer at the bottom of the sidebar's. The
+/// targets are found by geometry: the header at the leading edge of the
+/// conversation's title bar, the footer at the bottom of the sidebar's. The
 /// events go to the window, so the pointer never moves. The team is
 /// `WindowSnapshots`'s synthetic one, in a temporary store.
 @MainActor
@@ -105,21 +106,16 @@ enum WindowClickCheck {
         click(at: header, in: window)
         try await Task.sleep(for: .seconds(1))
         print("click check: after the header click, requested \(probe.isInspectorRequested)")
-        try expect(probe.isInspectorRequested && showsInspector(hosting),
-                   "clicking the header did not show the inspector")
+        try expect(!probe.isInspectorRequested && !showsInspector(hosting), "clicking the header opened the inspector")
 
-        // Close it with its shortcut, then Space on the header, which the click should have focused.
-        press("i", keyCode: 34, modifiers: [.control, .option, .command], in: window, throughApp: true)
-        try await Task.sleep(for: .seconds(1))
-        print("click check: after Control-Option-Command-I, requested \(probe.isInspectorRequested)")
-        try expect(!probe.isInspectorRequested && !showsInspector(hosting),
-                   "Control-Option-Command-I did not hide the inspector")
-        print("click check: first responder \(String(describing: window.firstResponder.map { type(of: $0) }))")
-        press(" ", keyCode: 49, modifiers: [], in: window, throughApp: false)
-        try await Task.sleep(for: .seconds(1))
-        print("click check: after Space, requested \(probe.isInspectorRequested)")
-        try expect(probe.isInspectorRequested && showsInspector(hosting),
-                   "Space on the focused header did not show the inspector")
+        // The inspector's own shortcut opens it and closes it again.
+        for shows in [true, false] {
+            press("i", keyCode: 34, modifiers: [.control, .option, .command], in: window, throughApp: true)
+            try await Task.sleep(for: .seconds(1))
+            print("click check: after Control-Option-Command-I, requested \(probe.isInspectorRequested)")
+            try expect(probe.isInspectorRequested == shows && showsInspector(hosting) == shows,
+                       "Control-Option-Command-I did not \(shows ? "show" : "hide") the inspector")
+        }
 
         let footer = point(in: panes[0], fromBottom: 20, leading: 60, in: window)
         click(at: footer, in: window)

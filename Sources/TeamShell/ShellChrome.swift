@@ -30,9 +30,6 @@ public enum ShellChrome {
         public let workerID  : UUID
         public let name      : String
         public let appearance: WorkerAppearance
-
-        /// What VoiceOver says on top of the name: activating the header opens the details.
-        public var accessibilityHint: String { "Shows \(name)'s details" }
     }
 
     /// The window's title when no worker is selected: the app's scene name.

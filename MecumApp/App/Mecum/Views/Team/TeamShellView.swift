@@ -145,13 +145,6 @@ struct TeamShellView: View {
         isInspectorShown = ShellMetrics.fitsInspector(window: windowWidth, isSidebarShown: columns != .detailOnly)
     }
 
-    /// The header's action: shows the worker's details, which for now are the
-    /// inspector. An inspector already shown stays shown.
-    private func showDetails() {
-        guard !isInspectorShown else { return }
-        toggleInspector()
-    }
-
     /// The first report resolves a restored request once; later ones apply the
     /// resize rule, whose hysteresis keeps a jittering resize from flipping it.
     private func windowResized(to width: Double) {
@@ -204,7 +197,7 @@ struct TeamShellView: View {
     @ViewBuilder
     private var header: some View {
         if let header = ShellChrome.header(for: team.selectedWorker) {
-            WorkerHeaderView(header: header, open: showDetails)
+            WorkerHeaderView(header: header)
         }
     }
 

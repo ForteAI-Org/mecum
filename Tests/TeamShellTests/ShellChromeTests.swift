@@ -32,7 +32,6 @@ struct ShellChromeTests {
             #expect(header.workerID   == worker.id)
             #expect(header.name       == "Atlas")
             #expect(header.appearance == WorkerAppearance(seed: 7, palette: "tide"))
-            #expect(header.accessibilityHint == "Shows Atlas's details")
         }
     }
 
