@@ -351,6 +351,28 @@ struct BrokeredAutomationSessionTests {
         #expect(broker.queue.entries.isEmpty)
     }
 
+    @Test("the screen can be watched only while an application is open on the held seat",
+          .timeLimit(.minutes(1)))
+    func theScreenIsThereOnlyWhileTheSeatIsHeld() async throws {
+        let broker  = SeatBroker()
+        let desktop = try Self.seated(broker)
+        #expect(!desktop.hasScreen && desktop.makeScreenView(contentsScale: 2) == nil)
+
+        let holder = try await broker.queue.acquire("holder")
+        let open   = Task { try await desktop.open(application: "Test", window: nil) }
+        await Self.letTheWaitBegin()
+        #expect(!desktop.hasScreen && desktop.makeScreenView(contentsScale: 2) == nil, "waiting is not watching")
+
+        holder.giveBack()
+        _ = try await open.value
+        #expect(desktop.hasScreen && desktop.makeScreenView(contentsScale: 2) != nil)
+
+        // Given back, the seat goes warm to the next entry, so no new view may reach it.
+        await desktop.close()
+        #expect(!desktop.hasScreen && desktop.makeScreenView(contentsScale: 2) == nil)
+        #expect(desktop.screenFrame == .zero)
+    }
+
     @Test("a worker alone keeps the seat across its turns")
     func aLoneHolderKeepsTheSeatAcrossTurns() async throws {
         let broker  = SeatBroker()

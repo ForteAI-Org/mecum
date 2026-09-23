@@ -44,8 +44,26 @@ struct WorkerConversationView: View {
     var body: some View {
         transcriptArea
             .overlay(alignment: .top) { titleBarEdge }
+            .overlay(alignment: .topTrailing) { floatingScreen }
             .overlay(alignment: .bottom) { composer }
             .onGeometryChange(for: CGFloat.self) { $0.safeAreaInsets.top } action: { titleBarHeight = $0 }
+    }
+
+    /// The worker's live screen at the top right, below the title bar, when the
+    /// person moved it here from the inspector and there is a window to watch.
+    @ViewBuilder
+    private var floatingScreen: some View {
+        if team.showsScreenInConversation, team.hasScreen(worker.id) {
+            WorkerScreenCard(team: team, worker: worker, place: .conversation)
+                .padding(6)
+                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .shadow(color: .black.opacity(0.18), radius: 10, y: 4)
+                .frame(width: 280)
+                .padding(.top, titleBarHeight + 8)
+                .padding(.trailing, 16)
+                .ignoresSafeArea(.container, edges: .top)
+                .transition(.scale(scale: 0.85, anchor: .topTrailing).combined(with: .opacity))
+        }
     }
 
     /// The soft edge the messages fade under at the title bar, as a system scroll

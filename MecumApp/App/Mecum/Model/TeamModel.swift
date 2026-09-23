@@ -5,6 +5,7 @@
 //  Created by Eliomar Alejandro Rodriguez Ferrer on 22/09/2026.
 //
 
+import AppKit
 import Foundation
 import ModelTransports
 import Observation
@@ -380,6 +381,20 @@ final class TeamModel {
 
     /// True while the worker's desktop session holds the seat, the only time it can be released.
     func holdsComputer(_ workerID: UUID) -> Bool { desktops[workerID]?.holdsComputer ?? false }
+
+    /// True while the worker's window can be watched: it holds the seat and has an application open.
+    func hasScreen(_ workerID: UUID) -> Bool { desktops[workerID]?.hasScreen ?? false }
+
+    /// A live view of the worker's window, nil while there is none; see `hasScreen`.
+    func makeScreenView(of workerID: UUID, contentsScale: CGFloat) -> NSView? {
+        desktops[workerID]?.makeScreenView(contentsScale: contentsScale)
+    }
+
+    /// The worker's window frame, for the live view's proportions.
+    func screenFrame(of workerID: UUID) -> CGRect { desktops[workerID]?.screenFrame ?? .zero }
+
+    /// Whether the worker's live screen floats over the conversation instead of sitting in the inspector.
+    var showsScreenInConversation = false
 
     /// Gives the worker's seat back (§3.4). The conversation, a running turn and the worker stay
     /// as they are; the next tool call that needs the computer waits in the queue for it again.

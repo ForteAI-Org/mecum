@@ -172,6 +172,25 @@ public final class BrokeredAutomationSession: AutomationSessionOperating {
         if case .holding = phase { true } else { false }
     }
 
+    /// True while there is a window to watch: the seat is held and an application is open on it.
+    public var hasScreen: Bool {
+        if case .holding(.some) = phase { true } else { false }
+    }
+
+    /// A live view of the window this session drives, or nil while there is none to watch.
+    /// Mount it only while `hasScreen`: a seat given back goes warm to the next entry, and a view
+    /// left attached would show that worker's window.
+    public func makeScreenView(contentsScale: CGFloat) -> NSView? {
+        guard hasScreen, let lease else { return nil }
+        return lease.session.makePreviewView(contentsScale: contentsScale)
+    }
+
+    /// The driven window's frame, for the view's proportions; zero while there is none to watch.
+    public var screenFrame: CGRect {
+        guard hasScreen, let lease else { return .zero }
+        return lease.session.windowFrame
+    }
+
     /// "Waiting for the computer", with how many entries are ahead when exactly one waiting entry
     /// carries `label`. Entries list the acting ones first and the waiting ones in arrival order,
     /// so an entry's index is the number ahead of it.
