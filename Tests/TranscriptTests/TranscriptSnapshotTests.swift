@@ -84,6 +84,30 @@ struct TranscriptSnapshotTests {
                         to: try directory.appending(path: "transcript-badges-600-light.png"))
     }
 
+    @Test("A selection from the middle of one message to the middle of the next, across the header between")
+    func selectionSnapshot() async throws {
+        let fixture = try await TranscriptFixture()
+        defer { fixture.discard() }
+        try await fixture.say("Can you check this morning's build and tell me what failed?", at: 0)
+        try await fixture.say("""
+            The build finished at 07:42. Two bundles failed: the capture suite timed out once on the \
+            virtual display, and the layout suite failed on a width assertion.
+            """, at: 10, byWorker: true)
+        try await fixture.say("Rerun the capture suite first.", at: 20)
+
+        let spanning: @MainActor (TranscriptController) -> Void = { controller in
+            guard controller.rows.count >= 2 else { return }
+            let (first, second) = (controller.rows[0], controller.rows[1])
+            controller.select(TranscriptSelection(anchor: .init(itemID: first.item.id, offset: 14),
+                                                  focus : .init(itemID: second.item.id, offset: 60)))
+        }
+        for (name, appearance) in [("light", NSAppearance.Name.aqua), ("dark", .darkAqua)] {
+            try await write(fixture, width: 600, appearance: appearance,
+                            to: try directory.appending(path: "transcript-selection-600-\(name).png"),
+                            adjust: spanning)
+        }
+    }
+
     // MARK: Drawing
 
     /// Measures at an ordinary height, then draws tall enough that every row is
@@ -92,11 +116,12 @@ struct TranscriptSnapshotTests {
         _ fixture : TranscriptFixture,
         width     : CGFloat,
         appearance: NSAppearance.Name,
-        to file   : URL
+        to file   : URL,
+        adjust    : (@MainActor (TranscriptController) -> Void)? = nil
     ) async throws {
         let measuring = try await render(fixture, width: width, height: 600, appearance: appearance)
         let backdrop  = try await render(fixture, width: width, height: measuring.contentHeight,
-                                         appearance: appearance).backdrop
+                                         appearance: appearance, adjust: adjust).backdrop
         try Self.png(of: backdrop).write(to: file)
         print("snapshot: \(file.path)")
     }
@@ -105,7 +130,8 @@ struct TranscriptSnapshotTests {
         _ fixture : TranscriptFixture,
         width     : CGFloat,
         height    : CGFloat,
-        appearance: NSAppearance.Name
+        appearance: NSAppearance.Name,
+        adjust    : (@MainActor (TranscriptController) -> Void)? = nil
     ) async throws -> (backdrop: NSView, contentHeight: CGFloat) {
         let controller = TranscriptController(source: fixture.store)
         let backdrop   = Backdrop(frame: NSRect(x: 0, y: 0, width: width, height: height))
@@ -116,6 +142,7 @@ struct TranscriptSnapshotTests {
         controller.open(fixture.conversation, workerName: "Atlas", appearance: TranscriptFixture.appearance,
                         readingAnchor: nil, readingOffset: 0)
         await controller.settle()
+        adjust?(controller)
         backdrop.layoutSubtreeIfNeeded()
         return (backdrop, controller.contentHeight)
     }

@@ -5,6 +5,7 @@
 //  Created by Eliomar Alejandro Rodriguez Ferrer on 23/09/2026.
 //
 
+import AppKit
 import Foundation
 import Transcript
 import Workspace
@@ -83,6 +84,19 @@ struct TranscriptFixture {
 
         Raw HTML stays text: <b>not bold</b> <script>alert(1)</script>
         """
+
+    /// A borderless window that is never ordered in, holding `view` at `size`.
+    /// The collection view tiles and recycles its cells on scroll only inside
+    /// a window; bare, it keeps the cells it made first.
+    @MainActor
+    static func offscreenWindow(for view: NSView, size: CGSize) -> NSWindow {
+        let window = NSWindow(contentRect: NSRect(origin: .zero, size: size), styleMask: [.borderless],
+                              backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = view
+        view.layoutSubtreeIfNeeded()
+        return window
+    }
 
     /// Removes the directory. A failure must not fail the test it cleans up after.
     func discard() {

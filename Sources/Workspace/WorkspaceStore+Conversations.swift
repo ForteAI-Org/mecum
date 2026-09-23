@@ -122,7 +122,8 @@ extension WorkspaceStore {
     /// the pages in between.
     ///
     /// `before` messages with a lower sequence and `after` messages from
-    /// `position` upwards, each clamped at zero.
+    /// `position` upwards, each clamped at zero. Read through a context made
+    /// for the call (`readingContext`), so paging keeps nothing behind.
     public func messages(
         in conversation: UUID,
         around position: Int,
@@ -143,15 +144,19 @@ extension WorkspaceStore {
         later.fetchLimit = max(0, after)
 
         // A fetch limit of zero means no limit, so a side asked for none is not fetched at all.
-        let head = before > 0 ? try modelContext.fetch(earlier).reversed().map(MessageSnapshot.init) : []
-        let tail = after  > 0 ? try modelContext.fetch(later).map(MessageSnapshot.init) : []
+        let context = readingContext()
+        let head = before > 0 ? try context.fetch(earlier).reversed().map(MessageSnapshot.init) : []
+        let tail = after  > 0 ? try context.fetch(later).map(MessageSnapshot.init) : []
         return head + tail
     }
 
     /// One message by its id, or nil when the store has none. The transcript
-    /// reads it to find the sequence a remembered reading anchor sits at.
+    /// reads it to find the sequence a remembered reading anchor sits at,
+    /// through a context made for the call.
     public func message(_ id: UUID) throws -> MessageSnapshot? {
-        try first(Message.self, where: #Predicate { $0.id == id }).map(MessageSnapshot.init)
+        var descriptor = FetchDescriptor<Message>(predicate: #Predicate { $0.id == id })
+        descriptor.fetchLimit = 1
+        return try readingContext().fetch(descriptor).first.map(MessageSnapshot.init)
     }
 
     public func messageCount(in conversation: UUID) throws -> Int {

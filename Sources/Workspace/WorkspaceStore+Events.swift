@@ -53,7 +53,8 @@ extension WorkspaceStore: EventStoring {
     /// latest `limit` of them, returned in local order.
     ///
     /// The transcript reads the events between two messages with this, so a
-    /// window of messages costs its own events and not the conversation's.
+    /// window of messages costs its own events and not the conversation's,
+    /// through a context made for the call (`readingContext`).
     public func events(
         inConversation conversation: UUID,
         from start                 : Date,
@@ -69,7 +70,7 @@ extension WorkspaceStore: EventStoring {
             sortBy   : [SortDescriptor(\.localOrder, order: .reverse)]
         )
         descriptor.fetchLimit = limit
-        return try modelContext.fetch(descriptor).reversed().map(RecordedEvent.init)
+        return try readingContext().fetch(descriptor).reversed().map(RecordedEvent.init)
     }
 
     /// One predicate per scope. Written apart so each stays a single

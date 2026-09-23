@@ -338,6 +338,15 @@ let package = Package(
             swiftSettings: suite
         ),
 
+        // The transcript's measurements over a synthetic 10,000 message store (§20.1, §20.2),
+        // apart from its functional tests and run only with MECUM_BENCH=1.
+        .testTarget(
+            name         : "TranscriptBenchmarks",
+            dependencies : [.target(name: "Transcript"), .target(name: "Workspace")],
+            path         : "Tests/TranscriptBenchmarks",
+            swiftSettings: suite
+        ),
+
         // Host (TCC, real display) and Live (fixture and reader) tiers, gated by
         // AGENTSEAT_HOST_TESTS=1 and AGENTSEAT_LIVE_TESTS=1 and run serialized.
         driverTests("Host", ["SeatCore", "PrivateSymbols", "VirtualScreens", "WindowPlacement", "SeatInput", "CursorGuard", "SeatCapture", "SeatSession"]),

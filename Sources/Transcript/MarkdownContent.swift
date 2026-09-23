@@ -32,6 +32,9 @@ public final class MarkdownContent: MessageContentPipeline {
     /// Lines of an open fence per provisional block.
     public static let provisionalLines = 40
 
+    /// ponytail: counts entries, not bytes, so a history of long code blocks
+    /// holds more; 150 pages of the benchmark grew the heap 2.3 MB through it.
+    /// Cap by bytes if a profile shows it matters.
     public static let capacity = 2048
 
     private enum Source: Hashable {

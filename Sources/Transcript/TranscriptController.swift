@@ -35,8 +35,16 @@ import Workspace
 /// delta a message receives, becomes one read and one view update per
 /// `FlushCadence` tick. The flush does not depend on the view being on
 /// screen, and a request that arrives while one is read schedules another,
-/// so the terminal update of a turn always lands. A selection survives an
-/// update that leaves its text where it was, or moves with its text.
+/// so the terminal update of a turn always lands.
+///
+/// The selection is a `TranscriptSelection`, in row ids and offsets, never in
+/// cells: a drag is hit tested here against the layout, so it can cross rows
+/// the recycler reuses while it runs. It survives an update to a row it
+/// spans and clamps when one of its rows goes (`TranscriptSelection.kept`).
+///
+/// The window pages at both ends as the reader nears one, and drops what is
+/// far past the other (`TranscriptWindow.messageLimit`). `reveal(message:)`
+/// opens a window around any message without reading the pages between.
 @MainActor
 @Observable
 public final class TranscriptController: NSObject {
@@ -90,12 +98,13 @@ public final class TranscriptController: NSObject {
     @ObservationIgnored private var preparedWidth : CGFloat = 0
     @ObservationIgnored private var workerName    = ""
     @ObservationIgnored private var avatar        : NSImage?
-    @ObservationIgnored private(set) var textSelection: (id: TranscriptItem.ID, range: NSRange)?
+    @ObservationIgnored private(set) var textSelection: TranscriptSelection?
     @ObservationIgnored private var focusedAction : (id: TranscriptItem.ID, action: RowAction)?
     @ObservationIgnored private var chain         : Task<Void, Never>?
     @ObservationIgnored private var flush         : Task<Void, Never>?
     @ObservationIgnored private var cadence       = FlushCadence()
     @ObservationIgnored private var isApplying    = false
+    @ObservationIgnored private var isPaging      = false
     @ObservationIgnored private var restingReport : Task<Void, Never>?
     @ObservationIgnored private var unsentCheck   : Task<Void, Never>?
     @ObservationIgnored private var observers     : [any NSObjectProtocol] = []
@@ -151,6 +160,36 @@ public final class TranscriptController: NSObject {
         }
     }
 
+    /// Shows `messageID` of the open conversation at the viewport's top and
+    /// focuses it. A loaded message is scrolled to; any other opens the window
+    /// around it with one read, not the pages between (§12.5). Search opens
+    /// its results through here. A message the conversation no longer has
+    /// leaves the transcript as it was and is reported in `problem`.
+    public func reveal(message messageID: UUID) {
+        enqueue {
+            let id = TranscriptItem.ID.message(messageID)
+            if let frame = self.frameMap()[id] {
+                self.setVisibleTop(frame.minY)
+                self.focus(id)
+                return
+            }
+            guard let conversationID = self.conversationID else { return }
+            do {
+                let window = try await TranscriptWindow.opening(conversationID, around: messageID,
+                                                                from: self.source)
+                guard self.conversationID == conversationID else { return }
+                guard window.messages.contains(where: { $0.id == messageID }) else {
+                    self.problem = "That message is no longer in this conversation."
+                    return
+                }
+                await self.apply(window, mode: .open(ScrollAnchor(itemID: id, offset: 0)))
+                self.focus(id)
+            } catch {
+                self.problem = "That message could not be read. \(error.localizedDescription)"
+            }
+        }
+    }
+
     /// Reads the live tail again after the store recorded something, at the
     /// next flush: calls before it share one read.
     public func refresh() {
@@ -169,15 +208,36 @@ public final class TranscriptController: NSObject {
         do {
             let fresh = try await window.refreshingTail(from: source)
             guard fresh.conversationID == conversationID else { return }
+            guard fresh.isAtNewest else {
+                // The newest end is not loaded: nothing to apply, only the indicator to raise.
+                self.window = fresh
+                let arrived = fresh.newestSequence > window.newestSequence
+                newActivity = arrived ? .messages : newActivity ?? .statusChanges
+                return
+            }
             await apply(fresh, mode: .live)
         } catch {
             problem = "The conversation could not be read again. \(error.localizedDescription)"
         }
     }
 
+    /// Goes to the conversation's end, opening the newest window when the
+    /// loaded one stops short of it.
     public func scrollToBottom() {
         newActivity = nil
-        setVisibleTop(.greatestFiniteMagnitude)
+        guard window?.isAtNewest == false, let conversationID else {
+            setVisibleTop(.greatestFiniteMagnitude)
+            return
+        }
+        enqueue {
+            do {
+                let window = try await TranscriptWindow.opening(conversationID, around: nil, from: self.source)
+                guard self.conversationID == conversationID else { return }
+                await self.apply(window, mode: .open(nil))
+            } catch {
+                self.problem = "The end of this conversation could not be read. \(error.localizedDescription)"
+            }
+        }
     }
 
     /// Waits for the pending flush and every queued load and relayout. Tests
@@ -229,7 +289,7 @@ public final class TranscriptController: NSObject {
         let update      = TranscriptUpdate(from: rows.map(\.item), to: result.rows.map(\.item))
         let wasAtBottom = isAtBottom
         let anchor      = captureAnchor()
-        keepSelection(in: result.rows)
+        textSelection   = textSelection?.kept(from: rows, in: result.rows)
 
         isApplying = true
         defer {
@@ -278,6 +338,7 @@ public final class TranscriptController: NSObject {
                 playEntrances(update)
             }
         }
+        showSelection()
         lastUpdate = update
         isEmpty    = rows.isEmpty
         scheduleUnsentCheck(window, now: now)
@@ -311,14 +372,36 @@ public final class TranscriptController: NSObject {
         await apply(window, mode: .relayout)
     }
 
+    /// Loads one page above the window. A load already queued absorbs the
+    /// call, so a burst of scroll notifications reads one page.
     func loadOlder() {
+        page("Earlier messages could not be read.") { window, source in
+            window.isAtOldest ? nil : try await window.loadingOlder(from: source)
+        }
+    }
+
+    /// Loads one page below the window, when it stops short of the newest.
+    func loadNewer() {
+        page("Later messages could not be read.") { window, source in
+            window.isAtNewest ? nil : try await window.loadingNewer(from: source)
+        }
+    }
+
+    private func page(
+        _ failure: String,
+        read     : @escaping @MainActor (TranscriptWindow, any ConversationWindowSource) async throws
+            -> TranscriptWindow?
+    ) {
+        guard !isPaging else { return }
+        isPaging = true
         enqueue {
-            guard let window = self.window, !window.isAtOldest else { return }
+            defer { self.isPaging = false }
+            guard let window = self.window else { return }
             do {
-                let older = try await window.loadingOlder(from: self.source)
-                await self.apply(older, mode: .paging)
+                guard let paged = try await read(window, self.source) else { return }
+                await self.apply(paged, mode: .paging)
             } catch {
-                self.problem = "Earlier messages could not be read. \(error.localizedDescription)"
+                self.problem = "\(failure) \(error.localizedDescription)"
             }
         }
     }
@@ -332,24 +415,6 @@ public final class TranscriptController: NSObject {
     private func reproject() async {
         guard let window else { return }
         await apply(window, mode: .paging)
-    }
-
-    /// Keeps the selection across an update of its row: where it was when
-    /// its text is still there, else on the first place that text now is.
-    /// A selection whose text is gone, or whose row is, is cleared.
-    private func keepSelection(in fresh: [PreparedRow]) {
-        guard let selection = textSelection,
-              let before = rows.first(where: { $0.item.id == selection.id })?.text.string as NSString?,
-              NSMaxRange(selection.range) <= before.length
-        else { return }
-        let selected = before.substring(with: selection.range)
-        guard let after = fresh.first(where: { $0.item.id == selection.id })?.text.string as NSString? else {
-            textSelection = nil
-            return
-        }
-        if NSMaxRange(selection.range) <= after.length, after.substring(with: selection.range) == selected { return }
-        let moved = after.range(of: selected)
-        textSelection = moved.location == NSNotFound ? nil : (selection.id, moved)
     }
 
     // MARK: Collection view
@@ -367,6 +432,9 @@ public final class TranscriptController: NSObject {
         collectionView.onMoveAction = { [weak self] step in self?.moveActionFocus(by: step) }
         collectionView.onActivate = { [weak self] in self?.activateFocused() }
         collectionView.onCopy     = { [weak self] in self?.copySelection() }
+        collectionView.onExtend   = { [weak self] step in self?.extendSelection(byRow: step) }
+        collectionView.onSelectAll     = { [weak self] in self?.selectAll() }
+        collectionView.onSelectMessage = { [weak self] in self?.selectFocusedMessage() }
 
         scrollView.documentView          = collectionView
         scrollView.hasVerticalScroller   = true
@@ -409,20 +477,18 @@ public final class TranscriptController: NSObject {
         layout.continuesGroup = rows.map(\.item.continuesGroup)
     }
 
-    private func configure(_ cell: TranscriptCell, with row: PreparedRow) {
-        let id = row.item.id
+    private func configure(_ cell: TranscriptCell, at index: Int) {
+        let row = rows[index]
+        let id  = row.item.id
         cell.rowView.configure(
             row,
             style     : style,
             workerName: workerName,
             avatar    : row.item.authorWorkerID == nil ? nil : avatar,
-            selection : textSelection?.id == id ? textSelection?.range : nil
+            selection : selectedRange(ofRow: index)
         )
         cell.rowView.focusedAction = focusedAction?.id == id ? focusedAction?.action : nil
-        cell.rowView.onSelectText = { [weak self] range in
-            self?.textSelection = range.map { (id, $0) }
-            self?.focus(id)
-        }
+        cell.rowView.onPointer  = { [weak self] phase, location in self?.pointer(phase, at: location) }
         cell.rowView.onActivate = { [weak self] in self?.toggle(id) }
         cell.rowView.onAction   = { [weak self] action in self?.perform(action, in: id) }
     }
@@ -433,7 +499,7 @@ public final class TranscriptController: NSObject {
             let row = rows[indexPath.item]
             guard ids.contains(row.item.id), let cell = collectionView.item(at: indexPath) as? TranscriptCell
             else { continue }
-            configure(cell, with: row)
+            configure(cell, at: indexPath.item)
         }
     }
 
@@ -461,6 +527,9 @@ public final class TranscriptController: NSObject {
     /// The content height, which a snapshot sizes its view to.
     var contentHeight: CGFloat { layout.collectionViewContentSize.height }
 
+    /// Block sizes the measurement cache holds, which a benchmark reports.
+    var measuredBlockCount: Int { cache.count }
+
     private func layoutNow() {
         collectionView.frame.size.width = scrollView.contentView.bounds.width
         layout.prepare()
@@ -477,6 +546,8 @@ public final class TranscriptController: NSObject {
         return ScrollAnchor.capture(frames: frames, visibleTop: scrollView.contentView.bounds.minY)
     }
 
+    var visibleTop: CGFloat { scrollView.contentView.bounds.minY }
+
     func setVisibleTop(_ top: CGFloat) {
         let clip    = scrollView.contentView
         let maximum = max(0, layout.collectionViewContentSize.height - clip.bounds.height)
@@ -487,7 +558,9 @@ public final class TranscriptController: NSObject {
     private func didScroll() {
         guard !isApplying else { return }
         if isAtBottom { newActivity = nil }
-        if scrollView.contentView.bounds.minY < 400, window?.isAtOldest == false { loadOlder() }
+        let clip = scrollView.contentView.bounds
+        if clip.minY < 400, window?.isAtOldest == false { loadOlder() }
+        if layout.collectionViewContentSize.height - clip.maxY < 400, window?.isAtNewest == false { loadNewer() }
         reportWhenResting()
     }
 
@@ -600,11 +673,10 @@ public final class TranscriptController: NSObject {
     }
 
     /// Copies the selected text, or the focused row when nothing is selected.
-    private func copySelection() {
+    func copySelection() {
         let text: String
-        if let selection = textSelection, let row = rows.first(where: { $0.item.id == selection.id }),
-           NSMaxRange(selection.range) <= (row.text.string as NSString).length {
-            text = (row.text.string as NSString).substring(with: selection.range)
+        if let selection = textSelection, !selection.isEmpty, let span = selection.span(in: rows) {
+            text = span.text(in: rows)
         } else if let index = focusedIndex, rows.indices.contains(index) {
             text = rows[index].item.copyText
         } else {
@@ -612,6 +684,126 @@ public final class TranscriptController: NSObject {
         }
         pasteboard.clearContents()
         pasteboard.setString(text, forType: .string)
+    }
+
+    // MARK: Selection
+
+    /// The part of the row at `index` the selection covers, as its view draws it.
+    func selectedRange(ofRow index: Int) -> NSRange? {
+        guard let selection = textSelection, !selection.isEmpty else { return nil }
+        return selection.span(in: rows)?.range(ofRow: index, in: rows)
+    }
+
+    /// Replaces the selection and redraws the rows on screen.
+    func select(_ selection: TranscriptSelection?) {
+        textSelection = selection
+        showSelection()
+    }
+
+    /// Gives every live cell its part of the selection, so a row the recycler
+    /// brings back draws what the logical selection says and nothing older.
+    private func showSelection() {
+        for indexPath in collectionView.indexPathsForVisibleItems() where rows.indices.contains(indexPath.item) {
+            guard let cell = collectionView.item(at: indexPath) as? TranscriptCell else { continue }
+            cell.rowView.show(selection: selectedRange(ofRow: indexPath.item))
+        }
+    }
+
+    private func pointer(_ phase: TranscriptRowView.PointerPhase, at windowLocation: NSPoint) {
+        let point = collectionView.convert(windowLocation, from: nil)
+        switch phase {
+        case .down(let clicks): beginSelection(at: point, clickCount: clicks)
+        case .drag:             extendSelection(to: point)
+        }
+    }
+
+    /// Starts a selection at `point`, in the collection view's coordinates. A
+    /// double click selects the row under it whole.
+    func beginSelection(at point: CGPoint, clickCount: Int) {
+        guard let hit = selectionPoint(at: point),
+              let index = rows.firstIndex(where: { $0.item.id == hit.itemID })
+        else { return }
+        select(clickCount == 2 ? TranscriptSelection(wholeOf: rows[index])
+                               : TranscriptSelection(anchor: hit, focus: hit))
+        focus(hit.itemID)
+    }
+
+    /// Moves the selection's free end to `point`. A point past the viewport
+    /// counts as its edge, where a live row always is.
+    func extendSelection(to point: CGPoint) {
+        guard var selection = textSelection else { return }
+        let visible = scrollView.contentView.bounds
+        let clamped = CGPoint(x: point.x, y: min(max(point.y, visible.minY), visible.maxY - 1))
+        guard let hit = selectionPoint(at: clamped) else { return }
+        selection.focus = hit
+        select(selection)
+    }
+
+    /// The row and character under `point`. Between rows it is the start of
+    /// the row below; past the last row, the end of it.
+    private func selectionPoint(at point: CGPoint) -> TranscriptSelection.Point? {
+        let frames = layout.frames
+        guard let last = rows.last, frames.count == rows.count else { return nil }
+        var low = 0, high = frames.count
+        while low < high {
+            let middle = (low + high) / 2
+            if frames[middle].maxY < point.y { low = middle + 1 } else { high = middle }
+        }
+        guard low < rows.count else { return .init(itemID: last.item.id, offset: last.length) }
+        let id = rows[low].item.id
+        guard point.y >= frames[low].minY,
+              let cell = collectionView.item(at: IndexPath(item: low, section: 0)) as? TranscriptCell
+        else { return .init(itemID: id, offset: 0) }
+        let local = cell.rowView.convert(point, from: collectionView)
+        return .init(itemID: id, offset: cell.rowView.nearestCharacter(to: local))
+    }
+
+    /// Command A inside the transcript: every loaded row, not the app.
+    func selectAll() {
+        guard let first = rows.first, let last = rows.last else { return }
+        select(TranscriptSelection(anchor: .init(itemID: first.item.id, offset: 0),
+                                   focus : .init(itemID: last.item.id, offset: last.length)))
+    }
+
+    /// Selects the focused row's whole text.
+    func selectFocusedMessage() {
+        guard let index = focusedIndex, rows.indices.contains(index) else { return }
+        select(TranscriptSelection(wholeOf: rows[index]))
+    }
+
+    /// Shift with Up or Down: the free end goes to the edge of its row, then
+    /// to the far edge of the next message. With nothing selected, the focused
+    /// row, or the last one, is selected whole first.
+    func extendSelection(byRow step: Int) {
+        guard !rows.isEmpty else { return }
+        guard let selection = textSelection, !selection.isEmpty,
+              let row = rows.firstIndex(where: { $0.item.id == selection.focus.itemID })
+        else {
+            let index = focusedIndex.flatMap { rows.indices.contains($0) ? $0 : nil } ?? rows.count - 1
+            let whole = TranscriptSelection(wholeOf: rows[index])
+            select(step > 0 ? whole : TranscriptSelection(anchor: whole.focus, focus: whole.anchor))
+            reach(index)
+            return
+        }
+        let edge = step > 0 ? rows[row].length : 0
+        var next = selection
+        if selection.focus.offset != edge {
+            next.focus = .init(itemID: rows[row].item.id, offset: edge)
+        } else {
+            let ahead  = step > 0 ? Array(rows.indices.suffix(from: row + 1))
+                                  : Array(rows.indices.prefix(row).reversed())
+            guard let target = ahead.first(where: { rows[$0].item.messageID != nil }) else { return }
+            next.focus = .init(itemID: rows[target].item.id, offset: step > 0 ? rows[target].length : 0)
+        }
+        select(next)
+        if let target = rows.firstIndex(where: { $0.item.id == next.focus.itemID }) { reach(target) }
+    }
+
+    /// Focuses the row at `index` and scrolls it into view.
+    private func reach(_ index: Int) {
+        let path = IndexPath(item: index, section: 0)
+        collectionView.selectionIndexPaths = [path]
+        collectionView.scrollToItems(at: [path], scrollPosition: .nearestHorizontalEdge)
     }
 }
 
@@ -629,7 +821,7 @@ extension TranscriptController: NSCollectionViewDataSource, NSCollectionViewDele
     ) -> NSCollectionViewItem {
         let item = collectionView.makeItem(withIdentifier: TranscriptCell.identifier, for: indexPath)
         if let cell = item as? TranscriptCell, rows.indices.contains(indexPath.item) {
-            configure(cell, with: rows[indexPath.item])
+            configure(cell, at: indexPath.item)
         }
         return item
     }

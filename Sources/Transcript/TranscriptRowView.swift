@@ -11,9 +11,11 @@ import AppKit
 /// text be selected.
 ///
 /// A recycled view: `configure` replaces everything it shows, including the
-/// selection, which the controller owns in logical terms (row id and character
-/// range in the row's text) so a view that scrolls away and comes back as
-/// another row keeps nothing of the old one. Main actor only.
+/// selection, which the controller owns in logical terms (`TranscriptSelection`)
+/// so a view that scrolls away and comes back as another row keeps nothing of
+/// the old one. A press or drag on text is handed to the controller with its
+/// window location: the view that took the press may be showing another row
+/// before the drag ends, so it keeps no selection state of its own. Main actor only.
 ///
 /// Nothing here runs on its own: a link opens and a code block is copied only
 /// on a click or on the controller's keyboard action, and nothing is fetched.
@@ -22,8 +24,13 @@ final class TranscriptRowView: NSView {
 
     typealias TextStack = (NSTextStorage, NSLayoutManager, NSTextContainer)
 
-    /// Called with the selected character range, or nil when it is cleared.
-    var onSelectText: ((NSRange?) -> Void)?
+    enum PointerPhase {
+        case down(clickCount: Int)
+        case drag
+    }
+
+    /// Called with a press or drag on the row's text and its window location.
+    var onPointer: ((PointerPhase, NSPoint) -> Void)?
 
     /// Called when the row's own action runs: a tool run expands or folds.
     var onActivate: (() -> Void)?
@@ -40,9 +47,9 @@ final class TranscriptRowView: NSView {
     private var style      = TranscriptStyle()
     private var workerName = ""
     private var avatar     : NSImage?
-    private var selection  : NSRange?
-    private var dragStart  : Int?
-    private var didDrag    = false
+    private(set) var selection: NSRange?
+    private var pressLocation : NSPoint?
+    private var didDrag       = false
     private(set) var stacks: [TextStack?] = []
     private var ranges     : [NSRange] = []
 
@@ -73,6 +80,13 @@ final class TranscriptRowView: NSView {
             return block.kind == .rule ? nil : RowPreparation.textStack(block.attributed(style), width: frame.width)
         }
         configureAccessibility(row)
+        needsDisplay = true
+    }
+
+    /// Replaces the drawn selection and nothing else.
+    func show(selection range: NSRange?) {
+        guard range != selection else { return }
+        selection    = range
         needsDisplay = true
     }
 
@@ -216,15 +230,25 @@ final class TranscriptRowView: NSView {
     }
 
     /// The part of the row's selection inside `block`, kept within its frame.
+    ///
+    /// On the accent bubble the selection is a near opaque white with the
+    /// selected glyphs in the accent, as Messages draws it: white text on a
+    /// lighter tint of the accent would not read. Elsewhere it is the system's.
     private func drawSelection(in frame: CGRect, block: Int, clip: CGRect, isOnAccent: Bool) {
-        guard let selection, selection.length > 0, let (_, manager, container) = stacks[block] else { return }
+        guard let (storage, manager, container) = stacks[block] else { return }
+        // The stack outlives a selection change when its block is unchanged, so an old inversion is cleared first.
+        manager.removeTemporaryAttribute(.foregroundColor,
+                                         forCharacterRange: NSRange(location: 0, length: storage.length))
+        guard let selection, selection.length > 0 else { return }
         let local = NSIntersectionRange(selection, ranges[block])
         guard local.length > 0 else { return }
-        let glyphs = manager.glyphRange(
-            forCharacterRange   : NSRange(location: local.location - ranges[block].location, length: local.length),
-            actualCharacterRange: nil
-        )
-        (isOnAccent ? NSColor.white.withAlphaComponent(0.35) : NSColor.selectedTextBackgroundColor).setFill()
+        let characters = NSRange(location: local.location - ranges[block].location, length: local.length)
+        let glyphs     = manager.glyphRange(forCharacterRange: characters, actualCharacterRange: nil)
+        if isOnAccent {
+            manager.addTemporaryAttribute(.foregroundColor, value: NSColor.controlAccentColor,
+                                          forCharacterRange: characters)
+        }
+        (isOnAccent ? NSColor.white.withAlphaComponent(0.9) : NSColor.selectedTextBackgroundColor).setFill()
         manager.enumerateEnclosingRects(
             forGlyphRange             : glyphs,
             withinSelectedGlyphRange  : NSRange(location: NSNotFound, length: 0),
@@ -242,7 +266,7 @@ final class TranscriptRowView: NSView {
             onAction?(.copyBlock(index: block))
             return
         }
-        guard let row, let index = characterIndex(at: point) else {
+        guard let row, blockCharacter(at: point, boundary: true) != nil else {
             super.mouseDown(with: event)
             return
         }
@@ -250,26 +274,24 @@ final class TranscriptRowView: NSView {
             onActivate?()
             return
         }
-        if event.clickCount == 2 {
-            select(NSRange(location: 0, length: (row.text.string as NSString).length))
-            return
-        }
-        dragStart = index
-        didDrag   = false
-        select(nil)
+        pressLocation = event.locationInWindow
+        didDrag       = false
+        onPointer?(.down(clickCount: event.clickCount), event.locationInWindow)
     }
 
+    /// Past the viewport's edge the drag scrolls it; the controller keeps the
+    /// selection's far end on whichever row is then under the pointer.
     override func mouseDragged(with event: NSEvent) {
-        guard let start = dragStart, let index = characterIndex(at: convert(event.locationInWindow, from: nil))
-        else { return }
-        didDrag = didDrag || index != start
-        select(NSRange(location: min(start, index), length: abs(index - start)))
+        guard let press = pressLocation else { return }
+        didDrag = didDrag || hypot(event.locationInWindow.x - press.x, event.locationInWindow.y - press.y) > 2
+        autoscroll(with: event)
+        onPointer?(.drag, event.locationInWindow)
     }
 
     /// A click that did not drag, on a link, is the explicit action that opens it.
     override func mouseUp(with event: NSEvent) {
-        defer { dragStart = nil }
-        guard !didDrag, dragStart != nil, let row,
+        defer { pressLocation = nil }
+        guard !didDrag, pressLocation != nil, let row,
               let (block, offset) = blockCharacter(at: convert(event.locationInWindow, from: nil)),
               let action = RowAction.actions(in: row.text).first(where: {
                   if case .openLink(_, block, let range) = $0 { NSLocationInRange(offset, range) } else { false }
@@ -284,12 +306,6 @@ final class TranscriptRowView: NSView {
         return true
     }
 
-    private func select(_ range: NSRange?) {
-        selection = range
-        needsDisplay = true
-        onSelectText?(range)
-    }
-
     private func copyControl(at point: CGPoint, in row: PreparedRow) -> Int? {
         row.text.blocks.indices.first { index in
             row.text.blocks[index].isCompleteCode && row.geometry.blocks.indices.contains(index)
@@ -298,10 +314,26 @@ final class TranscriptRowView: NSView {
         }
     }
 
-    /// The character boundary nearest `point`, in the row's text, or nil outside it.
-    private func characterIndex(at point: CGPoint) -> Int? {
-        guard let (block, offset) = blockCharacter(at: point, boundary: true) else { return nil }
-        return ranges[block].location + offset
+    /// The character boundary in the row's text nearest `point`, anywhere in
+    /// the row: above its text is the start, below it the end, and between
+    /// two blocks the start of the lower one.
+    func nearestCharacter(to point: CGPoint) -> Int {
+        guard let row else { return 0 }
+        let texts = row.geometry.blocks.indices.filter { stacks.indices.contains($0) && stacks[$0] != nil }
+        guard let block = texts.first(where: { point.y < row.geometry.blocks[$0].maxY }) else {
+            return row.length
+        }
+        guard point.y >= row.geometry.blocks[block].minY, let (storage, manager, container) = stacks[block] else {
+            return ranges[block].location
+        }
+        let frame = row.geometry.blockTexts[block]
+        var fraction: CGFloat = 0
+        let index = manager.characterIndex(
+            for                                : CGPoint(x: point.x - frame.minX, y: point.y - frame.minY),
+            in                                 : container,
+            fractionOfDistanceBetweenInsertionPoints: &fraction
+        )
+        return ranges[block].location + min(storage.length, index + (fraction > 0.5 ? 1 : 0))
     }
 
     /// The block under `point` and the character in it: the character hit,

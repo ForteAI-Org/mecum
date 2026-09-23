@@ -142,12 +142,11 @@ struct TranscriptControllerTests {
         let (controller, source, id) = try await streaming(
             fixture, reply: "Build it in two steps.\n\n```sh\nmake", pipeline: pipeline
         )
-        let index = try #require(controller.rows.firstIndex { $0.item.id == .message(id) })
-        let cell  = try #require(controller.collectionView.item(at: IndexPath(item: index, section: 0))
-            as? TranscriptCell)
+        let index  = try #require(controller.rows.firstIndex { $0.item.id == .message(id) })
         let chosen = NSRange(location: 9, length: 12)
-        cell.rowView.onSelectText?(chosen)
-        #expect(controller.textSelection?.range == chosen)
+        controller.select(TranscriptSelection(anchor: .init(itemID: .message(id), offset: 9),
+                                              focus : .init(itemID: .message(id), offset: 21)))
+        #expect(controller.selectedRange(ofRow: index) == chosen)
 
         let spent = pipeline.preparedBlockCount
         await source.append(" test\n```\n\nThat is all.")
@@ -157,8 +156,9 @@ struct TranscriptControllerTests {
         let row = try #require(controller.rows.first { $0.item.id == .message(id) })
         #expect(row.text.blocks.map(\.kind) == [.text, .code(language: "sh", isComplete: true), .text])
         #expect(pipeline.preparedBlockCount - spent == 2)
-        #expect(controller.textSelection?.id == .message(id))
-        let selection = try #require(controller.textSelection?.range)
+        #expect(controller.textSelection?.anchor.itemID == .message(id))
+        let rowIndex  = try #require(controller.rows.firstIndex { $0.item.id == .message(id) })
+        let selection = try #require(controller.selectedRange(ofRow: rowIndex))
         #expect((row.text.string as NSString).substring(with: selection) == "in two steps")
     }
 
@@ -232,21 +232,31 @@ struct TranscriptControllerTests {
     }
 }
 
-/// GrowingSource serves the store's windows with one message's text taken
-/// from a buffer that grows, the way a streamed reply's does between flushes.
+/// GrowingSource serves the store's windows with some messages' text taken
+/// from buffers that grow, the way a streamed reply's does between flushes.
 actor GrowingSource: ConversationWindowSource {
 
-    let store    : WorkspaceStore
-    let streaming: UUID
-    private(set) var text: String
+    let store: WorkspaceStore
+    private(set) var texts: [UUID: String]
 
     init(store: WorkspaceStore, streaming: UUID, text: String) {
-        self.store     = store
-        self.streaming = streaming
-        self.text      = text
+        self.init(store: store, texts: [streaming: text])
     }
 
-    func append(_ delta: String) { text += delta }
+    init(store: WorkspaceStore, texts: [UUID: String]) {
+        self.store = store
+        self.texts = texts
+    }
+
+    /// The streamed text, when one message streams.
+    var text: String { texts.values.first ?? "" }
+
+    /// Grows every stream by `delta`.
+    func append(_ delta: String) {
+        for id in texts.keys { texts[id, default: ""] += delta }
+    }
+
+    func append(_ delta: String, to id: UUID) { texts[id, default: ""] += delta }
 
     func messages(in conversation: UUID, around position: Int, before: Int, after: Int) async throws
         -> [MessageSnapshot] {
@@ -263,7 +273,7 @@ actor GrowingSource: ConversationWindowSource {
     }
 
     private func streamed(_ message: MessageSnapshot) -> MessageSnapshot {
-        guard message.id == streaming else { return message }
+        guard let text = texts[message.id] else { return message }
         return MessageSnapshot(Message(id: message.id, conversationID: message.conversationID,
                                        authorWorkerID: message.authorWorkerID, text: text,
                                        createdAt: message.createdAt, sequence: message.sequence,

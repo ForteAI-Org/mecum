@@ -64,6 +64,19 @@ public actor WorkspaceStore {
         }
     }
 
+    /// A context made for one read and dropped when the read returns.
+    ///
+    /// The store's own context keeps data for every row it has fetched for as
+    /// long as it lives, even once no model is registered: paging a 10,000
+    /// message history 150 windows up grew the live heap by 17.7 MB through
+    /// it and by 0.2 MB through one of these (macOS 27, SDK 27.0). The
+    /// transcript's window reads, which walk the whole history, use one.
+    /// Every write saves before it returns, and a failed save is rolled
+    /// back, so a read here sees the same rows the store's context would.
+    func readingContext() -> ModelContext {
+        ModelContext(modelContainer)
+    }
+
     /// The single row matching `id`, or nil.
     func first<T: PersistentModel>(_ type: T.Type, where predicate: Predicate<T>) throws -> T? {
         var descriptor = FetchDescriptor<T>(predicate: predicate)
