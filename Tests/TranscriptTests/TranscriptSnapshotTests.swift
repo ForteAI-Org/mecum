@@ -286,9 +286,11 @@ struct TranscriptSnapshotTests {
         try await fixture.say("Rerun the capture suite first.", at: 20)
 
         let chosen: @MainActor (TranscriptController) -> Void = { controller in
-            guard controller.rows.count >= 3 else { return }
-            controller.click(controller.rows[0].item.id, modifiers: [])
-            controller.click(controller.rows[2].item.id, modifiers: .shift)
+            // By message, not by row: the day separator opens the conversation.
+            let messages = controller.rows.filter { $0.item.messageID != nil }
+            guard messages.count >= 3 else { return }
+            controller.click(messages[0].item.id, modifiers: [])
+            controller.click(messages[2].item.id, modifiers: .shift)
         }
         for (name, appearance) in [("light", NSAppearance.Name.aqua), ("dark", .darkAqua)] {
             try await write(fixture, width: 600, appearance: appearance,
