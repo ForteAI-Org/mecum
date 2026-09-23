@@ -14,8 +14,9 @@ import SeatCore
 /// use the measured unprepared path. Drag and bulk insertion retain the
 /// conservative preparation until those surfaces have their own measurements.
 /// A controlled Qt 6 widget fixture has also qualified scrolling, routed and
-/// native popup choices, and a context-menu action. Those measurements do not
-/// qualify DaVinci's intermittently stalled context menu.
+/// native popup choices, and a context-menu action. DaVinci's menu has also
+/// opened, captured and closed after the Search locator correction; a menu
+/// item action in DaVinci remains unmeasured.
 nonisolated public struct QtPlatform: InputPlatform {
 
     public init() {}

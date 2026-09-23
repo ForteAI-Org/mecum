@@ -431,11 +431,10 @@ struct QtDriverLiveTests {
     }
 
     @Test(
-        "diagnostic Qt contextual menu probe",
+        "DaVinci's Qt menu opens, is captured and closes on the virtual display",
         .enabled(
-            if: liveSkipReason(optIn: "AGENTSEAT_QT_TESTS") == nil
-                && ProcessInfo.processInfo.environment["AGENTSEAT_QT_MENU_PROBE"] == "1",
-            Comment(rawValue: "Set AGENTSEAT_QT_MENU_PROBE=1 only for the diagnostic menu probe")))
+            if: liveSkipReason(optIn: "AGENTSEAT_QT_TESTS") == nil,
+            Comment(rawValue: liveSkipReason(optIn: "AGENTSEAT_QT_TESTS") ?? "")))
     func openDaVinciSearchContextMenu() async throws {
         let application = try #require(
             NSRunningApplication.runningApplications(
@@ -464,9 +463,14 @@ struct QtDriverLiveTests {
                         windowNumber: window.id,
                         allowUnvalidatedBuild: true
                     )
-                    return try #require(snapshot.axTree.first {
+                    if let named = snapshot.axTree.first(where: {
                         $0.description == "Search" && $0.role == role
-                    })
+                    }) { return named }
+                    if role == "AXTextField" {
+                        let fields = snapshot.axTree.filter { $0.role == role }
+                        if fields.count == 1 { return fields[0] }
+                    }
+                    throw LiveFailure.unsupported("Project Manager has no unique \(role) for Search")
                 }
 
                 func point(of node: AXElementNode) throws -> InputLocation {
@@ -504,6 +508,13 @@ struct QtDriverLiveTests {
                 ) { interaction in
                     print("QT_MENU window=\(interaction.menu.window.windowNumber)"
                         + " frame=\(interaction.menu.frame)")
+                    switch await interaction.observe() {
+                        case .success(let delivery):
+                            print("QT_MENU capture=qualified"
+                                + " pixels=\(delivery.frame.geometry.pixelSize)")
+                        case .failure(let reason):
+                            Issue.record("DaVinci menu surface could not be observed: \(reason)")
+                    }
                 }
                 print("QT_MENU cleanup=\(menu.cleanup)"
                     + " appeared-after=\(menu.menu.appearedAfter)"

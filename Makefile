@@ -61,7 +61,8 @@ HOST_REST_TESTS := 29
 # assertion over the reported Live bundle, including intentionally skipped rows.
 LIVE_TESTS := 94
 QT_LIVE_ROWS := discoverDaVinci adoptAndReturnDaVinci observeDaVinci \
-                clickDaVinciSearch openAndCancelDaVinciProjectDialog insertTextIntoDaVinciSearch
+                clickDaVinciSearch openAndCancelDaVinciProjectDialog insertTextIntoDaVinciSearch \
+                openDaVinciSearchContextMenu
 QT_FIXTURE_ROWS := widgetCommands contextMenu dropdownMenu nativePopupMenu modalChild
 QT_PYTHON ?= $(shell command -v python3)
 

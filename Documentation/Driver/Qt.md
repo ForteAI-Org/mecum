@@ -20,9 +20,10 @@ and open then cancel the New Project dialog. They never create or delete a
 project.
 
 Run `make qt-live-tests` with DaVinci open on Project Manager. It runs each of
-the six stable rows in a separate test process and checks that each printed its
-final summary. All six passed together on 26A428 after the AX locator was
-adjusted for an intermittently unnamed Search field. This avoids accepting the macOS failure mode where repeated virtual
+the seven rows in a separate test process and checks that each printed its
+final summary. All seven passed together on 26A428 after the AX locator was
+adjusted for an intermittently unnamed Search field, including the menu row.
+This avoids accepting the macOS failure mode where repeated virtual
 display creation ends a process with exit status zero before the suite ends.
 The ordinary `make live-tests` reports these rows as skipped and needs the
 consumer fixture and browser for its other rows.
@@ -64,8 +65,8 @@ window from an on-screen row alone.
 | `send(.text)` | No preparation | A typed `x` appended in DaVinci; Qt 6 accepted `é🧪` as two grapheme clusters and four events. Active IME composition remains untested. | Partial |
 | `send(.insertText)` | Prepare, 150 ms | Atomic `qtbgprobe` insertion appeared in DaVinci Search and `qt6bulk` in the Qt 6 line edit. The unprepared AppKit recipe also worked on DaVinci's field. | Passed for simple text |
 | `send(.drag)` | Prepare, shared pacing | DaVinci text selection changed from `{9, 0}` to `{0, 8}`; the Qt 6 slider changed from 0 to 81 along a paced drag between measured widget points. Cross-widget drag and drop remains untested. | Passed on measured drags |
-| `send(.click(..., .right))` | No preparation | A Qt 6 line edit opened its menu, and the target's right-click counter incremented. One Qt 6 rerun missed the menu; the following rerun passed. DaVinci opened its menu once, then later diagnostic runs stalled. | Intermittent |
-| `withContextMenu` / menu observation / item action | Shared | Qt 6 opened a menu wholly inside the virtual display, captured its own 128 by 26 surface, clicked the target-published action frame, incremented `menuChoices` and verified `chosenItem` closure. DaVinci's separate menu probe remains unstable: AX reading, capture and a later opening-only run stalled for over 30 seconds and were interrupted. | Passed on Qt 6, pending on DaVinci |
+| `send(.click(..., .right))` | No preparation | A Qt 6 line edit opened its menu, and the target's right-click counter incremented. One Qt 6 rerun missed the menu; the following rerun passed. DaVinci's Search field opened a 184 by 164 menu in four consecutive runs after the locator accepted its uniquely unnamed AX text field. | Passed on measured controls; one earlier Qt 6 miss |
+| `withContextMenu` / menu observation / item action | Shared | Qt 6 opened a menu wholly inside the virtual display, captured its own 128 by 26 surface, clicked the target-published action frame, incremented `menuChoices` and verified `chosenItem` closure. DaVinci's 184 by 164 menu was opened, captured and closed through `preparationCycle` in three diagnostic runs and then the seven-row suite. Earlier DaVinci attempts stalled; the successful runs followed the Search locator correction, but they did not choose a DaVinci menu item. | Passed Qt 6 item action and DaVinci open/capture/close; DaVinci item action pending |
 | `send(.click(..., count: 2))` | No preparation | Four events selected the whole DaVinci Search word, AX range `{0, 9}`; the Qt 6 line edit's double-click counter also incremented. | Passed on text |
 | `send(.scroll)` | No preparation | Qt 6's scroll area changed its target-side offset from 0 to 60 after one wheel event. DaVinci's thumbnail slider stayed at `-50`; it is not a scroll offset oracle. | Passed on Qt 6 scroll area |
 | Modified key / shortcut / held repeat | No preparation, shared flags and pacing | DaVinci's layout-resolved `⌘A` selected all nine Search characters. Qt 6 counted the `down → 3 repeat → up` sequence while the turn held the key. Other modifiers, shortcut destinations and repeat rates are pending. | Partial |
@@ -74,21 +75,21 @@ window from an on-screen row alone.
 | `useDropdownMenu` | Shared | The Qt 6 combo opened a 648 by 62 popup. A scoped Down and Return selected `Beta` in the target state and closed it as `chosenItem`. | Passed on Qt 6 combo |
 | `useNativePopupMenu` | Shared | The fixture supplied a native `QComboBox.showPopup()` opener and a native choice callback through its local command channel. The scoped menu stayed on the virtual display, selected `Beta` in target state and closed as `chosenItem`. This qualifies the scope when a caller has a native Qt action; it does not imply the kit can invent that action for an external app. | Passed on fixture native action |
 
-The checked-in suite is `QtDriverLiveTests`. Its six stable rows discover the
+The checked-in suite is `QtDriverLiveTests`. Its seven rows discover the
 window, stage and return it, capture it, toggle Search, follow and cancel a
-dialog, and drive text and selection. A seventh menu probe is diagnostic only.
+dialog, drive text and selection, and open, capture and close Search's menu.
 The comparative research runs also tested the Chromium and AppKit
 recipes against Search; the checked-in regression uses `QtPlatform` so it
 qualifies the public Qt entry point directly. Qt file dialogs, custom
-widgets, DaVinci context menus and DaVinci's main editing workspace require separate
-effect-based rows before their functions can be marked passed.
+widgets, DaVinci menu item actions and DaVinci's main editing workspace require
+separate effect-based rows before their functions can be marked passed.
 
 The Qt 6 fixture rows add a scroll offset, slider value, text and key counters,
 a measured context-menu action, both routed and native combo choices, and a
 modal child with a target-side open/closed flag. They verified every `InputCommand` case on
 at least one Qt 6 widget, including right click, held-key phases and
-multi-cluster text. This does not remove DaVinci's menu failure or prove those
-effects on other Qt widget implementations.
+multi-cluster text. The Qt 6 menu choice does not prove a menu item effect in
+DaVinci or on other Qt widget implementations.
 
 The target sometimes publishes Search's text field without an AX description.
 The live locator accepts the only `AXTextField` in Project Manager while Search
