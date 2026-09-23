@@ -27,6 +27,14 @@ display creation ends a process with exit status zero before the suite ends.
 The ordinary `make live-tests` reports these rows as skipped and needs the
 consumer fixture and browser for its other rows.
 
+`make qt-fixture-live-tests QT_PYTHON=/absolute/path/to/python` runs two more
+rows against an owned Qt 6 widget fixture. That interpreter must have
+`PySide6-Essentials` installed. Each row launches its own fixture in the
+background, reads target-side JSON counters and measured widget frames, then
+closes the fixture. The fixture is in `Tools/Driver/QtProbe.py`; it creates no
+projects or user files. On this host the official PySide6-Essentials 6.11.2
+wheel was installed into a temporary virtual environment, outside the repo.
+
 The oracle for an input command is a change in DaVinci's own AX value, focus or
 selected range. A posted-event receipt alone is not a pass. The oracle for
 capture is a qualified `SeatFrame` and observation reference bound to the
@@ -44,25 +52,26 @@ window from an on-screen row alone.
 
 ## Function matrix
 
-`Passed` means an effect was observed on this target, not a Qt-wide guarantee.
+`Passed` means an effect was observed on the named target, not a Qt-wide guarantee.
 `Pending` means no target-side oracle has yet qualified that function for Qt.
 
-| Kit function | Qt policy | DaVinci Project Manager evidence | State |
+| Kit function | Qt policy | Measured evidence | State |
 |---|---|---|---|
-| `adopt` and `stage` | `QtPlatform` | Exact AX and WindowServer identity matched; 910 by 640 window moved into the virtual display. | Passed |
-| `observe` / window capture | Shared | Qualified BGRA frame and reference for the same window lifetime and staged geometry. | Passed |
-| `send(.click(..., .left, count: 1))` | No preparation | Search checkbox changed `0 → 1 → 0`. New Project opened a Qt dialog; Cancel closed it. A prepared Cancel click caused `activationUnverified` with focus recovery enabled, so the unprepared policy is required on this path. | Passed on measured controls |
-| `send(.key)` | No preparation | Backspace removed one character from Search after text entry; Right Arrow collapsed a text selection. Other virtual keys and key phases are pending. | Partial |
-| `send(.text)` | No preparation | One typed `x` appended to the Search query. Multicluster and composing text are pending. | Partial |
-| `send(.insertText)` | Prepare, 150 ms | Atomic `qtbgprobe` insertion appeared in Search. The unprepared AppKit recipe also worked on that field. | Passed for simple text |
-| `send(.drag)` | Prepare, shared pacing | AX text selection changed from `{9, 0}` to `{0, 8}` by a paced drag between measured text points. Widget drag and drop is pending. | Partial |
-| `send(.click(..., .right))` | No preparation | The diagnostic opened DaVinci's menu window on the virtual display in 67 ms once. Later runs stalled after opening Search, so this is not a repeatable pass. | Pending repeatability |
-| `withContextMenu` / menu observation / item action | Shared | One scoped run opened a 184 by 164 menu within the virtual display and verified closure by a preparation cycle, with zero HID events. Reading the menu AX tree and observing its dedicated captured surface each stalled separate live runs for over 30 seconds. A subsequent opening-and-closing-only rerun also stalled. All were interrupted and Search restored; the diagnostic row requires `AGENTSEAT_QT_MENU_PROBE=1` and is excluded from `make qt-live-tests`. Menu item selection remains unqualified. | Pending repeatability |
-| `send(.click(..., count: 2))` | No preparation | Four events selected the whole Search word, AX range `{0, 9}`. | Passed on text |
-| `send(.scroll)` | No preparation | A background wheel event over the thumbnail slider left its AX value `-50`; the slider may not consume wheel input. A scrollable Qt container with a measurable offset is still needed. | Pending |
-| Modified key / shortcut / held repeat | No preparation, shared flags and pacing | Right Arrow collapsed the Search selection and layout-resolved `⌘A` selected all nine characters. Other modifiers, shortcut destinations and held repeat are pending. | Partial |
+| `adopt` and `stage` | `QtPlatform` | DaVinci's exact AX and WindowServer identity matched; its 910 by 640 window and the owned Qt 6 window moved into the virtual display. | Passed on both targets |
+| `observe` / window capture | Shared | Qualified BGRA frame and reference for DaVinci's staged window; the Qt 6 menu's dedicated 128 by 26 frame was also captured. | Passed on measured surfaces |
+| `send(.click(..., .left, count: 1))` | No preparation | DaVinci Search changed `0 → 1 → 0`; New Project and Cancel opened and closed a dialog. The Qt 6 fixture's button counter incremented. A prepared DaVinci Cancel click caused `activationUnverified`, so clicks remain unprepared. | Passed on measured controls |
+| `send(.key)` | No preparation | Backspace removed one character and Right Arrow collapsed a selection in DaVinci. In Qt 6, `down`, three `repeated` key downs and `up` changed the target's key-down counter by 1, 3 and 0. Other virtual keys and modifier combinations need separate oracles. | Partial |
+| `send(.text)` | No preparation | A typed `x` appended in DaVinci; Qt 6 accepted `é🧪` as two grapheme clusters and four events. Active IME composition remains untested. | Partial |
+| `send(.insertText)` | Prepare, 150 ms | Atomic `qtbgprobe` insertion appeared in DaVinci Search and `qt6bulk` in the Qt 6 line edit. The unprepared AppKit recipe also worked on DaVinci's field. | Passed for simple text |
+| `send(.drag)` | Prepare, shared pacing | DaVinci text selection changed from `{9, 0}` to `{0, 8}`; the Qt 6 slider changed from 0 to 81 along a paced drag between measured widget points. Cross-widget drag and drop remains untested. | Passed on measured drags |
+| `send(.click(..., .right))` | No preparation | A Qt 6 line edit opened its menu, and the target's right-click counter incremented. One Qt 6 rerun missed the menu; the following rerun passed. DaVinci opened its menu once, then later diagnostic runs stalled. | Intermittent |
+| `withContextMenu` / menu observation / item action | Shared | Qt 6 opened a menu wholly inside the virtual display, captured its own 128 by 26 surface, clicked the target-published action frame, incremented `menuChoices` and verified `chosenItem` closure. DaVinci's separate menu probe remains unstable: AX reading, capture and a later opening-only run stalled for over 30 seconds and were interrupted. | Passed on Qt 6, pending on DaVinci |
+| `send(.click(..., count: 2))` | No preparation | Four events selected the whole DaVinci Search word, AX range `{0, 9}`; the Qt 6 line edit's double-click counter also incremented. | Passed on text |
+| `send(.scroll)` | No preparation | Qt 6's scroll area changed its target-side offset from 0 to 60 after one wheel event. DaVinci's thumbnail slider stayed at `-50`; it is not a scroll offset oracle. | Passed on Qt 6 scroll area |
+| Modified key / shortcut / held repeat | No preparation, shared flags and pacing | DaVinci's layout-resolved `⌘A` selected all nine Search characters. Qt 6 counted the `down → 3 repeat → up` sequence while the turn held the key. Other modifiers, shortcut destinations and repeat rates are pending. | Partial |
 | Window watch / modal child / return | Shared | New Project opened window `8616`; the watcher adopted and staged it, then a Qt-policy click on Cancel closed it with the foreground app and cursor unchanged in a run with zero physical HID events. Focus recovery was enabled for this row, though no restoration request was needed. The parent returned to its original AX position. | Passed on this dialog |
-| `release(..., .returnToUserSeat)` | Shared | Project Manager returned to its former placement, display removed and fence released in the six-row suite. Stage Manager briefly publishes a full-size surface after AX has reached home and before its thumbnail appears; the return path now allows eight observations for this stashed-window case without rewriting the already-correct AX position. A deterministic unit row and repeated live returns verified it. When the initial stashed AX body instead appeared at `(1082, 776)`, a separate run refused return with the body at `(1082, 1012)`; that geometry remains unsupported. | Partial across stashed placements |
+| `release(..., .returnToUserSeat)` | Shared | Both Qt targets returned after the measured rows, with displays and fences removed. Stage Manager briefly publishes a full-size surface after DaVinci's AX body reaches home; the return path now allows eight observations without rewriting the already-correct AX position. A deterministic unit row verified it. When DaVinci's initial stashed AX body instead appeared at `(1082, 776)`, a separate run refused return with the body at `(1082, 1012)`; that geometry remains unsupported. | Partial across stashed placements |
+| `useDropdownMenu` / `useNativePopupMenu` | Shared | The Qt 6 combo box is present, but neither popup API has a target-side choice oracle in this suite yet. | Pending |
 
 The checked-in suite is `QtDriverLiveTests`. Its six stable rows discover the
 window, stage and return it, capture it, toggle Search, follow and cancel a
@@ -70,8 +79,14 @@ dialog, and drive text and selection. A seventh menu probe is diagnostic only.
 The comparative research runs also tested the Chromium and AppKit
 recipes against Search; the checked-in regression uses `QtPlatform` so it
 qualifies the public Qt entry point directly. Qt file dialogs, custom
-widgets, context menus and DaVinci's main editing workspace require separate
+widgets, DaVinci context menus and DaVinci's main editing workspace require separate
 effect-based rows before their functions can be marked passed.
+
+The Qt 6 fixture rows add a scroll offset, slider value, text and key counters,
+and a measured context-menu action. They verified every `InputCommand` case on
+at least one Qt 6 widget, including right click, held-key phases and
+multi-cluster text. This does not remove DaVinci's menu failure or prove those
+effects on other Qt widget implementations.
 
 The target sometimes publishes Search's text field without an AX description.
 The live locator accepts the only `AXTextField` in Project Manager while Search
@@ -85,4 +100,6 @@ Qt's own documentation distinguishes native and widget file dialogs, and
 documents accessibility support for built-in widgets separately from custom
 widgets. That is why an AX-visible Search control cannot stand in for every
 Qt control: [QFileDialog](https://doc.qt.io/qt-6/qfiledialog.html),
-[Accessible QWidget](https://doc.qt.io/qt-6/accessible-qwidget.html).
+[Accessible QWidget](https://doc.qt.io/qt-6/accessible-qwidget.html). Qt's
+[PySide6 setup guide](https://doc.qt.io/qtforpython-6/quickstart.html) describes
+the virtual-environment installation used for the owned fixture.
