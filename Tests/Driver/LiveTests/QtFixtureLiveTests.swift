@@ -104,6 +104,103 @@ private final class QtProbeTarget {
 struct QtFixtureLiveTests {
 
     @Test(
+        "a Qt 6 combo popup is chosen through the dropdown menu scope",
+        .enabled(
+            if: qtFixtureSkipReason() == nil,
+            Comment(rawValue: qtFixtureSkipReason() ?? "")))
+    func dropdownMenu() async throws {
+        let target = try QtProbeTarget()
+        defer { target.stop() }
+        let processID = target.processID
+        let original = try WindowReader.windowSnapshot(
+            processID: processID, allowUnvalidatedBuild: true
+        )
+        try #require(original.windowTitle == "Mecum Qt Probe")
+
+        func probeState() throws -> [String: Any] {
+            let data = try Data(contentsOf: URL(fileURLWithPath: target.statePath))
+            return try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        }
+
+        var failure: (any Error)?
+        try await LiveStage.run(needsFixture: false, needsChrome: false) { stage in
+            let personBefore = UserSeatState.capture()
+            let handBefore = stage.fence.snapshot().observedEventCount
+            var adopted: AdoptedWindow?
+            do {
+                try #require(personBefore.frontmostProcessID != processID)
+                adopted = try await stage.seat.adopt(
+                    original.reference, platform: QtPlatform(), title: original.windowTitle
+                )
+                if let window = adopted, !stage.seat.isStaged(window) {
+                    adopted = try await stage.seat.stage(window)
+                }
+                let window = try #require(adopted)
+                let geometryReady = LivePump.run(until: {
+                    guard let frame = try? probeState()["comboFrame"] as? [NSNumber], frame.count == 4
+                    else { return false }
+                    return stage.virtualBounds.contains(CGPoint(
+                        x: frame[0].doubleValue, y: frame[1].doubleValue
+                    ))
+                }, timeout: 3)
+                try #require(geometryReady)
+                let candidate = try probeState()["comboFrame"] as? [NSNumber]
+                let frame = try #require(candidate)
+                let server = try #require(WindowServerProbe.geometry(of: window.id))
+                let geometry = try #require(WindowGeometryProbe.observation(of: server))
+                let location = try #require(InputLocation(
+                    screenPoint: CGPoint(
+                        x: frame[0].doubleValue + frame[2].doubleValue / 2,
+                        y: frame[1].doubleValue + frame[3].doubleValue / 2
+                    ), observedIn: geometry
+                ))
+                let initial = (try probeState()["comboIndex"] as? NSNumber)?.intValue ?? -1
+                try #require(initial == 0)
+
+                let turn = try await stage.seat.acquire()
+                do {
+                    let result = try await stage.seat.useDropdownMenu(
+                        openedAt: location,
+                        of: window,
+                        turn: turn,
+                        keyInterval: .milliseconds(80)
+                    ) { menu in
+                        print("QT6_DROPDOWN menu=\(menu.window.windowNumber) frame=\(menu.frame)")
+                        return [125, 36]
+                    }
+                    print("QT6_DROPDOWN requested=\(result.selectionRequested)"
+                        + " closed-by=\(result.closedBy)"
+                        + " opening=\(String(describing: result.opening?.eventCount))"
+                        + " keys=\(result.choosing.map(\.eventCount))")
+                    _ = await stage.seat.concludeObservation()
+                    try stage.seat.release(turn)
+                    let changed = LivePump.run(until: {
+                        (try? probeState()["comboIndex"] as? NSNumber)?.intValue == 1
+                    }, timeout: 2)
+                    #expect(result.selectionRequested)
+                    #expect(changed, "Qt did not select Beta from its combo popup")
+                    #expect((try probeState()["comboText"] as? String) == "Beta")
+                } catch {
+                    _ = await stage.seat.concludeObservation()
+                    try? stage.seat.release(turn)
+                    throw error
+                }
+                let physicalEvents = stage.fence.snapshot().observedEventCount - handBefore
+                if physicalEvents == 0 { #expect(UserSeatState.capture() == personBefore) }
+            } catch {
+                failure = error
+            }
+            _ = await stage.seat.concludeObservation()
+            if let adopted {
+                let outcome = await stage.seat.release(adopted, .returnToUserSeat)
+                print("QT6_DROPDOWN release=\(outcome)")
+                #expect(outcome == .returned)
+            }
+        }
+        if let failure { throw failure }
+    }
+
+    @Test(
         "a Qt 6 menu opens on the virtual display and is verified closed",
         .enabled(
             if: qtFixtureSkipReason() == nil,

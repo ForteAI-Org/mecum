@@ -30,6 +30,8 @@ state = {
     "rightClicks": 0,
     "scroll": 0,
     "slider": 0,
+    "comboIndex": 0,
+    "comboText": "Alpha",
     "menuOpen": False,
     "menuChoices": 0,
     "modalOpen": False,
@@ -134,6 +136,11 @@ layout.addWidget(slider)
 combo = QComboBox()
 combo.setAccessibleName("Probe choices")
 combo.addItems(["Alpha", "Beta", "Gamma"])
+combo.currentIndexChanged.connect(lambda index: (
+    state.__setitem__("comboIndex", index),
+    state.__setitem__("comboText", combo.currentText()),
+    publish(),
+))
 layout.addWidget(combo)
 
 scroll = QScrollArea()
