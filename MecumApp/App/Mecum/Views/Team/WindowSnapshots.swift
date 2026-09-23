@@ -47,8 +47,8 @@ enum WindowSnapshots {
                 try await write(root, width: shot.width, dark: shot.dark,
                                 to: output.appending(path: "window-\(shot.name).png"))
             }
-            // The split's sidebar is glass and draws blank offscreen, so its rows are drawn alone too,
-            // full and compact, with two connections ready for the footer's badge.
+            // The split's sidebar is glass and draws blank offscreen, so its rows are drawn alone too, on the
+            // sidebar material, full and compact, with two connections ready for the footer's badge.
             let badges = try await badgedTeam(in: store.appending(path: "Badges", directoryHint: .isDirectory))
             for connections in [team.connections, badges.connections] {
                 for provider in [ModelProvider.codex, .claudeCode] {
@@ -63,7 +63,8 @@ enum WindowSnapshots {
             ]
             for sidebar in sidebars {
                 for (name, dark) in [("light", false), ("dark", true)] {
-                    try await write(TeamSidebarView(team: sidebar.team), width: sidebar.width, dark: dark,
+                    try await write(TeamSidebarView(team: sidebar.team).background(SidebarMaterial().ignoresSafeArea()),
+                                    width: sidebar.width, dark: dark,
                                     to: output.appending(path: "\(sidebar.name)-\(name).png"))
                 }
             }
@@ -158,8 +159,9 @@ enum WindowSnapshots {
     }
 
     /// Four workers for the sidebar badge (§4.3): three unread replies, 120,
-    /// a failed turn not yet seen, and one with nothing new. None is selected,
-    /// so no conversation is on screen to mark read.
+    /// a failed turn not yet seen, and one with nothing new, and a fifth in the
+    /// archive, so its folded title is drawn too. None is selected, so no
+    /// conversation is on screen to mark read.
     static func badgedTeam(in directory: URL) async throws -> TeamModel {
         let store = try WorkspaceStore.opening(in: directory)
         let selection = ModelSelection(provider: .claudeCode, model: "claude-opus-5", effort: .high)
@@ -186,6 +188,9 @@ enum WindowSnapshots {
                                                 type: .executionFailed, payload: Data("timed out".utf8)))
             }
         }
+        let archived = try await store.createWorker(name: "Orla", role: "Translator",
+                                                    appearance: WorkerAppearance(seed: 43, palette: "dusk"))
+        try await store.update(worker: archived.id, .archived(true))
         let team = TeamModel(store: store, connections: ModelSettingsStore(), broker: SeatBroker())
         await team.load()
         return team
@@ -271,5 +276,20 @@ enum WindowSnapshots {
         var body: some View {
             TeamShellView(team: team, isInspectorRequested: $isInspectorRequested)
         }
+    }
+
+    /// The sidebar material, behind the sidebar drawn alone, standing in for
+    /// the glass the split's column gives it in a window. Offscreen it draws
+    /// the grey the list used to draw there.
+    struct SidebarMaterial: NSViewRepresentable {
+
+        func makeNSView(context: Context) -> NSVisualEffectView {
+            let view = NSVisualEffectView()
+            view.material     = .sidebar
+            view.blendingMode = .behindWindow
+            return view
+        }
+
+        func updateNSView(_ view: NSVisualEffectView, context: Context) {}
     }
 }

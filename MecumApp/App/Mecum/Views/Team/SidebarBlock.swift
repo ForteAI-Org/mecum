@@ -12,17 +12,14 @@ import SwiftUI
 /// sidebar's version of the inspector's grouped blocks, and the insets the
 /// sidebar's title, blocks and footer share.
 ///
-/// The list draws no selection of its own (`SidebarBridge`), so a selected
-/// block is the selection, in the system's colours: the accent colour while
-/// the list has focus in the active window, grey otherwise, as any sidebar
-/// shows it. A block reaches past the list's own row inset out to `gutter`.
+/// The sidebar draws no selection other than this, so a selected block is the
+/// selection, in the system's colours: the accent colour while the sidebar has
+/// focus in the active window, grey otherwise, as any sidebar shows it. A block
+/// fills the frame it is the background of, which the sidebar sets `gutter` in.
 struct SidebarBlock: View {
 
     /// From the sidebar's edge to a block's edge, where a sidebar's selection sits.
     static let gutter: CGFloat = 10
-
-    /// From the sidebar's edge to where the list starts a row's content.
-    static let listContentInset: CGFloat = 16
 
     /// From the sidebar's edge to the content of a block, the title and the footer.
     static let contentInset: CGFloat = 20
@@ -38,7 +35,6 @@ struct SidebarBlock: View {
     var body: some View {
         RoundedRectangle(cornerRadius: Self.cornerRadius)
             .fill(fill)
-            .padding(.horizontal, Self.gutter - Self.listContentInset)
     }
 
     private var fill: Color {

@@ -14,20 +14,20 @@ import Workspace
 /// WindowClickCheck puts the team shell in a real key window, when the app is
 /// launched with MECUM_CLICK_CHECK=1, and drives the window's chrome with
 /// events sent through the window: a click on the worker header, which opens
-/// nothing, the inspector's shortcut both ways, Down and Up in the team, a
-/// click on the sidebar's Connections footer, a narrower window with the
-/// inspector open, where the sidebar must turn compact, and back, and every
-/// way a sidebar is hidden (the View menu, Control-Command-S, `toggleSidebar:`
-/// and a drag of the divider to the window's edge), none of which may hide it.
-/// It prints what each step found and quits with 0 when every step held, 1
-/// otherwise.
+/// nothing, the inspector's shortcut both ways, a click on the sidebar's
+/// Connections footer, Shift-Tab into the team, Down and Up there, a click on a
+/// worker, a narrower window with the inspector open, where the sidebar must
+/// turn compact, and back, and every way a sidebar is hidden (the View menu,
+/// Control-Command-S, `toggleSidebar:` and a drag of the divider to the
+/// window's edge), none of which may hide it. It prints what each step found
+/// and quits with 0 when every step held, 1 otherwise.
 ///
 /// SwiftUI builds no accessibility tree without an assistive client, so the
 /// targets are found by geometry: the header at the leading edge of the
-/// conversation's title bar, the footer at the bottom of the sidebar's, the
-/// divider at the sidebar pane's trailing edge. The events go to the window,
-/// so the pointer never moves. The team is `WindowSnapshots`'s synthetic one,
-/// in a temporary store.
+/// conversation's title bar, the footer at the bottom of the sidebar's, a
+/// worker's block from the sidebar's safe top, the divider at the sidebar
+/// pane's trailing edge. The events go to the window, so the pointer never
+/// moves. The team is `WindowSnapshots`'s synthetic one, in a temporary store.
 @MainActor
 enum WindowClickCheck {
 
@@ -146,21 +146,50 @@ enum WindowClickCheck {
 
     // MARK: Steps
 
-    /// Down and Up in the team's list move the selection to the next worker and back.
+    /// The team is the key view before the conversation, as the list was: Tab
+    /// from nothing focused reaches the transcript, and Shift-Tab from there
+    /// the team, where Down and Up move the selection to the next worker and
+    /// back. A click on the second worker's block selects it and focuses the
+    /// team, so Up then selects the first.
     private static func checkKeyboardSelection(team: TeamModel, hosting: NSView, window: NSWindow) async throws {
-        guard let table = firstView(of: NSTableView.self, in: try splitPanes(in: hosting)[0]) else {
-            throw CheckFailure(description: "no list in the sidebar")
-        }
-        window.makeFirstResponder(table)
+        let sidebar = try splitPanes(in: hosting)[0]
         let names = team.rows.map(\.name)
-        let first = team.selectedWorker?.name
-        for (key, character, expected) in [(UInt16(125), "\u{F701}", names.dropFirst().first),
-                                           (UInt16(126), "\u{F700}", first)] {
-            press(character, keyCode: key, modifiers: [.numericPad, .function], in: window, throughApp: false)
-            try await Task.sleep(for: .seconds(1))
-            print("click check: after key \(key) in the team, selected \(team.selectedWorker?.name ?? "none")")
-            try expect(team.selectedWorker?.name == expected, "the arrow key did not select \(expected ?? "none")")
+        try expect(names.count >= 2 && team.selectedWorker?.name == names.first,
+                   "the check needs the first of two workers selected, not \(team.selectedWorker?.name ?? "none")")
+        func isSidebarFocused() -> Bool {
+            (window.firstResponder as? NSView)?.isDescendant(of: sidebar) ?? false
         }
+        func responder() -> String { window.firstResponder.map { "\(type(of: $0))" } ?? "none" }
+        func arrow(down: Bool, expecting expected: String) async throws {
+            press(down ? "\u{F701}" : "\u{F700}", keyCode: down ? 125 : 126, modifiers: [.numericPad, .function],
+                  in: window, throughApp: false)
+            try await Task.sleep(for: .seconds(1))
+            print("click check: after \(down ? "Down" : "Up") in the team, "
+                + "selected \(team.selectedWorker?.name ?? "none")")
+            try expect(team.selectedWorker?.name == expected, "the arrow key did not select \(expected)")
+        }
+
+        window.makeFirstResponder(nil)
+        press("\t", keyCode: 48, modifiers: [], in: window, throughApp: false)
+        try await Task.sleep(for: .milliseconds(300))
+        print("click check: after Tab, first responder \(responder())")
+        press("\u{19}", keyCode: 48, modifiers: [.shift], in: window, throughApp: false)
+        try await Task.sleep(for: .milliseconds(300))
+        print("click check: after Shift-Tab, first responder \(responder()), team focused \(isSidebarFocused())")
+        try expect(isSidebarFocused(), "Shift-Tab from the conversation did not reach the team")
+        try await arrow(down: true, expecting: names[1])
+        try await arrow(down: false, expecting: names[0])
+
+        window.makeFirstResponder(nil)
+        // The second block's middle: the title bar (36) and the first block's extra room (5), then one
+        // block and its spacing (3 + 48 + 6) and half the second (3 + 24).
+        click(at: point(in: sidebar, fromTop: 125, leading: 60, in: window), in: window)
+        try await Task.sleep(for: .seconds(1))
+        print("click check: after the click on the second block, selected \(team.selectedWorker?.name ?? "none"), "
+            + "team focused \(isSidebarFocused())")
+        try expect(team.selectedWorker?.name == names[1] && isSidebarFocused(),
+                   "clicking \(names[1]) did not select it and focus the team")
+        try await arrow(down: false, expecting: names[0])
     }
 
     /// Nothing that hides a sidebar hides this one: the View menu has no item for
