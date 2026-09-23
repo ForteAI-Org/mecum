@@ -134,7 +134,7 @@ struct ToolLineTests {
         let expandedText  = RowPreparation.preparedText(for: try #require(open.last), workerName: "Atlas",
                                                         pipeline: MarkdownContent())
         #expect(collapsedText.string == "⚙\u{FE0E} Opened Calculator · pressed 8 ›")
-        #expect(expandedText.string == "⚙\u{FE0E} Opened Calculator · pressed 8 ⌄\nOpened Calculator\nPressed 8")
+        #expect(expandedText.string == "⚙\u{FE0E} Opened Calculator · pressed 8 ›\nOpened Calculator\nPressed 8")
         #expect(expandedText.blocks[0].runs.last?.indent == 1)
 
         let closed = try await fixture.items(expanded: [])

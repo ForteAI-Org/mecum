@@ -36,12 +36,10 @@ enum BubblePath {
         path.move(to: CGPoint(x: minX + radius, y: minY))
         path.appendArc(from: CGPoint(x: maxX, y: minY), to: CGPoint(x: maxX, y: maxY), radius: radius)
         path.line(to: CGPoint(x: maxX, y: maxY - rise))
-        // The outer edge sweeps out to the tip on the bottom line; the inner edge curls back under the bubble.
+        // The outer edge sweeps out to the tip, and the tail's underside runs back along the bubble's bottom
+        // line itself, so the two meet with no step.
         path.curve(to: CGPoint(x: maxX + width, y: maxY), controlPoint1: CGPoint(x: maxX, y: maxY - rise * 0.35),
-                   controlPoint2: CGPoint(x: maxX + width * 0.45, y: maxY - 0.5))
-        path.curve(to: CGPoint(x: maxX - radius * 0.9, y: maxY),
-                   controlPoint1: CGPoint(x: maxX + width * 0.2, y: maxY),
-                   controlPoint2: CGPoint(x: maxX - radius * 0.35, y: maxY - 1.5))
+                   controlPoint2: CGPoint(x: maxX + width * 0.45, y: maxY))
         path.line(to: CGPoint(x: minX + radius, y: maxY))
         path.appendArc(from: CGPoint(x: minX, y: maxY), to: CGPoint(x: minX, y: minY), radius: radius)
         path.appendArc(from: CGPoint(x: minX, y: minY), to: CGPoint(x: maxX, y: minY), radius: radius)

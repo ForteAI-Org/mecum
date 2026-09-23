@@ -158,14 +158,16 @@ struct TurnRowsTests {
         #expect(worker.minX > RowGeometry.gutter + RowGeometry.avatarSide, "the tail stays clear of the mascot")
         #expect(worker.maxY == rows[4].geometry.surface.maxY && rows[4].geometry.height >= worker.maxY)
 
-        // The tail moves no text and changes no height: the same reply, with and without it.
+        // The tail moves no text: the same reply, with and without it. The group's end adds only its time below.
         var untailed = rows[4].item
         untailed.endsGroup = false
         let size = [CGSize(width: 120, height: 17)]
         let with = RowGeometry(item: rows[4].item, rowWidth: 600, style: TranscriptStyle(), blocks: [.text], sizes: size)
         let without = RowGeometry(item: untailed, rowWidth: 600, style: TranscriptStyle(), blocks: [.text], sizes: size)
         #expect(with.tail != nil && without.tail == nil)
-        #expect(with.text == without.text && with.height == without.height && with.surface == without.surface)
+        #expect(with.text == without.text && with.surface == without.surface)
+        let time = try #require(with.footer)
+        #expect(without.footer == nil && time.minY > with.surface.maxY && with.height == time.maxY.rounded(.up))
     }
 
     @Test("A thinking row has no text, draws a bubble of one line and reads its worker's name")

@@ -125,8 +125,8 @@ enum RowPreparation {
         let hasFailure = steps.contains { if case .failed = $0.state { true } else { false } }
         var block = PreparedBlock(kind: .text)
         block.append(hasFailure ? errorMark : "⚙\u{FE0E} ", role: hasFailure ? .captionAlert : .caption)
-        block.append(TranscriptWording.toolSummary(steps, ending: ending) + (isExpanded ? " ⌄" : " ›"),
-                     role: .caption)
+        block.append(TranscriptWording.toolSummary(steps, ending: ending) + " ", role: .caption)
+        block.append(disclosureSlot, role: .disclosureSlot)
         guard isExpanded else { return PreparedText(blocks: [block]) }
         for line in TranscriptWording.toolSteps(steps, ending: ending) {
             block.append("\n", role: .caption, indent: 1)
@@ -135,6 +135,9 @@ enum RowPreparation {
         }
         return PreparedText(blocks: [block])
     }
+
+    /// The character a tool line's summary ends with, where its chevron is drawn.
+    static let disclosureSlot = "›"
 
     /// The mark a tool line or step carries when something failed.
     private static let errorMark = "⚠\u{FE0E} "

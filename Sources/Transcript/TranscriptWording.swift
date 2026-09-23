@@ -178,9 +178,6 @@ public enum TranscriptWording {
 
     // MARK: Code
 
-    /// The control on a finished code block.
-    public static let copyBlock = "Copy"
-
     public static func codeBlock(language: String?) -> String {
         language.map { "Code block, \($0)" } ?? "Code block"
     }

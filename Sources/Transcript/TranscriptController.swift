@@ -297,6 +297,9 @@ public final class TranscriptController: NSObject {
         case live
         case paging
         case relayout
+
+        /// A tool line opened or closed: the rows it moves slide, and an opened one that runs under the composer scrolls up.
+        case expansion(TranscriptItem.ID)
     }
 
     private func enqueue(_ operation: @escaping @MainActor () async -> Void) {
@@ -325,6 +328,8 @@ public final class TranscriptController: NSObject {
         let update      = TranscriptUpdate(from: rows.map(\.item), to: result.rows.map(\.item))
         let wasAtBottom = isAtBottom
         let anchor      = captureAnchor()
+        let drawnFrames = frameMap()
+        let drawnTop    = scrollView.contentView.bounds.minY
         textSelection   = textSelection?.kept(from: rows, in: result.rows)
 
         isApplying = true
@@ -350,7 +355,7 @@ public final class TranscriptController: NSObject {
                 setVisibleTop(.greatestFiniteMagnitude)
             }
 
-        case .live, .paging, .relayout:
+        case .live, .paging, .relayout, .expansion:
             guard !update.isEmpty || mode == .relayout else { break }
             rows = result.rows
             viewUpdateCount += 1
@@ -372,6 +377,10 @@ public final class TranscriptController: NSObject {
             if mode == .live {
                 noteActivity(update, followed: wasAtBottom)
                 playEntrances(update)
+            }
+            if case .expansion(let id) = mode {
+                slideRows(opening: id, from: drawnFrames, drawnTop: drawnTop)
+                reveal(id)
             }
         }
         showSelection()
@@ -445,10 +454,13 @@ public final class TranscriptController: NSObject {
 
     private func toggle(_ id: TranscriptItem.ID) {
         if expanded.remove(id) == nil { expanded.insert(id) }
-        enqueue { await self.reproject() }
+        enqueue {
+            guard let window = self.window else { return }
+            await self.apply(window, mode: .expansion(id))
+        }
     }
 
-    /// Projects the same window again: an expansion, or a badge whose time came.
+    /// Projects the same window again, for a badge whose time came.
     private func reproject() async {
         guard let window else { return }
         await apply(window, mode: .paging)
@@ -473,6 +485,7 @@ public final class TranscriptController: NSObject {
         collectionView.onSelectAll     = { [weak self] in self?.selectAll() }
         collectionView.onToggle        = { [weak self] in self?.toggleFocusedBubble() }
         collectionView.onClear         = { [weak self] in self?.clearSelections() }
+        collectionView.onKeyboard      = { [weak self] in self?.showFocusRing(true) }
         collectionView.onSelectMessage = { [weak self] in self?.selectFocusedMessage() }
         collectionView.onContextMenu   = { [weak self] in self?.showMenuForFocusedRow() }
         collectionView.onScrollToEnd   = { [weak self] in self?.scrollToBottom() }
@@ -540,6 +553,7 @@ public final class TranscriptController: NSObject {
             selection : selectedRange(ofRow: index)
         )
         cell.rowView.focusedAction = focusedAction?.id == id ? focusedAction?.action : nil
+        cell.rowView.showsFocusRing = showsFocusRing
         cell.rowView.isBubbleSelected = row.item.messageID.map(bubbleSelection.contains) ?? false
         cell.rowView.onPointer  = { [weak self] phase, location in self?.pointer(phase, at: location) }
         cell.rowView.onActivate = { [weak self] in self?.toggle(id) }
@@ -554,6 +568,41 @@ public final class TranscriptController: NSObject {
             guard ids.contains(row.item.id), let cell = collectionView.item(at: indexPath) as? TranscriptCell
             else { continue }
             configure(cell, at: indexPath.item)
+        }
+    }
+
+    /// Slides each row on screen from where it was drawn to where it now is,
+    /// and opens a tool line that grew downwards from its old height, so an
+    /// expansion moves rather than jumps. Reduce Motion places them at once.
+    private func slideRows(opening id: TranscriptItem.ID, from drawn: [TranscriptItem.ID: CGRect], drawnTop: CGFloat) {
+        guard !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else { return }
+        let top = scrollView.contentView.bounds.minY
+        for indexPath in collectionView.indexPathsForVisibleItems()
+        where rows.indices.contains(indexPath.item) && layout.frames.indices.contains(indexPath.item) {
+            let rowID = rows[indexPath.item].item.id
+            guard let old = drawn[rowID], let cell = collectionView.item(at: indexPath) as? TranscriptCell else { continue }
+            let new = layout.frames[indexPath.item]
+            cell.slide(from: (old.minY - drawnTop) - (new.minY - top), openingFrom: rowID == id ? old.height : nil)
+        }
+    }
+
+    /// Scrolls an opened row that now runs under the composer up into view, never past its own top.
+    private func reveal(_ id: TranscriptItem.ID) {
+        guard let index = rows.firstIndex(where: { $0.item.id == id }), layout.frames.indices.contains(index)
+        else { return }
+        let frame  = layout.frames[index]
+        let clip   = scrollView.contentView
+        let bottom = clip.bounds.maxY - max(0, bottomInset)
+        guard frame.maxY > bottom else { return }
+        let maximum = max(0, layout.collectionViewContentSize.height - clip.bounds.height)
+        let target  = min(maximum, clip.bounds.minY + min(frame.maxY - bottom, frame.minY - visibleTop))
+        guard target > clip.bounds.minY else { return }
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion ? 0 : 0.22
+            context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            clip.animator().setBoundsOrigin(NSPoint(x: 0, y: target))
+        } completionHandler: { [weak self] in
+            MainActor.assumeIsolated { self.map { $0.scrollView.reflectScrolledClipView($0.scrollView.contentView) } }
         }
     }
 
@@ -702,6 +751,17 @@ public final class TranscriptController: NSObject {
 
     private var focusedIndex: Int? { collectionView.selectionIndexPaths.first?.item }
 
+    /// Whether the focused row is outlined: once a key moves the focus, until the next press.
+    @ObservationIgnored private var showsFocusRing = false
+
+    private func showFocusRing(_ shown: Bool) {
+        guard shown != showsFocusRing else { return }
+        showsFocusRing = shown
+        for indexPath in collectionView.indexPathsForVisibleItems() {
+            (collectionView.item(at: indexPath) as? TranscriptCell)?.rowView.showsFocusRing = shown
+        }
+    }
+
     private func focus(_ id: TranscriptItem.ID) {
         guard let index = rows.firstIndex(where: { $0.item.id == id }) else { return }
         collectionView.selectionIndexPaths = [IndexPath(item: index, section: 0)]
@@ -758,6 +818,10 @@ public final class TranscriptController: NSObject {
             guard row.text.blocks.indices.contains(index) else { return }
             pasteboard.clearContents()
             pasteboard.setString(row.text.blocks[index].string, forType: .string)
+            if let item = rows.firstIndex(where: { $0.item.id == id }),
+               let cell = collectionView.item(at: IndexPath(item: item, section: 0)) as? TranscriptCell {
+                cell.rowView.showCopied(block: index)
+            }
         case .openLink(let destination, _, _):
             guard let url = RowAction.openableURL(destination) else { return }
             NSWorkspace.shared.open(url)
@@ -814,6 +878,7 @@ public final class TranscriptController: NSObject {
         case .press:
             // The row takes the press, so the collection view must take the keyboard or Copy goes elsewhere.
             takeKeyboard()
+            showFocusRing(false)
         case .dragStart:
             beginSelection(at: point, clickCount: 1)
         case .drag:
@@ -876,9 +941,10 @@ public final class TranscriptController: NSObject {
         click(rows[index].item.id, modifiers: .command)
     }
 
-    /// Escape, or a press on empty space: nothing stays selected.
+    /// Escape, or a press on empty space: nothing stays selected, and no row keeps the focus outline.
     private func clearSelections() {
         textSelection = nil
+        collectionView.selectionIndexPaths = []
         setBubbles([], anchor: nil)
     }
 

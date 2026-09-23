@@ -33,9 +33,13 @@ final class TranscriptCollectionView: NSCollectionView {
     var onToggle       : (() -> Void)?
     var onClear        : (() -> Void)?
 
+    /// Called before any key is handled, so the focus outline shows for the keyboard and not after a click.
+    var onKeyboard     : (() -> Void)?
+
     override var acceptsFirstResponder: Bool { true }
 
     override func keyDown(with event: NSEvent) {
+        onKeyboard?()
         let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
         // The letter, not the key position, so the chord follows the keyboard layout.
         if modifiers.isSuperset(of: [.command, .shift]), event.charactersIgnoringModifiers?.lowercased() == "a" {

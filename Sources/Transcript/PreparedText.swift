@@ -51,6 +51,10 @@ public struct PreparedText: Sendable, Hashable {
 
         /// Where a link or an image points, shown beside it so it is never hidden.
         case destination
+
+        /// The room a tool line keeps for its disclosure chevron: a caption glyph
+        /// drawn clear, which the row's rotating chevron covers.
+        case disclosureSlot
     }
 
     /// Inline emphasis, which changes the face and not the role.
@@ -144,6 +148,8 @@ public struct PreparedText: Sendable, Hashable {
         case .syntax(let kind):
             attributes = [.font: NSFont.monospacedSystemFont(ofSize: style.codePointSize, weight: .regular),
                           .foregroundColor: TranscriptColors.syntax(kind)]
+        case .disclosureSlot:
+            attributes = [.font: NSFont.systemFont(ofSize: style.captionPointSize), .foregroundColor: NSColor.clear]
         case .captionAlert:
             attributes = [.font: NSFont.systemFont(ofSize: style.captionPointSize, weight: .semibold),
                           .foregroundColor: NSColor.systemRed]

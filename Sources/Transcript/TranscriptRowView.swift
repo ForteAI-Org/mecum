@@ -48,6 +48,11 @@ final class TranscriptRowView: NSView {
 
     var isFocusedRow = false { didSet { needsDisplay = true } }
 
+    /// Whether a focused row draws its outline: the keyboard's focus is outlined, a click's is not.
+    var showsFocusRing = false { didSet { if showsFocusRing != oldValue { needsDisplay = true } } }
+
+    private var isOutlined: Bool { isFocusedRow && showsFocusRing }
+
     /// True when the whole message is selected as a bubble: drawn lighter, and spoken as selected.
     var isBubbleSelected = false {
         didSet {
@@ -71,6 +76,13 @@ final class TranscriptRowView: NSView {
     private var ranges     : [NSRange] = []
     private var thinkingDots: ThinkingDotsView?
 
+    /// Each finished code block's copy icon, by block, which turns into a check once its code is copied.
+    private var copyIcons  : [Int: NSImageView] = [:]
+    private var copiedReset: Task<Void, Never>?
+
+    /// A tool line's disclosure chevron, which turns to point down while the line is open.
+    private var chevron    : NSImageView?
+
     override var isFlipped: Bool { true }
 
     func configure(
@@ -82,6 +94,7 @@ final class TranscriptRowView: NSView {
     ) {
         // The same row again, as a streamed reply grows, keeps the laid out stacks of its unchanged blocks.
         let previous    = self.row?.item.id == row.item.id && self.style == style ? self.row : nil
+        let previousRow = self.row?.item.id == row.item.id ? self.row : nil
         let oldStacks   = stacks
         self.row        = row
         self.style      = style
@@ -98,6 +111,8 @@ final class TranscriptRowView: NSView {
             return block.kind == .rule ? nil : RowPreparation.textStack(block.attributed(style), width: frame.width)
         }
         showThinking(row)
+        showCopyIcons(row, keepsCopied: previous != nil)
+        showChevron(row, wasExpanded: Self.isExpanded(previousRow))
         configureAccessibility(row)
         needsDisplay = true
     }
@@ -119,6 +134,145 @@ final class TranscriptRowView: NSView {
         dots.start(reducesMotion: NSWorkspace.shared.accessibilityDisplayShouldReduceMotion)
     }
 
+    /// Whether `row` is an open tool line, or nil when it is no tool line at all.
+    private static func isExpanded(_ row: PreparedRow?) -> Bool? {
+        guard case .toolRun(_, let isExpanded, _)? = row?.item.kind else { return nil }
+        return isExpanded
+    }
+
+    /// The chevron over a tool line's disclosure slot. The same line opening or
+    /// closing turns it with a short rotation; Reduce Motion turns it at once.
+    private func showChevron(_ row: PreparedRow, wasExpanded: Bool?) {
+        guard let isExpanded = Self.isExpanded(row), let frame = disclosureSlot(in: row) else {
+            chevron?.isHidden = true
+            return
+        }
+        let icon = chevron ?? makeChevron()
+        chevron = icon
+        icon.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: style.captionPointSize * 0.8,
+                                                               weight: .semibold)
+        icon.isHidden = false
+        // A rotated view's frame is its bounding box, so it is placed upright and turned after.
+        icon.frameCenterRotation = 0
+        icon.frame = frame
+        // Flipped, a positive rotation turns clockwise: the chevron that pointed right points down.
+        let angle: CGFloat = isExpanded ? 90 : 0
+        guard let wasExpanded, wasExpanded != isExpanded, !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else {
+            icon.frameCenterRotation = angle
+            return
+        }
+        icon.frameCenterRotation = wasExpanded ? 90 : 0
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration = 0.2
+            context.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+            icon.animator().frameCenterRotation = angle
+        }
+    }
+
+    private func makeChevron() -> NSImageView {
+        let icon = NSImageView()
+        icon.image            = NSImage(systemSymbolName: "chevron.right", accessibilityDescription: nil)
+        icon.contentTintColor = .secondaryLabelColor
+        icon.imageScaling     = .scaleProportionallyDown
+        icon.wantsLayer       = true
+        // The row's expanded state speaks for it, and its press goes to the row.
+        icon.setAccessibilityElement(false)
+        addSubview(icon)
+        return icon
+    }
+
+    /// A square on the tool line's disclosure slot, the last character of its first line.
+    private func disclosureSlot(in row: PreparedRow) -> CGRect? {
+        guard let (storage, manager, container) = stacks.first ?? nil, let origin = row.geometry.blockTexts.first?.origin
+        else { return nil }
+        let text = storage.string as NSString
+        let end  = text.range(of: "\n").location == NSNotFound ? text.length : text.range(of: "\n").location
+        guard end > 0 else { return nil }
+        let glyphs = manager.glyphRange(forCharacterRange: NSRange(location: end - 1, length: 1),
+                                        actualCharacterRange: nil)
+        let glyph = manager.boundingRect(forGlyphRange: glyphs, in: container).offsetBy(dx: origin.x, dy: origin.y)
+        let side  = (style.captionPointSize * 0.9).rounded()
+        // Turned down it is wider than the slot's glyph, so it sits a little right of the glyph's centre.
+        return CGRect(x: glyph.midX - side / 2 + 2, y: glyph.midY - side / 2, width: side, height: side).integral
+    }
+
+    /// The copy icons of the row's finished code blocks. Another row starts
+    /// them as copy icons; the same row growing keeps a check still showing.
+    private func showCopyIcons(_ row: PreparedRow, keepsCopied: Bool) {
+        if !keepsCopied { copiedReset?.cancel() }
+        let blocks = Set(row.text.blocks.indices.filter {
+            row.text.blocks[$0].isCompleteCode && row.geometry.blocks.indices.contains($0)
+        })
+        for (index, icon) in copyIcons where !blocks.contains(index) {
+            icon.removeFromSuperview()
+            copyIcons[index] = nil
+        }
+        for index in blocks {
+            let icon = copyIcons[index] ?? makeCopyIcon()
+            copyIcons[index] = icon
+            icon.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: style.captionPointSize, weight: .medium)
+            if !keepsCopied { icon.image = Self.copySymbol(copied: false) }
+        }
+        placeCopyIcons()
+    }
+
+    private func makeCopyIcon() -> NSImageView {
+        let icon = NSImageView()
+        icon.contentTintColor = .secondaryLabelColor
+        icon.imageScaling     = .scaleProportionallyDown
+        // The row's Copy action speaks for it, and its press goes to the row.
+        icon.setAccessibilityElement(false)
+        addSubview(icon)
+        return icon
+    }
+
+    private func placeCopyIcons() {
+        guard let row else { return }
+        for (index, icon) in copyIcons where row.geometry.blocks.indices.contains(index) {
+            icon.frame = RowGeometry.copyControl(in: row.geometry.blocks[index], style: style)
+                .offsetBy(dx: drift(of: row), dy: 0)
+        }
+    }
+
+    /// Turns the block's copy icon into a check, then back, with the system's symbol replace animation.
+    func showCopied(block: Int) {
+        guard let icon = copyIcons[block] else { return }
+        // Off and up swaps the symbols in place; the default replace slides them down.
+        icon.setSymbolImage(Self.copySymbol(copied: true), contentTransition: .replace.offUp)
+        copiedReset?.cancel()
+        copiedReset = Task { [weak icon] in
+            do { try await Task.sleep(for: .seconds(1.5)) } catch { return }
+            icon?.setSymbolImage(Self.copySymbol(copied: false), contentTransition: .replace.offUp)
+        }
+    }
+
+    private static func copySymbol(copied: Bool) -> NSImage {
+        let name = copied ? "checkmark" : "doc.on.doc"
+        return NSImage(systemSymbolName: name, accessibilityDescription: nil) ?? NSImage()
+    }
+
+    /// How far the person's bubble moves right of where it was placed: a live
+    /// resize widens the row before its parts are placed again off the main
+    /// thread, and a bubble anchored to the right edge must follow the edge.
+    private func drift(of row: PreparedRow) -> CGFloat {
+        guard case .personMessage = row.item.kind else { return 0 }
+        return bounds.width - row.geometry.rowWidth
+    }
+
+    override func setFrameSize(_ newSize: NSSize) {
+        let changed = newSize.width != frame.width
+        super.setFrameSize(newSize)
+        guard changed else { return }
+        placeCopyIcons()
+        needsDisplay = true
+    }
+
+    /// The copy icons and the chevron take no press of their own; the row decides what a press on them does.
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        let hit = super.hitTest(point)
+        return hit is NSImageView ? self : hit
+    }
+
     /// Replaces the drawn selection and nothing else.
     func show(selection range: NSRange?) {
         guard range != selection else { return }
@@ -134,11 +288,15 @@ final class TranscriptRowView: NSView {
         let isPerson: Bool
         if case .personMessage = row.item.kind { isPerson = true } else { isPerson = false }
 
+        // ponytail: only drawing follows the drift; a press during it hits where the parts were placed.
+        let drift = drift(of: row)
+        if drift != 0 { NSGraphicsContext.current?.cgContext.translateBy(x: drift, y: 0) }
         drawSurface(row, geometry: geometry, isPerson: isPerson)
         if let avatar, let frame = geometry.avatar { avatar.draw(in: frame) }
-        if let header = geometry.header { drawHeader(row, in: header, isPerson: isPerson) }
+        if let header = geometry.header { drawName(row, in: header) }
+        if let footer = geometry.footer { drawTime(row, in: footer, isPerson: isPerson) }
         for index in row.text.blocks.indices
-        where geometry.blocks.indices.contains(index) && geometry.blocks[index].intersects(dirtyRect) {
+        where geometry.blocks.indices.contains(index) && geometry.blocks[index].offsetBy(dx: drift, dy: 0).intersects(dirtyRect) {
             drawBlock(at: index, of: row, isOnAccent: isPerson)
         }
         if let frame = geometry.badge, let badge = DeliveryBadge(row.item.kind) { draw(badge, in: frame) }
@@ -182,12 +340,22 @@ final class TranscriptRowView: NSView {
             let fill = isPerson ? TranscriptColors.personBubble : TranscriptColors.neutralSurface
             bubbleFill(fill, isPerson: isPerson).setFill()
             path.fill()
-            if isFocusedRow, !isBubbleSelected { strokeFocus(path) }
+            if isOutlined, !isBubbleSelected { strokeFocus(path) }
 
         case .card:
             let path = NSBezierPath(roundedRect: surface, xRadius: 8, yRadius: 8)
+            NSGraphicsContext.saveGraphicsState()
+            if case .toolRun = row.item.kind {
+                // An opened tool line lifts off the background as a card, so its steps read apart from the replies.
+                let shadow = NSShadow()
+                shadow.shadowColor      = .black.withAlphaComponent(0.14)
+                shadow.shadowBlurRadius = 3
+                shadow.shadowOffset     = NSSize(width: 0, height: -1)
+                shadow.set()
+            }
             TranscriptColors.cardSurface.setFill()
             path.fill()
+            NSGraphicsContext.restoreGraphicsState()
             if case .executionFailed = row.item.kind {
                 NSColor.systemRed.withAlphaComponent(0.6).setStroke()
             } else {
@@ -195,12 +363,12 @@ final class TranscriptRowView: NSView {
             }
             path.lineWidth = 1
             path.stroke()
-            if isFocusedRow { strokeFocus(path) }
+            if isOutlined { strokeFocus(path) }
 
         case .line, .divider:
             // A quiet caption with no surface of its own; focus still outlines it.
             let frame = geometry.text.insetBy(dx: -6, dy: -2)
-            if isFocusedRow { strokeFocus(NSBezierPath(roundedRect: frame, xRadius: 4, yRadius: 4)) }
+            if isOutlined { strokeFocus(NSBezierPath(roundedRect: frame, xRadius: 4, yRadius: 4)) }
         }
     }
 
@@ -232,33 +400,36 @@ final class TranscriptRowView: NSView {
         }
     }
 
+    /// The icon is a subview; the keyboard's focus on it is outlined here.
     private func drawCopyControl(in block: CGRect, isFocused: Bool) {
+        guard isFocused else { return }
         let frame = RowGeometry.copyControl(in: block, style: style)
-        let label = NSAttributedString(
-            string    : TranscriptWording.copyBlock,
-            attributes: [.font: NSFont.systemFont(ofSize: style.captionPointSize),
-                         .foregroundColor: NSColor.secondaryLabelColor]
-        )
-        label.draw(at: CGPoint(x: frame.maxX - label.size().width, y: frame.minY))
-        if isFocused { strokeFocus(NSBezierPath(roundedRect: frame.insetBy(dx: -3, dy: -1), xRadius: 4, yRadius: 4)) }
+        strokeFocus(NSBezierPath(roundedRect: frame.insetBy(dx: -3, dy: -1), xRadius: 4, yRadius: 4))
     }
 
-    private func drawHeader(_ row: PreparedRow, in frame: CGRect, isPerson: Bool) {
-        let size   = style.captionPointSize
-        let parts  = TranscriptWording.header(for: row.item, workerName: workerName)
-        let header = NSMutableAttributedString()
-        if let name = parts.name {
-            header.append(NSAttributedString(
-                string    : name + "  ",
-                attributes: [.font: NSFont.boldSystemFont(ofSize: size), .foregroundColor: NSColor.labelColor]
-            ))
-        }
-        header.append(NSAttributedString(
-            string    : parts.time,
-            attributes: [.font: NSFont.systemFont(ofSize: size), .foregroundColor: NSColor.secondaryLabelColor]
-        ))
-        let width = header.size().width
-        header.draw(at: CGPoint(x: isPerson ? frame.maxX - width : frame.minX, y: frame.minY))
+    private func drawName(_ row: PreparedRow, in frame: CGRect) {
+        guard let name = TranscriptWording.header(for: row.item, workerName: workerName).name else { return }
+        NSAttributedString(
+            string    : name,
+            attributes: [.font: NSFont.boldSystemFont(ofSize: style.captionPointSize),
+                         .foregroundColor: NSColor.labelColor]
+        ).draw(at: frame.origin)
+    }
+
+    /// The time sits at the bubble's inner corner, in from its edge, past the
+    /// badge when there is one: bottom left under the person's, bottom right under the worker's.
+    private func drawTime(_ row: PreparedRow, in frame: CGRect, isPerson: Bool) {
+        guard row.item.endsGroup else { return }
+        let time = NSAttributedString(
+            string    : TranscriptWording.header(for: row.item, workerName: workerName).time,
+            attributes: [.font: NSFont.systemFont(ofSize: style.captionPointSize - 1),
+                         .foregroundColor: NSColor.tertiaryLabelColor]
+        )
+        let size  = time.size()
+        let badge = row.geometry.badge.map { $0.width + 4 } ?? 0
+        let x     = isPerson ? frame.minX + RowGeometry.footerInset + badge
+                             : frame.maxX - RowGeometry.footerInset - badge - size.width
+        time.draw(at: CGPoint(x: x, y: frame.midY - size.height / 2))
     }
 
     /// The badge's symbol: its shape carries the meaning, and a stopped or
@@ -316,6 +487,8 @@ final class TranscriptRowView: NSView {
             return
         }
         if Self.isToolRun(row), event.clickCount == 1 {
+            // A press first, as on any row, so the keyboard comes here and no outline is drawn.
+            onPointer?(.press, event.locationInWindow)
             onActivate?()
             return
         }

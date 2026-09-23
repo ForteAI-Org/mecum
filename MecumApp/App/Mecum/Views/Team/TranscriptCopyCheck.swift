@@ -77,8 +77,8 @@ enum TranscriptCopyCheck {
         if let composer = firstView(in: hosting, where: { $0 is NSTextView }) { window.makeFirstResponder(composer) }
         print("copy check: before the drag, first responder \(describe(window.firstResponder))")
 
-        // The reply's last line sits just above its bubble's bottom padding.
-        let line  = reply.isFlipped ? reply.bounds.height - 16 : 16
+        // The reply's last line sits above its bubble's bottom padding and the time line under the bubble.
+        let line  = reply.isFlipped ? reply.bounds.height - 34 : 34
         let start = reply.convert(NSPoint(x: 70, y: line), to: nil)
         let end   = reply.convert(NSPoint(x: 320, y: line), to: nil)
         window.sendEvent(try mouse(.leftMouseDown, start, window))
