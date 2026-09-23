@@ -67,16 +67,17 @@ final class TranscriptCell: NSCollectionViewItem {
         CATransaction.commit()
     }
 
-    /// A short entrance for a row that just arrived (§11.4). Reduce Motion
+    /// A short entrance for a row that just arrived (§11.4), or a slower one for
+    /// each row of a conversation just opened in place of another. Reduce Motion
     /// keeps the fade and drops the movement.
-    func playEntrance(reducesMotion: Bool) {
+    func playEntrance(reducesMotion: Bool, duration: CFTimeInterval = 0.17) {
         view.wantsLayer = true
         guard let layer = view.layer else { return }
         let fade = CABasicAnimation(keyPath: "opacity")
         fade.fromValue = 0
         fade.toValue   = 1
         let group = CAAnimationGroup()
-        group.duration       = 0.17
+        group.duration       = duration
         group.timingFunction = CAMediaTimingFunction(name: .easeOut)
         if reducesMotion {
             group.animations = [fade]

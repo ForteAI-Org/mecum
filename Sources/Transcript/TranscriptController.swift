@@ -66,9 +66,6 @@ public final class TranscriptController: NSObject {
 
     public private(set) var isEmpty = true
 
-    /// The conversation the rows on screen belong to, set once an `open` has drawn it, so a view
-    /// can bring a newly opened conversation in rather than show the old one changing.
-    public private(set) var shownConversationID: UUID?
     public private(set) var newActivity: NewActivity? {
         didSet {
             if newActivity == nil { newMessageCount = 0 }
@@ -126,6 +123,9 @@ public final class TranscriptController: NSObject {
     @ObservationIgnored private var indicatorBottom: NSLayoutConstraint?
 
     @ObservationIgnored private var conversationID: UUID?
+
+    /// True once a conversation has been drawn, so the next one opened comes in as a replacement.
+    @ObservationIgnored private var hasShownConversation = false
     @ObservationIgnored private var window        : TranscriptWindow?
     @ObservationIgnored private(set) var rows     : [PreparedRow] = []
     @ObservationIgnored private var expanded      : Set<TranscriptItem.ID> = []
@@ -192,8 +192,11 @@ public final class TranscriptController: NSObject {
                 self.focusedAction = nil
                 self.newActivity = nil
                 let position = readingAnchor.map { ScrollAnchor(itemID: .message($0), offset: readingOffset) }
+                let replaces = self.hasShownConversation
                 await self.apply(window, mode: .open(position))
-                if self.conversationID == conversationID { self.shownConversationID = conversationID }
+                guard self.conversationID == conversationID else { return }
+                self.hasShownConversation = true
+                if replaces { self.playOpening() }
             } catch {
                 self.problem = "This conversation could not be read. \(error.localizedDescription)"
             }
@@ -608,6 +611,19 @@ public final class TranscriptController: NSObject {
             clip.animator().setBoundsOrigin(NSPoint(x: 0, y: target))
         } completionHandler: { [weak self] in
             MainActor.assumeIsolated { self.map { $0.scrollView.reflectScrolledClipView($0.scrollView.contentView) } }
+        }
+    }
+
+    /// Brings in the rows of a conversation that replaced another, each fading and rising on
+    /// its own layer. Done in AppKit on purpose: fading the hosted view from SwiftUI made the
+    /// title bar above it lose sight of the content and draw itself solid until the fade ended.
+    private func playOpening() {
+        let reduces = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
+        // The scroll to the reading position has just moved the viewport; its cells exist only after a layout.
+        collectionView.layoutSubtreeIfNeeded()
+        for indexPath in collectionView.indexPathsForVisibleItems() {
+            (collectionView.item(at: indexPath) as? TranscriptCell)?
+                .playEntrance(reducesMotion: reduces, duration: 0.28)
         }
     }
 

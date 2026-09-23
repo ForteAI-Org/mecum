@@ -229,13 +229,14 @@ struct TeamShellView: View {
         }
     }
 
-    /// The selected worker's name and mascot; another worker's cross-fade in place of the last.
+    /// The selected worker's name and mascot; another worker's replace them with the system's
+    /// blur, so the two names never sit legibly on top of each other.
     private var header: some View {
         ZStack(alignment: .leading) {
             if let header = ShellChrome.header(for: team.selectedWorker) {
                 WorkerHeaderView(header: header)
                     .id(header.workerID)
-                    .transition(.opacity.combined(with: .offset(y: reducesMotion ? 0 : 3)))
+                    .transition(reducesMotion ? AnyTransition.opacity : AnyTransition(.blurReplace))
             }
         }
         .animation(reducesMotion ? .easeOut(duration: 0.15) : .smooth(duration: 0.25), value: team.selection)

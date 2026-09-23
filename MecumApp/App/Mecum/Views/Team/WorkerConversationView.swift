@@ -41,12 +41,6 @@ struct WorkerConversationView: View {
     /// The title bar's height, which the transcript scrolls under and keeps clear above its first message.
     @State private var titleBarHeight: CGFloat = 0
 
-    @Environment(\.accessibilityReduceMotion)
-    private var reducesMotion
-
-    /// True for the instant a newly drawn conversation starts its entrance.
-    @State private var isArriving = false
-
     var body: some View {
         transcriptArea
             .overlay(alignment: .top) { titleBarEdge }
@@ -99,11 +93,7 @@ struct WorkerConversationView: View {
                 TranscriptHost(controller: transcript, topInset: titleBarHeight + 8, bottomInset: composerHeight)
                     // Under the title bar, so messages scroll beneath the worker's name as the system draws it.
                     .ignoresSafeArea(.container, edges: .top)
-                    // The old conversation stays until the new one is drawn, which then comes in:
-                    // nothing is ever blank while it loads.
-                    .opacity(isArriving ? 0.3 : 1)
-                    .offset(y: isArriving && !reducesMotion ? 10 : 0)
-                    .onChange(of: transcript.shownConversationID) { arrive() }
+
             } else {
                 Color.clear
             }
@@ -119,14 +109,6 @@ struct WorkerConversationView: View {
                 )
             }
         }
-    }
-
-    /// Starts a newly drawn conversation a little faded and low, then lets it settle into place.
-    private func arrive() {
-        var start = Transaction()
-        start.disablesAnimations = true
-        withTransaction(start) { isArriving = true }
-        withAnimation(reducesMotion ? .easeOut(duration: 0.15) : .smooth(duration: 0.28)) { isArriving = false }
     }
 
     /// Opens the conversation at the position it was left at, or at the end.
