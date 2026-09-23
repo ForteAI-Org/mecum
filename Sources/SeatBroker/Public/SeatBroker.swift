@@ -127,7 +127,9 @@ public final class SeatBroker {
     /// provenance is recorded: an application opened here is the agent's to
     /// quit once it is finished with it. Finding one already running is not
     /// evidence of who started it, so that branch records nothing and the
-    /// ledger answers for it: not the lab's, so not the lab's to quit.
+    /// ledger answers for it: not the lab's, so not the lab's to quit. An application this call
+    /// launched that shows no window in time is quit again before the refusal, since no seat ever
+    /// took a window of it; one found running is left alone.
     public func launch(_ app: TargetApp, timeout: Duration = .seconds(20)) async throws -> TargetApp {
         let pid: pid_t
         if let running = app.pid {
@@ -150,8 +152,13 @@ public final class SeatBroker {
             }
             try await Task.sleep(for: .milliseconds(300))
         }
-        throw SeatBrokerError.noWindowShown(application: app.name, seconds: timeout.components.seconds,
-                                            wasLaunched: app.pid == nil)
+        let wasLaunched = app.pid == nil
+        throw SeatBrokerError.noWindowShown(
+            application: app.name,
+            seconds    : timeout.components.seconds,
+            wasLaunched: wasLaunched,
+            wasQuit    : wasLaunched && ledger.quitUnseated(pid)
+        )
     }
 
     /// A seat with nothing on it, and nothing brought up yet.

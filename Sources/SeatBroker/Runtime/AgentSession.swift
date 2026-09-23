@@ -129,7 +129,9 @@ public final class AgentSession {
     ///
     /// `title` names the window to take instead of the application's main
     /// one, compared without case; a title that names no window of it, or
-    /// several, refuses before anything is released.
+    /// several, refuses before anything is released. An application this call
+    /// launched and could not hand to `use` is quit again before the refusal,
+    /// and the refusal says so; one that was already running is left alone.
     @discardableResult
     public func open(applicationNamed name: String, windowTitled title: String? = nil) async throws -> TargetApp {
         guard isOpen else { throw SeatBrokerError.sessionClosed }
@@ -147,7 +149,8 @@ public final class AgentSession {
             let named = opened.windows.filter { $0.title.caseInsensitiveCompare(title) == .orderedSame }
             guard named.count == 1, let only = named.first else {
                 throw SeatBrokerError.driver("Expected one window of \(opened.name) named '\(title)'. Open: "
-                    + opened.windows.map { $0.title.isEmpty ? "untitled" : $0.title }.joined(separator: ", "))
+                    + opened.windows.map { $0.title.isEmpty ? "untitled" : $0.title }.joined(separator: ", ")
+                    + ". " + unseated(opened, wasLaunched: wanted.pid == nil))
             }
             window = only
         } else {
@@ -155,7 +158,8 @@ public final class AgentSession {
             // is listed like any other window, and taking the first adopted one.
             guard let main = TargetEnumerator.mainWindow(among: TargetEnumerator.candidates(of: opened))
             else {
-                throw SeatBrokerError.driver("\(opened.name) is open but has no window to adopt.")
+                throw SeatBrokerError.driver("\(opened.name) is open but has no window to adopt. "
+                    + unseated(opened, wasLaunched: wanted.pid == nil))
             }
             window = main
         }
@@ -165,6 +169,13 @@ public final class AgentSession {
             throw ApplicationOpening.notSeated(opened, cause: error)
         }
         return opened
+    }
+
+    /// Quits `app` when this open launched it, since no seat took a window of it, and says what
+    /// became of it. An application found running is never quit here, whatever its provenance.
+    private func unseated(_ app: TargetApp, wasLaunched: Bool) -> String {
+        let wasQuit = wasLaunched && app.pid.map { ledger.quitUnseated($0) } == true
+        return ApplicationOpening.unseated(app.name, wasLaunched: wasLaunched, wasQuit: wasQuit)
     }
 
     /// Finishes with the held application as its provenance says and keeps
@@ -187,7 +198,8 @@ public final class AgentSession {
     /// adoption. `driver.release` returning is not enough on its own: it
     /// answers with an outcome, and two of the four say the window is still on
     /// the background display, so `hasUnrestoredWindow` is what is read here.
-    /// This is the only place that terminates anything.
+    /// It is the only place that terminates an application a seat held; one
+    /// that never reached a seat is quit by `LaunchLedger.quitUnseated`.
     ///
     /// Between the two comes the handback of the assigned application, which is
     /// the same rule one step out: the kit binds the assignment to the first

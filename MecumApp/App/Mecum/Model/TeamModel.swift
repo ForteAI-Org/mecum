@@ -302,13 +302,20 @@ final class TeamModel {
         else { return }
 
         answering[workerID] = conversationID
-        let host = hosts[conversationID] ?? WorkerAgentHost(
-            workingDirectory: WorkspaceLaunch.directory
-                .appending(path: "WorkerWorkspaces/\(conversationID.uuidString)", directoryHint: .isDirectory),
-            bridgeExecutable: Bundle.main.bundleURL.appending(path: "Contents/Helpers/mecum"),
-            session         : { desktop(for: workerID, named: worker.name) }
-        )
-        hosts[conversationID] = host
+        let host: WorkerAgentHost
+        let desktop: BrokeredAutomationSession
+        if let existing = hosts[conversationID], let held = desktops[workerID] {
+            (host, desktop) = (existing, held)
+        } else {
+            desktop = self.desktop(for: workerID)
+            host = WorkerAgentHost(
+                workingDirectory: WorkspaceLaunch.directory
+                    .appending(path: "WorkerWorkspaces/\(conversationID.uuidString)", directoryHint: .isDirectory),
+                bridgeExecutable: Bundle.main.bundleURL.appending(path: "Contents/Helpers/mecum"),
+                session         : { desktop }
+            )
+            hosts[conversationID] = host
+        }
         let recorder = WorkerTurnRecorder(
             store         : store,
             workspaceID   : Self.workspaceID,
@@ -327,8 +334,11 @@ final class TeamModel {
             do {
                 _ = try await recorder.run { frozen, session, emit in
                     if pendingStops.remove(workerID) != nil { throw CancellationError() }
-                    try await host.run(prompt: message.text, selection: frozen, sessionID: session,
-                                       role: worker.instructions, onEvent: emit)
+                    // The turn gives the seat back as it ends when another entry is waiting for it.
+                    try await desktop.turn {
+                        try await host.run(prompt: message.text, selection: frozen, sessionID: session,
+                                           role: worker.instructions, onEvent: emit)
+                    }
                 }
             } catch {
                 problem = """
@@ -351,13 +361,14 @@ final class TeamModel {
         }
     }
 
-    /// A new desktop session for the worker, kept so its row can read it. The
-    /// Brain's directory is the command line's, so what either learns applies
-    /// to both.
-    private func desktop(for workerID: UUID, named name: String) -> BrokeredAutomationSession {
+    /// A new desktop session for the worker, kept so its row can read it. It
+    /// waits in the queue under the worker's id, never its name, so two workers
+    /// with one name each read their own position. The Brain's directory is the
+    /// command line's, so what either learns applies to both.
+    private func desktop(for workerID: UUID) -> BrokeredAutomationSession {
         let desktop = BrokeredAutomationSession(
             broker            : broker,
-            label             : name,
+            workerID          : workerID,
             knowledgeDirectory: WorkspaceLaunch.directory.appending(path: "Knowledge", directoryHint: .isDirectory)
         )
         desktops[workerID] = desktop

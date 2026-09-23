@@ -41,6 +41,19 @@ struct ProviderTests {
         #expect(!value.arguments.contains(value.standardInput))
     }
 
+    /// Codex 0.155 ignores an unknown `-c` key with only a warning, and `--strict-config` makes it
+    /// exit 1 instead. The sandbox flag precedes `resume`, which is where a resumed turn reads it.
+    @Test
+    func codexRefusesUnknownKeysAndKeepsTheSandboxOnAResumedTurn() throws {
+        let arguments = try ProviderInvocation(turn(.codex, session: "thread-123")).arguments
+        #expect(arguments.prefix(3) == ["exec", "--ignore-user-config", "--strict-config"])
+        let sandbox = try #require(arguments.firstIndex(of: "-s"))
+        let resume  = try #require(arguments.firstIndex(of: "resume"))
+        #expect(arguments[sandbox + 1] == "read-only")
+        #expect(sandbox < resume)
+        #expect(!(try ProviderInvocation(turn(.claude)).arguments.contains("--strict-config")))
+    }
+
     @Test
     func effortReachesEachProviderInItsOwnFlag() throws {
         func turn(_ provider: ChatProvider, model: String?, effort: String?) -> ProviderTurn {

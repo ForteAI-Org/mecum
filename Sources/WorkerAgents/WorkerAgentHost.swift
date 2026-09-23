@@ -88,13 +88,20 @@ public final class WorkerAgentHost {
         tools.record = { [weak self] text in self?.onEvent?(.tool(text)) }
     }
 
-    /// The instructions a worker's turn runs with: the base text first, and
-    /// the worker's own instructions after it, never instead of it (§6.2).
+    /// What this app adds to the command line's text: its `open_session` launches an installed
+    /// application, which the base text, written around `windows`, does not say.
+    static let appInstructions = "In this app, open_session also opens an installed application that is "
+        + "not running yet; you do not need to find it with windows first."
+
+    /// The instructions a worker's turn runs with: the base text first, then
+    /// the app's line, and the worker's own instructions after them, never
+    /// instead of them (§6.2).
     public static func instructions(role: String?) -> String {
+        let base = AutomationTools.instructions + "\n" + appInstructions
         guard let role = role?.trimmingCharacters(in: .whitespacesAndNewlines), !role.isEmpty else {
-            return AutomationTools.instructions
+            return base
         }
-        return AutomationTools.instructions + "\n\nYour role:\n" + role
+        return base + "\n\nYour role:\n" + role
     }
 
     /// Runs one turn and reports its events in order, then returns when the

@@ -82,6 +82,16 @@ enum ApplicationOpening {
             + cause.localizedDescription)
     }
 
+    /// What became of an application that opened and was never seated: quit again when this open
+    /// launched it, and left running when it was already open, since that one is the person's.
+    static func unseated(_ name: String, wasLaunched: Bool, wasQuit: Bool) -> String {
+        switch (wasLaunched, wasQuit) {
+            case (true, true) : "\(name) was closed again, since this open had launched it."
+            case (true, false): "\(name) could not be closed again and is still running; quit it yourself."
+            case (false, _)   : "\(name) was left running, since it was already open."
+        }
+    }
+
     private static let comparison: String.CompareOptions = [.caseInsensitive, .diacriticInsensitive]
 
     private static func same(_ a: String, _ b: String) -> Bool {

@@ -5,6 +5,7 @@
 //  Created by Eliomar Alejandro Rodriguez Ferrer on 17/09/2026.
 //
 
+import AppKit
 import Foundation
 
 /// Where a running application came from, which is what "finished with it"
@@ -76,6 +77,18 @@ final class LaunchLedger {
 
     func provenance(of pid: pid_t) -> AppProvenance {
         records[pid] ?? .alreadyRunning
+    }
+
+    /// Quits `pid` when the lab opened it, for an application that was launched and never seated,
+    /// so no seat owes a window of it, and forgets it. Answers whether it was asked to quit: false
+    /// for an application the lab did not open, and for one that refused the request.
+    func quitUnseated(
+        _ pid    : pid_t,
+        terminate: (pid_t) -> Bool = { NSRunningApplication(processIdentifier: $0)?.terminate() ?? true }
+    ) -> Bool {
+        guard provenance(of: pid).endsByQuitting, terminate(pid) else { return false }
+        forget(pid)
+        return true
     }
 
     /// Forgets a process the lab has finished with. A PID is reused by the

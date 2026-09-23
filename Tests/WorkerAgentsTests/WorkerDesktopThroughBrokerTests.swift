@@ -56,7 +56,7 @@ struct WorkerDesktopThroughBrokerTests {
         }
         try #require(!isRunning, "Calculator is already running: quit it, so the row acts only on what it opened")
 
-        let desktop = BrokeredAutomationSession(broker: broker, label: "Live worker", knowledgeDirectory: knowledge)
+        let desktop = BrokeredAutomationSession(broker: broker, workerID: UUID(), knowledgeDirectory: knowledge)
         let host = WorkerAgentHost(workingDirectory: scratch.appending(path: "work"), bridgeExecutable: bridge,
                                    session: { desktop })
         var tools  : [String] = []
@@ -74,8 +74,7 @@ struct WorkerDesktopThroughBrokerTests {
                 prompt   : "open Calculator and press 8",
                 selection: ModelSelection(provider: .claudeCode, model: "claude-sonnet-5", effort: .low),
                 sessionID: nil,
-                role     : "open_session opens an installed application that is not running yet. "
-                    + "Answer in one short sentence.",
+                role     : "Answer in one short sentence.",
                 onEvent  : receive
             )
         } catch {

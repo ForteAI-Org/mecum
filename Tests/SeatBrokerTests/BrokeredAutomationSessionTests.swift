@@ -5,10 +5,12 @@
 //  Created by Eliomar Alejandro Rodriguez Ferrer on 23/09/2026.
 //
 
+import AppKit
 import AutomationMCP
 import AutomationRuntime
 import Foundation
 import LocalMCP
+import PerceptionCore
 import SeatCore
 import SeatDriving
 import Testing
@@ -24,26 +26,44 @@ import Testing
 @Suite("A worker's desktop session through the broker")
 struct BrokeredAutomationSessionTests {
 
-    private static let label = "Iris"
+    private static let workerID = UUID()
+    private static let label    = workerID.uuidString
 
     private struct Opened: Error {}
 
     private static func session(
-        _ broker: SeatBroker,
-        missing : PermissionKind? = nil,
-        requests: @escaping @MainActor () -> Void = {},
-        seating : @escaping BrokeredAutomationSession.Seating
+        _ broker  : SeatBroker,
+        workerID  : UUID = workerID,
+        missing   : PermissionKind? = nil,
+        requests  : @escaping @MainActor () -> Void = {},
+        perceiving: @escaping BrokeredAutomationSession.Perceiving = BrokeredAutomationSession
+            .perceivedThroughTheEngine,
+        seating   : @escaping BrokeredAutomationSession.Seating
     ) -> BrokeredAutomationSession {
         BrokeredAutomationSession(
             broker            : broker,
-            label             : label,
+            workerID          : workerID,
             knowledgeDirectory: FileManager.default.temporaryDirectory
                 .appendingPathComponent("mecum-brokered-\(UUID().uuidString)", isDirectory: true),
             allowsDestructive : false,
             missingGrant      : { missing },
             requestGrants     : requests,
-            seating           : seating
+            seating           : seating,
+            perceiving        : perceiving
         )
+    }
+
+    /// A session whose open succeeds without a display. The seating names the Dock as the running
+    /// application, which nothing adopts or quits, and the scene is supplied in place of perception.
+    private static func seated(_ broker: SeatBroker) throws -> BrokeredAutomationSession {
+        let dock = try #require(NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.dock")
+            .first?.processIdentifier)
+        let scene = SceneSnapshot(bundleID: "test.process", appName: "Test", windowTitle: "Test",
+                                  viewportPixelSize: ViewportPixelSize(width: 10, height: 10), elements: [])
+        return session(broker, perceiving: { _, _ in scene }) { _, _, _ in
+            (TargetApp(pid: dock, bundleID: "test.process", name: "Test", bundleURL: nil, windows: []),
+             SeatTarget())
+        }
     }
 
     /// Long enough for a task about to suspend on the queue to get there.
@@ -181,7 +201,8 @@ struct BrokeredAutomationSessionTests {
     func aLaunchThatShowsNoWindowRefusesWithTheReason() async throws {
         let broker  = SeatBroker()
         let desktop = Self.session(broker) { _, _, _ in
-            throw SeatBrokerError.noWindowShown(application: "TextEdit", seconds: 20, wasLaunched: true)
+            throw SeatBrokerError.noWindowShown(application: "TextEdit", seconds: 20, wasLaunched: true,
+                                                wasQuit: true)
         }
 
         let refusal = await #expect(throws: AutomationFailure.self) {
@@ -192,6 +213,103 @@ struct BrokeredAutomationSessionTests {
         #expect(sentence.hasPrefix("TextEdit was launched in the background and showed no window within 20 s."))
         #expect(sentence.contains("the seat never brings an application to the front"))
         #expect(sentence.contains("the computer was given back"))
+        #expect(sentence.contains("TextEdit was closed again, since this open had launched it."))
+        #expect(!sentence.contains("still running"))
+        #expect(broker.queue.entries.isEmpty)
+    }
+
+    @Test("an application that was never seated says whether it was closed again or left running")
+    func anUnseatedApplicationSaysWhatBecameOfIt() {
+        func sentence(_ wasLaunched: Bool, _ wasQuit: Bool) -> String {
+            let error = SeatBrokerError.noWindowShown(application: "Notes", seconds: 20, wasLaunched: wasLaunched,
+                                                      wasQuit: wasQuit)
+            return String(describing: BrokeredAutomationSession.refusal(for: error))
+        }
+        #expect(sentence(false, false).hasPrefix("Notes is running and showed no window within 20 s."))
+        #expect(sentence(false, false).contains("Notes was left running, since it was already open."))
+        #expect(sentence(true, false).contains("Notes could not be closed again and is still running"))
+        #expect(SeatBrokerError.noWindowShown(application: "Notes", seconds: 20, wasLaunched: true, wasQuit: true)
+            .localizedDescription == "Notes launched but showed no window within 20 s. "
+                + "Notes was closed again, since this open had launched it.")
+    }
+
+    @Test("a holder idle between turns gives the seat back as soon as another entry waits",
+          .timeLimit(.minutes(1)))
+    func anIdleHolderReleasesWhenAnEntryStartsWaiting() async throws {
+        let broker  = SeatBroker()
+        let desktop = try Self.seated(broker)
+        try await desktop.turn { _ = try await desktop.open(application: "Test", window: nil) }
+        #expect(desktop.activity == "Using Test")
+
+        let waiter = Task { try await broker.queue.acquire("Mecum") }
+        let lease  = try await waiter.value
+
+        #expect(desktop.activity == nil)
+        #expect(desktop.id == nil)
+        #expect(broker.queue.entries.map(\.label) == ["Mecum"])
+        // The next turn's tools find no session, and the sentence leads the agent to open_session again.
+        let refusal = await #expect(throws: AutomationFailure.self) { try await desktop.observe() }
+        #expect(refusal?.description == "No live application session. Use windows and open_session, then observe.")
+        lease.giveBack()
+    }
+
+    @Test("a holder in a turn keeps the seat while the turn runs and gives it back as the turn ends",
+          .timeLimit(.minutes(1)))
+    func aHolderInATurnReleasesAtTheTurnsEndAndNotBefore() async throws {
+        let broker  = SeatBroker()
+        let desktop = try Self.seated(broker)
+        var waiter: Task<SeatLease, any Error>?
+        try await desktop.turn {
+            _ = try await desktop.open(application: "Test", window: nil)
+            waiter = Task { try await broker.queue.acquire("Mecum") }
+            await Self.letTheWaitBegin()
+            #expect(broker.queue.entries.map(\.state) == [.acting, .waiting])
+            #expect(desktop.activity == "Using Test")
+            #expect(try await desktop.observe().appName == "Test")
+        }
+        #expect(desktop.activity == nil)
+        let lease = try #require(try await waiter?.value)
+        #expect(broker.queue.entries.map(\.label) == ["Mecum"])
+        lease.giveBack()
+    }
+
+    @Test("a worker alone keeps the seat across its turns")
+    func aLoneHolderKeepsTheSeatAcrossTurns() async throws {
+        let broker  = SeatBroker()
+        let desktop = try Self.seated(broker)
+        try await desktop.turn { _ = try await desktop.open(application: "Test", window: nil) }
+        await Self.letTheWaitBegin()
+        try await desktop.turn { _ = try await desktop.observe() }
+        await Self.letTheWaitBegin()
+
+        #expect(desktop.activity == "Using Test")
+        #expect(desktop.id != nil)
+        #expect(broker.queue.entries.map(\.label) == [Self.label])
+        await desktop.close()
+        #expect(broker.queue.entries.isEmpty)
+    }
+
+    @Test("the queue entry carries the worker's id, so two workers with one name each read their own place")
+    func theQueueLabelIsTheWorkersIDAndTheRowReadsItsOwnPosition() async throws {
+        let broker = SeatBroker()
+        let holder = try await broker.queue.acquire("Mecum")
+        let first  = UUID()
+        let second = UUID()
+        let one = Self.session(broker, workerID: first) { _, _, _ in throw Opened() }
+        let two = Self.session(broker, workerID: second) { _, _, _ in throw Opened() }
+        let early = Task { try await one.open(application: "Calculator", window: nil) }
+        await Self.letTheWaitBegin()
+        let later = Task { try await two.open(application: "Calculator", window: nil) }
+        await Self.letTheWaitBegin()
+
+        #expect(broker.queue.entries.map(\.label) == ["Mecum", first.uuidString, second.uuidString])
+        #expect(one.activity == "Waiting for the computer (1 ahead)")
+        #expect(two.activity == "Waiting for the computer (2 ahead)")
+
+        early.cancel()
+        later.cancel()
+        _ = await (early.result, later.result)
+        holder.giveBack()
         #expect(broker.queue.entries.isEmpty)
     }
 

@@ -29,7 +29,8 @@ public struct ProviderInvocation: Sendable {
             let args = try bridgeArguments.map(Self.quote).joined(separator: ",")
             let server = "{command=\(command),args=[\(args)],required=true,tool_timeout_sec=120,"
                 + "default_tools_approval_mode=\"approve\"}"
-            arguments = ["exec", "--ignore-user-config", "--json", "--skip-git-repo-check",
+            // Strict, so a feature key a later Codex renames fails the turn instead of re-enabling a tool.
+            arguments = ["exec", "--ignore-user-config", "--strict-config", "--json", "--skip-git-repo-check",
                          "-C", turn.workingDirectory, "-s", "read-only",
                          "-c", "approval_policy=\"never\"",
                          "-c", "features.shell_tool=false", "-c", "features.unified_exec=false",

@@ -37,8 +37,9 @@ public enum SeatBrokerError: LocalizedError {
     /// An application was launched, or found running, and showed no window
     /// within the wait. Its own case because the reason is often the
     /// application waiting to be brought to the front, which the seat never
-    /// does. `wasLaunched` says whether this call started it: nothing quits it.
-    case noWindowShown(application: String, seconds: Int64, wasLaunched: Bool)
+    /// does. `wasLaunched` says whether this call started it, and `wasQuit` whether it was then
+    /// asked to quit, which happens to an application this call launched and never to another.
+    case noWindowShown(application: String, seconds: Int64, wasLaunched: Bool, wasQuit: Bool)
 
     public var errorDescription: String? {
         switch self {
@@ -53,8 +54,9 @@ public enum SeatBrokerError: LocalizedError {
         case .applicationNotResolved(let sentence): sentence
         case .inputPaused(let sentence): sentence
         case .observationSuspended(let sentence): sentence
-        case .noWindowShown(let application, let seconds, _):
-            "\(application) launched but showed no window within \(seconds) s."
+        case .noWindowShown(let application, let seconds, let wasLaunched, let wasQuit):
+            "\(application) launched but showed no window within \(seconds) s. "
+                + ApplicationOpening.unseated(application, wasLaunched: wasLaunched, wasQuit: wasQuit)
         }
     }
 }
