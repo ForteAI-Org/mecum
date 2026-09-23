@@ -119,7 +119,7 @@ struct ComposerWindowTests {
         var fields : [NSRect] = []
         for lines in [1, 3, 6] {
             harness.draft = (1...lines).map { "line \($0)" }.joined(separator: "\n")
-            try await harness.settle()
+            try await harness.settleAnimation()
             let circle = try #require(harness.drawnCircle()).frame
             circles.append(circle)
             fields.append(scrollView.convert(scrollView.bounds, to: nil))
@@ -142,7 +142,7 @@ struct ComposerWindowTests {
         let harness = try await keyWindowHarness()
         defer { harness.close() }
         harness.type("next")
-        try await harness.settle()
+        try await harness.settleAnimation()
         let send = try #require(harness.drawnCircle())
 
         harness.isAnswering = true
@@ -177,7 +177,7 @@ struct ComposerWindowTests {
         let scrollView = try #require(harness.scrollView)
         let window     = try #require(harness.window)
         harness.type("hold")
-        try await harness.settle()
+        try await harness.settleAnimation()
         let circle = try #require(harness.drawnCircle()).frame
         let alone  = scrollView.convert(scrollView.bounds, to: nil)
         // Only the bar's spacing lies between the field and the circle: nothing else is drawn there.

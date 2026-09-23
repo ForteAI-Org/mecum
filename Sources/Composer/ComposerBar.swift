@@ -47,6 +47,14 @@ public struct ComposerBar: View {
     /// The surface a snapshot draws instead of the platform's.
     var surface: ComposerSurface.Kind?
 
+    /// Whether the round buttons are Liquid Glass; a test measuring the drawn circle turns it off,
+    /// since glass composites only in the window server. Nil is the platform's: glass unless
+    /// Reduce Transparency is on.
+    var buttonGlass: Bool?
+
+    @Namespace
+    private var glass
+
     @Environment(\.accessibilityReduceTransparency)
     private var reducesTransparency
 
@@ -107,14 +115,20 @@ public struct ComposerBar: View {
         .padding(.bottom, 12)
     }
 
-    /// Release, when shown, beside the circle: it comes out of the circle to the left and goes back into it.
+    private var isGlass: Bool { buttonGlass ?? !reducesTransparency }
+
+    /// Release, when shown, beside the circle: it comes out of the circle to the left and goes back
+    /// into it, and on glass the two shapes merge as one control.
     private var actions: some View {
-        HStack(spacing: 6) {
-            if let release {
-                releaseButton(release)
-                    .transition(.scale(scale: 0.3, anchor: .trailing).combined(with: .opacity))
+        GlassEffectContainer(spacing: 6) {
+            HStack(spacing: 6) {
+                if let release {
+                    releaseButton(release)
+                        .transition(isGlass ? .identity : .scale(scale: 0.3, anchor: .trailing)
+                            .combined(with: .opacity))
+                }
+                circle
             }
-            circle
         }
         .animation(reducesMotion ? nil : .spring(duration: 0.35, bounce: 0.15), value: release != nil)
     }
@@ -128,23 +142,30 @@ public struct ComposerBar: View {
                 .contentShape(Circle())
         }
         .buttonStyle(.plain)
+        .modifier(RoundGlass(isGlass: isGlass, tint: nil, id: "release", namespace: glass))
         .help("Release the computer")
         .accessibilityLabel("Release the computer")
     }
 
-    /// Send, which becomes Stop in the same place while a turn runs.
+    /// Send, which becomes Stop in the same place while a turn runs. It takes the accent as soon
+    /// as there is something to send, with an animated change, and with nothing to send it is
+    /// plain glass with a secondary arrow rather than a dark disc.
     private var circle: some View {
         let isEnabled = isAnswering || canSend
-        let fill      = isEnabled ? AnyShapeStyle(.tint) : AnyShapeStyle(.quaternary)
+        // On glass the tint is the glass's own; off glass the circle is filled.
+        let fill = isGlass ? AnyShapeStyle(.clear)
+            : isEnabled ? AnyShapeStyle(.tint) : AnyShapeStyle(.quaternary.opacity(0.6))
         return Button(action: isAnswering ? stop : send) {
             Image(systemName: isAnswering ? "stop.fill" : "arrow.up")
                 .font(.system(size: isAnswering ? 11 : 13, weight: .bold))
-                .foregroundStyle(isEnabled ? AnyShapeStyle(.white) : AnyShapeStyle(.tertiary))
+                .foregroundStyle(isEnabled ? AnyShapeStyle(.white) : AnyShapeStyle(.secondary))
                 .frame(width: Self.circleSide, height: Self.circleSide)
                 .background(Circle().fill(fill))
                 .contentShape(Circle())
         }
         .buttonStyle(.plain)
+        .modifier(RoundGlass(isGlass: isGlass, tint: isEnabled ? .accentColor : nil, id: "circle", namespace: glass))
+        .animation(reducesMotion ? nil : .easeInOut(duration: 0.2), value: isEnabled)
         .disabled(!isEnabled)
         .keyboardShortcut(isAnswering ? KeyboardShortcut(".", modifiers: .command)
                                       : KeyboardShortcut(.return, modifiers: .command))

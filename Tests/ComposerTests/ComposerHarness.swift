@@ -114,6 +114,11 @@ final class ComposerHarness {
         }
     }
 
+    /// Settles past the circle's 0.2 s change of colour, before its pixels are read.
+    func settleAnimation() async throws {
+        for _ in 0..<5 { try await settle() }
+    }
+
     /// Asks for activation until the window is key, for at most five seconds.
     func becomeKey() {
         for attempt in 0..<100 where window?.isKeyWindow == false {
@@ -334,7 +339,9 @@ final class ComposerHarness {
                     harness.holdsComputer = false
                 } : nil
             )
-            bar.surface = harness.surface
+            bar.surface     = harness.surface
+            // The circle is measured from what the view draws, and glass draws only in the window server.
+            bar.buttonGlass = false
             return bar
         }
     }
