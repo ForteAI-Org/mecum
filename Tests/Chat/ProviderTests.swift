@@ -42,6 +42,38 @@ struct ProviderTests {
     }
 
     @Test
+    func effortReachesEachProviderInItsOwnFlag() throws {
+        func turn(_ provider: ChatProvider, model: String?, effort: String?) -> ProviderTurn {
+            ProviderTurn(provider: provider, model: model, sessionID: nil, prompt: "p", instructions: "i",
+                         bridgeExecutable: "/b", connectionFile: "/c", workingDirectory: "/tmp", effort: effort)
+        }
+        let claude = try ProviderInvocation(turn(.claude, model: "claude-opus-5", effort: "high")).arguments
+        let flag = try #require(claude.firstIndex(of: "--effort"))
+        #expect(claude[flag + 1] == "high")
+        #expect(!(try ProviderInvocation(turn(.claude, model: "claude-opus-5", effort: nil)).arguments
+                  .contains("--effort")))
+        #expect(!(try ProviderInvocation(turn(.claude, model: "claude-haiku-4-5", effort: "high")).arguments
+                  .contains("--effort")))
+        let codex = try ProviderInvocation(turn(.codex, model: "gpt-5.6-luna", effort: "xhigh")).arguments
+        #expect(codex.contains("model_reasoning_effort=\"xhigh\""))
+        #expect(codex.last == "-")
+        #expect(!(try ProviderInvocation(turn(.codex, model: "gpt-5.6-luna", effort: nil)).arguments
+                  .contains(where: { $0.hasPrefix("model_reasoning_effort") })))
+    }
+
+    @Test
+    func resumeIsPassedOnlyWithASession() throws {
+        #expect(!(try ProviderInvocation(turn(.claude)).arguments.contains("--resume")))
+        #expect(!(try ProviderInvocation(turn(.codex)).arguments.contains("resume")))
+        let codex = try ProviderInvocation(ProviderTurn(
+            provider: .codex, model: nil, sessionID: "thread-9", prompt: "p", instructions: "i",
+            bridgeExecutable: "/b", connectionFile: "/c", workingDirectory: "/tmp", effort: "low"
+        )).arguments
+        #expect(codex.suffix(3) == ["resume", "thread-9", "-"])
+        #expect(codex.contains("model_reasoning_effort=\"low\""))
+    }
+
+    @Test
     func claudeDecoderDoesNotDuplicateResult() throws {
         var decoder = ProviderEventDecoder(provider: .claude)
         let assistant = try decoder.decode(Data(#"{"type":"assistant","session_id":"abc","message":{"content":[{"type":"text","text":"Hello"}]}}"#.utf8))

@@ -25,7 +25,7 @@ public enum CodexClientError: LocalizedError {
 /// read, no API key exists, and every desktop tool of the CLI is disabled so
 /// the planner can only answer. Ported from the research lab, which validated
 /// this exact argument list.
-actor CodexCLIClient: ModelTransport {
+public actor CodexCLIClient: ModelTransport {
     private let model: String
     private let effort: ReasoningEffort
     private var authenticated = false
@@ -34,7 +34,7 @@ actor CodexCLIClient: ModelTransport {
     /// has exited, and the request is one `exec` turn with no conversation
     /// behind it. Nothing here carries a chat, and pretending otherwise would
     /// mean buffering a whole answer and calling it a stream.
-    nonisolated var streaming: StreamingSupport {
+    public nonisolated var streaming: StreamingSupport {
         .unsupported(reason: "the Codex CLI is run as one non-interactive exec whose output is read "
             + "only after the process exits")
     }
@@ -44,7 +44,7 @@ actor CodexCLIClient: ModelTransport {
         self.effort = effort
     }
 
-    func complete(prompt: String, schema: Data, timeout: TimeInterval)
+    public func complete(prompt: String, schema: Data, timeout: TimeInterval)
         async throws -> (text: String, usage: ModelUsage) {
         if !authenticated {
             try await Self.checkAuthentication()
@@ -68,7 +68,9 @@ actor CodexCLIClient: ModelTransport {
         else { throw CodexClientError.signInRequired }
     }
 
-    static func executableURL() throws -> URL {
+    /// The `codex` at one of its install locations, never looked up on
+    /// `PATH`, which is minimal for an app launched from the Finder.
+    public static func executableURL() throws -> URL {
         let paths = [
             "/Applications/ChatGPT.app/Contents/Resources/codex",
             "/Applications/Codex.app/Contents/Resources/codex",
@@ -104,7 +106,7 @@ actor CodexCLIClient: ModelTransport {
 
     /// Only launch environment, login store and TLS/proxy settings reach the
     /// child. API keys and alternate endpoints never do.
-    static func environment(from inherited: [String: String]) -> [String: String] {
+    public static func environment(from inherited: [String: String]) -> [String: String] {
         let allowed: Set<String> = [
             "HOME", "USER", "LOGNAME", "PATH", "TMPDIR", "SHELL", "LANG", "LC_ALL",
             "CODEX_HOME", "SSL_CERT_FILE", "SSL_CERT_DIR", "CODEX_CA_CERTIFICATE",

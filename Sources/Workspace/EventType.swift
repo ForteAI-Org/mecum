@@ -25,6 +25,10 @@ public enum EventType: String, Codable, Sendable, CaseIterable {
     case executionFailed
     case executionCancelled
 
+    /// One line of a turn's tool use, as the agent's tools recorded it. The
+    /// payload is that line as UTF-8. Replies are messages, never this.
+    case toolActivity
+
     /// True when the type ends a subject's work.
     ///
     /// A terminal transition is the one a repeated network result would apply
@@ -34,7 +38,8 @@ public enum EventType: String, Codable, Sendable, CaseIterable {
         switch self {
         case .executionCompleted, .executionFailed, .executionCancelled: true
         case .workerCreated, .workerConfigured, .workerManagerChanged, .workerArchived,
-             .conversationOpened, .messageRecorded, .messageDeliveryChanged, .executionStarted: false
+             .conversationOpened, .messageRecorded, .messageDeliveryChanged, .executionStarted,
+             .toolActivity: false
         }
     }
 }

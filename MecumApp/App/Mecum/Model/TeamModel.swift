@@ -8,6 +8,7 @@
 import Foundation
 import ModelTransports
 import Observation
+import WorkerAgents
 import Workspace
 
 /// TeamModel is the only thing in the app that talks to `WorkspaceStore`.
@@ -18,8 +19,8 @@ import Workspace
 /// boundary.
 ///
 /// It touches `SeatBroker` nowhere. A worker in the team acquires no seat: a
-/// conversation and a draft are text in a database, and the desktop is a
-/// later increment's capability.
+/// worker on Claude Code or Codex answers through its agent command line with
+/// Mecum's tools, whose desktop refuses in this build (`WorkerAgents`).
 ///
 /// Connections come from `connections`, the same store the lab's Settings
 /// edits, so a key entered in either place serves both.
@@ -60,6 +61,25 @@ final class TeamModel {
 
     private(set) var conversation: ConversationSnapshot?
     private(set) var messages    : [MessageSnapshot] = []
+
+    /// The open conversation's tool rows, failures and stops, in local order.
+    /// They are events, not messages, so a tool row is never a reply (§11.2).
+    private(set) var activity: [RecordedEvent] = []
+
+    /// Workers whose turn is running, each with the conversation it runs in.
+    /// One turn at a time per worker; the others are unaffected.
+    private(set) var answering: [UUID: UUID] = [:]
+
+    /// Stops asked for before the worker's agent had started.
+    private var pendingStops: Set<UUID> = []
+
+    /// One agent host per conversation, kept for the process so a second turn
+    /// resumes the first one's provider session (T5a.2 persists it).
+    private var hosts: [UUID: WorkerAgentHost] = [:]
+
+    /// Increment 1 has one workspace per store, and the schema gives it no row
+    /// yet, so its events carry this fixed id.
+    private static let workspaceID = UUID(uuid: (0x4d, 0x45, 0x43, 0x55, 0x4d, 0, 0x40, 0, 0x80, 0, 0, 0, 0, 0, 0, 1))
 
     /// The draft as typed. It reaches the store on a pause and when the
     /// conversation changes, not on every keystroke; `savedDraft` is what the
@@ -142,6 +162,7 @@ final class TeamModel {
         guard generation == openingGeneration else { return }
         conversation = nil
         messages     = []
+        activity     = []
         draft        = ""
         savedDraft   = ""
 
@@ -161,11 +182,13 @@ final class TeamModel {
                 guard generation == openingGeneration else { return }
             }
             let history = try await store.messages(in: opened.id)
+            let events  = try await Self.activity(in: opened.id, of: store)
             guard generation == openingGeneration else { return }
             conversation = opened
             draft        = opened.draft
             savedDraft   = opened.draft
             messages     = history
+            activity     = events
         } catch {
             guard generation == openingGeneration else { return }
             problem = "This worker's conversation could not be opened. \(describe(error))"
@@ -191,9 +214,9 @@ final class TeamModel {
         }
     }
 
-    /// Persists the message and stops. No model is attached to any worker in
-    /// this increment, so nothing is routed and nothing answers; the message
-    /// stays at the delivery state the store writes it with.
+    /// Persists the message, then starts the worker's answer when its provider
+    /// has an agent (`WorkerAnswer`). Otherwise the message stays saved and
+    /// nothing answers, and the composer says why.
     ///
     /// The text leaves the draft before the first suspension, and a second
     /// send while this one waits does nothing, so one Return is one message.
@@ -202,6 +225,8 @@ final class TeamModel {
     /// whose draft could not be cleared are reported as the two facts they are.
     func send() async {
         guard !isSending, let conversation else { return }
+        let workerID = conversation.participantIDs.first
+        if let workerID, isAnswering(workerID) { return }
         let typed = draft
         let text  = typed.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
@@ -219,6 +244,7 @@ final class TeamModel {
             return
         }
         if self.conversation?.id == conversation.id { messages.append(message) }
+        if let workerID { startAnswer(to: message, in: conversation.id, by: workerID) }
 
         do {
             let cleared = try await store.update(conversation: conversation.id, .draft(""))
@@ -250,6 +276,103 @@ final class TeamModel {
             so here it is: \(typed)
             """
         }
+    }
+
+    // MARK: The answer
+
+    func isAnswering(_ workerID: UUID) -> Bool { answering[workerID] != nil }
+
+    /// Starts the worker's turn when its provider answers as an agent. The
+    /// turn runs apart from `send`, so writing to another worker meanwhile is
+    /// not held up, and a failed turn is reported and never retried.
+    private func startAnswer(to message: MessageSnapshot, in conversationID: UUID, by workerID: UUID) {
+        guard let worker = worker(workerID), let selection = worker.configuration,
+              WorkerAnswer(provider: selection.provider) == .agent, answering[workerID] == nil
+        else { return }
+
+        answering[workerID] = conversationID
+        let host = hosts[conversationID] ?? WorkerAgentHost(
+            workingDirectory: WorkspaceLaunch.directory
+                .appending(path: "WorkerWorkspaces/\(conversationID.uuidString)", directoryHint: .isDirectory),
+            bridgeExecutable: Bundle.main.bundleURL.appending(path: "Contents/Helpers/mecum")
+        )
+        hosts[conversationID] = host
+        let recorder = WorkerTurnRecorder(
+            store         : store,
+            workspaceID   : Self.workspaceID,
+            workerID      : workerID,
+            conversationID: conversationID,
+            messageID     : message.id
+        ) { [weak self] in
+            await self?.reloadTranscript(of: conversationID)
+        }
+
+        Task {
+            defer {
+                answering[workerID] = nil
+                pendingStops.remove(workerID)
+            }
+            do {
+                _ = try await recorder.run { frozen, emit in
+                    if pendingStops.remove(workerID) != nil { throw CancellationError() }
+                    try await host.run(prompt: message.text, selection: frozen, role: worker.instructions,
+                                       onEvent: emit)
+                }
+            } catch {
+                problem = """
+                \(worker.name)'s turn was not recorded completely, so this conversation may be missing \
+                part of it. \(describe(error))
+                """
+            }
+        }
+    }
+
+    /// Stops the worker's running turn, as Stop in the conversation and in
+    /// the menus asks. What already arrived stays, and the turn ends with the
+    /// interruption note.
+    func stopAnswering(_ workerID: UUID) {
+        guard let conversationID = answering[workerID] else { return }
+        if let host = hosts[conversationID], host.isRunning {
+            host.stop()
+        } else {
+            pendingStops.insert(workerID)
+        }
+    }
+
+    /// True while an agent host holds a loopback port and a temporary directory.
+    var hasAgentHosts: Bool { !hosts.isEmpty }
+
+    /// Ends every agent host before quitting: a running turn stops, the
+    /// loopback hosts close and their temporary directories go. A directory
+    /// that could not be removed is reported rather than forgotten.
+    func closeAgentHosts() async {
+        let closing = hosts
+        hosts.removeAll()
+        for host in closing.values {
+            do { try await host.close() }
+            catch { problem = "A worker's temporary tool configuration could not be removed. \(describe(error))" }
+        }
+    }
+
+    /// Reads the conversation's messages and activity again when it is the
+    /// one open; a turn in another conversation changes nothing shown here.
+    private func reloadTranscript(of conversationID: UUID) async {
+        guard conversation?.id == conversationID else { return }
+        do {
+            let history = try await store.messages(in: conversationID)
+            let events  = try await Self.activity(in: conversationID, of: store)
+            guard conversation?.id == conversationID else { return }
+            messages = history
+            activity = events
+        } catch {
+            problem = "The conversation could not be read again, so it may be out of date. \(describe(error))"
+        }
+    }
+
+    private static func activity(in conversationID: UUID, of store: WorkspaceStore) async throws
+        -> [RecordedEvent] {
+        try await store.events(matching: EventQuery(scope: .conversation(conversationID)))
+            .filter { WorkerTurnRecorder.text(of: $0) != nil }
     }
 
     /// Remembers which message the reader is anchored on.

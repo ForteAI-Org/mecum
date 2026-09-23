@@ -40,10 +40,15 @@ public struct ProviderInvocation: Sendable {
                          "-c", "developer_instructions=\(try Self.quote(turn.instructions))",
                          "-c", "mcp_servers.mecum=\(server)"]
             if let model = turn.model { arguments += ["--model", model] }
+            if let effort = turn.effort { arguments += ["-c", "model_reasoning_effort=\(try Self.quote(effort))"] }
             if let session = turn.sessionID { arguments += ["resume", session] }
             arguments += ["-"]
         }
         if turn.provider == .claude, let model = turn.model { arguments += ["--model", model] }
+        // Haiku has no effort levels, so the flag is left out for it, as ClaudeCLIClient does.
+        if turn.provider == .claude, let effort = turn.effort, turn.model?.contains("haiku") != true {
+            arguments += ["--effort", effort]
+        }
         self.arguments = arguments
     }
 

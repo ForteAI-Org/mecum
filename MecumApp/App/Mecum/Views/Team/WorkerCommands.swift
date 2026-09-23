@@ -26,6 +26,11 @@ struct WorkerCommands: View {
     let team  : TeamModel
 
     var body: some View {
+        if team.isAnswering(worker.id) {
+            Button("Stop answering") { team.stopAnswering(worker.id) }
+            Divider()
+        }
+
         if !worker.isArchived {
             Button("Model and connection…") { team.profileWorkerID = worker.id }
             Divider()

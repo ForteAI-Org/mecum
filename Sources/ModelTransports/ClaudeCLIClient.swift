@@ -4,7 +4,7 @@ import Foundation
 /// no API key. `claude -p` with `--json-schema` returns the structured answer
 /// in `structured_output`; every built-in tool is disabled so the planner can
 /// only answer. Same process runner and environment allow-list as Codex.
-actor ClaudeCLIClient: ModelTransport {
+public actor ClaudeCLIClient: ModelTransport {
     private let model: String
     private let effort: ReasoningEffort
     private var authenticated = false
@@ -12,7 +12,7 @@ actor ClaudeCLIClient: ModelTransport {
     /// `claude -p --output-format json` prints one object when the turn is
     /// over, and the answer is read from the finished process. There is no
     /// event line to hang a conversation on.
-    nonisolated var streaming: StreamingSupport {
+    public nonisolated var streaming: StreamingSupport {
         .unsupported(reason: "the Claude Code CLI is run with --output-format json, which prints one "
             + "object after the turn has finished")
     }
@@ -22,7 +22,7 @@ actor ClaudeCLIClient: ModelTransport {
         self.effort = effort
     }
 
-    func complete(prompt: String, schema: Data, timeout: TimeInterval)
+    public func complete(prompt: String, schema: Data, timeout: TimeInterval)
         async throws -> (text: String, usage: ModelUsage) {
         if !authenticated {
             try await Self.checkAuthentication()
@@ -50,7 +50,9 @@ actor ClaudeCLIClient: ModelTransport {
         else { throw ClaudeClientError.signInRequired }
     }
 
-    static func executableURL() throws -> URL {
+    /// The signed-in `claude` at one of its install locations, never looked up
+    /// on `PATH`, which is minimal for an app launched from the Finder.
+    public static func executableURL() throws -> URL {
         let home = FileManager.default.homeDirectoryForCurrentUser
         let paths = [
             home.appendingPathComponent(".local/bin/claude").path,

@@ -10,7 +10,21 @@
 		000000000000000200000001 /* SeatBroker in Frameworks */ = {isa = PBXBuildFile; productRef = 000000000000000200000011 /* SeatBroker */; };
 		000000000000000200000002 /* ModelTransports in Frameworks */ = {isa = PBXBuildFile; productRef = 000000000000000200000012 /* ModelTransports */; };
 		000000000000000200000003 /* MecumWorkspace in Frameworks */ = {isa = PBXBuildFile; productRef = 000000000000000200000013 /* MecumWorkspace */; };
+		000000000000000200000004 /* WorkerAgents in Frameworks */ = {isa = PBXBuildFile; productRef = 000000000000000200000014 /* WorkerAgents */; };
+		000000000000000200000005 /* mecum in Embed Helpers */ = {isa = PBXBuildFile; productRef = 000000000000000200000015 /* mecum */; };
 /* End PBXBuildFile section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		000000000000000150000000 /* Embed Helpers */ = {
+			isa = PBXCopyFilesBuildPhase;
+			dstPath = Contents/Helpers;
+			dstSubfolderSpec = 1;
+			files = (
+				000000000000000200000005 /* mecum in Embed Helpers */,
+			);
+			name = "Embed Helpers";
+		};
+/* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
 		000000000000000000000120 /* Mecum.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Mecum.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -44,6 +58,7 @@
 				000000000000000200000001 /* SeatBroker in Frameworks */,
 				000000000000000200000002 /* ModelTransports in Frameworks */,
 				000000000000000200000003 /* MecumWorkspace in Frameworks */,
+				000000000000000200000004 /* WorkerAgents in Frameworks */,
 			);
 		};
 /* End PBXFrameworksBuildPhase section */
@@ -75,6 +90,7 @@
 				000000000000000120000000 /* Sources */,
 				000000000000000130000000 /* Frameworks */,
 				000000000000000140000000 /* Resources */,
+				000000000000000150000000 /* Embed Helpers */,
 			);
 			buildRules = (
 			);
@@ -86,6 +102,8 @@
 				000000000000000200000011 /* SeatBroker */,
 				000000000000000200000012 /* ModelTransports */,
 				000000000000000200000013 /* MecumWorkspace */,
+				000000000000000200000014 /* WorkerAgents */,
+				000000000000000200000015 /* mecum */,
 			);
 			productName = Mecum;
 			productReference = 000000000000000000000120 /* Mecum.app */;
@@ -374,6 +392,16 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 000000000000000300000001 /* XCLocalSwiftPackageReference "../.." */;
 			productName = MecumWorkspace;
+		};
+		000000000000000200000014 /* WorkerAgents */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 000000000000000300000001 /* XCLocalSwiftPackageReference "../.." */;
+			productName = WorkerAgents;
+		};
+		000000000000000200000015 /* mecum */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 000000000000000300000001 /* XCLocalSwiftPackageReference "../.." */;
+			productName = mecum;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

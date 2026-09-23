@@ -16,9 +16,9 @@ import Workspace
 /// It is a sheet because the hideable inspector is increment 2; the other
 /// three areas of the profile are not built yet.
 ///
-/// Every provider is offered. One whose transport cannot hold a conversation
-/// is marked so in the picker and explained the moment it is chosen, in the
-/// reason its transport declares, and saving it stays possible with that said.
+/// Every provider is offered. One with no agent in this build is marked so in
+/// the picker and explained the moment it is chosen, in `WorkerAnswer`'s
+/// reason, and saving it stays possible with that said.
 /// A model the catalogue dropped is shown with a proposed replacement that the
 /// person applies; nothing replaces it for them (§7.4). A change between local
 /// and cloud, or between a subscription and a metered key, asks first.
@@ -57,7 +57,7 @@ struct WorkerProfileSheet: View {
                 VStack(alignment: .leading, spacing: 16) {
                     providerPicker
                     if let provider {
-                        if let refusal = connection(provider).conversationRefusal {
+                        if let refusal = WorkerAnswer(provider: provider).refusal {
                             deadEnd(provider, refusal)
                         }
                         ConnectionCardView(connections: team.connections, provider: provider)
@@ -135,8 +135,8 @@ struct WorkerProfileSheet: View {
     private func deadEnd(_ provider: ModelProvider, _ refusal: String) -> some View {
         Label(
             """
-            \(provider.title) cannot hold a conversation here: \(refusal). A worker saved with it \
-            stays on the team and will not answer. Choose another provider for a worker that talks.
+            \(provider.title) does not answer here yet: \(refusal). A worker saved with it stays \
+            on the team and will not answer. Choose Claude Code or Codex for a worker that answers.
             """,
             systemImage: "exclamationmark.bubble"
         )
@@ -195,11 +195,14 @@ struct WorkerProfileSheet: View {
         ProviderConnection(provider: provider, settings: team.connections.providerSettings)
     }
 
-    /// The provider's name, its last known state, and whether it can converse.
+    /// The provider's name, its last known state, and how a worker on it answers.
     private func label(for provider: ModelProvider) -> String {
         var parts = [provider.title]
         if let state = team.connections.states[provider] { parts.append(state.title) }
-        if connection(provider).conversationRefusal != nil { parts.append("cannot converse") }
+        switch WorkerAnswer(provider: provider) {
+        case .agent:  parts.append("answers as an agent")
+        case .notYet: parts.append("does not answer yet")
+        }
         return parts.joined(separator: " · ")
     }
 

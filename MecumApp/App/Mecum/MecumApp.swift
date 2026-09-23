@@ -70,11 +70,15 @@ final class SeatReleasingDelegate: NSObject, NSApplicationDelegate {
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         let drafts    = teams.allObjects.filter(\.hasUnsavedDraft)
+        let agents    = teams.allObjects.filter(\.hasAgentHosts)
         let seatOwner = model?.session == nil ? nil : model
-        guard !drafts.isEmpty || seatOwner != nil else { return .terminateNow }
+        guard !drafts.isEmpty || !agents.isEmpty || seatOwner != nil else { return .terminateNow }
         Task { @MainActor in
             await Self.bounded(.seconds(2)) {
                 for team in drafts { await team.flushDraft() }
+            }
+            await Self.bounded(.seconds(5)) {
+                for team in agents { await team.closeAgentHosts() }
             }
             if let seatOwner {
                 await Self.bounded(.seconds(5)) { await seatOwner.closeSession() }

@@ -1,0 +1,172 @@
+//
+//  WorkerTurnRecorder.swift
+//  Mecum
+//
+//  Created by Eliomar Alejandro Rodriguez Ferrer on 23/09/2026.
+//
+
+import ChatCore
+import Foundation
+import ModelTransports
+import Workspace
+
+/// WorkerTurnRecorder writes one agent turn into the workspace (§11.5).
+///
+/// It starts the execution, which freezes the configuration the turn runs
+/// with, records `executionStarted` and moves the person's message to sent.
+/// Then it runs the agent once and writes what it reports in order: each reply
+/// block as a message authored by the worker, and each tool record as a
+/// `toolActivity` event, so a tool row is never a reply (§11.2).
+///
+/// The turn ends with exactly one terminal event: `executionCompleted`,
+/// `executionFailed` carrying the reason, or `executionCancelled` carrying the
+/// interruption note. A failed or stopped message is marked interrupted, and
+/// what arrived before stays. Nothing here runs the agent a second time.
+@MainActor
+public final class WorkerTurnRecorder {
+
+    /// How a turn ended.
+    public enum Ending: Sendable, Equatable {
+        case completed
+        case failed(reason: String)
+        case cancelled
+    }
+
+    /// The note a stopped turn leaves, word for word what `mecum chat` writes.
+    public static let interruptedNote = "Interrupted. Inspect the current app state before continuing."
+
+    private let store         : WorkspaceStore
+    private let workspaceID   : UUID
+    private let workerID      : UUID
+    private let conversationID: UUID
+    private let messageID     : UUID
+    private let onRecorded    : @MainActor () async -> Void
+
+    /// `messageID` is the person's message the turn answers. `onRecorded` is
+    /// called after every write, on the main actor, so a reader can refresh.
+    public init(
+        store         : WorkspaceStore,
+        workspaceID   : UUID,
+        workerID      : UUID,
+        conversationID: UUID,
+        messageID     : UUID,
+        onRecorded    : @escaping @MainActor () async -> Void
+    ) {
+        self.store          = store
+        self.workspaceID    = workspaceID
+        self.workerID       = workerID
+        self.conversationID = conversationID
+        self.messageID      = messageID
+        self.onRecorded     = onRecorded
+    }
+
+    /// The text a tool, failure or cancellation event carries, or nil for any
+    /// other event.
+    public static func text(of event: RecordedEvent) -> String? {
+        switch event.type {
+        case .toolActivity, .executionFailed, .executionCancelled:
+            event.payload.map { String(decoding: $0, as: UTF8.self) }
+        default:
+            nil
+        }
+    }
+
+    /// Runs `agent` once with the execution's frozen selection and records it.
+    ///
+    /// Throws before `agent` runs when the execution cannot be started, which
+    /// leaves the message as it was. After that it always attempts the
+    /// terminal event, and throws the first write that failed, if any.
+    public func run(
+        _ agent: (ModelSelection, @escaping @MainActor (WorkerAgentEvent) -> Void) async throws -> Void
+    ) async throws -> Ending {
+        let execution = try await store.startExecution(worker: workerID, conversation: conversationID)
+        try await append(.executionStarted, subject: execution.id)
+        try await store.update(message: messageID, delivery: .sentToBackend)
+        await onRecorded()
+
+        let (events, continuation) = AsyncStream.makeStream(of: WorkerAgentEvent.self)
+        let writer = Task { @MainActor in
+            var state = WriteState()
+            for await event in events {
+                do { try await write(event, execution: execution.id, state: &state) }
+                catch { state.firstFailure = state.firstFailure ?? error }
+            }
+            return state
+        }
+
+        let thrown: (any Error)?
+        do {
+            try await agent(execution.selection) { continuation.yield($0) }
+            thrown = nil
+        } catch {
+            thrown = error
+        }
+        continuation.finish()
+        let state = await writer.value
+
+        let ending: Ending
+        switch thrown {
+        case is CancellationError:  ending = .cancelled
+        case .some(let error):      ending = .failed(reason: state.reportedFailure ?? error.localizedDescription)
+        case .none:                 ending = state.reportedFailure.map { .failed(reason: $0) } ?? .completed
+        }
+        try await finish(ending, execution: execution.id)
+        if let failure = state.firstFailure { throw failure }
+        return ending
+    }
+
+    // MARK: Writing
+
+    private struct WriteState {
+        var hasReply       = false
+        var reportedFailure: String?
+        var firstFailure   : (any Error)?
+    }
+
+    private func write(_ event: WorkerAgentEvent, execution: UUID, state: inout WriteState) async throws {
+        switch event {
+        case .provider(.assistant(let text)):
+            try await store.appendMessage(to: conversationID, author: workerID, text: text, delivery: .completed)
+            if !state.hasReply {
+                state.hasReply = true
+                try await store.update(message: messageID, delivery: .responding)
+            }
+        case .provider(.failure(let reason)):
+            // Kept for the one terminal event; the provider also throws it at the end.
+            state.reportedFailure = reason
+            return
+        case .tool(let text):
+            try await append(.toolActivity, subject: execution, text: text)
+        case .provider(.session), .provider(.activity), .provider(.completed):
+            return
+        }
+        await onRecorded()
+    }
+
+    private func finish(_ ending: Ending, execution: UUID) async throws {
+        switch ending {
+        case .completed:
+            try await append(.executionCompleted, subject: execution)
+            try await store.update(message: messageID, delivery: .completed)
+        case .failed(let reason):
+            try await append(.executionFailed, subject: execution, text: reason)
+            try await store.update(message: messageID, delivery: .interrupted)
+        case .cancelled:
+            try await append(.executionCancelled, subject: execution, text: Self.interruptedNote)
+            try await store.update(message: messageID, delivery: .interrupted)
+        }
+        await onRecorded()
+    }
+
+    private func append(_ type: EventType, subject: UUID, text: String? = nil) async throws {
+        try await store.append(NewEvent(
+            workspaceID   : workspaceID,
+            subjectID     : subject,
+            conversationID: conversationID,
+            workerID      : workerID,
+            type          : type,
+            payload       : text.map { Data($0.utf8) },
+            correlationID : messageID
+        ))
+    }
+}

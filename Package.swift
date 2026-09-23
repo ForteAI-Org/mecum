@@ -201,6 +201,9 @@ let package = Package(
         .library(name: "SeatBroker", targets: ["SeatBroker"]),
         .library(name: "ModelTransports", targets: ["ModelTransports"]),
         .library(name: "MecumWorkspace", targets: ["Workspace"]),
+        .library(name: "WorkerAgents", targets: ["WorkerAgents"]),
+        // Declared so the app can bundle it as the tool bridge a worker's agent launches.
+        .executable(name: "mecum", targets: ["mecum"]),
     ],
     targets: [
         
@@ -384,6 +387,12 @@ let package = Package(
                     "SeatDriving", "SeatCore", "SeatSession", "PrivateSymbols"]),
         integration("AutomationMCP", ["AutomationRuntime", "LocalMCP", "EngineCore", "PerceptionCore",
                                      "PrivateSymbols", "SeatCore", "WindowServerListing"]),
+        // A worker's turn through a signed-in agent command line, with mecum chat's tools and
+        // instructions, and its record in the workspace. No seat: the desktop refuses in this build.
+        .target(name: "WorkerAgents",
+                dependencies: ["ChatCore", "CLIProviders", "LocalMCP", "AutomationMCP", "AutomationRuntime",
+                               "EngineCore", "PerceptionCore", "ModelTransports", "Workspace"],
+                path: "Sources/WorkerAgents", swiftSettings: facility),
         // The foreground command line: windows, scene, act, memory. What a model host does, by hand.
         .executableTarget(
             name: "mecum",
@@ -415,6 +424,11 @@ let package = Package(
         .testTarget(name: "ChatTests", dependencies: ["ChatCore", "CLIProviders", "FileConversations", "LocalMCP",
                                                     "AutomationMCP", "AutomationRuntime", "EngineCore", "PerceptionCore"],
                     path: "Tests/Chat", swiftSettings: facility),
+        // The live row runs the real claude CLI with the built mecum as its bridge, gated by MECUM_LIVE_AGENT=1.
+        .testTarget(name: "WorkerAgentsTests",
+                    dependencies: ["WorkerAgents", "ChatCore", "CLIProviders", "AutomationMCP", "AutomationRuntime",
+                                   "ModelTransports", "Workspace"],
+                    path: "Tests/WorkerAgentsTests", swiftSettings: facility),
         .testTarget(
             name: "MecumCLITests",
             dependencies: ["mecum", "EngineCore", "PerceptionCore", "ChatCore", "AutomationRuntime", "Perception"],

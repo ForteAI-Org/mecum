@@ -64,18 +64,17 @@ struct WorkerModelChoiceTests {
         }
     }
 
-    @Test("a provider that cannot converse says so in its transport's words",
+    @Test("the two command lines answer as agents and the rest say why not",
           arguments: ModelProvider.allCases)
-    func aDeadEndIsMarkedWithItsReason(provider: ModelProvider) {
-        let connection = ProviderConnection(provider: provider)
-        switch ModelSelection(provider: provider, model: "").transport().streaming {
-        case .unsupported(let reason):
-            #expect(connection.conversationRefusal == reason)
-            #expect(!reason.isEmpty)
-        case .incremental:
-            #expect(connection.conversationRefusal == nil)
+    func whoAnswersIsOneAuthority(provider: ModelProvider) {
+        let answer = WorkerAnswer(provider: provider)
+        if [.codex, .claudeCode].contains(provider) {
+            #expect(answer == .agent)
+            #expect(answer.refusal == nil)
+        } else {
+            #expect(answer == .notYet(reason: "this provider has no agent in this build yet"))
+            #expect(answer.refusal == "this provider has no agent in this build yet")
         }
-        #expect((connection.conversationRefusal != nil) == [.codex, .claudeCode].contains(provider))
     }
 
     @Test func movingBetweenLocalAndCloudOrSubscriptionAndKeyAsksFirst() {

@@ -11,9 +11,8 @@ import Foundation
 /// apart: authentication and destination, which is neither the model nor an
 /// agent adapter.
 ///
-/// There is no adapter level here on purpose. This release runs its own turn
-/// for every provider it talks to, and an adapter role with one implementation
-/// would describe a variation that does not exist yet.
+/// Whether a worker on the connection answers, and how, is `WorkerAnswer`'s
+/// to say, not this value's.
 ///
 /// The value is derived, not stored: a connection is what a provider and the
 /// current settings already say it is, so there is no second copy of a host or
@@ -57,17 +56,6 @@ public struct ProviderConnection: Sendable, Hashable, Identifiable {
 
     public var id  : String { provider.rawValue }
     public var name: String { provider.title }
-
-    /// Why a worker on this connection cannot hold a conversation, in the
-    /// words its transport declares, or nil when it can. Asked of the
-    /// transport itself, so a choice is marked at the moment it is made and
-    /// no second list of conversational providers can drift from the first.
-    public var conversationRefusal: String? {
-        switch ModelSelection(provider: provider, model: "").transport().streaming {
-        case .incremental:              nil
-        case .unsupported(let reason):  reason
-        }
-    }
 
     /// What moving a worker from `previous` to this connection changes, as a
     /// sentence to consent to, or nil when nothing needs consent (§7.4).
