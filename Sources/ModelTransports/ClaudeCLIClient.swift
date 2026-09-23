@@ -46,9 +46,7 @@ actor ClaudeCLIClient: ModelTransport {
     static func checkAuthentication() async throws {
         let result = try await CodexCLIClient.run(executable: executableURL(), arguments: ["auth", "status"],
                                                   input: Data(), schema: nil, timeout: 15)
-        guard result.status == 0,
-              let json = try? JSONSerialization.jsonObject(with: result.output) as? [String: Any],
-              json["loggedIn"] as? Bool == true
+        guard ProviderCatalog.classifyClaudeAuth(exitStatus: result.status, output: result.output) == .ready
         else { throw ClaudeClientError.signInRequired }
     }
 

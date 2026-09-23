@@ -69,7 +69,7 @@ final class AppModel {
     /// prompt, so the badge can report before anything is requested. The
     /// request itself and the two watchers start in `startDesktopSurface()`.
     init() {
-        settings     = ModelSettingsStore(broker: broker)
+        settings     = ModelSettingsStore()
         capabilities = broker.capabilities()
     }
 
@@ -251,6 +251,9 @@ final class AppModel {
             return
         }
         let isCommand = text.hasPrefix("/")
+        // Nothing is checked before something asks, so a goal typed first
+        // waits for the checks rather than being refused for want of them.
+        if !isCommand, settings.availableProviders.isEmpty { await settings.refreshAndWait() }
         guard isCommand || !settings.availableProviders.isEmpty else {
             needsModel = true
             post(.system, "No usable model is configured, so there is nothing to plan the goal with.")

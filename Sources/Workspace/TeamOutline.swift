@@ -25,9 +25,13 @@ public enum TeamOutline {
     /// `collapsed` names managers whose reports are hidden. The manager
     /// itself stays, with `isCollapsed` set, so the row can say that it has
     /// more behind it.
+    ///
+    /// `modelUnavailable` names workers whose model a check found missing.
+    /// It changes what their row says and never where it is.
     public static func rows(
-        of workers: [WorkerSnapshot],
-        collapsed : Set<UUID> = []
+        of workers      : [WorkerSnapshot],
+        collapsed       : Set<UUID> = [],
+        modelUnavailable: Set<UUID> = []
     ) -> [TeamRow] {
 
         let present = Set(workers.map(\.id))
@@ -55,10 +59,11 @@ public enum TeamOutline {
             if !isHidden {
                 rows.append(
                     TeamRow(
-                        worker     : worker,
-                        depth      : depth,
-                        hasReports : !children.isEmpty,
-                        isCollapsed: isFolded
+                        worker            : worker,
+                        depth             : depth,
+                        hasReports        : !children.isEmpty,
+                        isCollapsed       : isFolded,
+                        isModelUnavailable: modelUnavailable.contains(worker.id)
                     )
                 )
             }

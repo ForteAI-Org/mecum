@@ -7,6 +7,7 @@
 
 import Foundation
 import ModelTransports
+import SwiftData
 import Testing
 import Workspace
 
@@ -118,6 +119,32 @@ struct WorkerStoreTests {
         #expect(read.selection == TemporaryStore.firstSelection)
         #expect(read.configurationVersion == 1)
         #expect(try await reopened.worker(worker.id)?.configuration == TemporaryStore.secondSelection)
+    }
+
+    @Test("Changing the model writes a new version and leaves the old one on disk")
+    func reconfiguringKeepsEveryVersion() async throws {
+        let directory = TemporaryStore.directory()
+        defer { TemporaryStore.discard(directory) }
+
+        let store  = try WorkspaceStore.opening(in: directory)
+        let worker = try await store.createWorker(name: "Iris", appearance: TemporaryStore.appearance())
+
+        #expect(try await store.configure(worker: worker.id, selection: TemporaryStore.firstSelection) == 1)
+        #expect(try await store.configure(worker: worker.id, selection: TemporaryStore.secondSelection) == 2)
+        #expect(try await store.worker(worker.id)?.configurationVersion == 2)
+
+        // Read the rows themselves, from a separate container, so the old
+        // version is proven to be on disk and not only in the actor's context.
+        let context  = ModelContext(try WorkspaceStoreFile.open(in: directory))
+        let workerID = worker.id
+        let rows     = try context.fetch(
+            FetchDescriptor<WorkerConfiguration>(
+                predicate: #Predicate { $0.workerID == workerID },
+                sortBy   : [SortDescriptor(\.version)]
+            )
+        )
+        #expect(rows.map(\.version) == [1, 2])
+        #expect(rows.map(\.selection) == [TemporaryStore.firstSelection, TemporaryStore.secondSelection])
     }
 
     @Test("Archiving leaves the worker readable and out of the active team")

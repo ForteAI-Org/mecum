@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import ModelTransports
 import Observation
 import Workspace
 
@@ -20,6 +21,9 @@ import Workspace
 /// conversation and a draft are text in a database, and the desktop is a
 /// later increment's capability.
 ///
+/// Connections come from `connections`, the same store the lab's Settings
+/// edits, so a key entered in either place serves both.
+///
 /// A refusal from the store becomes `problem`, a sentence naming what was
 /// refused and what to do about it. Nothing here fails silently.
 @Observable
@@ -27,6 +31,8 @@ import Workspace
 final class TeamModel {
 
     private let store: WorkspaceStore
+
+    let connections: ModelSettingsStore
 
     /// The active team and the archive, as the store last answered.
     private(set) var active  : [WorkerSnapshot] = []
@@ -38,6 +44,16 @@ final class TeamModel {
 
     var selection       : UUID?
     var isCreatingWorker = false
+
+    /// The connection cards, reachable from the team (§19.1).
+    var isShowingConnections = false
+
+    /// The worker whose model and connection are being edited, if any.
+    var profileWorkerID: UUID?
+
+    /// What the last check said about each configured worker's model. A
+    /// worker absent here has not been checked, which is not the same as fine.
+    private(set) var modelStates: [UUID: ConnectionState] = [:]
 
     /// What the store refused, in a sentence. Nil while nothing is pending.
     var problem: String?
@@ -60,8 +76,9 @@ final class TeamModel {
     /// send in that window does nothing, so one Return is one message.
     private var isSending = false
 
-    init(store: WorkspaceStore) {
-        self.store = store
+    init(store: WorkspaceStore, connections: ModelSettingsStore) {
+        self.store       = store
+        self.connections = connections
     }
 
     // MARK: Reading
@@ -69,7 +86,20 @@ final class TeamModel {
     /// The sidebar's rows, recomputed from the team and the folded managers.
     /// The team is tens of workers, so this is cheaper than keeping a second
     /// copy in step with two sources.
-    var rows: [TeamRow] { TeamOutline.rows(of: active, collapsed: collapsed) }
+    var rows: [TeamRow] {
+        TeamOutline.rows(of: active, collapsed: collapsed, modelUnavailable: workersWithRemovedModels)
+    }
+
+    /// No model attached, or one the catalogue no longer lists (§7.4).
+    func needsConfiguring(_ worker: WorkerSnapshot) -> Bool {
+        !worker.isConfigured || workersWithRemovedModels.contains(worker.id)
+    }
+
+    private var workersWithRemovedModels: Set<UUID> {
+        Set(modelStates.compactMap { id, state in
+            if case .modelRemoved = state { id } else { nil }
+        })
+    }
 
     var selectedWorker: WorkerSnapshot? { selection.flatMap(worker) }
 
@@ -261,6 +291,37 @@ final class TeamModel {
         } catch {
             problem = "The worker was not created. \(describe(error))"
         }
+    }
+
+    // MARK: The model
+
+    /// Writes `selection` as the worker's next configuration version. The
+    /// versions before it stay, and the change applies from the next turn.
+    /// The connection and the model are checked again afterwards, so what the
+    /// profile and the row say follows the change.
+    func configure(_ id: UUID, selection: ModelSelection) async {
+        do {
+            try await store.configure(worker: id, selection: selection)
+            await load()
+        } catch {
+            problem = "\(name(of: id))'s model was not changed, so it keeps the one it had. \(describe(error))"
+            return
+        }
+        connections.refresh([selection.provider])
+        await checkModel(of: id)
+    }
+
+    /// Asks the worker's provider whether its model is still in the catalogue.
+    /// A worker whose model is gone keeps it; only the person replaces it.
+    func checkModel(of id: UUID) async {
+        guard let selection = worker(id)?.configuration else {
+            modelStates[id] = nil
+            return
+        }
+        let state = await connections.check(selection.provider, model: selection.model)
+        // The worker was reconfigured meanwhile, and this answer is about the old model.
+        guard worker(id)?.configuration == selection else { return }
+        modelStates[id] = state
     }
 
     func changeManager(of id: UUID, to manager: UUID?) async {

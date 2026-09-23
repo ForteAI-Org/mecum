@@ -37,6 +37,8 @@ struct ChatView: View {
                 }
             }
             ComposerBar(model: model)
+                // The composer carries the model picker, so its appearing is what asks for the checks.
+                .task { model.settings.refresh() }
         }
         .navigationTitle(model.session?.app?.name ?? "Mecum")
         .navigationSubtitle(model.session?.target?.title ?? "")
@@ -191,7 +193,10 @@ private struct ModelCapsule: View {
                     ForEach(ModelSelection.supportedEfforts(provider: selection.provider, model: selection.model)) {
                         Text($0.title(for: selection.provider)).fontWeight(.semibold).hidden()
                     }
-                    Text(selection.effort.title(for: selection.provider)).fontWeight(.semibold)
+                    // A model with no effort parameter shows no level at all.
+                    if !ModelSelection.supportedEfforts(provider: selection.provider, model: selection.model).isEmpty {
+                        Text(selection.effort.title(for: selection.provider)).fontWeight(.semibold)
+                    }
                 }
                 Image(systemName: "chevron.up.chevron.down").font(.caption2)
             }
@@ -273,7 +278,7 @@ private struct ModelPopover: View {
 
     private func clampEffort() {
         let supported = efforts
-        guard !supported.contains(model.selection.effort) else { return }
+        guard !supported.isEmpty, !supported.contains(model.selection.effort) else { return }
         // Medium when the provider has it; otherwise the highest level, which
         // for Ollama means thinking on.
         model.selection.effort = supported.contains(.medium) ? .medium : (supported.last ?? .low)

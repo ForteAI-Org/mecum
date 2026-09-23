@@ -1,23 +1,28 @@
 import ModelTransports
-import SeatBroker
 import Foundation
 import Observation
 
 /// Persisted model preferences: favorite models per provider, provider
-/// knobs, API keys (keychain), and which providers are usable right now.
-/// Favorites are what the composer's model picker shows.
+/// knobs, API keys (keychain), and what the last check of each connection
+/// found. Favorites are what the lab composer's model picker shows.
+///
+/// It is team state as much as the lab's: the team window's connection cards
+/// and worker profiles read the same object, so it asks `ProviderCatalog`
+/// directly and holds no seat. Nothing is checked at construction. A check
+/// runs when a connection card or a model picker appears, when a key or the
+/// Ollama address changes, and when a worker is configured, because checking
+/// runs the `codex` and `claude` command lines and probes a server.
 @Observable
 @MainActor
 final class ModelSettingsStore {
     private let defaults = UserDefaults.standard
-    private let broker: SeatBroker
 
     var favorites: [ModelProvider: [String]] {
         didSet { save(favorites.mapKeys { $0.rawValue }, key: "favorites") }
     }
-    var anthropicAPIKey: String { didSet { Keychain.set(anthropicAPIKey, for: "anthropic"); scheduleAvailabilityRefresh() } }
-    var geminiAPIKey: String { didSet { Keychain.set(geminiAPIKey, for: "gemini"); scheduleAvailabilityRefresh() } }
-    var ollamaHost: String { didSet { defaults.set(ollamaHost, forKey: "ollama.host"); scheduleAvailabilityRefresh() } }
+    var anthropicAPIKey: String { didSet { store(anthropicAPIKey, for: .anthropic) } }
+    var geminiAPIKey: String { didSet { store(geminiAPIKey, for: .gemini) } }
+    var ollamaHost: String { didSet { defaults.set(ollamaHost, forKey: "ollama.host"); refresh([.ollama]) } }
     var ollamaTemperature: Double { didSet { defaults.set(ollamaTemperature, forKey: "ollama.temperature") } }
     var ollamaTopP: Double { didSet { defaults.set(ollamaTopP, forKey: "ollama.topP") } }
     var ollamaTopK: Int { didSet { defaults.set(ollamaTopK, forKey: "ollama.topK") } }
@@ -27,13 +32,21 @@ final class ModelSettingsStore {
     var ollamaTimeoutSeconds: Double { didSet { defaults.set(ollamaTimeoutSeconds, forKey: "ollama.timeout") } }
     var lastSelection: ModelSelection { didSet { save(lastSelection, key: "selection") } }
 
-    /// Reason a provider cannot be used, nil when it can. Missing key = not yet checked.
-    private(set) var unavailability: [ModelProvider: String?] = [:]
-    private(set) var isCheckingAvailability = false
-    private var refreshTask: Task<Void, Never>?
+    /// What the last check of each connection found. Absent means not checked yet.
+    private(set) var states: [ModelProvider: ConnectionState] = [:]
 
-    init(broker: SeatBroker) {
-        self.broker = broker
+    /// When each of those checks finished.
+    private(set) var checkedAt: [ModelProvider: Date] = [:]
+
+    /// Why a key typed for a provider is not in the keychain, nil once it is.
+    /// The sentence names the keychain's status, never the key.
+    private(set) var credentialFailure: [ModelProvider: String] = [:]
+
+    /// One check in flight per provider. A newer check of the same provider
+    /// cancels the older one, and checks of different providers run side by side.
+    private var checks: [ModelProvider: Task<Void, Never>] = [:]
+
+    init() {
         let base = ProviderSettings()
         let stored: [String: [String]] = Self.load(UserDefaults.standard, key: "favorites") ?? [:]
         favorites = Dictionary(uniqueKeysWithValues: ModelProvider.allCases.map { provider in
@@ -50,7 +63,6 @@ final class ModelSettingsStore {
         ollamaMaxOutputTokens = defaults.object(forKey: "ollama.numPredict") as? Int ?? base.ollamaMaxOutputTokens
         ollamaTimeoutSeconds = defaults.object(forKey: "ollama.timeout") as? Double ?? base.ollamaTimeoutSeconds
         lastSelection = Self.load(UserDefaults.standard, key: "selection") ?? .default
-        scheduleAvailabilityRefresh()
     }
 
     var providerSettings: ProviderSettings {
@@ -75,43 +87,95 @@ final class ModelSettingsStore {
 
     /// A provider is usable when its check passed and it has at least one model to pick.
     func isAvailable(_ provider: ModelProvider) -> Bool {
-        guard let status = unavailability[provider] else { return false }
-        return status == nil && !models(for: provider).isEmpty
+        states[provider]?.isReady == true && !models(for: provider).isEmpty
     }
 
     var availableProviders: [ModelProvider] { ModelProvider.allCases.filter(isAvailable) }
 
-    /// The reason shown in Settings: the check's verdict, or the missing models.
+    func isChecking(_ provider: ModelProvider) -> Bool { checks[provider] != nil }
+
+    /// The line shown in the lab's Settings: the check's own message, or the missing models.
     func statusText(_ provider: ModelProvider) -> String {
-        guard let status = unavailability[provider] else { return "Checking…" }
-        if let status { return status }
+        guard let state = states[provider] else { return isChecking(provider) ? "Checking…" : "Not checked yet" }
+        guard state.isReady else { return state.message }
         return models(for: provider).isEmpty ? "No models in the list. Add one with +." : "Ready"
     }
 
-    func scheduleAvailabilityRefresh() {
-        refreshTask?.cancel()
-        refreshTask = Task { await refreshAvailability() }
+    /// Checks the named connections again, each on its own.
+    func refresh(_ providers: [ModelProvider] = ModelProvider.allCases) {
+        let settings = providerSettings
+        for provider in providers {
+            checks[provider]?.cancel()
+            checks[provider] = Task {
+                let state = await ProviderCatalog.check(provider, settings: settings)
+                // A newer check of this provider replaced this one; its answer is the one to keep.
+                guard !Task.isCancelled else { return }
+                states[provider]    = state
+                checkedAt[provider] = Date()
+                checks[provider]    = nil
+                keepSelectionUsable()
+            }
+        }
     }
 
-    func refreshAvailability() async {
-        isCheckingAvailability = true
-        let settings = providerSettings
-        for provider in ModelProvider.allCases {
-            let status = await broker.providerStatus(provider, settings: settings)
-            guard !Task.isCancelled else { return }
-            unavailability[provider] = .some(status)
-        }
-        isCheckingAvailability = false
-        // Keep the selection on a provider that works.
+    /// Waits for every check in flight, first starting one for each provider
+    /// never checked. The lab's composer asks this before refusing a goal.
+    func refreshAndWait() async {
+        refresh(ModelProvider.allCases.filter { states[$0] == nil && checks[$0] == nil })
+        for check in checks.values { await check.value }
+    }
+
+    /// Checks `model` on `provider`'s connection, for a worker configured with it.
+    func check(_ provider: ModelProvider, model: String) async -> ConnectionState {
+        await ProviderCatalog.check(provider, model: model, settings: providerSettings)
+    }
+
+    /// Keeps the lab's selection on a provider that works, once every check
+    /// has answered: moving it on a partial answer would drop a working choice.
+    private func keepSelectionUsable() {
+        guard checks.isEmpty, states.count == ModelProvider.allCases.count else { return }
         if !isAvailable(lastSelection.provider), let first = availableProviders.first {
             lastSelection = ModelSelection(provider: first, model: models(for: first).first ?? "",
                                            effort: ModelSelection.supportedEfforts(provider: first, model: "").contains(.medium) ? .medium : .high)
         }
     }
 
+    // MARK: Credentials
+
+    /// Whether a key is held for `provider`. Only the API providers have one.
+    func hasCredential(_ provider: ModelProvider) -> Bool {
+        switch provider {
+        case .anthropic:                   !anthropicAPIKey.isEmpty
+        case .gemini:                      !geminiAPIKey.isEmpty
+        case .codex, .claudeCode, .ollama: false
+        }
+    }
+
+    /// Puts the key for `provider` in the keychain, or removes it when empty,
+    /// and checks the connection again.
+    func setCredential(_ value: String, for provider: ModelProvider) {
+        switch provider {
+        case .anthropic: anthropicAPIKey = value
+        case .gemini:    geminiAPIKey    = value
+        case .codex, .claudeCode, .ollama: return
+        }
+    }
+
+    private func store(_ value: String, for provider: ModelProvider) {
+        let reference = ProviderConnection(provider: provider).credentialReference ?? provider.rawValue
+        do {
+            try Keychain.set(value, for: reference)
+            credentialFailure[provider] = nil
+        } catch {
+            credentialFailure[provider] = "The keychain did not keep the change (\(error)), so the key "
+                + "used from now on is the one typed in this session only. Try again."
+        }
+        refresh([provider])
+    }
+
     /// Models the provider reports, for the + menu.
     func discoverModels(for provider: ModelProvider) async throws -> [String] {
-        try await broker.availableModels(for: provider, settings: providerSettings)
+        try await ProviderCatalog.models(provider, settings: providerSettings)
     }
 
     // MARK: Favorites

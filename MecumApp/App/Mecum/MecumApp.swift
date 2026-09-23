@@ -19,7 +19,7 @@ struct MecumApp: App {
 
         // The team is the front door. It holds no seat and needs no grant.
         WindowGroup("Mecum") {
-            TeamWindowView(launch: workspace, didOpenTeam: { delegate.teams.add($0) })
+            TeamWindowView(launch: workspace, connections: model.settings, didOpenTeam: { delegate.teams.add($0) })
                 // The delegate is made by AppKit and the model by SwiftUI, so
                 // this window, the one that always exists, is where they meet.
                 .task { delegate.model = model }

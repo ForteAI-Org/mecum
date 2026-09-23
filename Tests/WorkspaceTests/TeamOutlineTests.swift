@@ -37,6 +37,33 @@ struct TeamOutlineTests {
         #expect(rows.map(\.hasReports) == [true, true, false])
     }
 
+    @Test("A worker whose model is gone keeps its place and reads as to configure")
+    func aMissingModelKeepsThePlace() async throws {
+        let directory = TemporaryStore.directory()
+        defer { TemporaryStore.discard(directory) }
+
+        let store = try WorkspaceStore.opening(in: directory)
+        let head  = try await store.createWorker(name: "Aaa", role: "Lead", appearance: TemporaryStore.appearance())
+        let gone  = try await store.createWorker(name: "Bbb", role: "Research", managerID: head.id,
+                                                 appearance: TemporaryStore.appearance())
+        try await store.configure(worker: head.id, selection: TemporaryStore.firstSelection)
+        try await store.configure(worker: gone.id, selection: TemporaryStore.secondSelection)
+
+        let workers = try await store.workers()
+        let before  = TeamOutline.rows(of: workers)
+        let after   = TeamOutline.rows(of: workers, modelUnavailable: [gone.id])
+
+        #expect(before.map(\.id) == after.map(\.id))
+        #expect(before.map(\.depth) == after.map(\.depth))
+
+        let row = try #require(after.first { $0.id == gone.id })
+        #expect(row.worker.isConfigured)
+        #expect(row.needsConfiguring)
+        #expect(row.subtitle == TeamRow.toConfigure)
+        #expect(row.accessibilityLabel.contains(TeamRow.toConfigure))
+        #expect(after.first { $0.id == head.id }?.subtitle == "Lead")
+    }
+
     @Test("Changing a worker's state does not move it in the list")
     func stateDoesNotReorder() async throws {
         let directory = TemporaryStore.directory()

@@ -90,12 +90,13 @@ public struct ModelSelection: Sendable, Hashable, Codable {
         self.effort = effort
     }
 
-    /// Efforts a provider/model pair accepts.
+    /// Efforts a provider/model pair accepts, in order. Empty when the model
+    /// has no effort parameter at all, so no level is offered for it.
     public static func supportedEfforts(provider: ModelProvider, model: String) -> [ReasoningEffort] {
         switch provider {
         case .codex: model == "gpt-5.6-luna" ? ReasoningEffort.allCases : [.low, .medium, .high, .xhigh]
         // Haiku 4.5 has no effort parameter (extended thinking only).
-        case .claudeCode, .anthropic: model.contains("haiku") ? [.medium] : ReasoningEffort.allCases
+        case .claudeCode, .anthropic: model.contains("haiku") ? [] : ReasoningEffort.allCases
         case .gemini: [.low, .medium, .high]
         case .ollama: [.low, .high]
         }

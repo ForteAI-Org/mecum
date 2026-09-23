@@ -18,6 +18,8 @@ struct SettingsView: View {
         }
         .frame(width: 560, height: 520)
         .padding()
+        // Every tab is a connection's status and a model list, so opening Settings asks for the checks.
+        .task { store.refresh() }
     }
 
     private func icon(_ provider: ModelProvider) -> String {
@@ -46,7 +48,7 @@ private struct ProviderTab: View {
                 case .ollama:
                     TextField("Server", text: $store.ollamaHost, prompt: Text("http://127.0.0.1:11434"))
                 case .codex, .claudeCode:
-                    Button("Re-check sign-in") { store.scheduleAvailabilityRefresh() }
+                    Button("Re-check sign-in") { store.refresh([provider]) }
                 }
             } header: {
                 Text("Access")
@@ -107,7 +109,7 @@ private struct StatusRow: View {
 
     var body: some View {
         let available = store.isAvailable(provider)
-        let checking = store.unavailability[provider] == nil
+        let checking = store.states[provider] == nil
         HStack(spacing: 8) {
             if checking {
                 ProgressView().controlSize(.small)

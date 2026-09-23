@@ -5,6 +5,7 @@
 //  Created by Eliomar Alejandro Rodriguez Ferrer on 22/09/2026.
 //
 
+import ModelTransports
 import SwiftUI
 import Workspace
 
@@ -18,8 +19,8 @@ import Workspace
 /// What is real here is the persistence. The draft reaches the store shortly
 /// after typing stops and again when the conversation changes, the reading
 /// anchor is written as it moves, and sending writes the message and stops:
-/// no worker has a model attached in this increment, so nothing is routed and
-/// nothing answers.
+/// a model can be attached from the profile, and running the turn with it is
+/// the next ticket's, so nothing is routed and nothing answers yet.
 struct WorkerConversationView: View {
 
     @Bindable
@@ -36,7 +37,7 @@ struct WorkerConversationView: View {
             composer
         }
         .navigationTitle(worker.name)
-        .navigationSubtitle(worker.isConfigured ? "" : TeamRow.toConfigure)
+        .navigationSubtitle(team.needsConfiguring(worker) ? TeamRow.toConfigure : "")
     }
 
     // MARK: Transcript
@@ -112,20 +113,37 @@ struct WorkerConversationView: View {
 
     // MARK: Composer
 
+    /// Why this worker cannot answer, when that is known: no model, a model
+    /// the catalogue dropped, or a provider that cannot hold a conversation.
+    private var modelNotice: String? {
+        guard let selection = worker.configuration else {
+            return "\(worker.name) has no model attached. What you write is saved and stays here, "
+                + "and nothing answers until a model is connected."
+        }
+        if case .modelRemoved(let model) = team.modelStates[worker.id] {
+            return "\(model) is no longer offered by \(selection.provider.title), so \(worker.name) needs "
+                + "configuring. Nothing was changed; choose a model to replace it."
+        }
+        if let refusal = ProviderConnection(provider: selection.provider).conversationRefusal {
+            return "\(selection.provider.title) cannot hold a conversation here: \(refusal). "
+                + "\(worker.name) will not answer until it uses another provider."
+        }
+        return nil
+    }
+
     private var composer: some View {
         VStack(alignment: .leading, spacing: 8) {
 
-            if !worker.isConfigured {
-                Label(
-                    """
-                    \(worker.name) has no model attached. What you write is saved and stays \
-                    here, and nothing answers until a model is connected.
-                    """,
-                    systemImage: "exclamationmark.circle"
-                )
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
+            if let notice = modelNotice {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Label(notice, systemImage: "exclamationmark.circle")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer(minLength: 0)
+                    Button("Choose a model") { team.profileWorkerID = worker.id }
+                        .controlSize(.small)
+                }
             }
 
             HStack(alignment: .bottom, spacing: 8) {

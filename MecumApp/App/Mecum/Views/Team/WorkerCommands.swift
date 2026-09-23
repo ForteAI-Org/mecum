@@ -26,6 +26,11 @@ struct WorkerCommands: View {
     let team  : TeamModel
 
     var body: some View {
+        if !worker.isArchived {
+            Button("Model and connection…") { team.profileWorkerID = worker.id }
+            Divider()
+        }
+
         Menu("Change manager") {
             Button("No manager") {
                 Task { await team.changeManager(of: worker.id, to: nil) }

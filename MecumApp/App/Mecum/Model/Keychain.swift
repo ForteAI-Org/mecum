@@ -2,8 +2,22 @@ import Foundation
 import Security
 
 /// API keys live in the login keychain, never in UserDefaults.
+///
+/// One item per provider, under the service below and the account a
+/// connection names as its `credentialReference`. The team's connection card
+/// and the lab's Settings read and write the same items, so a key entered
+/// once serves both: they are one person's key to one provider, in one app.
 enum Keychain {
     private static let service = "dev.forte.Mecum"
+
+    /// A write the keychain refused. It carries the status and never the value.
+    struct WriteFailure: Error, CustomStringConvertible {
+        let status: OSStatus
+
+        var description: String {
+            (SecCopyErrorMessageString(status, nil) as String?) ?? "keychain status \(status)"
+        }
+    }
 
     static func string(for account: String) -> String {
         let query: [String: Any] = [
@@ -19,16 +33,20 @@ enum Keychain {
         return String(decoding: data, as: UTF8.self)
     }
 
-    static func set(_ value: String, for account: String) {
+    /// Replaces the item, or removes it when `value` is empty. Throws when the
+    /// keychain refuses, so a key that was not kept is never reported as kept.
+    static func set(_ value: String, for account: String) throws {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: account,
         ]
-        SecItemDelete(query as CFDictionary)
+        let deleted = SecItemDelete(query as CFDictionary)
+        guard deleted == errSecSuccess || deleted == errSecItemNotFound else { throw WriteFailure(status: deleted) }
         guard !value.isEmpty else { return }
         var item = query
         item[kSecValueData as String] = Data(value.utf8)
-        SecItemAdd(item as CFDictionary, nil)
+        let added = SecItemAdd(item as CFDictionary, nil)
+        guard added == errSecSuccess else { throw WriteFailure(status: added) }
     }
 }

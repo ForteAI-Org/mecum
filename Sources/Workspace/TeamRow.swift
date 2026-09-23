@@ -25,6 +25,13 @@ public struct TeamRow: Sendable, Hashable, Identifiable {
     public let hasReports : Bool
     public let isCollapsed: Bool
 
+    /// The worker's model is no longer in its provider's catalogue (§7.4). The
+    /// worker keeps its place and its configuration, and needs configuring.
+    public let isModelUnavailable: Bool
+
+    /// Whether the row reads as to configure: no model, or one that is gone.
+    public var needsConfiguring: Bool { !worker.isConfigured || isModelUnavailable }
+
     public var id  : UUID   { worker.id }
     public var name: String { worker.name }
 
@@ -33,7 +40,7 @@ public struct TeamRow: Sendable, Hashable, Identifiable {
     /// so before it says what it is for. A worker with no role has no
     /// subtitle; nothing invents a specialisation from the name.
     public var subtitle: String {
-        guard worker.isConfigured else { return Self.toConfigure }
+        guard !needsConfiguring else { return Self.toConfigure }
         return role
     }
 
@@ -42,7 +49,7 @@ public struct TeamRow: Sendable, Hashable, Identifiable {
     public var accessibilityLabel: String {
         var parts = [worker.name]
         if !role.isEmpty { parts.append(role) }
-        if !worker.isConfigured { parts.append(Self.toConfigure) }
+        if needsConfiguring { parts.append(Self.toConfigure) }
         if worker.isArchived { parts.append("Archived") }
         return parts.joined(separator: ", ")
     }

@@ -63,8 +63,8 @@ actor CodexCLIClient: ModelTransport {
     static func checkAuthentication() async throws {
         let result = try await run(executable: executableURL(), arguments: ["login", "status"],
                                    input: Data(), schema: nil, timeout: 10)
-        guard result.status == 0,
-              String(decoding: result.output + result.errors, as: UTF8.self).contains("Logged in using ChatGPT")
+        guard ProviderCatalog.classifyCodexLogin(exitStatus: result.status, output: result.output + result.errors)
+                == .ready
         else { throw CodexClientError.signInRequired }
     }
 

@@ -88,11 +88,16 @@ enum HTTPTransport {
     /// read, so nothing the request carried (an API key travels in a header)
     /// can come back out through the error.
     static func failure(status: Int, body: Data) -> ProviderError {
+        ProviderError.http(status: status, message: message(in: body))
+    }
+
+    /// The provider's own words in an error body: Anthropic's and Google's
+    /// `error.message`, Ollama's `error`, otherwise the start of the body.
+    static func message(in body: Data) -> String {
         let json = (try? JSONSerialization.jsonObject(with: body)) as? [String: Any]
-        let message = ((json?["error"] as? [String: Any])?["message"] as? String)
+        return ((json?["error"] as? [String: Any])?["message"] as? String)
             ?? (json?["error"] as? String)
             ?? String(decoding: body.prefix(400), as: UTF8.self)
-        return ProviderError.http(status: status, message: message)
     }
 
     /// One JSON POST, ready to send. Headers carry what identifies the caller:

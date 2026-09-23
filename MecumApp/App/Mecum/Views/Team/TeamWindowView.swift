@@ -22,11 +22,11 @@ struct TeamWindowView: View {
 
     var launch: WorkspaceLaunch
 
+    /// The connections the team's workers use, shared with the lab's Settings.
+    var connections: ModelSettingsStore
+
     /// Told once the team is made, so quitting can write what is typed in it.
     var didOpenTeam: (TeamModel) -> Void
-
-    @Environment(\.openSettings)
-    private var openSettings
 
     @State private var team: TeamModel?
 
@@ -36,7 +36,7 @@ struct TeamWindowView: View {
             .task {
                 launch.open()
                 guard team == nil, let store = launch.store else { return }
-                let model = TeamModel(store: store)
+                let model = TeamModel(store: store, connections: connections)
                 didOpenTeam(model)
                 await model.load()
                 team = model
@@ -76,6 +76,20 @@ struct TeamWindowView: View {
         .sheet(isPresented: Bindable(team).isCreatingWorker) {
             NewWorkerSheet(team: team)
         }
+        .sheet(isPresented: Bindable(team).isShowingConnections) {
+            ConnectionsSheet(connections: team.connections)
+        }
+        .sheet(item: profileWorker(team)) { worker in
+            WorkerProfileSheet(team: team, worker: worker)
+        }
+        .toolbar {
+            ToolbarItem {
+                Button("Connections", systemImage: "point.3.connected.trianglepath.dotted") {
+                    team.isShowingConnections = true
+                }
+                .help("The model connections the team uses")
+            }
+        }
         .alert(
             "That could not be done",
             isPresented: Binding(
@@ -104,6 +118,14 @@ struct TeamWindowView: View {
         }
     }
 
+    /// The worker being edited, as the sheet's item. Closing the sheet clears it.
+    private func profileWorker(_ team: TeamModel) -> Binding<WorkerSnapshot?> {
+        Binding(
+            get: { team.profileWorkerID.flatMap(team.worker) },
+            set: { team.profileWorkerID = $0?.id }
+        )
+    }
+
     /// The first launch offers the two things there are to do. It invents no
     /// team, and it asks for no desktop permission: talking to a worker never
     /// needed one.
@@ -115,7 +137,7 @@ struct TeamWindowView: View {
         } actions: {
             Button("Create the first worker") { team.isCreatingWorker = true }
                 .buttonStyle(.borderedProminent)
-            Button("Connect a model") { openSettings() }
+            Button("Connect a model") { team.isShowingConnections = true }
         }
     }
 }

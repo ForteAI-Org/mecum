@@ -15,9 +15,8 @@ import Workspace
 /// not an approximation of it.
 ///
 /// The worker is saved with no model attached and is marked to configure. The
-/// sheet says so rather than asking for a connection it cannot yet make:
-/// attaching a model is the next increment, and a worker that cannot answer
-/// must not look like one that can.
+/// sheet says so, and the model is chosen afterwards in the worker's profile:
+/// a worker that cannot answer must not look like one that can.
 struct NewWorkerSheet: View {
 
     let team: TeamModel
@@ -65,7 +64,7 @@ struct NewWorkerSheet: View {
             Label(
                 """
                 Saved without a model attached. The worker is listed as \(TeamRow.toConfigure) \
-                and cannot answer until a model is connected. No desktop permission is needed.
+                until you choose its model in Model and connection. No desktop permission is needed.
                 """,
                 systemImage: "info.circle"
             )
