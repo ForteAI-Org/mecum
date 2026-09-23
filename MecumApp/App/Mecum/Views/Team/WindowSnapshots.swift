@@ -34,19 +34,15 @@ enum WindowSnapshots {
         do {
             let team = try await syntheticTeam(in: store)
             let output = try directory()
-            let cases: [(name: String, width: Double, dark: Bool, inspector: Bool, material: Bool)] = [
-                ("1200-light", 1200, false, true, false), ("1200-dark", 1200, true, true, false),
-                ("820-light", 820, false, true, false), ("820-dark", 820, true, true, false),
-                ("820-light-inspector-closed", 820, false, false, false),
-                // Glass may draw blank offscreen; the header's material fallback shows its shape and place.
-                ("1200-light-material", 1200, false, true, true), ("1200-dark-material", 1200, true, true, true),
-                ("820-light-material", 820, false, false, true), ("820-dark-material", 820, true, false, true),
+            let cases: [(name: String, width: Double, dark: Bool, inspector: Bool)] = [
+                ("1200-light", 1200, false, true), ("1200-dark", 1200, true, true),
+                ("820-light", 820, false, true), ("820-dark", 820, true, true),
+                ("820-light-inspector-closed", 820, false, false),
             ]
             for shot in cases {
                 let hidesSidebar = shot.inspector && ShellMetrics.openingHidesSidebar(window: shot.width)
                 let root = Root(team: team, isInspectorRequested: shot.inspector,
                                 columns: hidesSidebar ? .detailOnly : .all)
-                    .environment(\.workerHeaderUsesMaterial, shot.material)
                 try await write(root, width: shot.width, dark: shot.dark,
                                 to: output.appending(path: "window-\(shot.name).png"))
             }

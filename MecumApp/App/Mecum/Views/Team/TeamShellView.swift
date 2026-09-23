@@ -64,7 +64,6 @@ struct TeamShellView: View {
                 )
         } detail: {
             detail
-                .overlay(alignment: .top) { header.ignoresSafeArea(.container, edges: .top) }
                 .navigationTitle(ShellChrome.windowTitle(for: team.selectedWorker))
                 .toolbar { toolbar }
                 // A constant zero minimum for the column: the conversation's own height follows its width,
@@ -113,12 +112,14 @@ struct TeamShellView: View {
     // MARK: Toolbar
 
     /// The window's own controls, `ShellChrome.toolbar`: the split view's sidebar
-    /// toggle and the inspector toggle at the trailing edge. The worker's header floats over the band,
+    /// toggle, the worker's header at the centre and the inspector toggle at the trailing edge,
     /// the connections are at the foot of the sidebar, and Release the computer is
     /// in the composer beside Send and in the worker's commands.
     @ToolbarContentBuilder
     private var toolbar: some ToolbarContent {
-        // The window has no title, so the spacer is what takes the inspector toggle to the trailing edge.
+        // The worker's name is the bar's centre, in place of a title.
+        ToolbarItem(placement: .principal) { header }
+            .sharedBackgroundVisibility(.hidden)
         ToolbarSpacer(.flexible)
         ToolbarItem {
             Button(isInspectorShown ? "Hide Inspector" : "Show Inspector", systemImage: "sidebar.trailing",

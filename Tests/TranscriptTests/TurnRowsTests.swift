@@ -130,7 +130,7 @@ struct TurnRowsTests {
         #expect(!items.contains(where: Self.isThinking))
     }
 
-    @Test("Only the last bubble of each group carries the tail, on its author's side, clear of the mascot")
+    @Test("Only the last bubble of each group carries the tail, on its author's side, clear of any mascot")
     func tailOnGroupEnd() async throws {
         let fixture = try await TranscriptFixture()
         defer { fixture.discard() }
@@ -155,7 +155,11 @@ struct TurnRowsTests {
         #expect(person.minX == rows[2].geometry.surface.maxX && person.maxX <= 600 - RowGeometry.gutter / 2)
         let worker = try #require(rows[4].geometry.tail)
         #expect(worker.maxX == rows[4].geometry.surface.minX)
-        #expect(worker.minX > RowGeometry.gutter + RowGeometry.avatarSide, "the tail stays clear of the mascot")
+        #expect(worker.minX >= RowGeometry.gutter / 2, "in a direct conversation the tail stays in the gutter")
+        let authored = RowGeometry(item: rows[4].item, rowWidth: 600, style: TranscriptStyle(showsAuthors: true),
+                                   blocks: [.text], sizes: [CGSize(width: 120, height: 17)])
+        #expect(try #require(authored.tail).minX > RowGeometry.gutter + RowGeometry.avatarSide,
+                "with authors shown the tail stays clear of the mascot")
         #expect(worker.maxY == rows[4].geometry.surface.maxY && rows[4].geometry.height >= worker.maxY)
 
         // The tail moves no text: the same reply, with and without it. The group's end adds only its time below.
@@ -170,7 +174,7 @@ struct TurnRowsTests {
         #expect(without.footer == nil && time.minY > with.surface.maxY && with.height == time.maxY.rounded(.up))
     }
 
-    @Test("A thinking row has no text, draws a bubble of one line and reads its worker's name")
+    @Test("A thinking row has no text, draws a bubble of one line, reads its worker's name and shows it only with authors")
     func thinkingRowPrepares() async throws {
         let fixture = try await TranscriptFixture()
         defer { fixture.discard() }
@@ -180,7 +184,11 @@ struct TurnRowsTests {
                                                     cache: LayoutMeasurementCache(), pipeline: MarkdownContent())
         let row = try #require(prepared.rows.first { $0.item.kind == .thinking })
         #expect(row.text.blocks.isEmpty)
-        #expect(row.geometry.avatar != nil && row.geometry.header != nil)
+        // A direct conversation names its worker in the title bar, not on the bubble.
+        #expect(row.geometry.avatar == nil && row.geometry.header == nil)
+        let authored = RowGeometry(item: row.item, rowWidth: 600, style: TranscriptStyle(showsAuthors: true),
+                                   blocks: [], sizes: [])
+        #expect(authored.avatar != nil && authored.header != nil)
         #expect(row.geometry.text.size == RowGeometry.thinkingSize(TranscriptStyle()))
         #expect(TranscriptWording.accessibilityLabel(for: row.item, workerName: "Atlas") == "Atlas is thinking")
     }

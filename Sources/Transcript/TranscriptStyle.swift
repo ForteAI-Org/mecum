@@ -15,8 +15,13 @@ public struct TranscriptStyle: Sendable, Hashable {
     /// The conversation body, in points. The spec's floor is 14.
     public var bodyPointSize: CGFloat
 
-    public init(bodyPointSize: CGFloat = 14) {
+    /// Whether the worker's replies carry its name and mascot. A direct
+    /// conversation has one other side, which the title bar already names, so it shows neither.
+    public var showsAuthors: Bool
+
+    public init(bodyPointSize: CGFloat = 14, showsAuthors: Bool = false) {
         self.bodyPointSize = max(10, bodyPointSize)
+        self.showsAuthors  = showsAuthors
     }
 
     /// Names, times and delivery states.
@@ -65,11 +70,11 @@ public struct TranscriptStyle: Sendable, Hashable {
     /// The next size up, or nil at the largest. A size between two steps,
     /// such as one remembered from another build, moves to the step above it.
     public var bigger: TranscriptStyle? {
-        Self.bodyPointSizes.first { $0 > bodyPointSize }.map(TranscriptStyle.init(bodyPointSize:))
+        Self.bodyPointSizes.first { $0 > bodyPointSize }.map { TranscriptStyle(bodyPointSize: $0) }
     }
 
     /// The next size down, or nil at Actual Size.
     public var smaller: TranscriptStyle? {
-        Self.bodyPointSizes.last { $0 < bodyPointSize }.map(TranscriptStyle.init(bodyPointSize:))
+        Self.bodyPointSizes.last { $0 < bodyPointSize }.map { TranscriptStyle(bodyPointSize: $0) }
     }
 }

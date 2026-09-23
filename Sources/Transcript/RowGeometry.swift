@@ -64,6 +64,12 @@ public struct RowGeometry: Sendable, Hashable {
     /// How far the footer's time and badge sit in from the bubble's edge, clear of its rounded corner.
     static let footerInset: CGFloat = 8
 
+    /// Where the worker's bubbles and its tool lines start: past the mascot's
+    /// column when replies show their author, at the gutter when they do not.
+    static func leading(_ style: TranscriptStyle) -> CGFloat {
+        style.showsAuthors ? gutter + avatarSide + avatarGap : gutter
+    }
+
     /// The widest a row's prose may be laid out at, before it is measured.
     public static func textWidthLimit(
         for kind: TranscriptItem.Kind,
@@ -145,13 +151,13 @@ public struct RowGeometry: Sendable, Hashable {
         switch Self.shape(of: item.kind) {
         case .bubble:
             let hasHeader = !item.continuesGroup
-            let hasName   = hasHeader && !isPerson
+            let hasName   = hasHeader && !isPerson && style.showsAuthors
             let top       = hasName ? caption + 2 : 0
             let long      = Self.isLong(item.kind) && !isWide
             let width     = long ? limit : min(limit, textSize.width + 2 * Self.bubblePadding.width)
             let bubbleX   = isPerson
                 ? rowWidth - Self.gutter - width
-                : Self.gutter + Self.avatarSide + Self.avatarGap
+                : Self.leading(style)
             let surface   = CGRect(x: bubbleX, y: top, width: width,
                                    height: textSize.height + 2 * Self.bubblePadding.height)
             let hasBadge  = DeliveryBadge(item.kind) != nil
@@ -163,7 +169,7 @@ public struct RowGeometry: Sendable, Hashable {
                 ? CGRect(x: bubbleX, y: surface.maxY + 2, width: width, height: caption)
                 : nil
             self.footer  = footer
-            self.avatar  = hasHeader && !isPerson
+            self.avatar  = hasName
                 ? CGRect(x: Self.gutter, y: top, width: Self.avatarSide, height: Self.avatarSide)
                 : nil
             // The inner corner faces the conversation: the person's bubble's left, the worker's right.
@@ -181,7 +187,7 @@ public struct RowGeometry: Sendable, Hashable {
             self.height  = max(footer?.maxY ?? surface.maxY, self.avatar?.maxY ?? 0).rounded(.up)
 
         case .card:
-            let x       = Self.gutter + Self.avatarSide + Self.avatarGap
+            let x       = Self.leading(style)
             // An opened tool line's card fits its steps; a stopped or failed turn's spans the measure.
             let isTool  = if case .toolRun = item.kind { true } else { false }
             let width   = isTool ? min(limit, textSize.width + 2 * Self.cardPadding.width) : limit
@@ -199,7 +205,7 @@ public struct RowGeometry: Sendable, Hashable {
 
         case .line:
             // No surface: a caption under the worker's bubble, at its column.
-            let x       = Self.gutter + Self.avatarSide + Self.avatarGap
+            let x       = Self.leading(style)
             let surface = CGRect(x: x, y: 0, width: min(limit, textSize.width), height: textSize.height + 4)
             self.surface = surface
             self.text    = surface.insetBy(dx: 0, dy: 2)
@@ -308,7 +314,7 @@ public struct RowGeometry: Sendable, Hashable {
         style   : TranscriptStyle,
         isWide  : Bool
     ) -> CGFloat {
-        let indent  = gutter + avatarSide + avatarGap
+        let indent  = leading(style)
         let measure = isWide ? style.wideMeasure
             : isLong(kind) || shape(of: kind) != .bubble ? style.longMeasure : style.shortMeasure
         switch kind {

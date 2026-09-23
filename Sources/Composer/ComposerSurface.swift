@@ -7,27 +7,22 @@
 
 import SwiftUI
 
-/// ComposerSurface is what the composer's pill floats on (§3.2): Liquid Glass
-/// on macOS 26 and later, an Apple material before it, and an opaque surface
-/// when Reduce Transparency is on, so nothing behind the pill shows through.
+/// ComposerSurface is what the composer's pill floats on (§3.2): the system's
+/// regular material on every macOS version, and an opaque surface when Reduce
+/// Transparency is on, so nothing behind the pill shows through. It is never
+/// Liquid Glass.
 ///
-/// The glass is SwiftUI's `glassEffect`, applied to the pill's content, which
-/// includes the AppKit text view: SwiftUI draws the glass behind that content
-/// and leaves the hosted view on top, editing and first responder included.
-/// The material is SwiftUI's `regularMaterial`, the system material in SwiftUI.
+/// The material is drawn behind the pill's content, which includes the AppKit
+/// text view, so the hosted view stays on top, editing and first responder included.
 struct ComposerSurface: ViewModifier {
 
     enum Kind: CaseIterable {
-        case glass
         case material
         case solid
 
-        /// The platform's kind: glass unless Reduce Transparency is on.
+        /// The material unless Reduce Transparency is on.
         static func resolved(reducesTransparency: Bool) -> Kind {
-            if reducesTransparency { return .solid }
-            if #available(macOS 26, *) { return .glass }
-            // Never reached while the deployment target is macOS 26; kept for an earlier target.
-            return .material
+            reducesTransparency ? .solid : .material
         }
     }
 
@@ -38,12 +33,6 @@ struct ComposerSurface: ViewModifier {
 
     func body(content: Content) -> some View {
         switch kind {
-        case .glass:
-            if #available(macOS 26, *) {
-                content.glassEffect(.regular, in: shape)
-            } else {
-                floating(content, on: AnyShapeStyle(.regularMaterial))
-            }
         case .material:
             floating(content, on: AnyShapeStyle(.regularMaterial))
         case .solid:

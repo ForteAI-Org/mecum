@@ -38,9 +38,13 @@ struct WorkerConversationView: View {
     /// The floating composer's height, which the transcript keeps clear below its last message.
     @State private var composerHeight: CGFloat = 0
 
+    /// The title bar's height, which the transcript scrolls under and keeps clear above its first message.
+    @State private var titleBarHeight: CGFloat = 0
+
     var body: some View {
         transcriptArea
             .overlay(alignment: .bottom) { composer }
+            .onGeometryChange(for: CGFloat.self) { $0.safeAreaInsets.top } action: { titleBarHeight = $0 }
     }
 
     // MARK: Transcript
@@ -48,8 +52,9 @@ struct WorkerConversationView: View {
     private var transcriptArea: some View {
         Group {
             if let transcript {
-                TranscriptHost(controller: transcript, topInset: WorkerHeaderView.clearance,
-                               bottomInset: composerHeight)
+                TranscriptHost(controller: transcript, topInset: titleBarHeight + 8, bottomInset: composerHeight)
+                    // Under the title bar, so messages scroll beneath the worker's name as the system draws it.
+                    .ignoresSafeArea(.container, edges: .top)
             } else {
                 Color.clear
             }

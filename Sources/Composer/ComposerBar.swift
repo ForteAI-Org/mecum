@@ -53,9 +53,6 @@ public struct ComposerBar: View {
     @Environment(\.accessibilityReduceMotion)
     private var reducesMotion
 
-    @Namespace
-    private var glass
-
     /// - Parameters:
     ///   - recipient: the worker's name, in the placeholder and the labels.
     ///   - canAnswer: the recipient has a model that can answer; without one Send is disabled.
@@ -110,18 +107,14 @@ public struct ComposerBar: View {
         .padding(.bottom, 12)
     }
 
-    /// Release, when shown, and the circle, as one control: on glass their
-    /// shapes merge, and Release morphs out of the circle and back into it.
+    /// Release, when shown, beside the circle: it comes out of the circle to the left and goes back into it.
     private var actions: some View {
-        GlassEffectContainer(spacing: 6) {
-            HStack(spacing: 6) {
-                if let release {
-                    releaseButton(release)
-                        .transition(kind == .glass ? .identity : .scale(scale: 0.3, anchor: .trailing)
-                            .combined(with: .opacity))
-                }
-                circle
+        HStack(spacing: 6) {
+            if let release {
+                releaseButton(release)
+                    .transition(.scale(scale: 0.3, anchor: .trailing).combined(with: .opacity))
             }
+            circle
         }
         .animation(reducesMotion ? nil : .spring(duration: 0.35, bounce: 0.15), value: release != nil)
     }
@@ -135,7 +128,6 @@ public struct ComposerBar: View {
                 .contentShape(Circle())
         }
         .buttonStyle(.plain)
-        .modifier(ActionGlass(isGlass: kind == .glass, tint: nil, id: "release", namespace: glass))
         .help("Release the computer")
         .accessibilityLabel("Release the computer")
     }
@@ -143,9 +135,7 @@ public struct ComposerBar: View {
     /// Send, which becomes Stop in the same place while a turn runs.
     private var circle: some View {
         let isEnabled = isAnswering || canSend
-        // On glass the tint is the glass's own; off glass the circle is filled.
-        let fill      = kind == .glass ? AnyShapeStyle(.clear)
-            : isEnabled ? AnyShapeStyle(.tint) : AnyShapeStyle(.quaternary)
+        let fill      = isEnabled ? AnyShapeStyle(.tint) : AnyShapeStyle(.quaternary)
         return Button(action: isAnswering ? stop : send) {
             Image(systemName: isAnswering ? "stop.fill" : "arrow.up")
                 .font(.system(size: isAnswering ? 11 : 13, weight: .bold))
@@ -155,8 +145,6 @@ public struct ComposerBar: View {
                 .contentShape(Circle())
         }
         .buttonStyle(.plain)
-        .modifier(ActionGlass(isGlass: kind == .glass, tint: isEnabled ? .accentColor : nil, id: "circle",
-                              namespace: glass))
         .disabled(!isEnabled)
         .keyboardShortcut(isAnswering ? KeyboardShortcut(".", modifiers: .command)
                                       : KeyboardShortcut(.return, modifiers: .command))

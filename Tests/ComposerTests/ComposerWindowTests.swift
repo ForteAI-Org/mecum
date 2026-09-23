@@ -29,12 +29,9 @@ struct ComposerWindowTests {
         try await circleStaysPinned()
         try await circleBecomesStop()
         try await releaseButton()
-        if ProcessInfo.processInfo.environment["MECUM_SNAPSHOTS"] == "1" { try await glassOnScreen() }
     }
 
-    /// A key window whose bar is on the material surface: glass draws only in
-    /// the window server, and the circle is measured from what the view draws.
-    /// The layout is the same on every surface; the on-screen captures show the glass.
+    /// A key window whose bar is on the material surface, where the circle is measured from what the view draws.
     private func keyWindowHarness() async throws -> ComposerHarness {
         let harness = ComposerHarness(surface: .material, onScreen: true)
         harness.becomeKey()
@@ -210,37 +207,5 @@ struct ComposerWindowTests {
         #expect(!harness.holdsComputer)
         #expect(try #require(harness.drawnCircle()).frame == circle)
         #expect(abs(scrollView.convert(scrollView.bounds, to: nil).maxX - alone.maxX) <= 1)
-    }
-
-    /// The glass composites only in the window server, which `cacheDisplay`
-    /// never reaches, so the platform surface is also captured on screen with
-    /// `screencapture -l`. That needs Screen Recording for the process running
-    /// the tests; without it the capture fails and the test says so. Run only
-    /// with MECUM_SNAPSHOTS=1, like the offscreen snapshots.
-    private func glassOnScreen() async throws {
-        for width in [600, 900] as [CGFloat] {
-            for (theme, appearance) in [("light", NSAppearance.Name.aqua), ("dark", .darkAqua)] {
-                for state in ComposerSnapshotTests.states {
-                    let harness = ComposerHarness(width: width, height: 320, appearance: appearance, onScreen: true,
-                                                  transcript: true)
-                    defer { harness.close() }
-                    harness.becomeKey()
-                    harness.focus()
-                    state.set(harness)
-                    // Long enough for the release button's morph to finish before the capture.
-                    for _ in 0..<10 { try await harness.settle() }
-                    let window  = try #require(harness.window)
-                    let name    = "composer-\(state.name)-\(Int(width))-\(theme)-onscreen.png"
-                    let file    = try ComposerSnapshotTests.directory.appending(path: name)
-                    let capture = Process()
-                    capture.executableURL = URL(filePath: "/usr/sbin/screencapture")
-                    capture.arguments     = ["-x", "-o", "-l", "\(window.windowNumber)", file.path]
-                    try capture.run()
-                    capture.waitUntilExit()
-                    #expect(capture.terminationStatus == 0)
-                    print("snapshot: \(file.path)")
-                }
-            }
-        }
     }
 }
