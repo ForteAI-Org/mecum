@@ -53,6 +53,8 @@ struct TeamSidebarView: View {
                 WorkerRowView(row: row, isCompact: isCompact, isSelected: team.selection == row.id,
                               isFocused: isListFocused && appearsActive)
                     .tag(row.id)
+                    // A little more room between the title and the first block than between blocks.
+                    .padding(.top, row.id == team.rows.first?.id ? 5 : 0)
                     .contextMenu {
                         WorkerCommands(worker: row.worker, team: team)
                     }
@@ -74,6 +76,8 @@ struct TeamSidebarView: View {
         .onGeometryChange(for: Bool.self) { proxy in
             ShellMetrics.showsCompactTiles(sidebarWidth: proxy.size.width)
         } action: { isCompact in
+            // At once, so the sidebar's minimum width never moves mid-change: an animated title and
+            // footer made the split resize it back and forth until AppKit gave up on its constraints.
             self.isCompact = isCompact
         }
         .safeAreaBar(edge: .top, spacing: 0) { header }

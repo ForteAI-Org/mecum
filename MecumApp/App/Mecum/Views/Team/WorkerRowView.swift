@@ -33,59 +33,59 @@ struct WorkerRowView: View {
 
     private var isEmphasized: Bool { isSelected && isFocused }
 
+    @Environment(\.accessibilityReduceMotion)
+    private var reducesMotion
+
     var body: some View {
-        Group {
-            if isCompact { tile } else { line }
-        }
-        .frame(maxWidth: .infinity, alignment: isCompact ? .center : .leading)
-        .background { SidebarBlock(isSelected: isSelected, isEmphasized: isEmphasized) }
-        .padding(.vertical, SidebarBlock.spacing / 2)
-        .listRowInsets(EdgeInsets())
-        .help(isCompact ? "\(row.name), \(row.subtitle)" : row.name)
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(row.accessibilityLabel)
+        content
+            .frame(maxWidth: .infinity, alignment: isCompact ? .center : .leading)
+            .background { SidebarBlock(isSelected: isSelected, isEmphasized: isEmphasized) }
+            .padding(.vertical, SidebarBlock.spacing / 2)
+            .listRowInsets(EdgeInsets())
+            .help(isCompact ? "\(row.name), \(row.subtitle)" : row.name)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(row.accessibilityLabel)
     }
 
-    private var line: some View {
-        HStack(spacing: 10) {
-            MascotView(appearance: row.worker.appearance, size: 28)
+    /// One layout that is a line in the full sidebar and a tile in the compact
+    /// one. The mascot, the name and the indicator are the same views in both,
+    /// so turning compact moves and resizes them rather than swapping one row for another.
+    private var content: some View {
+        let layout = isCompact ? AnyLayout(VStackLayout(spacing: 4)) : AnyLayout(HStackLayout(spacing: 10))
+        return layout {
+            MascotView(appearance: row.worker.appearance, size: isCompact ? 32 : 28)
+                .overlay(alignment: .topTrailing) {
+                    if isCompact { indicator.offset(x: 7, y: -4) }
+                }
 
-            VStack(alignment: .leading, spacing: 1) {
+            VStack(alignment: isCompact ? .center : .leading, spacing: 1) {
                 Text(row.name)
-                    .fontWeight(.medium)
+                    .font(isCompact ? .caption : .body)
+                    .fontWeight(isCompact ? .regular : .medium)
                     .foregroundStyle(isEmphasized ? AnyShapeStyle(.white) : AnyShapeStyle(.primary))
                     .lineLimit(1)
                     .truncationMode(.tail)
-                Text(row.subtitle)
-                    .font(.subheadline)
-                    .foregroundStyle(isEmphasized ? AnyShapeStyle(.white.opacity(0.85)) : AnyShapeStyle(.secondary))
-                    .lineLimit(1)
-                    .truncationMode(.tail)
+                if !isCompact {
+                    Text(row.subtitle)
+                        .font(.subheadline)
+                        .foregroundStyle(isEmphasized ? AnyShapeStyle(.white.opacity(0.85)) : AnyShapeStyle(.secondary))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .transition(.opacity)
+                }
             }
 
-            Spacer(minLength: 4)
-
-            indicator
-        }
-        .padding(.vertical, 8)
-        .padding(.horizontal, SidebarBlock.contentInset - SidebarBlock.listContentInset)
-        .frame(minHeight: 48)
-    }
-
-    private var tile: some View {
-        VStack(spacing: 4) {
-            MascotView(appearance: row.worker.appearance, size: 32)
-                .overlay(alignment: .topTrailing) {
-                    indicator.offset(x: 7, y: -4)
-                }
-            Text(row.name)
-                .font(.caption)
-                .foregroundStyle(isEmphasized ? AnyShapeStyle(.white) : AnyShapeStyle(.primary))
-                .lineLimit(1)
-                .truncationMode(.tail)
+            if !isCompact {
+                Spacer(minLength: 4)
+                indicator
+            }
         }
         .padding(.top, 8)
-        .padding(.bottom, 7)
+        .padding(.bottom, isCompact ? 7 : 8)
+        .padding(.horizontal, isCompact ? 0 : SidebarBlock.contentInset - SidebarBlock.listContentInset)
+        .frame(minHeight: isCompact ? nil : 48)
+        // Only the row's own parts move, the mascot and name gliding into the tile and back.
+        .animation(reducesMotion ? nil : .smooth(duration: 0.3), value: isCompact)
     }
 
     /// The attention mark when a turn failed or stopped unseen, else the unread
