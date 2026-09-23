@@ -13,6 +13,7 @@ import FileKnowledge
 import Foundation
 import HIDActuation
 import Memory
+import OSLog
 import SeatDriving
 import WindowServerListing
 import WorkspaceActivation
@@ -48,7 +49,7 @@ public struct EngineRuntime {
         store = FileKnowledgeStore(
             directory  : knowledgeDirectory,
             clock      : { Date() },
-            diagnostics: { FileHandle.standardError.write(Data(($0 + "\n").utf8)) }
+            diagnostics: { Logger(subsystem: "dev.forte.Mecum", category: "Knowledge").error("\($0, privacy: .private)") }
         )
         memory = BrainMemory(store: store, clock: { Date() })
     }

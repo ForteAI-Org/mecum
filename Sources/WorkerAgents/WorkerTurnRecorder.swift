@@ -6,6 +6,7 @@
 //
 
 import ChatCore
+import CLIProviders
 import Foundation
 import ModelTransports
 import Workspace
@@ -24,6 +25,10 @@ import Workspace
 /// `executionFailed` carrying the reason, or `executionCancelled` carrying the
 /// interruption note. A failed or stopped message is marked interrupted, and
 /// what arrived before stays. Nothing here runs the agent a second time.
+///
+/// The agent child's identity is recorded as `agentProcessStarted`, so that a
+/// turn a crash cut short can be ended, and its child stopped, at the next
+/// launch (`endTurnsLeftUnfinished`).
 @MainActor
 public final class WorkerTurnRecorder {
 
@@ -36,6 +41,41 @@ public final class WorkerTurnRecorder {
 
     /// The note a stopped turn leaves, word for word what `mecum chat` writes.
     public static let interruptedNote = "Interrupted. Inspect the current app state before continuing."
+
+    /// The reason a turn that an earlier launch left without an ending fails with.
+    public static let closedDuringTurnReason = "Mecum closed during this turn, so it did not finish and was "
+        + "not run again. Inspect the current app state before continuing."
+
+    /// What `endTurnsLeftUnfinished` did: the executions it ended and the pids
+    /// of the agent children it stopped.
+    public struct Recovery: Sendable, Equatable {
+        public let endedExecutions : [UUID]
+        public let stoppedProcesses: [Int32]
+    }
+
+    /// Ends every turn an earlier launch left without an ending, then stops
+    /// each one's agent child when it is provably the child that turn spawned
+    /// and it outlived the app (§18.4). Call it before any turn starts.
+    ///
+    /// The ending is `WorkspaceStore.endExecutionsLeftUnfinished` with
+    /// `closedDuringTurnReason`: the message reads interrupted, the replies
+    /// stay, and nothing is run again. A second launch finds nothing to do.
+    /// Throws the first store read or payload decoding that failed, after the
+    /// turns are ended.
+    @discardableResult
+    public static func endTurnsLeftUnfinished(in store: WorkspaceStore, workspaceID: UUID) async throws -> Recovery {
+        let ended = try await store.endExecutionsLeftUnfinished(reason: closedDuringTurnReason, workspace: workspaceID)
+        var stopped: [Int32] = []
+        for execution in ended {
+            for event in try await store.events(matching: EventQuery(scope: .subject(execution)))
+            where event.type == .agentProcessStarted {
+                guard let payload = event.payload else { continue }
+                let identity = try JSONDecoder().decode(ChildProcessIdentity.self, from: payload)
+                if identity.endIfOrphaned() { stopped.append(identity.pid) }
+            }
+        }
+        return Recovery(endedExecutions: ended, stoppedProcesses: stopped)
+    }
 
     private let store         : WorkspaceStore
     private let workspaceID   : UUID
@@ -153,6 +193,10 @@ public final class WorkerTurnRecorder {
             return
         case .tool(let text):
             try await append(.toolActivity, subject: execution, text: text)
+        case .processStarted(let identity):
+            let encoded = try JSONEncoder().encode(identity)
+            try await append(.agentProcessStarted, subject: execution, text: String(decoding: encoded, as: UTF8.self))
+            return
         case .provider(.session(let id)):
             guard id != state.session else { return }
             try await store.update(conversation: conversationID, .providerSession(provider: provider, id: id))

@@ -66,7 +66,7 @@ struct WorkerDesktopThroughBrokerTests {
             switch event {
             case .tool(let text):                 tools.append(text)
             case .provider(.assistant(let text)): replies.append(text)
-            case .provider:                       break
+            case .provider, .processStarted:      break
             }
         }
         do {

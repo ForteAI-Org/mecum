@@ -563,7 +563,8 @@ final class SeatDriver {
         let outcome = try await mapped {
             try await seat.withContextMenu(openedAt: location, observation: observation, turn: turn) { interaction in
                 note = await Self.choose(item, in: interaction, openedFrom: parent)
-                Self.log.info("contextual menu, chose: \(note, privacy: .public)")
+                // The note quotes the menu's own titles, which are the app's content (§15.5).
+                Self.log.info("contextual menu, chose: \(note, privacy: .private)")
             }
         }
         return MenuChoice(

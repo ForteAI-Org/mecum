@@ -28,9 +28,13 @@ final class WorkspaceLaunch {
     /// Why the store is not open, nil while it is or before the attempt.
     private(set) var failure: String?
 
-    /// Where the store lives beside the kit's other directories: MECUM_APP_SUPPORT_DIR when set,
-    /// and a temporary one for a snapshot or window check run that names none, so those runs
-    /// never open the person's workspace. Worker workspaces and the Brain follow it.
+    /// Where the store lives beside the kit's other directories.
+    ///
+    /// `MECUM_APP_SUPPORT_DIR` replaces it for one launch, so a second copy of
+    /// the app can run without opening the store another process holds. A
+    /// snapshot or window check run that names none gets a temporary one, so
+    /// those runs never open the person's workspace. Worker workspaces and the
+    /// Brain follow it.
     static var directory: URL {
         if let override = ProcessInfo.processInfo.environment["MECUM_APP_SUPPORT_DIR"], !override.isEmpty {
             return URL(filePath: override, directoryHint: .isDirectory)

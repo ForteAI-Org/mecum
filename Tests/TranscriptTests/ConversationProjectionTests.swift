@@ -275,4 +275,25 @@ struct ConversationProjectionTests {
         #expect(labels == ["Saved", "Waiting", "Sent", "Responding", "Completed", "Interrupted"])
         #expect(!labels.contains { $0.localizedCaseInsensitiveContains("read") || $0.localizedCaseInsensitiveContains("seen") })
     }
+
+    @Test("An event of a type this build does not know draws nothing and splits no tool run")
+    func unknownTypeIsSkipped() async throws {
+        let fixture = try await TranscriptFixture()
+        defer { fixture.discard() }
+        let execution = UUID()
+        try await fixture.say("Open the report", at: 0, delivery: .completed)
+        try await fixture.record(.executionStarted, subject: execution, at: 1)
+        try await fixture.record(.toolActivity, subject: execution, at: 2, text: "→ open {}")
+        let unknown = try await fixture.record(.unknown("taskHandedOff"), subject: execution, at: 3, text: "Nova")
+        try await fixture.record(.toolActivity, subject: execution, at: 4, text: "← open {}")
+        try await fixture.record(.executionCompleted, subject: execution, at: 5)
+
+        #expect(unknown.type == .unknown("taskHandedOff"))
+        let items = try await fixture.items()
+        let hidden: Set<TranscriptItem.ID> = [.event(unknown.id), .toolRun(unknown.id), .notice(unknown.id)]
+        #expect(!items.contains { hidden.contains($0.id) })
+        let runs = items.compactMap { if case .toolRun(let lines, _, _) = $0.kind { lines } else { nil } }
+        #expect(runs == [["→ open {}", "← open {}"]])
+        #expect(items.count == 4)
+    }
 }

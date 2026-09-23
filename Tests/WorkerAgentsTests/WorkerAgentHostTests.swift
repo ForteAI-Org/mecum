@@ -70,10 +70,13 @@ struct WorkerAgentHostTests {
         PY
         """)
         defer { remove(fixture) }
+        // Every name a provider this app talks to reads a key, token or endpoint from. The app itself
+        // puts none of them in its environment: `Keychain` values reach only `ProviderSettings`.
+        let secrets = ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "ANTHROPIC_BASE_URL", "CLAUDE_CODE_OAUTH_TOKEN",
+                       "OPENAI_API_KEY", "OPENAI_BASE_URL", "CODEX_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY",
+                       "OLLAMA_HOST", "OLLAMA_API_KEY"]
         var inherited = ProcessInfo.processInfo.environment
-        inherited["ANTHROPIC_API_KEY"] = "sk-ant-fake-0001"
-        inherited["OPENAI_API_KEY"]    = "sk-openai-fake-0002"
-        inherited["GEMINI_API_KEY"]    = "gemini-fake-0003"
+        for (index, name) in secrets.enumerated() { inherited[name] = "fake-000\(index)" }
         let turn = WorkerAgentHost.turn(
             prompt              : "p",
             provider            : .codex,
@@ -91,7 +94,7 @@ struct WorkerAgentHostTests {
             if case .assistant(let text) = event { reply = text }
         }
         let child = try #require(try JSONSerialization.jsonObject(with: Data(reply.utf8)) as? [String: String])
-        for key in ["ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY"] { #expect(child[key] == nil) }
+        for key in secrets { #expect(child[key] == nil) }
         #expect(!reply.contains("fake-000"))
         #expect(child["HOME"] == inherited["HOME"])
     }
@@ -198,7 +201,7 @@ struct WorkerAgentHostTests {
             case .tool(let text):                  tools.append(text)
             case .provider(.assistant(let text)):  replies.append(text)
             case .provider(.session(let id)):      sessions.append(id)
-            case .provider:                        break
+            case .provider, .processStarted:       break
             }
         }
         func turn(_ store: WorkspaceStore, _ host: WorkerAgentHost, _ worker: UUID, _ conversation: UUID,

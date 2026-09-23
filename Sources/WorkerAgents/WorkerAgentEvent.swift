@@ -6,6 +6,7 @@
 //
 
 import ChatCore
+import CLIProviders
 import Foundation
 
 /// WorkerAgentEvent is what one agent turn reports, in the order it happened:
@@ -18,4 +19,8 @@ public enum WorkerAgentEvent: Sendable, Equatable {
     /// One tool record, as `mecum chat` prints it: the call with its
     /// arguments, then its result or its error.
     case tool(String)
+
+    /// The provider child the turn spawned, before its first event. It is
+    /// recorded so a launch after a crash can end a child left running.
+    case processStarted(ChildProcessIdentity)
 }

@@ -76,7 +76,12 @@ public struct NewEvent: Sendable, Hashable {
     /// The new attempt's ending would otherwise carry the old attempt's key,
     /// collapse onto it and be lost without a trace.
     var deduplicationKey: String {
-        type.isTerminal ? "terminal:\(subjectID.uuidString)" : id.uuidString
+        type.isTerminal ? Self.terminalKey(of: subjectID) : id.uuidString
+    }
+
+    /// The key every terminal event about `subject` carries, whichever way it ends.
+    static func terminalKey(of subject: UUID) -> String {
+        "terminal:\(subject.uuidString)"
     }
 }
 

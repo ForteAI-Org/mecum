@@ -153,6 +153,13 @@ final class TeamModel {
 
     func load() async {
         do {
+            // The first load precedes every turn here: a turn a crash left unfinished ends first (§18.4).
+            try await WorkerTurnRecorder.endTurnsLeftUnfinished(in: store, workspaceID: Self.workspaceID)
+        } catch {
+            problem = "A turn left unfinished when Mecum last closed could not be marked interrupted. "
+                + describe(error)
+        }
+        do {
             let everyone = try await store.workers(includingArchived: true)
             active   = everyone.filter { !$0.isArchived }
             archived = everyone.filter(\.isArchived)

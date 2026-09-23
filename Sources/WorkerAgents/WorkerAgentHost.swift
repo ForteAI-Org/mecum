@@ -148,7 +148,9 @@ public final class WorkerAgentHost {
         do {
             // A stop during `start` found no child to interrupt; it ends the turn here instead.
             if isStopRequested { throw CancellationError() }
-            try await provider.run(turn, executable: executable) { event in onEvent(.provider(event)) }
+            try await provider.run(turn, executable: executable, onStart: { onEvent(.processStarted($0)) }) { event in
+                onEvent(.provider(event))
+            }
         } catch {
             router.pause()
             await router.drain()

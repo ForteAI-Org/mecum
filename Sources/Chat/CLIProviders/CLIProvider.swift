@@ -29,9 +29,12 @@ public final class CLIProvider {
         }
     }
 
+    /// `onStart` receives the child's identity once it is spawned, before any event, so a caller
+    /// can record it and a later launch can end a child the app did not outlive (§18.4).
     public func run(
         _ turn: ProviderTurn,
         executable: URL,
+        onStart: @MainActor (ChildProcessIdentity) -> Void = { _ in },
         onEvent: @escaping @MainActor (ProviderEvent) throws -> Void
     ) async throws {
         guard process == nil else { throw failure("A provider turn is already running.") }
@@ -57,6 +60,8 @@ public final class CLIProvider {
         try child.run()
         process = child
         defer { process = nil }
+        // A child that has already exited has no identity to record, and nothing to end later.
+        if let identity = ChildProcessIdentity(running: child.processIdentifier) { onStart(identity) }
 
         let stdout = Self.chunks(output.fileHandleForReading)
         let stderr = Self.chunks(errors.fileHandleForReading)

@@ -129,6 +129,7 @@ extension WorkspaceStore {
         )
         modelContext.insert(execution)
         try saveOrRollBack()
+        startedHere.insert(execution.id)
         return ExecutionSnapshot(execution)
     }
 

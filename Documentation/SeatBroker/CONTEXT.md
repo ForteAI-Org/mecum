@@ -91,3 +91,29 @@ A semantic click may carry a bounded `count`. The parser accepts `/click N`
 for one click and `/click N C` for `C` complete clicks, where `C` is within
 `InputCommand.maximumClickCount`. The driver remains the sole authority that
 constructs the individual input events and rejects invalid input counts.
+
+## After a crash
+
+A process that ends without `applicationShouldTerminate` (a crash, `kill -9`)
+skips every release the app does on Quit. What the next launch reconciles, and
+what it does not, as of 23 September 2026:
+
+- A worker's turn is ended at the next launch, before any turn starts: its
+  execution gets one `executionFailed`, the person's message reads interrupted,
+  the partial reply stays, and nothing is run again
+  (`WorkerTurnRecorder.endTurnsLeftUnfinished`). A turn that ended before its
+  message was updated gets the message its ending implies: completed for
+  `executionCompleted`, interrupted for any other ending.
+- The turn's agent child (`claude -p`, `codex exec`) is reparented to launchd
+  and keeps running until its next write to the pipe the app held, or longer if
+  it ignores `SIGPIPE`. Its pid, start time and executable are recorded when it
+  is spawned, and the next launch sends it `SIGTERM` only when all three still
+  match and its parent is launchd. A child spawned in the instant before that
+  record is written is not known to the next launch.
+- **Known limit.** A window a seat adopted stays where the window server leaves
+  it when the virtual display goes, and the display arrangement `SeatHost`
+  committed for the login session (`.forSession`) is put back only by
+  `SeatHost.stop`. Nothing records the
+  window's original frame or display to disk (`AdoptedWindow.originalFrame` is
+  in memory only), and nothing at launch looks for a window an earlier process
+  took. What the window server does with that window has not been measured.

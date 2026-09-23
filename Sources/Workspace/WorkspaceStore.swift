@@ -28,6 +28,14 @@ import SwiftData
 @ModelActor
 public actor WorkspaceStore {
 
+    /// Executions this instance started. They belong to this process, so
+    /// `endExecutionsLeftUnfinished` never ends one of them.
+    var startedHere: Set<UUID> = []
+
+    /// Set by the first `endExecutionsLeftUnfinished`, the only call that can
+    /// find anything: a later one would only scan again.
+    var hasEndedEarlierExecutions = false
+
     /// Opens the store in `directory` and returns the actor that owns it.
     ///
     /// The directory is the caller's decision: this module resolves no path of
