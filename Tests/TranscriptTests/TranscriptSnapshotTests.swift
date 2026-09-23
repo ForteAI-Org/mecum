@@ -80,8 +80,54 @@ struct TranscriptSnapshotTests {
                                  text: "The provider stopped with exit status 1.")
         try await fixture.say("Leave it for now.", at: 800, delivery: .savedLocally)
 
-        try await write(fixture, width: 600, appearance: .aqua,
-                        to: try directory.appending(path: "transcript-badges-600-light.png"))
+        for (name, appearance) in [("light", NSAppearance.Name.aqua), ("dark", .darkAqua)] {
+            try await write(fixture, width: 600, appearance: appearance,
+                            to: try directory.appending(path: "transcript-badges-600-\(name).png"))
+        }
+    }
+
+    @Test("Scrolled up while three messages arrive, then a change to a row already seen: both indicator pills")
+    func indicatorSnapshots() async throws {
+        let fixture = try await TranscriptFixture()
+        defer { fixture.discard() }
+        var waiting: [MessageSnapshot] = []
+        for index in 0..<30 {
+            let message = try await fixture.say("Message \(index), with a little more text to give it a line or two.",
+                                                at: Double(index) * 400, byWorker: index % 2 == 1,
+                                                delivery: index >= 26 ? .sentToBackend : .completed)
+            if index == 26 || index == 28 { waiting.append(message) }
+        }
+        for (name, appearance) in [("light", NSAppearance.Name.aqua), ("dark", .darkAqua)] {
+            let controller = TranscriptController(source: fixture.store)
+            let backdrop   = Backdrop(frame: NSRect(x: 0, y: 0, width: 600, height: 500))
+            backdrop.appearance = NSAppearance(named: appearance)
+            controller.view.frame = backdrop.bounds
+            backdrop.addSubview(controller.view)
+            let window = TranscriptFixture.offscreenWindow(for: backdrop, size: backdrop.frame.size)
+            defer { window.close() }
+            controller.bottomInset = 60
+            controller.open(fixture.conversation, workerName: "Atlas", appearance: TranscriptFixture.appearance,
+                            readingAnchor: nil, readingOffset: 0)
+            await controller.settle()
+            controller.setVisibleTop(400)
+            try await fixture.store.update(message: waiting.removeFirst().id, delivery: .completed)
+            controller.refresh()
+            await controller.settle()
+            backdrop.layoutSubtreeIfNeeded()
+            let updates = try directory.appending(path: "transcript-updates-600-\(name).png")
+            try Self.png(of: backdrop).write(to: updates)
+            print("snapshot: \(updates.path)")
+
+            for index in 0..<3 {
+                try await fixture.say("Arrived \(index) (\(name)).", at: 100_000 + Double(index), byWorker: true)
+            }
+            controller.refresh()
+            await controller.settle()
+            backdrop.layoutSubtreeIfNeeded()
+            let file = try directory.appending(path: "transcript-new-messages-600-\(name).png")
+            try Self.png(of: backdrop).write(to: file)
+            print("snapshot: \(file.path)")
+        }
     }
 
     @Test("A selection from the middle of one message to the middle of the next, across the header between")
@@ -227,6 +273,28 @@ struct TranscriptSnapshotTests {
         try await tool(fourth, "→ observe {\"session\":\"s\"}")
         try await tool(fourth, "← observe {\"scene\":\"…\"}")
         try await tool(fourth, "→ close_session {\"session\":\"s\"}")
+    }
+
+    @Test("Three messages selected as bubbles, the person's and two of the worker's, beside one that is not")
+    func bubbleSnapshots() async throws {
+        let fixture = try await TranscriptFixture()
+        defer { fixture.discard() }
+        try await fixture.say("Can you check this morning's build and tell me what failed?", at: 0)
+        try await fixture.say("The build finished at 07:42. Two bundles failed.", at: 10, byWorker: true)
+        try await fixture.say("The capture suite timed out once; the layout suite failed on a width.", at: 12,
+                              byWorker: true)
+        try await fixture.say("Rerun the capture suite first.", at: 20)
+
+        let chosen: @MainActor (TranscriptController) -> Void = { controller in
+            guard controller.rows.count >= 3 else { return }
+            controller.click(controller.rows[0].item.id, modifiers: [])
+            controller.click(controller.rows[2].item.id, modifiers: .shift)
+        }
+        for (name, appearance) in [("light", NSAppearance.Name.aqua), ("dark", .darkAqua)] {
+            try await write(fixture, width: 600, appearance: appearance,
+                            to: try directory.appending(path: "transcript-bubbles-600-\(name).png"),
+                            adjust: chosen)
+        }
     }
 
     // MARK: Drawing

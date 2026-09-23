@@ -9,10 +9,13 @@ import AppKit
 
 /// TranscriptCollectionView is the collection view with the transcript's
 /// keyboard: Up and Down move the focused row, Left and Right move through
-/// its actions (Copy block, a link), Return and Space run the focused one,
-/// Command C copies. Shift with Up or Down extends the selection by row,
-/// Shift Command A selects the focused message and Command A the loaded
-/// rows. Every one of them is a key, never a hover (§3.3, §12.5).
+/// its actions (Copy block, a link), Return runs the focused one, Space
+/// toggles the focused bubble and Escape clears the selection. Command C
+/// copies. Shift with Up or Down extends the selection, Shift Command A
+/// selects the focused message's text and Command A the loaded messages.
+/// Shift F10 or the context menu key opens the focused row's menu, and End or
+/// Command Down goes to the end. Every one of them is a key, never a hover
+/// (§3.3, §12.5).
 ///
 /// It decides nothing itself; each key calls the controller's closure.
 @MainActor
@@ -25,6 +28,10 @@ final class TranscriptCollectionView: NSCollectionView {
     var onExtend    : ((Int) -> Void)?
     var onSelectAll : (() -> Void)?
     var onSelectMessage: (() -> Void)?
+    var onContextMenu  : (() -> Void)?
+    var onScrollToEnd  : (() -> Void)?
+    var onToggle       : (() -> Void)?
+    var onClear        : (() -> Void)?
 
     override var acceptsFirstResponder: Bool { true }
 
@@ -35,16 +42,32 @@ final class TranscriptCollectionView: NSCollectionView {
             onSelectMessage?()
             return
         }
+        // Command C reaches here only when no menu item took it, as in a window without an Edit menu.
+        if modifiers.subtracting([.numericPad, .function]) == .command,
+           event.charactersIgnoringModifiers?.lowercased() == "c" {
+            onCopy?()
+            return
+        }
         switch event.keyCode {
+        case 109 where modifiers.contains(.shift), 110: onContextMenu?()
+        case 119, 125 where modifiers.contains(.command): onScrollToEnd?()
         case 126 where modifiers.contains(.shift): onExtend?(-1)
         case 125 where modifiers.contains(.shift): onExtend?(1)
         case 126: onMove?(-1)
         case 125: onMove?(1)
         case 123: onMoveAction?(-1)
         case 124: onMoveAction?(1)
-        case 36, 76, 49: onActivate?()
+        case 49: onToggle?()
+        case 53: onClear?()
+        case 36, 76: onActivate?()
         default: super.keyDown(with: event)
         }
+    }
+
+    /// A press that reaches the collection view itself is on empty space.
+    override func mouseDown(with event: NSEvent) {
+        onClear?()
+        super.mouseDown(with: event)
     }
 
     @objc
@@ -52,8 +75,8 @@ final class TranscriptCollectionView: NSCollectionView {
         onCopy?()
     }
 
-    /// Edit, Select All, which the first responder receives: the transcript's
-    /// loaded rows, never the collection view's own item selection.
+    /// Edit, Select All, which the first responder receives: the loaded
+    /// messages as bubbles, never the collection view's own item selection.
     override func selectAll(_ sender: Any?) {
         onSelectAll?()
     }

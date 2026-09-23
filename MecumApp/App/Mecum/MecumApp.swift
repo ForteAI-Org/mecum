@@ -17,7 +17,9 @@ struct MecumApp: App {
     @NSApplicationDelegateAdaptor(SeatReleasingDelegate.self) private var delegate
 
     /// A snapshot or window check run, which draws its own windows and quits.
-    static var isCheckRun: Bool { WindowSnapshots.isRequested || WindowResizeCheck.isRequested }
+    static var isCheckRun: Bool {
+        WindowSnapshots.isRequested || WindowResizeCheck.isRequested || TranscriptCopyCheck.isRequested
+    }
 
     init() {
         // A restored team window would open the person's workspace; a snapshot run must not.
@@ -88,6 +90,8 @@ final class SeatReleasingDelegate: NSObject, NSApplicationDelegate {
             Task { await WindowSnapshots.writeAndQuit() }
         } else if WindowResizeCheck.isRequested {
             Task { await WindowResizeCheck.runAndQuit() }
+        } else if TranscriptCopyCheck.isRequested {
+            Task { await TranscriptCopyCheck.runAndQuit() }
         }
     }
 

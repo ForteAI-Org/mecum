@@ -42,6 +42,11 @@ import Workspace
 /// the recycler reuses while it runs. It survives an update to a row it
 /// spans and clamps when one of its rows goes (`TranscriptSelection.kept`).
 ///
+/// Whole messages can be selected as bubbles, Finder style, beside the text
+/// selection: a click selects one, Command adds or removes one, Shift takes
+/// the range from the anchor. The bubble selection is message ids, so it
+/// survives recycling, paging and updates; the two selections never coexist.
+///
 /// The window pages at both ends as the reader nears one, and drops what is
 /// far past the other (`TranscriptWindow.messageLimit`). `reveal(message:)`
 /// opens a window around any message without reading the pages between.
@@ -61,7 +66,27 @@ public final class TranscriptController: NSObject {
 
     public private(set) var isEmpty = true
     public private(set) var newActivity: NewActivity? {
-        didSet { showIndicator() }
+        didSet {
+            if newActivity == nil { newMessageCount = 0 }
+            showIndicator()
+        }
+    }
+
+    /// Messages that arrived below the reader since it was last at the end.
+    public private(set) var newMessageCount = 0
+
+    /// Points at the bottom of the view that something floating covers, such
+    /// as the composer. The last row scrolls clear of it, the end counts from
+    /// above it and the new activity indicator sits over it. The host sets it.
+    public var bottomInset: CGFloat = 0 {
+        didSet { if bottomInset != oldValue { applyInsets(previousTop: topInset) } }
+    }
+
+    /// Points at the top of the view that a floating header covers. The oldest
+    /// row scrolls clear of it, and the reading position, the anchor kept
+    /// across updates and a revealed message all count from below it.
+    public var topInset: CGFloat = 0 {
+        didSet { if topInset != oldValue { applyInsets(previousTop: oldValue) } }
     }
 
     /// Why the last read did not apply, in a sentence. Nil once one applies.
@@ -82,13 +107,19 @@ public final class TranscriptController: NSObject {
     @ObservationIgnored public private(set) var lastUpdate      : TranscriptUpdate?
     @ObservationIgnored public private(set) var viewUpdateCount = 0
 
+    /// Shows a menu the keyboard opened at a point in a view; a test records it instead.
+    @ObservationIgnored var presentsMenu: (NSMenu, CGPoint, NSView) -> Void = { menu, point, view in
+        menu.popUp(positioning: nil, at: point, in: view)
+    }
+
     @ObservationIgnored private let source        : any ConversationWindowSource
     @ObservationIgnored private let pipeline      : any MessageContentPipeline
     @ObservationIgnored private let pasteboard    : NSPasteboard
     @ObservationIgnored private let scrollView    = NSScrollView()
     @ObservationIgnored let collectionView        = TranscriptCollectionView()
     @ObservationIgnored private let layout        = TranscriptLayout()
-    @ObservationIgnored private let indicator     = NSButton()
+    @ObservationIgnored let indicator             = NSButton()
+    @ObservationIgnored private var indicatorBottom: NSLayoutConstraint?
 
     @ObservationIgnored private var conversationID: UUID?
     @ObservationIgnored private var window        : TranscriptWindow?
@@ -99,6 +130,9 @@ public final class TranscriptController: NSObject {
     @ObservationIgnored private var workerName    = ""
     @ObservationIgnored private var avatar        : NSImage?
     @ObservationIgnored private(set) var textSelection: TranscriptSelection?
+    @ObservationIgnored private(set) var bubbleSelection: Set<UUID> = []
+    @ObservationIgnored private var bubbleAnchor  : UUID?
+    @ObservationIgnored private var bubbleBase    : Set<UUID> = []
     @ObservationIgnored private var focusedAction : (id: TranscriptItem.ID, action: RowAction)?
     @ObservationIgnored private var chain         : Task<Void, Never>?
     @ObservationIgnored private var flush         : Task<Void, Never>?
@@ -150,6 +184,7 @@ public final class TranscriptController: NSObject {
                 self.avatar      = MascotImages.image(for: appearance, size: RowGeometry.avatarSide)
                 self.expanded    = []
                 self.textSelection = nil
+                self.setBubbles([], anchor: nil)
                 self.focusedAction = nil
                 self.newActivity = nil
                 let position = readingAnchor.map { ScrollAnchor(itemID: .message($0), offset: readingOffset) }
@@ -211,8 +246,9 @@ public final class TranscriptController: NSObject {
             guard fresh.isAtNewest else {
                 // The newest end is not loaded: nothing to apply, only the indicator to raise.
                 self.window = fresh
-                let arrived = fresh.newestSequence > window.newestSequence
-                newActivity = arrived ? .messages : newActivity ?? .statusChanges
+                let arrived = max(0, fresh.newestSequence - window.newestSequence)
+                newMessageCount += arrived
+                newActivity = arrived > 0 ? .messages : newActivity ?? .statusChanges
                 return
             }
             await apply(fresh, mode: .live)
@@ -433,9 +469,13 @@ public final class TranscriptController: NSObject {
         collectionView.onMoveAction = { [weak self] step in self?.moveActionFocus(by: step) }
         collectionView.onActivate = { [weak self] in self?.activateFocused() }
         collectionView.onCopy     = { [weak self] in self?.copySelection() }
-        collectionView.onExtend   = { [weak self] step in self?.extendSelection(byRow: step) }
+        collectionView.onExtend   = { [weak self] step in self?.extend(by: step) }
         collectionView.onSelectAll     = { [weak self] in self?.selectAll() }
+        collectionView.onToggle        = { [weak self] in self?.toggleFocusedBubble() }
+        collectionView.onClear         = { [weak self] in self?.clearSelections() }
         collectionView.onSelectMessage = { [weak self] in self?.selectFocusedMessage() }
+        collectionView.onContextMenu   = { [weak self] in self?.showMenuForFocusedRow() }
+        collectionView.onScrollToEnd   = { [weak self] in self?.scrollToBottom() }
 
         scrollView.documentView          = collectionView
         scrollView.hasVerticalScroller   = true
@@ -444,11 +484,20 @@ public final class TranscriptController: NSObject {
         scrollView.contentView.postsBoundsChangedNotifications = true
         scrollView.translatesAutoresizingMaskIntoConstraints = false
 
-        indicator.bezelStyle = .push
-        indicator.isHidden   = true
-        indicator.target     = self
-        indicator.action     = #selector(indicatorPressed)
+        indicator.bezelStyle    = .push
+        indicator.controlSize   = .large
+        indicator.image         = NSImage(systemSymbolName: "arrow.down", accessibilityDescription: nil)
+        indicator.imagePosition = .imageLeading
+        indicator.isHidden      = true
+        indicator.target        = self
+        indicator.action        = #selector(indicatorPressed)
+        indicator.toolTip       = "Go to the end (End or Command Down Arrow)"
         indicator.translatesAutoresizingMaskIntoConstraints = false
+        let shadow = NSShadow()
+        shadow.shadowColor      = NSColor.black.withAlphaComponent(0.25)
+        shadow.shadowBlurRadius = 8
+        shadow.shadowOffset     = NSSize(width: 0, height: -2)
+        indicator.shadow        = shadow
 
         view.addSubview(scrollView)
         view.addSubview(indicator)
@@ -458,8 +507,10 @@ public final class TranscriptController: NSObject {
             scrollView.topAnchor.constraint(equalTo: view.topAnchor),
             scrollView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
             indicator.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-            indicator.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -12),
         ])
+        let indicatorBottom = indicator.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -12)
+        indicatorBottom.isActive = true
+        self.indicatorBottom     = indicatorBottom
 
         let center = NotificationCenter.default
         observers.append(center.addObserver(forName: NSView.boundsDidChangeNotification,
@@ -489,9 +540,11 @@ public final class TranscriptController: NSObject {
             selection : selectedRange(ofRow: index)
         )
         cell.rowView.focusedAction = focusedAction?.id == id ? focusedAction?.action : nil
+        cell.rowView.isBubbleSelected = row.item.messageID.map(bubbleSelection.contains) ?? false
         cell.rowView.onPointer  = { [weak self] phase, location in self?.pointer(phase, at: location) }
         cell.rowView.onActivate = { [weak self] in self?.toggle(id) }
         cell.rowView.onAction   = { [weak self] action in self?.perform(action, in: id) }
+        cell.rowView.onMenu     = { [weak self] block, offset in self?.menu(for: id, block: block, offset: offset) }
     }
 
     private func reconfigureVisible(_ ids: Set<TranscriptItem.ID>) {
@@ -504,9 +557,15 @@ public final class TranscriptController: NSObject {
         }
     }
 
+    /// Plays the entrance on rows that arrived below every row already shown.
+    /// A row inserted above one that stays is history, not an arrival.
     private func playEntrances(_ update: TranscriptUpdate) {
+        let inserted = Set(update.inserted)
+        let lastKept = rows.indices.last { !inserted.contains($0) } ?? -1
+        let arrivals = update.inserted.filter { $0 > lastKept }
+        guard !arrivals.isEmpty else { return }
         let reduces = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
-        for index in update.inserted {
+        for index in arrivals {
             guard let cell = collectionView.item(at: IndexPath(item: index, section: 0)) as? TranscriptCell
             else { continue }
             cell.playEntrance(reducesMotion: reduces)
@@ -523,6 +582,24 @@ public final class TranscriptController: NSObject {
     var isAtBottom: Bool {
         let clip = scrollView.contentView.bounds
         return layout.collectionViewContentSize.height - clip.maxY < 8
+    }
+
+    /// Lays out again for new insets, keeping the end in view or the row read below the header.
+    private func applyInsets(previousTop: CGFloat) {
+        let wasAtBottom = isAtBottom
+        let frames = zip(rows.map(\.item.id), layout.frames).map { (id: $0, frame: $1) }
+        let anchor = ScrollAnchor.capture(frames: frames,
+                                          visibleTop: scrollView.contentView.bounds.minY + max(0, previousTop))
+        layout.topInset           = max(0, topInset)
+        layout.bottomInset        = max(0, bottomInset)
+        indicatorBottom?.constant = -(max(0, bottomInset) + 12)
+        layout.invalidateLayout()
+        layoutNow()
+        if wasAtBottom {
+            setVisibleTop(.greatestFiniteMagnitude)
+        } else if let top = anchor?.visibleTop(in: frameMap()) {
+            setVisibleTop(top)
+        }
     }
 
     /// The content height, which a snapshot sizes its view to.
@@ -544,15 +621,17 @@ public final class TranscriptController: NSObject {
 
     func captureAnchor() -> ScrollAnchor? {
         let frames = zip(rows.map(\.item.id), layout.frames).map { (id: $0, frame: $1) }
-        return ScrollAnchor.capture(frames: frames, visibleTop: scrollView.contentView.bounds.minY)
+        return ScrollAnchor.capture(frames: frames, visibleTop: visibleTop)
     }
 
-    var visibleTop: CGFloat { scrollView.contentView.bounds.minY }
+    /// The first y the reader sees: the viewport's top, below `topInset`.
+    var visibleTop: CGFloat { scrollView.contentView.bounds.minY + max(0, topInset) }
 
+    /// Scrolls so `top` sits just below `topInset`, within the content.
     func setVisibleTop(_ top: CGFloat) {
         let clip    = scrollView.contentView
         let maximum = max(0, layout.collectionViewContentSize.height - clip.bounds.height)
-        clip.scroll(to: NSPoint(x: 0, y: min(max(0, top), maximum)))
+        clip.scroll(to: NSPoint(x: 0, y: min(max(0, top - max(0, topInset)), maximum)))
         scrollView.reflectScrolledClipView(clip)
     }
 
@@ -576,7 +655,7 @@ public final class TranscriptController: NSObject {
         restingReport = Task {
             do { try await Task.sleep(for: .milliseconds(400)) } catch { return }
             let frames = zip(rows.map(\.item.id), layout.frames).map { (id: $0, frame: $1) }
-            let anchor = ScrollAnchor.capture(frames: frames, visibleTop: scrollView.contentView.bounds.minY) {
+            let anchor = ScrollAnchor.capture(frames: frames, visibleTop: visibleTop) {
                 if case .message = $0 { true } else { false }
             }
             guard case .message(let id)? = anchor?.itemID, let anchor else {
@@ -589,19 +668,29 @@ public final class TranscriptController: NSObject {
 
     private func noteActivity(_ update: TranscriptUpdate, followed: Bool) {
         guard !followed else { return }
-        let arrivedMessage = (update.inserted + update.replaced).contains { rows[$0].item.messageID != nil }
-        if arrivedMessage {
+        let arrived = (update.inserted + update.replaced).count { rows[$0].item.messageID != nil }
+        if arrived > 0 {
+            newMessageCount += arrived
             newActivity = .messages
         } else if !update.inserted.isEmpty || !update.changed.isEmpty, newActivity == nil {
             newActivity = .statusChanges
         }
     }
 
-    /// The indicator says which kind of activity arrived, and hides with it.
+    /// The indicator says which kind of activity arrived, and hides with it:
+    /// new messages are an accent pill with their count, a change to a row
+    /// already seen is a quieter one.
     private func showIndicator() {
-        indicator.title    = newActivity == .messages ? "New messages" : "Status changed"
+        switch newActivity {
+        case .messages:
+            indicator.title      = newMessageCount == 1 ? "1 new message" : "\(max(1, newMessageCount)) new messages"
+            indicator.bezelColor = .controlAccentColor
+        case .statusChanges, nil:
+            indicator.title      = "Updates"
+            indicator.bezelColor = nil
+        }
         indicator.isHidden = newActivity == nil
-        indicator.setAccessibilityLabel("New activity: \(indicator.title). Go to the end")
+        indicator.setAccessibilityLabel("\(indicator.title). Go to the end")
     }
 
     @objc
@@ -675,11 +764,15 @@ public final class TranscriptController: NSObject {
         }
     }
 
-    /// Copies the selected text, or the focused row when nothing is selected.
+    /// Copies the selected text, else the selected bubbles' source in reading
+    /// order, else the focused row.
     func copySelection() {
         let text: String
+        let bubbles = selectedBubbleRows
         if let selection = textSelection, !selection.isEmpty, let span = selection.span(in: rows) {
             text = span.text(in: rows)
+        } else if !bubbles.isEmpty {
+            text = bubbles.map(\.item.copyText).joined(separator: "\n\n")
         } else if let index = focusedIndex, rows.indices.contains(index) {
             text = rows[index].item.copyText
         } else {
@@ -697,9 +790,11 @@ public final class TranscriptController: NSObject {
         return selection.span(in: rows)?.range(ofRow: index, in: rows)
     }
 
-    /// Replaces the selection and redraws the rows on screen.
+    /// Replaces the text selection and redraws the rows on screen. A text
+    /// selection replaces any bubble selection.
     func select(_ selection: TranscriptSelection?) {
         textSelection = selection
+        if selection?.isEmpty == false, !bubbleSelection.isEmpty { bubbleSelection = []; bubbleBase = [] }
         showSelection()
     }
 
@@ -709,15 +804,100 @@ public final class TranscriptController: NSObject {
         for indexPath in collectionView.indexPathsForVisibleItems() where rows.indices.contains(indexPath.item) {
             guard let cell = collectionView.item(at: indexPath) as? TranscriptCell else { continue }
             cell.rowView.show(selection: selectedRange(ofRow: indexPath.item))
+            cell.rowView.isBubbleSelected = rows[indexPath.item].item.messageID.map(bubbleSelection.contains) ?? false
         }
     }
 
     private func pointer(_ phase: TranscriptRowView.PointerPhase, at windowLocation: NSPoint) {
         let point = collectionView.convert(windowLocation, from: nil)
         switch phase {
-        case .down(let clicks): beginSelection(at: point, clickCount: clicks)
-        case .drag:             extendSelection(to: point)
+        case .press:
+            // The row takes the press, so the collection view must take the keyboard or Copy goes elsewhere.
+            takeKeyboard()
+        case .dragStart:
+            beginSelection(at: point, clickCount: 1)
+        case .drag:
+            extendSelection(to: point)
+        case .click(let count, _) where count == 2:
+            beginSelection(at: point, clickCount: 2)
+        case .click(_, let modifiers):
+            guard let hit = selectionPoint(at: point) else { return }
+            click(hit.itemID, modifiers: modifiers)
         }
+    }
+
+    // MARK: Bubbles
+
+    /// The loaded rows whose message is selected as a bubble, in reading order.
+    var selectedBubbleRows: [PreparedRow] {
+        bubbleSelection.isEmpty ? [] : rows.filter { $0.item.messageID.map(bubbleSelection.contains) ?? false }
+    }
+
+    /// A click on the row `id`: alone it selects that message, with Command it
+    /// adds or removes it, with Shift it takes the messages from the anchor to
+    /// it, replacing the range an earlier Shift click from that anchor took.
+    func click(_ id: TranscriptItem.ID, modifiers: NSEvent.ModifierFlags) {
+        textSelection = nil
+        focus(id)
+        guard let index = rows.firstIndex(where: { $0.item.id == id }), let message = rows[index].item.messageID
+        else {
+            setBubbles([], anchor: nil)
+            return
+        }
+        if modifiers.contains(.shift), let anchor = bubbleAnchor,
+           let from = rows.firstIndex(where: { $0.item.messageID == anchor }) {
+            let range = rows[min(from, index)...max(from, index)].compactMap(\.item.messageID)
+            bubbleSelection = bubbleBase.union(range)
+            showSelection()
+        } else if modifiers.contains(.command) {
+            var chosen = bubbleSelection
+            if chosen.remove(message) == nil { chosen.insert(message) }
+            setBubbles(chosen, anchor: message)
+        } else {
+            setBubbles([message], anchor: message)
+        }
+    }
+
+    /// Replaces the bubble selection and the anchor a Shift click counts from.
+    private func setBubbles(_ chosen: Set<UUID>, anchor: UUID?) {
+        bubbleSelection = chosen
+        bubbleBase      = chosen
+        bubbleAnchor    = anchor
+        if !chosen.isEmpty { textSelection = nil }
+        showSelection()
+    }
+
+    /// Space: the focused message joins or leaves the bubble selection; on any
+    /// other row, or with one of its actions reached, it runs as Return does.
+    private func toggleFocusedBubble() {
+        guard let index = focusedIndex, rows.indices.contains(index), focusedAction?.id != rows[index].item.id,
+              rows[index].item.messageID != nil
+        else { return activateFocused() }
+        click(rows[index].item.id, modifiers: .command)
+    }
+
+    /// Escape, or a press on empty space: nothing stays selected.
+    private func clearSelections() {
+        textSelection = nil
+        setBubbles([], anchor: nil)
+    }
+
+    /// Shift with Up or Down extends a text selection by row when there is
+    /// one, and otherwise the bubble selection from the focused message.
+    private func extend(by step: Int) {
+        guard textSelection?.isEmpty != false else { return extendSelection(byRow: step) }
+        let messages = rows.indices.filter { rows[$0].item.messageID != nil }
+        guard !messages.isEmpty else { return }
+        guard !bubbleSelection.isEmpty, let focused = focusedIndex else {
+            let start = focusedIndex.flatMap { index in messages.first { $0 >= index } } ?? messages[messages.count - 1]
+            click(rows[start].item.id, modifiers: [])
+            reach(start)
+            return
+        }
+        let ahead = step > 0 ? messages.first { $0 > focused } : messages.last { $0 < focused }
+        guard let next = ahead else { return }
+        click(rows[next].item.id, modifiers: .shift)
+        reach(next)
     }
 
     /// Starts a selection at `point`, in the collection view's coordinates. A
@@ -761,11 +941,11 @@ public final class TranscriptController: NSObject {
         return .init(itemID: id, offset: cell.rowView.nearestCharacter(to: local))
     }
 
-    /// Command A inside the transcript: every loaded row, not the app.
+    /// Command A inside the transcript: every loaded message as a bubble, not
+    /// the app. Copying it gives the text a select all of the rows would.
     func selectAll() {
-        guard let first = rows.first, let last = rows.last else { return }
-        select(TranscriptSelection(anchor: .init(itemID: first.item.id, offset: 0),
-                                   focus : .init(itemID: last.item.id, offset: last.length)))
+        textSelection = nil
+        setBubbles(Set(rows.compactMap(\.item.messageID)), anchor: bubbleAnchor)
     }
 
     /// Selects the focused row's whole text.
@@ -808,6 +988,95 @@ public final class TranscriptController: NSObject {
         collectionView.selectionIndexPaths = [path]
         collectionView.scrollToItems(at: [path], scrollPosition: .nearestHorizontalEdge)
     }
+
+    private func takeKeyboard() {
+        guard let window = collectionView.window, window.firstResponder !== collectionView else { return }
+        window.makeFirstResponder(collectionView)
+    }
+
+    // MARK: Context menu
+
+    /// The menu for the row `id`: Copy when text is selected, the message's
+    /// own items, and Copy Code or the link's items for what lies under the
+    /// pointer. A press inside the selection keeps it; one outside drops it.
+    /// On a selected bubble the copy takes the whole bubble selection; on any
+    /// other row the bubble selection goes. `block` and `offset` are nil when
+    /// the keyboard opens the menu.
+    func menu(for id: TranscriptItem.ID, block: Int?, offset: Int?) -> NSMenu? {
+        guard let index = rows.firstIndex(where: { $0.item.id == id }) else { return nil }
+        let row = rows[index]
+        takeKeyboard()
+        focus(id)
+        if let offset, let selected = selectedRange(ofRow: index),
+           !(selected.location...NSMaxRange(selected)).contains(offset) {
+            select(nil)
+        }
+        if let message = row.item.messageID, !bubbleSelection.contains(message), !bubbleSelection.isEmpty {
+            setBubbles([], anchor: nil)
+        }
+        let bubbles = selectedBubbleRows
+
+        let menu = NSMenu()
+        func add(_ title: String, _ run: @escaping @MainActor () -> Void) {
+            let item = NSMenuItem(title: title, action: #selector(runMenuItem(_:)), keyEquivalent: "")
+            item.target            = self
+            item.representedObject = MenuAction(run: run)
+            menu.addItem(item)
+        }
+        if textSelection?.isEmpty == false {
+            add("Copy") { [weak self] in self?.copySelection() }
+        }
+        if bubbles.count > 1 {
+            add("Copy \(bubbles.count) Messages") { [weak self] in self?.copySelection() }
+        } else if row.item.messageID != nil {
+            add("Copy Message") { [weak self] in self?.put(row.item.copyText) }
+        }
+        if row.item.messageID != nil {
+            add("Select Message") { [weak self] in self?.click(id, modifiers: []) }
+        }
+        let actions = RowAction.actions(in: row.text)
+        if let block, actions.contains(.copyBlock(index: block)) {
+            add("Copy Code") { [weak self] in self?.perform(.copyBlock(index: block), in: id) }
+        }
+        let link = actions.first { action in
+            guard case .openLink(_, let linkBlock, let range) = action, linkBlock == block, let offset
+            else { return false }
+            return NSLocationInRange(offset - row.text.blockRanges[linkBlock].location, range)
+        }
+        if let link, case .openLink(let destination, _, _) = link {
+            if RowAction.openableURL(destination) != nil {
+                add("Open Link") { [weak self] in self?.perform(link, in: id) }
+            }
+            add("Copy Link") { [weak self] in self?.put(destination) }
+        }
+        return menu.items.isEmpty ? nil : menu
+    }
+
+    /// Shift F10 or the context menu key: the focused row's menu, under its surface.
+    private func showMenuForFocusedRow() {
+        guard let index = focusedIndex, rows.indices.contains(index),
+              let cell = collectionView.item(at: IndexPath(item: index, section: 0)) as? TranscriptCell,
+              let menu = menu(for: rows[index].item.id, block: nil, offset: nil)
+        else { return }
+        let surface = rows[index].geometry.surface
+        presentsMenu(menu, CGPoint(x: surface.minX, y: surface.maxY + 4), cell.rowView)
+    }
+
+    @objc
+    private func runMenuItem(_ sender: NSMenuItem) {
+        (sender.representedObject as? MenuAction)?.run()
+    }
+
+    private func put(_ text: String) {
+        pasteboard.clearContents()
+        pasteboard.setString(text, forType: .string)
+    }
+}
+
+/// MenuAction is what a context menu item runs, carried by the item.
+private final class MenuAction {
+    let run: @MainActor () -> Void
+    init(run: @escaping @MainActor () -> Void) { self.run = run }
 }
 
 // MARK: - Data source

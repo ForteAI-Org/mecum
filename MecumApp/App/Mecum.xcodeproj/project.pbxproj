@@ -15,6 +15,7 @@
 		000000000000000200000006 /* MecumMascots in Frameworks */ = {isa = PBXBuildFile; productRef = 000000000000000200000017 /* MecumMascots */; };
 		000000000000000200000007 /* MecumComposer in Frameworks */ = {isa = PBXBuildFile; productRef = 000000000000000200000018 /* MecumComposer */; };
 		000000000000000200000021 /* MecumTeamShell in Frameworks */ = {isa = PBXBuildFile; productRef = 000000000000000200000031 /* MecumTeamShell */; };
+		04975A2F3064044900FB69FD /* mecum in Frameworks */ = {isa = PBXBuildFile; productRef = 000000000000000200000015 /* mecum */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -46,6 +47,7 @@
 		000000000000000130000000 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			files = (
+				04975A2F3064044900FB69FD /* mecum in Frameworks */,
 				000000000000000200000001 /* SeatBroker in Frameworks */,
 				000000000000000200000002 /* ModelTransports in Frameworks */,
 				000000000000000200000003 /* MecumWorkspace in Frameworks */,
@@ -165,7 +167,10 @@
 				"$(TARGET_BUILD_DIR)/$(CONTENTS_FOLDER_PATH)/Helpers/mecum",
 			);
 			shellPath = /bin/sh;
-			shellScript = "exec \"$PROJECT_DIR/Scripts/embed-helper.sh\"\n";
+			shellScript = (
+				"exec \"$PROJECT_DIR/Scripts/embed-helper.sh\"",
+				"",
+			);
 		};
 /* End PBXShellScriptBuildPhase section */
 

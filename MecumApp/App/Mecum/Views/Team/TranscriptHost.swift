@@ -15,9 +15,14 @@ import Transcript
 /// its updates, and outlives any one pass of the SwiftUI body. The text size
 /// is the one View > Bigger and Smaller set, remembered for the app
 /// (`TextSizeCommands`), and a change relays out without reloading.
+/// `topInset` and `bottomInset` are the heights a floating header and
+/// composer cover at the top and bottom.
 struct TranscriptHost: NSViewRepresentable {
 
     let controller: TranscriptController
+
+    var topInset   : CGFloat = 0
+    var bottomInset: CGFloat = 0
 
     @AppStorage(TextSizeCommands.storageKey)
     private var bodyPointSize = Double(TranscriptStyle.actualSize.bodyPointSize)
@@ -42,5 +47,7 @@ struct TranscriptHost: NSViewRepresentable {
     private func applyStyle() {
         let style = TranscriptStyle(bodyPointSize: CGFloat(bodyPointSize))
         if controller.style != style { controller.style = style }
+        if controller.topInset != topInset { controller.topInset = topInset }
+        if controller.bottomInset != bottomInset { controller.bottomInset = bottomInset }
     }
 }

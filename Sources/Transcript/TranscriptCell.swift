@@ -40,7 +40,7 @@ final class TranscriptCell: NSCollectionViewItem {
         fade.fromValue = 0
         fade.toValue   = 1
         let group = CAAnimationGroup()
-        group.duration       = 0.15
+        group.duration       = 0.17
         group.timingFunction = CAMediaTimingFunction(name: .easeOut)
         if reducesMotion {
             group.animations = [fade]

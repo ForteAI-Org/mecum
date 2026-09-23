@@ -54,7 +54,7 @@ public enum DeliveryBadge: Sendable, Hashable {
     /// An SF Symbol name. Each badge has its own shape.
     public var symbolName: String {
         switch self {
-        case .interrupted: "exclamationmark.circle"
+        case .interrupted: "exclamationmark.circle.fill"
         case .notSent:     "clock"
         }
     }

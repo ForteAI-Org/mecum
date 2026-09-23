@@ -24,12 +24,16 @@ final class TranscriptRowView: NSView {
 
     typealias TextStack = (NSTextStorage, NSLayoutManager, NSTextContainer)
 
+    /// A press, then either a drag that selects text from where it began, or
+    /// a click that selects the bubble. A click never starts a text selection.
     enum PointerPhase {
-        case down(clickCount: Int)
+        case press
+        case dragStart
         case drag
+        case click(count: Int, modifiers: NSEvent.ModifierFlags)
     }
 
-    /// Called with a press or drag on the row's text and its window location.
+    /// Called with a press, drag or click on the row's bubble and its window location.
     var onPointer: ((PointerPhase, NSPoint) -> Void)?
 
     /// Called when the row's own action runs: a tool run expands or folds.
@@ -38,7 +42,20 @@ final class TranscriptRowView: NSView {
     /// Called when a click or VoiceOver runs one of the row's actions.
     var onAction: ((RowAction) -> Void)?
 
+    /// Asked for the row's context menu on a right or Control click, with the
+    /// block and the row offset of the character under the pointer, if any.
+    var onMenu: ((_ block: Int?, _ offset: Int?) -> NSMenu?)?
+
     var isFocusedRow = false { didSet { needsDisplay = true } }
+
+    /// True when the whole message is selected as a bubble: drawn lighter, and spoken as selected.
+    var isBubbleSelected = false {
+        didSet {
+            guard isBubbleSelected != oldValue else { return }
+            setAccessibilitySelected(isBubbleSelected)
+            needsDisplay = true
+        }
+    }
 
     /// The action the keyboard has reached inside the focused row, outlined.
     var focusedAction: RowAction? { didSet { needsDisplay = true } }
@@ -162,9 +179,10 @@ final class TranscriptRowView: NSView {
         switch RowGeometry.shape(of: row.item.kind) {
         case .bubble:
             let path = BubblePath.path(surface: surface, tail: geometry.tail)
-            (isPerson ? TranscriptColors.personBubble : TranscriptColors.neutralSurface).setFill()
+            let fill = isPerson ? TranscriptColors.personBubble : TranscriptColors.neutralSurface
+            bubbleFill(fill, isPerson: isPerson).setFill()
             path.fill()
-            if isFocusedRow { strokeFocus(path) }
+            if isFocusedRow, !isBubbleSelected { strokeFocus(path) }
 
         case .card:
             let path = NSBezierPath(roundedRect: surface, xRadius: 8, yRadius: 8)
@@ -184,6 +202,14 @@ final class TranscriptRowView: NSView {
             let frame = geometry.text.insetBy(dx: -6, dy: -2)
             if isFocusedRow { strokeFocus(NSBezierPath(roundedRect: frame, xRadius: 4, yRadius: 4)) }
         }
+    }
+
+    /// A selected bubble is its own fill made lighter, with no border: toward
+    /// white on the accent, a step up on the neutral surface in either theme.
+    private func bubbleFill(_ fill: NSColor, isPerson: Bool) -> NSColor {
+        guard isBubbleSelected else { return fill }
+        let isDark = effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+        return fill.blended(withFraction: isPerson ? 0.28 : isDark ? 0.14 : 0.6, of: .white) ?? fill
     }
 
     /// Focus is an outline, so it reads without colour (§3.3).
@@ -235,10 +261,12 @@ final class TranscriptRowView: NSView {
         header.draw(at: CGPoint(x: isPerson ? frame.maxX - width : frame.minX, y: frame.minY))
     }
 
-    /// The badge's symbol, in the secondary label colour: its shape carries the meaning.
+    /// The badge's symbol: its shape carries the meaning, and a stopped or
+    /// failed turn's is also a red disc so it is seen; the unsent clock stays quiet.
     private func draw(_ badge: DeliveryBadge, in frame: CGRect) {
-        let configuration = NSImage.SymbolConfiguration(pointSize: frame.height, weight: .medium)
-            .applying(NSImage.SymbolConfiguration(paletteColors: [.secondaryLabelColor]))
+        let colors: [NSColor] = badge == .interrupted ? [.white, .systemRed] : [.secondaryLabelColor]
+        let configuration = NSImage.SymbolConfiguration(pointSize: frame.height, weight: .semibold)
+            .applying(NSImage.SymbolConfiguration(paletteColors: colors))
         guard let symbol = NSImage(systemSymbolName: badge.symbolName, accessibilityDescription: nil)?
             .withSymbolConfiguration(configuration)
         else { return }
@@ -282,7 +310,8 @@ final class TranscriptRowView: NSView {
             onAction?(.copyBlock(index: block))
             return
         }
-        guard let row, blockCharacter(at: point, boundary: true) != nil else {
+        guard let row, blockCharacter(at: point, boundary: true) != nil || row.geometry.surface.contains(point)
+        else {
             super.mouseDown(with: event)
             return
         }
@@ -292,28 +321,40 @@ final class TranscriptRowView: NSView {
         }
         pressLocation = event.locationInWindow
         didDrag       = false
-        onPointer?(.down(clickCount: event.clickCount), event.locationInWindow)
+        onPointer?(.press, event.locationInWindow)
     }
 
     /// Past the viewport's edge the drag scrolls it; the controller keeps the
     /// selection's far end on whichever row is then under the pointer.
     override func mouseDragged(with event: NSEvent) {
         guard let press = pressLocation else { return }
-        didDrag = didDrag || hypot(event.locationInWindow.x - press.x, event.locationInWindow.y - press.y) > 2
+        if !didDrag, hypot(event.locationInWindow.x - press.x, event.locationInWindow.y - press.y) > 2 {
+            didDrag = true
+            onPointer?(.dragStart, press)
+        }
+        guard didDrag else { return }
         autoscroll(with: event)
         onPointer?(.drag, event.locationInWindow)
     }
 
-    /// A click that did not drag, on a link, is the explicit action that opens it.
+    /// A click that did not drag opens the link under it, as its explicit
+    /// action, or else selects the bubble.
     override func mouseUp(with event: NSEvent) {
         defer { pressLocation = nil }
-        guard !didDrag, pressLocation != nil, let row,
-              let (block, offset) = blockCharacter(at: convert(event.locationInWindow, from: nil)),
-              let action = RowAction.actions(in: row.text).first(where: {
-                  if case .openLink(_, block, let range) = $0 { NSLocationInRange(offset, range) } else { false }
-              })
-        else { return }
-        onAction?(action)
+        guard !didDrag, pressLocation != nil, let row else { return }
+        if let (block, offset) = blockCharacter(at: convert(event.locationInWindow, from: nil)),
+           let action = RowAction.actions(in: row.text).first(where: {
+               if case .openLink(_, block, let range) = $0 { NSLocationInRange(offset, range) } else { false }
+           }) {
+            onAction?(action)
+            return
+        }
+        onPointer?(.click(count: event.clickCount, modifiers: event.modifierFlags), event.locationInWindow)
+    }
+
+    override func menu(for event: NSEvent) -> NSMenu? {
+        let hit = blockCharacter(at: convert(event.locationInWindow, from: nil))
+        return onMenu?(hit?.block, hit.map { ranges[$0.block].location + $0.offset })
     }
 
     override func accessibilityPerformPress() -> Bool {

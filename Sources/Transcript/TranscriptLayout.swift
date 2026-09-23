@@ -24,6 +24,11 @@ final class TranscriptLayout: NSCollectionViewLayout {
     var heights       : [CGFloat] = []
     var continuesGroup: [Bool]    = []
 
+    /// Room above the first row and below the last that a floating header
+    /// and composer cover, in points.
+    var topInset   : CGFloat = 0
+    var bottomInset: CGFloat = 0
+
     private(set) var frames: [CGRect] = []
     private var contentSize = NSSize.zero
 
@@ -33,7 +38,7 @@ final class TranscriptLayout: NSCollectionViewLayout {
         let width    = collectionView.enclosingScrollView?.contentView.bounds.width ?? collectionView.bounds.width
         let viewport = collectionView.enclosingScrollView?.contentView.bounds.height ?? 0
 
-        var y = Self.verticalInset
+        var y = Self.verticalInset + topInset
         var placed: [CGRect] = []
         placed.reserveCapacity(heights.count)
         for (index, height) in heights.enumerated() {
@@ -44,7 +49,7 @@ final class TranscriptLayout: NSCollectionViewLayout {
             placed.append(CGRect(x: 0, y: y, width: width, height: height))
             y += height
         }
-        let total = y + Self.verticalInset
+        let total = y + Self.verticalInset + bottomInset
         let lift  = max(0, viewport - total)
         frames      = lift > 0 ? placed.map { $0.offsetBy(dx: 0, dy: lift) } : placed
         contentSize = NSSize(width: width, height: max(total, viewport))
