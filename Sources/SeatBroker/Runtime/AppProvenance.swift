@@ -71,6 +71,16 @@ enum FinishOutcome: Sendable, Equatable {
 final class LaunchLedger {
     private var records: [pid_t: AppProvenance] = [:]
 
+    /// Asks the application `pid` to quit, for one a seat held and has finished with. The
+    /// controlled tests supply one that records the pid, so no process is touched.
+    let terminate: @MainActor (pid_t) -> Void
+
+    init(
+        terminate: @escaping @MainActor (pid_t) -> Void = { NSRunningApplication(processIdentifier: $0)?.terminate() }
+    ) {
+        self.terminate = terminate
+    }
+
     func record(_ provenance: AppProvenance, for pid: pid_t) {
         records[pid] = provenance
     }

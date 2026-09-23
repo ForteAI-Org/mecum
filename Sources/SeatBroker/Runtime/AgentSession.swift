@@ -178,6 +178,12 @@ public final class AgentSession {
         return ApplicationOpening.unseated(app.name, wasLaunched: wasLaunched, wasQuit: wasQuit)
     }
 
+    /// Records `pid` as the held application with the ledger's provenance, as `use` does before its
+    /// adoption, but adopts nothing. Only for the controlled tests, which have no display to adopt on.
+    func holdWithoutAdopting(_ pid: pid_t, name: String) {
+        held = HeldApp(pid: pid, name: name, provenance: ledger.provenance(of: pid))
+    }
+
     /// Finishes with the held application as its provenance says and keeps
     /// the seat and its display, so a session given back to the queue is
     /// parked warm for the next entry. The sentence is `finishWithHeldApp`'s.
@@ -217,7 +223,7 @@ public final class AgentSession {
         let finish = Self.finishing(held.provenance.finish(windowRestored: !driver.hasUnrestoredWindow),
                                     handback: handback, app: held.name)
         if finish.quits {
-            NSRunningApplication(processIdentifier: held.pid)?.terminate()
+            ledger.terminate(held.pid)
             ledger.forget(held.pid)
         }
         return finish.sentence

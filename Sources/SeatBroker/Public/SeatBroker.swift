@@ -47,7 +47,7 @@ public final class SeatBroker {
         controlState: nil
     )
     private let recorder: RunRecorder
-    private let ledger = LaunchLedger()
+    private let ledger: LaunchLedger
 
     /// The way a consumer gets a seat, and the only way: see `SeatQueue`.
     /// Built here rather than handed in because the queue needs the broker it
@@ -55,8 +55,14 @@ public final class SeatBroker {
     /// consumer that could route around the wait.
     public private(set) lazy var queue = SeatQueue(broker: self, capacity: configuration.seatCapacity)
 
-    public init(configuration: SeatBrokerConfiguration = .init()) {
+    public convenience init(configuration: SeatBrokerConfiguration = .init()) {
+        self.init(configuration: configuration, ledger: LaunchLedger())
+    }
+
+    /// `ledger` is supplied by the controlled tests, which record provenance and read the quit.
+    init(configuration: SeatBrokerConfiguration, ledger: LaunchLedger) {
         self.configuration = configuration
+        self.ledger        = ledger
         SeatDriver.setResearchOptIn(configuration.allowUnvalidatedBuild)
         self.recorder = RunRecorder(directory: configuration.recordingDirectory)
     }

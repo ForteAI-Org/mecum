@@ -31,10 +31,12 @@ import VisionText
 /// the Brain, ends the borrow, finishes with the application as its provenance says and gives the
 /// lease back, which parks the seat warm for the next entry.
 ///
-/// The seat is kept across the worker's turns only while nobody else waits for it. An entry that
-/// starts waiting while this session holds the seat between turns makes it close at once; one that
-/// arrives during a turn makes it close when `turn` ends, never inside it. The next turn then finds
-/// no live session and opens one again, which waits in the queue like any other entry.
+/// The seat is kept after a turn for `idleWindow` without another turn, then closed, so a quick
+/// follow-up reuses the open session and the window comes back soon after. A new turn cancels
+/// that pending close. An entry that starts waiting while this session holds the seat between
+/// turns makes it close at once; one that arrives during a turn makes it close when `turn` ends,
+/// never inside it. The next turn then finds no live session and opens one again, which waits in
+/// the queue like any other entry.
 ///
 /// Calls are serialized by the owner, as `AutomationSessionOperating` requires. Cancelling an
 /// `open` that waits in the queue takes the worker out of it; one cancelled after the seat was
@@ -52,6 +54,15 @@ public final class BrokeredAutomationSession: AutomationSessionOperating {
     /// Reads the scene of the application `pid` through `runtime`. A seam for the controlled tests;
     /// the public init perceives through Ron's engine.
     typealias Perceiving = @MainActor (EngineRuntime, _ pid: pid_t) async throws -> SceneSnapshot
+
+    /// Returns once `window` has passed, or throws when cancelled. A seam for the controlled tests,
+    /// which let the window elapse when they choose; the public init sleeps on the task's clock.
+    typealias IdleWaiting = @MainActor (_ window: Duration) async throws -> Void
+
+    /// How long a worker keeps the seat after its turn ends with no other turn, Eliomar's choice:
+    /// a quick follow-up ("and what is the first one called?") still finds the session and its
+    /// context, and the window comes back to the person's screen soon after the worker goes quiet.
+    static let idleWindow: Duration = .seconds(30)
 
     /// Where the session is with the computer, which is what the worker's row reads.
     enum Phase: Equatable {
@@ -74,6 +85,8 @@ public final class BrokeredAutomationSession: AutomationSessionOperating {
     @ObservationIgnored private let requestGrants: @MainActor () -> Void
     @ObservationIgnored private let seating: Seating
     @ObservationIgnored private let perceiving: Perceiving
+    @ObservationIgnored private let idleWindow: Duration
+    @ObservationIgnored private let waitIdle: IdleWaiting
 
     @ObservationIgnored private var lease: SeatLease?
     @ObservationIgnored private var target: SeatTarget?
@@ -81,6 +94,7 @@ public final class BrokeredAutomationSession: AutomationSessionOperating {
     @ObservationIgnored private var application: NSRunningApplication?
     @ObservationIgnored private var closing: Task<Void, Never>?
     @ObservationIgnored private var isInTurn = false
+    @ObservationIgnored private var idleRelease: Task<Void, Never>?
 
     /// `workerID` labels this session's entry in `SeatQueue.entries` as its `uuidString`, so two
     /// workers with one name still read their own position; no view shows that label.
@@ -126,7 +140,9 @@ public final class BrokeredAutomationSession: AutomationSessionOperating {
         missingGrant      : @escaping @MainActor () -> PermissionKind?,
         requestGrants     : @escaping @MainActor () -> Void,
         seating           : @escaping Seating,
-        perceiving        : @escaping Perceiving
+        perceiving        : @escaping Perceiving,
+        idleWindow        : Duration = idleWindow,
+        waitIdle          : @escaping IdleWaiting = { try await Task.sleep(for: $0) }
     ) {
         self.broker             = broker
         self.label              = workerID.uuidString
@@ -136,6 +152,8 @@ public final class BrokeredAutomationSession: AutomationSessionOperating {
         self.requestGrants      = requestGrants
         self.seating            = seating
         self.perceiving         = perceiving
+        self.idleWindow         = idleWindow
+        self.waitIdle           = waitIdle
     }
 
     /// What the worker's row says about the computer, and nil while this session neither waits
@@ -253,6 +271,8 @@ public final class BrokeredAutomationSession: AutomationSessionOperating {
     /// second call waits for the first. What finishing leaves the person to do (an application the
     /// seat could not confirm home, so left running) has no channel in this role, so it is logged.
     public func close() async {
+        idleRelease?.cancel()
+        idleRelease = nil
         if let closing { await closing.value; return }
         let runtime = self.runtime
         let target  = self.target
@@ -280,19 +300,43 @@ public final class BrokeredAutomationSession: AutomationSessionOperating {
     }
 
     /// Runs one turn of the worker's agent, and closes afterwards when another entry is waiting in
-    /// the queue, which gives the seat back. Nothing is released while `body` runs, since the agent
-    /// may be between an observation and an act. A worker alone keeps the seat across turns.
+    /// the queue, which gives the seat back; otherwise it closes once `idleWindow` passes with no
+    /// new turn. Starting a turn cancels that pending close, and nothing is released while `body`
+    /// runs, since the agent may be between an observation and an act.
     public func turn(_ body: () async throws -> Void) async throws {
+        idleRelease?.cancel()
+        idleRelease = nil
         isInTurn = true
         do {
             try await body()
         } catch {
-            isInTurn = false
-            await releaseIfSomeoneWaits()
+            await endTurn()
             throw error
         }
+        await endTurn()
+    }
+
+    private func endTurn() async {
         isInTurn = false
         await releaseIfSomeoneWaits()
+        releaseWhenIdle()
+    }
+
+    /// Closes once an open session has gone `idleWindow` without a turn. The wait is tied to the
+    /// lease held now, so one that outlives a close, or returns under a later lease, closes nothing.
+    private func releaseWhenIdle() {
+        guard let lease, id != nil, closing == nil else { return }
+        idleRelease?.cancel()
+        idleRelease = Task { [weak self, waitIdle, idleWindow] in
+            do {
+                try await waitIdle(idleWindow)
+            } catch {
+                // The wait ends early only when cancelled: a turn started or the session closed.
+                return
+            }
+            guard let self, !Task.isCancelled, self.lease === lease, !isInTurn, closing == nil else { return }
+            await close()
+        }
     }
 
     /// Closes when an open session is idle between turns and an entry is waiting for the seat.
