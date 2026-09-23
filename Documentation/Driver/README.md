@@ -25,6 +25,10 @@ against it declines to act rather than guessing.
 | `SeatSession` | `SeatHost` and `AgentSeat`: lifecycle, turns, watchdog, recovery |
 | `TargetReader` | reads another application's accessibility tree and returns value types; it never acts, no facility depends on it, and what a reading means is the caller's |
 
+The [Qt driver guide](Qt.md) records the command policy and the live
+qualification of DaVinci Resolve's Project Manager, including the commands
+whose target-side effect still needs a witness.
+
 There is no umbrella module: every consumer writes the imports it uses, so the
 boundaries are visible at the top of the file rather than hidden behind one
 name. Link the `MecumDriver` library product to use these modules, including

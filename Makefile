@@ -59,7 +59,7 @@ HOST_REST_TESTS := 29
 # they take a window in and out of fullscreen, which is the person's screen.
 # Verified by `xcrun swift test list | rg LiveTests` on 2026-09-21. This is an
 # assertion over the reported Live bundle, including intentionally skipped rows.
-LIVE_TESTS := 82
+LIVE_TESTS := 87
 
 # The measurements `make bench` gates on. Narrow it for a quick pass, for
 # example `make bench BENCH="fence-callback send-click"`; `seat-idle` alone

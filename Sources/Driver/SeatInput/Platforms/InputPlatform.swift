@@ -25,9 +25,9 @@ import SeatCore
 ///   arrives faster than a hand could produce it;
 /// - **one escape hatch**, `decorate`, for a family nobody has measured yet.
 ///
-/// It is public so a consumer can add Flutter, Qt or a game engine without
-/// touching the kit. The two implementations the kit ships are the two that
-/// were measured; a platform a consumer writes has no live test here.
+/// It is public so a consumer can add Flutter or a game engine without
+/// touching the kit. The shipped Qt policy uses the same route and has a
+/// target-specific Live suite; its qualification scope is in the Qt guide.
 nonisolated public protocol InputPlatform: Sendable {
 
     /// Whether this Command needs the target's own AppKit state prepared
@@ -72,14 +72,15 @@ nonisolated public protocol InputPlatform: Sendable {
 
 nonisolated extension InputPlatform {
 
-    /// Both target families applied the preparation within 20 ms in every
+    /// AppKit and Chromium applied the preparation within 20 ms in every
     /// measured case, at 20, 40 and 80 ms; the default is the smallest that
-    /// worked plus half again.
+    /// worked plus half again. Qt inherits this conservative default.
     public func preparationSettle(for command: InputCommand) -> Duration {
         .milliseconds(30)
     }
 
-    /// The pacing measured on the fixture and on Chromium renderers.
+    /// The pacing measured on the fixture and on Chromium renderers. Qt uses
+    /// it for the measured text-selection drag.
     public var dragPacing: DragPacing { .realistic }
 
     /// Stamped on the events and nothing else, which is what both shipped
