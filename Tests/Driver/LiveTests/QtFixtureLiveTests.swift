@@ -220,8 +220,26 @@ struct QtFixtureLiveTests {
                     + " adopted=\(stage.seat.adoptedWindows.map(\.id))"
                     + " person=\(UserSeatState.capture())")
                 let panel = try #require(nativePanel)
-                try #require(stage.virtualBounds.contains(panel.windowFrame))
-                let cancel = try #require(panel.axTree.first {
+                if !stage.virtualBounds.contains(panel.windowFrame) {
+                    print("QT6_NATIVE_FILE physical-panel=\(panel.windowFrame)"
+                        + " attempting-exact-adoption=\(panel.windowNumber)")
+                    if !stage.seat.adoptedWindows.contains(where: { $0.id == panel.windowNumber }) {
+                        let adoptedPanel = try await stage.seat.adopt(
+                            panel.reference, platform: QtPlatform(), title: panel.windowTitle
+                        )
+                        if !stage.seat.isStaged(adoptedPanel) {
+                            _ = try await stage.seat.stage(adoptedPanel)
+                        }
+                    }
+                }
+                let placedPanel = try WindowReader.windowSnapshot(
+                    processID: processID,
+                    windowNumber: panel.windowNumber,
+                    allowUnvalidatedBuild: true
+                )
+                let placedServer = try #require(WindowServerProbe.geometry(of: panel.windowNumber))
+                try #require(stage.virtualBounds.contains(placedServer.frame))
+                let cancel = try #require(placedPanel.axTree.first {
                     $0.role == "AXButton" && $0.title == "Cancel"
                 })
                 let cancelFrame = try #require(cancel.frame)
@@ -1218,6 +1236,34 @@ struct QtFixtureLiveTests {
                                              to: point("sliderFrame", x: 0.8)), until: {
                     number("slider") > sliderBefore
                 }))
+
+                let canvasPresses = number("canvasPresses")
+                #expect(try await send(.click(point("canvasFrame")), until: {
+                    number("canvasPresses") == canvasPresses + 1
+                        && number("canvasReleases") > 0
+                }))
+                let canvasScrolls = number("canvasScrolls")
+                #expect(try await send(.scroll(point("canvasFrame"), deltaY: -4), until: {
+                    number("canvasScrolls") == canvasScrolls + 1
+                }))
+                let canvasMoves = number("canvasMoves")
+                let canvasReleases = number("canvasReleases")
+                #expect(try await send(.drag(from: point("canvasFrame", x: 0.2),
+                                             to: point("canvasFrame", x: 0.8)), until: {
+                    number("canvasMoves") > canvasMoves
+                        && number("canvasReleases") == canvasReleases + 1
+                }))
+                let canvasKeys = number("canvasKeys")
+                #expect(try await send(.text("k"), until: {
+                    number("canvasKeys") == canvasKeys + 1
+                        && string("canvasKeyText") == "k"
+                }))
+                print("QT6_CANVAS presses=\(number("canvasPresses"))"
+                    + " moves=\(number("canvasMoves"))"
+                    + " releases=\(number("canvasReleases"))"
+                    + " scrolls=\(number("canvasScrolls"))"
+                    + " keys=\(number("canvasKeys"))"
+                    + " last-x=\(number("canvasLastX"))")
 
                 let field = try WindowReader.windowSnapshot(
                     processID: processID, windowNumber: window.id,

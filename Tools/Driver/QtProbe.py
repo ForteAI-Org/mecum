@@ -4,6 +4,7 @@ import sys
 from pathlib import Path
 
 from PySide6.QtCore import QTimer, Qt
+from PySide6.QtGui import QColor, QPainter
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
@@ -44,6 +45,13 @@ state = {
     "fileDialogOpen": False,
     "fileDialogMode": "",
     "fileDialogAccepted": False,
+    "canvasPresses": 0,
+    "canvasMoves": 0,
+    "canvasReleases": 0,
+    "canvasScrolls": 0,
+    "canvasKeys": 0,
+    "canvasKeyText": "",
+    "canvasLastX": -1,
 }
 measured_widgets = {}
 active_dialog = None
@@ -108,6 +116,48 @@ class ProbeLineEdit(QLineEdit):
         publish()
 
 
+class ProbeCanvas(QWidget):
+    def __init__(self):
+        super().__init__()
+        self.setAccessibleName("Probe Canvas")
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.setMinimumHeight(110)
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.fillRect(self.rect(), QColor(40, 58, 72))
+        painter.setPen(QColor(235, 244, 250))
+        painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, "Probe Canvas")
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.setFocus()
+            state["canvasPresses"] += 1
+            state["canvasLastX"] = int(event.position().x())
+            publish()
+
+    def mouseMoveEvent(self, event):
+        if event.buttons() & Qt.MouseButton.LeftButton:
+            state["canvasMoves"] += 1
+            state["canvasLastX"] = int(event.position().x())
+            publish()
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            state["canvasReleases"] += 1
+            state["canvasLastX"] = int(event.position().x())
+            publish()
+
+    def wheelEvent(self, event):
+        state["canvasScrolls"] += 1
+        publish()
+
+    def keyPressEvent(self, event):
+        state["canvasKeys"] += 1
+        state["canvasKeyText"] = event.text()
+        publish()
+
+
 app = QApplication(sys.argv)
 app.setApplicationName("Mecum Qt Probe")
 window = QWidget()
@@ -120,6 +170,9 @@ field.setObjectName("probeText")
 field.setAccessibleName("Probe Text")
 field.setPlaceholderText("Probe Text")
 layout.addWidget(field)
+
+canvas = ProbeCanvas()
+layout.addWidget(canvas)
 
 
 def sync_text():
@@ -297,6 +350,7 @@ layout.addWidget(native_file_opener)
 
 measured_widgets.update({
     "textFrame": field,
+    "canvasFrame": canvas,
     "buttonFrame": button,
     "sliderFrame": slider,
     "scrollFrame": scroll.viewport(),
