@@ -7,6 +7,7 @@ import Perception
 import PerceptionCore
 import SeatCapture
 import SeatCore
+import SeatDriving
 import SeatSession
 
 /// One background display and one seat, used by one application at a time.
@@ -216,6 +217,20 @@ public final class AgentSession {
         }
         return (quits: outcome == .quit && handback == nil,
                 sentence: sentences.isEmpty ? nil : sentences.joined(separator: " "))
+    }
+
+    /// A `SeatTarget` over this session's seat, so the Engine's roles perceive and act on the
+    /// window adopted here while this session stays its owner.
+    ///
+    /// The target borrows: it never starts or stops the display and never releases a window, so
+    /// `use`, `open` and `close` stay this session's. It is valid until the next `use`, `open` or
+    /// `close`, and the caller drops it before any of them. Observations are not shared: one taken
+    /// by `observe` or `execute` supersedes the target's, and the reverse holds too, so each side
+    /// observes again before acting. Throws `sessionClosed` or `noAdoptedApplication`.
+    package func borrowedSeatTarget() throws -> SeatTarget {
+        guard isOpen else { throw SeatBrokerError.sessionClosed }
+        guard isUsingApp else { throw SeatBrokerError.noAdoptedApplication }
+        return try driver.borrowedTarget()
     }
 
     /// The adopted window's frame on the background display, and the empty

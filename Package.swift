@@ -262,7 +262,7 @@ let package = Package(
             ["SeatCore", "PrivateSymbols", "VirtualScreens", "WindowPlacement", "SeatInput",
              "CursorGuard", "SeatCapture", "SeatSession", "TargetReader", "PerceptionCore",
              "Perception", "VisionText", "PixelRegions", "PixelSections", "PixelControlState",
-             "AccessibilityFacts", "EngineCore", "IncrementalText", "ModelTransports"]
+             "AccessibilityFacts", "EngineCore", "IncrementalText", "ModelTransports", "SeatDriving"]
         ),
 
         // MARK: Driver tools
@@ -286,14 +286,15 @@ let package = Package(
         driverTests("SeatInput", ["SeatInput", "SeatCore", "PrivateSymbols"]),
         driverTests("CursorGuard", ["CursorGuard", "SeatCore"]),
         driverTests("SeatCapture", ["SeatCapture", "SeatCore"]),
-        driverTests("SeatSession", ["SeatSession", "SeatCore", "CursorGuard", "SeatInput"]),
+        driverTests("SeatSession", ["SeatSession", "SeatCore", "CursorGuard", "SeatInput", "SeatDriving", "EngineCore"]),
         driverTests("TargetReader", ["TargetReader"]),
 
         // MARK: Broker tests
         brokerTests(
             "SeatBroker",
             ["SeatBroker", "PerceptionCore", "SeatCore", "SeatCapture",
-             "SeatSession", "SeatInput", "TargetReader", "EngineCore", "ModelTransports"]
+             "SeatSession", "SeatInput", "TargetReader", "EngineCore", "ModelTransports",
+             "SeatDriving", "AutomationRuntime", "Engine"]
         ),
         brokerTests("ModelTransports", ["ModelTransports"]),
 

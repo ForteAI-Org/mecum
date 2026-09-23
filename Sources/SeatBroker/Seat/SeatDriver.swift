@@ -6,6 +6,7 @@ import PrivateSymbols
 import ScreenCaptureKit
 import SeatCapture
 import SeatCore
+import SeatDriving
 import SeatInput
 import SeatSession
 import TargetReader
@@ -464,6 +465,18 @@ final class SeatDriver {
             if case .suspended = reason { throw SeatBrokerError.observationSuspended(sentence) }
             throw SeatBrokerError.driver(sentence)
         }
+    }
+
+    /// A `SeatTarget` that borrows this driver's host and seat, so the Engine's roles act on the
+    /// window adopted here. This driver stays the owner: the target never starts or stops the host
+    /// and never releases a window, and it is valid only while the current adoption lasts.
+    ///
+    /// Each call makes a new target with an observation of its own. The seat keeps one outstanding
+    /// observation, so `observe` here or on another borrow supersedes it and its next Command is
+    /// refused before any event. Throws `sessionClosed` while there is no seat or no window.
+    func borrowedTarget() throws -> SeatTarget {
+        guard let seat, window != nil else { throw SeatBrokerError.sessionClosed }
+        return SeatTarget(borrowing: host, seat: seat)
     }
 
     func attach(_ layer: MonitorLayer) { preview.attach(layer) }

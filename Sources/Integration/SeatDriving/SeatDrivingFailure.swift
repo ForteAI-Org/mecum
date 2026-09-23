@@ -27,4 +27,7 @@ public enum SeatDrivingFailure: Error, Equatable {
     /// addressed by the observation it was decided on, so without one there is nothing to post
     /// under and nothing is posted: a stale reference is never reused to get past this.
     case notObservable(String)
+    /// The target borrows a host and a seat another owner started, and bringing them up is that
+    /// owner's: nothing was started.
+    case borrowedLifecycle
 }

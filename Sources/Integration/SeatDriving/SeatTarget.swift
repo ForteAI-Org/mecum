@@ -27,6 +27,8 @@ public final class SeatTarget {
     private let host: SeatHost
     private var seat: AgentSeat?
     private var adopted: AdoptedWindow?
+    /// True when another owner started `host` and `seat` and keeps their lifecycle.
+    private let isBorrowed: Bool
 
     /// The observation the last Frame was delivered with, and whether a Command already consumed it.
     private var delivery: SeatObservationDelivery?
@@ -39,10 +41,28 @@ public final class SeatTarget {
 
     public init(configuration: SeatHostConfiguration = SeatHostConfiguration(restoresUserFocus: true)) {
         host = SeatHost(configuration: configuration)
+        isBorrowed = false
+    }
+
+    /// Wraps a host and a seat another owner started, so the Engine's roles act on that owner's seat.
+    ///
+    /// The target borrows both and owns neither. `start()` refuses, because the host is already up
+    /// and bringing it up is the owner's; `stop()` ends the borrow and touches neither, because
+    /// releasing a window or taking the display down here would leave the owner holding a seat it
+    /// no longer has. The owner keeps adoption, release and teardown, and must outlive every use.
+    ///
+    /// The observation kept here is this target's own, and the seat keeps one outstanding
+    /// observation: one the owner takes afterwards supersedes it, so the next Command from here is
+    /// refused before any event and never redirected.
+    package init(borrowing host: SeatHost, seat: AgentSeat) {
+        self.host  = host
+        self.seat  = seat
+        isBorrowed = true
     }
 
     /// Brings up the virtual display and the fence, atomically, and makes the seat.
     public func start() async throws {
+        guard !isBorrowed else { throw SeatDrivingFailure.borrowedLifecycle }
         try await host.start()
         seat = try host.makeSeat()
     }
@@ -146,9 +166,10 @@ public final class SeatTarget {
         return WindowServerProbe.geometry(of: window.id)?.frame ?? window.reference.frame
     }
 
-    /// Returns the window to the person's displays and takes the virtual display down.
+    /// Returns the window to the person's displays and takes the virtual display down. A borrowed
+    /// target only forgets its seat and its observation: the host and the seat are left as they are.
     public func stop() async {
-        if let seat, let adopted {
+        if !isBorrowed, let seat, let adopted {
             for companion in seat.adoptedWindows where companion.id != adopted.id {
                 _ = await seat.release(companion, .returnToUserSeat)
             }
@@ -160,7 +181,7 @@ public final class SeatTarget {
         deliverySpent = false
         lastCapturedWindow = nil
         lastWindowGeometry = nil
-        _ = await host.stop()
+        if !isBorrowed { _ = await host.stop() }
     }
 
     private static func retrying<T>(_ body: () async throws -> T) async throws -> T {
