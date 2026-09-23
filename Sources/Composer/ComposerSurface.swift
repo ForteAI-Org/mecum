@@ -26,7 +26,7 @@ struct ComposerSurface: ViewModifier {
         }
     }
 
-    /// The pill's outline: a capsule at one line, which keeps its ends as the field grows.
+    /// The bar's outline, a rounded rectangle that keeps its corners as the field grows.
     let shape: RoundedRectangle
 
     let kind: Kind

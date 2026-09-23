@@ -9,8 +9,8 @@ import Foundation
 import Workspace
 
 /// ShellChrome decides what the team window's chrome says about the selected
-/// worker (§3.4): the header at the centre of the title bar, the window's
-/// title, and the controls the toolbar keeps.
+/// worker (§3.4): the header at the leading edge of the title bar, the
+/// window's title, and the controls the toolbar keeps.
 ///
 /// The header is the only place the worker's name is drawn above the
 /// conversation. The window title still carries it, so Mission Control and the

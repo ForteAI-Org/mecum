@@ -29,8 +29,8 @@ public struct ComposerBar: View {
 
     static let padding: CGFloat = 5
 
-    /// The pill is a capsule at one line and keeps these ends as it grows.
-    static let cornerRadius = circleSide / 2 + padding
+    /// A rounded rectangle, a little squarer than a capsule, with the same corners at every height.
+    static let cornerRadius: CGFloat = 12
 
     /// The release button's symbol: a door with an arrow out of it, leaving the seat.
     static let releaseSymbol = "rectangle.portrait.and.arrow.right"

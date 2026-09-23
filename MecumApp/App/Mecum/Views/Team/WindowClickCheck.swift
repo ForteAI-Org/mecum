@@ -98,8 +98,8 @@ enum WindowClickCheck {
         print("click check: panes \(panes.map { window.contentView?.convert($0.bounds, from: $0) ?? .zero })")
         try expect(!probe.isInspectorRequested && !showsInspector(hosting), "the inspector is shown before the click")
 
-        // The mascot, in the title bar above the conversation's safe area.
-        let header = point(in: panes[1], fromTop: -30, in: window)
+        // The mascot, at the leading edge of the title bar above the conversation's safe area.
+        let header = point(in: panes[1], fromTop: -26, leading: 22, in: window)
         // A window that is not key spends a click on becoming key, as on a Mac someone is using.
         if !window.isKeyWindow { click(at: header, in: window) }
         click(at: header, in: window)
@@ -176,10 +176,10 @@ enum WindowClickCheck {
         return widths.joined().contains { range.contains($0) }
     }
 
-    /// A point in window coordinates, centred in `pane`'s safe area `fromTop` points below its top.
-    private static func point(in pane: NSView, fromTop: CGFloat, in window: NSWindow) -> NSPoint {
+    /// A point in window coordinates, `leading` points in and `fromTop` below `pane`'s safe top.
+    private static func point(in pane: NSView, fromTop: CGFloat, leading: CGFloat, in window: NSWindow) -> NSPoint {
         let safe = pane.convert(pane.safeAreaRect, to: nil)
-        return NSPoint(x: safe.midX, y: safe.maxY - fromTop)
+        return NSPoint(x: safe.minX + leading, y: safe.maxY - fromTop)
     }
 
     /// A point in window coordinates, `leading` points in and `fromBottom` up from `pane`'s safe bottom.

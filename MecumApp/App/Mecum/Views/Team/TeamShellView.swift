@@ -112,13 +112,13 @@ struct TeamShellView: View {
     // MARK: Toolbar
 
     /// The window's own controls, `ShellChrome.toolbar`: the split view's sidebar
-    /// toggle, the worker's header at the centre and the inspector toggle at the trailing edge,
+    /// toggle, the worker's header at the leading edge and the inspector toggle at the trailing edge,
     /// the connections are at the foot of the sidebar, and Release the computer is
     /// in the composer beside Send and in the worker's commands.
     @ToolbarContentBuilder
     private var toolbar: some ToolbarContent {
-        // The worker's name is the bar's centre, in place of a title.
-        ToolbarItem(placement: .principal) { header }
+        // The worker's name leads the conversation's side of the bar, in place of a title.
+        ToolbarItem(placement: .navigation) { header }
             .sharedBackgroundVisibility(.hidden)
         ToolbarSpacer(.flexible)
         ToolbarItem {
