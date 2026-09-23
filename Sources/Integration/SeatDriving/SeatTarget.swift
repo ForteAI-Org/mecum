@@ -154,7 +154,8 @@ public final class SeatTarget {
     /// One still of the whole virtual display: the only capture that holds both the window and a
     /// pop-up floating beside it, because a window filter captures exactly one window.
     public func displayStill() async throws -> SeatFrame {
-        guard let displayID = host.displayID else { throw SeatDrivingFailure.notAdopted }
+        // A stopped borrow has no seat and must not read the owner's display, which may show another window.
+        guard seat != nil, let displayID = host.displayID else { throw SeatDrivingFailure.notAdopted }
         return try await Self.retrying {
             try await SeatCaptureStream.still(of: .display(displayID), timeout: .seconds(5))
         }

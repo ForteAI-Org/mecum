@@ -150,7 +150,8 @@ public final class SeatBroker {
             }
             try await Task.sleep(for: .milliseconds(300))
         }
-        throw SeatBrokerError.driver("\(app.name) launched but showed no window within \(timeout.components.seconds) s.")
+        throw SeatBrokerError.noWindowShown(application: app.name, seconds: timeout.components.seconds,
+                                            wasLaunched: app.pid == nil)
     }
 
     /// A seat with nothing on it, and nothing brought up yet.

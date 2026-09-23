@@ -8,6 +8,7 @@
 import Foundation
 import ModelTransports
 import Observation
+import SeatBroker
 import WorkerAgents
 import Workspace
 
@@ -18,9 +19,10 @@ import Workspace
 /// the store, so no view holds a model row and no row crosses an isolation
 /// boundary.
 ///
-/// It touches `SeatBroker` nowhere. A worker in the team acquires no seat: a
-/// worker on Claude Code or Codex answers through its agent command line with
-/// Mecum's tools, whose desktop refuses in this build (`WorkerAgents`).
+/// A worker on Claude Code or Codex answers through its agent command line with
+/// Mecum's tools (`WorkerAgents`), and those tools reach the desktop only
+/// through the broker's queue (`BrokeredAutomationSession`, §22.3): a worker
+/// waits for the computer like any other entry and never builds a seat.
 ///
 /// Connections come from `connections`, the same store the lab's Settings
 /// edits, so a key entered in either place serves both.
@@ -77,6 +79,13 @@ final class TeamModel {
     /// resumes the first one's provider session (T5a.2 persists it).
     private var hosts: [UUID: WorkerAgentHost] = [:]
 
+    /// The broker every worker's desktop goes through, the lab's own.
+    private let broker: SeatBroker
+
+    /// Each worker's desktop session, which its row reads while it waits for
+    /// or holds the computer (§4.2).
+    private var desktops: [UUID: BrokeredAutomationSession] = [:]
+
     /// Increment 1 has one workspace per store, and the schema gives it no row
     /// yet, so its events carry this fixed id.
     private static let workspaceID = UUID(uuid: (0x4d, 0x45, 0x43, 0x55, 0x4d, 0, 0x40, 0, 0x80, 0, 0, 0, 0, 0, 0, 1))
@@ -96,9 +105,10 @@ final class TeamModel {
     /// send in that window does nothing, so one Return is one message.
     private var isSending = false
 
-    init(store: WorkspaceStore, connections: ModelSettingsStore) {
+    init(store: WorkspaceStore, connections: ModelSettingsStore, broker: SeatBroker) {
         self.store       = store
         self.connections = connections
+        self.broker      = broker
     }
 
     // MARK: Reading
@@ -107,7 +117,8 @@ final class TeamModel {
     /// The team is tens of workers, so this is cheaper than keeping a second
     /// copy in step with two sources.
     var rows: [TeamRow] {
-        TeamOutline.rows(of: active, collapsed: collapsed, modelUnavailable: workersWithRemovedModels)
+        TeamOutline.rows(of: active, collapsed: collapsed, modelUnavailable: workersWithRemovedModels,
+                         activities: desktops.compactMapValues(\.activity))
     }
 
     /// No model attached, or one the catalogue no longer lists (§7.4).
@@ -294,7 +305,8 @@ final class TeamModel {
         let host = hosts[conversationID] ?? WorkerAgentHost(
             workingDirectory: WorkspaceLaunch.directory
                 .appending(path: "WorkerWorkspaces/\(conversationID.uuidString)", directoryHint: .isDirectory),
-            bridgeExecutable: Bundle.main.bundleURL.appending(path: "Contents/Helpers/mecum")
+            bridgeExecutable: Bundle.main.bundleURL.appending(path: "Contents/Helpers/mecum"),
+            session         : { desktop(for: workerID, named: worker.name) }
         )
         hosts[conversationID] = host
         let recorder = WorkerTurnRecorder(
@@ -339,6 +351,19 @@ final class TeamModel {
         }
     }
 
+    /// A new desktop session for the worker, kept so its row can read it. The
+    /// Brain's directory is the command line's, so what either learns applies
+    /// to both.
+    private func desktop(for workerID: UUID, named name: String) -> BrokeredAutomationSession {
+        let desktop = BrokeredAutomationSession(
+            broker            : broker,
+            label             : name,
+            knowledgeDirectory: WorkspaceLaunch.directory.appending(path: "Knowledge", directoryHint: .isDirectory)
+        )
+        desktops[workerID] = desktop
+        return desktop
+    }
+
     /// True while an agent host holds a loopback port and a temporary directory.
     var hasAgentHosts: Bool { !hosts.isEmpty }
 
@@ -348,6 +373,7 @@ final class TeamModel {
     func closeAgentHosts() async {
         let closing = hosts
         hosts.removeAll()
+        desktops.removeAll()
         for host in closing.values {
             do { try await host.close() }
             catch { problem = "A worker's temporary tool configuration could not be removed. \(describe(error))" }

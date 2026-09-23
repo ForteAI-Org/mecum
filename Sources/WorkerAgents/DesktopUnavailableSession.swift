@@ -10,14 +10,13 @@ import EngineCore
 import Foundation
 import PerceptionCore
 
-/// DesktopUnavailableSession is the application session a worker's tools run
-/// over in this build, and it has no seat.
+/// DesktopUnavailableSession is an application session with no seat, for the
+/// tests of a host that must not reach the desktop.
 ///
 /// `open` refuses in a sentence the agent can repeat, and every other call
-/// answers as when no session is open. A worker reaches the desktop only
-/// through SeatBroker (§22.3), which a later ticket connects through this same
-/// role; building the command line's `AutomationSession` here instead would
-/// start a seat outside the broker.
+/// answers as when no session is open. The app supplies SeatBroker's own
+/// conformer instead (§22.3); building the command line's `AutomationSession`
+/// anywhere in the app would start a seat outside the broker.
 @MainActor
 final class DesktopUnavailableSession: AutomationSessionOperating {
 

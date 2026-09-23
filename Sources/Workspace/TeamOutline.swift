@@ -26,12 +26,14 @@ public enum TeamOutline {
     /// itself stays, with `isCollapsed` set, so the row can say that it has
     /// more behind it.
     ///
-    /// `modelUnavailable` names workers whose model a check found missing.
-    /// It changes what their row says and never where it is.
+    /// `modelUnavailable` names workers whose model a check found missing,
+    /// and `activities` what a worker is doing, by worker. Both change what a
+    /// row says and never where it is.
     public static func rows(
         of workers      : [WorkerSnapshot],
-        collapsed       : Set<UUID> = [],
-        modelUnavailable: Set<UUID> = []
+        collapsed       : Set<UUID>      = [],
+        modelUnavailable: Set<UUID>      = [],
+        activities      : [UUID: String] = [:]
     ) -> [TeamRow] {
 
         let present = Set(workers.map(\.id))
@@ -63,7 +65,8 @@ public enum TeamOutline {
                         depth             : depth,
                         hasReports        : !children.isEmpty,
                         isCollapsed       : isFolded,
-                        isModelUnavailable: modelUnavailable.contains(worker.id)
+                        isModelUnavailable: modelUnavailable.contains(worker.id),
+                        activity          : activities[worker.id]
                     )
                 )
             }

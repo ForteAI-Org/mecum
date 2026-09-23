@@ -1,4 +1,5 @@
 
+import SeatBroker
 import SwiftUI
 
 @main
@@ -17,9 +18,10 @@ struct MecumApp: App {
 
     var body: some Scene {
 
-        // The team is the front door. It holds no seat and needs no grant.
+        // The team is the front door. It asks for no grant until a worker first opens an app.
         WindowGroup("Mecum") {
-            TeamWindowView(launch: workspace, connections: model.settings, didOpenTeam: { delegate.teams.add($0) })
+            TeamWindowView(launch: workspace, connections: model.settings, broker: model.broker,
+                           didOpenTeam: { delegate.teams.add($0) })
                 // The delegate is made by AppKit and the model by SwiftUI, so
                 // this window, the one that always exists, is where they meet.
                 .task { delegate.model = model }
@@ -77,8 +79,10 @@ final class SeatReleasingDelegate: NSObject, NSApplicationDelegate {
             await Self.bounded(.seconds(2)) {
                 for team in drafts { await team.flushDraft() }
             }
-            await Self.bounded(.seconds(5)) {
+            await Self.bounded(.seconds(5)) { [model] in
                 for team in agents { await team.closeAgentHosts() }
+                // A worker's seat is parked warm once given back; this takes its display down too.
+                await model?.broker.queue.shutdown()
             }
             if let seatOwner {
                 await Self.bounded(.seconds(5)) { await seatOwner.closeSession() }

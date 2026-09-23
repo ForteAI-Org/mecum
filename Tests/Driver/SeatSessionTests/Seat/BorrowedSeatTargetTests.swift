@@ -133,4 +133,29 @@ struct BorrowedSeatTargetTests {
         try context.seat.release(turn)
         #expect(sender.sent.count == 1)
     }
+
+    @Test("a revoked borrow refuses to observe or act, and posts nothing, while the owner keeps its seat")
+    func aRevokedBorrowRefuses() async throws {
+
+        let sender   = FakeSender()
+        let context  = try await Self.borrowed(sender: sender)
+        let actuator = SeatActuator(target: context.target)
+        let perceived = try await context.target.observe()
+
+        // `stop` is what the broker's driver calls on every borrow it lent, before it adopts again.
+        await context.target.stop()
+
+        await #expect(throws: SeatDrivingFailure.notAdopted) { try await context.target.observe() }
+        await #expect(throws: SeatDrivingFailure.notAdopted) { try await context.target.currentObservation() }
+        await #expect(throws: SeatDrivingFailure.notAdopted) { try await context.target.windowStill() }
+        await #expect(throws: SeatDrivingFailure.notAdopted) { try await context.target.displayStill() }
+        let frame = perceived.geometry.window.frame
+        await #expect(throws: SeatDrivingFailure.notAdopted) {
+            try await actuator.perform(.click(at: CGPoint(x: frame.midX, y: frame.midY)),
+                                       in: context.window.reference.processID)
+        }
+        #expect(sender.sent.isEmpty)
+        #expect(context.seat.currentTurn == nil)
+        #expect(context.seat.adoptedWindows.map(\.id) == [context.window.id])
+    }
 }

@@ -16,8 +16,8 @@ import ModelTransports
 /// WorkerAgentHost answers one conversation through a signed-in agent command
 /// line, with the same agent, tools and instructions as `mecum chat`.
 ///
-/// It owns what `ChatCommand` composes for a terminal: `AutomationTools` over a
-/// session with no desktop, the router, the loopback MCP host, the connection
+/// It owns what `ChatCommand` composes for a terminal: `AutomationTools` over the
+/// session its composer supplies, the router, the loopback MCP host, the connection
 /// file (0600, in a 0700 temporary directory), the working directory and the
 /// provider runner. The loopback host starts with the first turn and lives
 /// until `close`, so each turn's provider child reconnects to the same tools.
@@ -60,11 +60,17 @@ public final class WorkerAgentHost {
     /// `workingDirectory` is created 0700 on the first turn and must stay the
     /// same across turns: Claude Code finds a session to resume by it.
     /// `bridgeExecutable` is the `mecum` the provider launches as
-    /// `mecum mcp-bridge --connection <file>`.
-    public init(workingDirectory: URL, bridgeExecutable: URL) {
+    /// `mecum mcp-bridge --connection <file>`. `session` is called once, here,
+    /// for the desktop the tools drive; the host closes it after a failed or
+    /// stopped turn and in `close`, and never builds a seat of its own (§22.3).
+    public init(
+        workingDirectory: URL,
+        bridgeExecutable: URL,
+        session         : () -> any AutomationSessionOperating
+    ) {
         self.workingDirectory = workingDirectory
         self.bridgeExecutable = bridgeExecutable
-        let tools  = AutomationTools(session: DesktopUnavailableSession())
+        let tools  = AutomationTools(session: session())
         let router = MCPRouter(tools: AutomationTools.definitions) { name, arguments in
             try await tools.call(name, arguments)
         }

@@ -34,6 +34,12 @@ public enum SeatBrokerError: LocalizedError {
     /// replays a Command.
     case inputPaused(String)
 
+    /// An application was launched, or found running, and showed no window
+    /// within the wait. Its own case because the reason is often the
+    /// application waiting to be brought to the front, which the seat never
+    /// does. `wasLaunched` says whether this call started it: nothing quits it.
+    case noWindowShown(application: String, seconds: Int64, wasLaunched: Bool)
+
     public var errorDescription: String? {
         switch self {
         case .windowNotAttested(let n): "Window \(n) could not be attested by the window server."
@@ -47,6 +53,8 @@ public enum SeatBrokerError: LocalizedError {
         case .applicationNotResolved(let sentence): sentence
         case .inputPaused(let sentence): sentence
         case .observationSuspended(let sentence): sentence
+        case .noWindowShown(let application, let seconds, _):
+            "\(application) launched but showed no window within \(seconds) s."
         }
     }
 }

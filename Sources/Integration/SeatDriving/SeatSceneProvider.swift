@@ -45,7 +45,10 @@ public struct SeatSceneProvider: SceneProviding {
     public func currentScene(of processID: pid_t) async throws -> PerceivedWindow {
         let application = identity(processID)
             ?? ApplicationIdentity(bundleID: "pid.\(processID)", name: "pid \(processID)")
-        let popups = WindowSurfaceClassifier.classify(try windows.windows(ownedBy: processID)).popups
+        // Only the windows on the seat's display: one left on the person's display is not in this scene.
+        let seatBounds = await target.displayID.map(CGDisplayBounds) ?? .null
+        let onSeat = try windows.windows(ownedBy: processID).filter { $0.frame.intersects(seatBounds) }
+        let popups = WindowSurfaceClassifier.classify(onSeat).popups
         let image: CGImage
         let frame: CGRect
         let observedWindow: AdoptedWindow

@@ -126,8 +126,12 @@ public final class AgentSession {
     /// `use` is reached the previous application has been finished with, and a
     /// failure there leaves the seat empty on purpose: nothing is put back
     /// silently.
+    ///
+    /// `title` names the window to take instead of the application's main
+    /// one, compared without case; a title that names no window of it, or
+    /// several, refuses before anything is released.
     @discardableResult
-    public func open(applicationNamed name: String) async throws -> TargetApp {
+    public func open(applicationNamed name: String, windowTitled title: String? = nil) async throws -> TargetApp {
         guard isOpen else { throw SeatBrokerError.sessionClosed }
         let wanted = try ApplicationOpening.resolve(name, in: TargetEnumerator.targets())
         // Re-opening the held application would finish with it first, which
@@ -138,11 +142,22 @@ public final class AgentSession {
                     + "act on the scene you were given instead of opening it again.")
         }
         let opened = try await environment.launch(wanted)
-        // The application's own window and not the first one listed: a sheet
-        // is listed like any other window, and taking the first adopted one.
-        guard let window = TargetEnumerator.mainWindow(among: TargetEnumerator.candidates(of: opened))
-        else {
-            throw SeatBrokerError.driver("\(opened.name) is open but has no window to adopt.")
+        let window: TargetWindow
+        if let title {
+            let named = opened.windows.filter { $0.title.caseInsensitiveCompare(title) == .orderedSame }
+            guard named.count == 1, let only = named.first else {
+                throw SeatBrokerError.driver("Expected one window of \(opened.name) named '\(title)'. Open: "
+                    + opened.windows.map { $0.title.isEmpty ? "untitled" : $0.title }.joined(separator: ", "))
+            }
+            window = only
+        } else {
+            // The application's own window and not the first one listed: a sheet
+            // is listed like any other window, and taking the first adopted one.
+            guard let main = TargetEnumerator.mainWindow(among: TargetEnumerator.candidates(of: opened))
+            else {
+                throw SeatBrokerError.driver("\(opened.name) is open but has no window to adopt.")
+            }
+            window = main
         }
         do {
             try await use(window, of: opened)
@@ -150,6 +165,14 @@ public final class AgentSession {
             throw ApplicationOpening.notSeated(opened, cause: error)
         }
         return opened
+    }
+
+    /// Finishes with the held application as its provenance says and keeps
+    /// the seat and its display, so a session given back to the queue is
+    /// parked warm for the next entry. The sentence is `finishWithHeldApp`'s.
+    func finishUsingApp() async -> String? {
+        guard isOpen else { return nil }
+        return await finishWithHeldApp()
     }
 
     /// Gives the held window back and, when the agent opened the application
@@ -224,7 +247,8 @@ public final class AgentSession {
     ///
     /// The target borrows: it never starts or stops the display and never releases a window, so
     /// `use`, `open` and `close` stay this session's. It is valid until the next `use`, `open` or
-    /// `close`, and the caller drops it before any of them. Observations are not shared: one taken
+    /// `close`: the driver revokes it before releasing or adopting anything, and a revoked target
+    /// refuses as `notAdopted` instead of observing the next window. Observations are not shared: one taken
     /// by `observe` or `execute` supersedes the target's, and the reverse holds too, so each side
     /// observes again before acting. Throws `sessionClosed` or `noAdoptedApplication`.
     package func borrowedSeatTarget() throws -> SeatTarget {

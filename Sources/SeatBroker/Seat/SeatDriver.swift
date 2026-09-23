@@ -38,6 +38,11 @@ final class SeatDriver {
     private(set) var window: AdoptedWindow?
     private let preview = PreviewStreamController()
 
+    /// Every target `borrowedTarget` lent since the last revocation. They are
+    /// revoked before this driver adopts or releases anything, so no borrower
+    /// can observe a window it was not lent: see `revokeBorrows`.
+    private var lent: [SeatTarget] = []
+
     /// The two subscriptions to the event channel, one per stream, for as long
     /// as the host is up.
     private var watchers: [Task<Void, Never>] = []
@@ -240,6 +245,7 @@ final class SeatDriver {
             throw SeatBrokerError.driver(
                 "The seat is still holding a window; release it before adopting another.")
         }
+        await revokeBorrows()
         guard let server = WindowServerProbe.geometry(of: target.windowNumber),
               server.identity != nil, server.processID == target.pid
         else { throw SeatBrokerError.windowNotAttested(windowNumber: target.windowNumber) }
@@ -469,14 +475,27 @@ final class SeatDriver {
 
     /// A `SeatTarget` that borrows this driver's host and seat, so the Engine's roles act on the
     /// window adopted here. This driver stays the owner: the target never starts or stops the host
-    /// and never releases a window, and it is valid only while the current adoption lasts.
+    /// and never releases a window, and it is valid only while the current adoption lasts: the
+    /// next `adopt`, `release` or `stop` revokes it.
     ///
     /// Each call makes a new target with an observation of its own. The seat keeps one outstanding
     /// observation, so `observe` here or on another borrow supersedes it and its next Command is
     /// refused before any event. Throws `sessionClosed` while there is no seat or no window.
     func borrowedTarget() throws -> SeatTarget {
         guard let seat, window != nil else { throw SeatBrokerError.sessionClosed }
-        return SeatTarget(borrowing: host, seat: seat)
+        let target = SeatTarget(borrowing: host, seat: seat)
+        lent.append(target)
+        return target
+    }
+
+    /// Ends every borrow lent since the last revocation. A revoked target has
+    /// no seat, so it refuses as `notAdopted` rather than observing: a session
+    /// parked warm and handed to the next worker must not let an earlier
+    /// borrower read that worker's window as its own. Idempotent.
+    private func revokeBorrows() async {
+        let revoked = lent
+        lent = []
+        for target in revoked { await target.stop() }
     }
 
     func attach(_ layer: MonitorLayer) { preview.attach(layer) }
@@ -838,6 +857,7 @@ final class SeatDriver {
     /// single leftover window kept the assignment bound and stopped the person
     /// moving on to a second application.
     func release() async {
+        await revokeBorrows()
         await preview.stop()
         self.window = nil
         // Kept, not discarded, and one per window: "release returned" and "the

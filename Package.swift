@@ -262,7 +262,9 @@ let package = Package(
             ["SeatCore", "PrivateSymbols", "VirtualScreens", "WindowPlacement", "SeatInput",
              "CursorGuard", "SeatCapture", "SeatSession", "TargetReader", "PerceptionCore",
              "Perception", "VisionText", "PixelRegions", "PixelSections", "PixelControlState",
-             "AccessibilityFacts", "EngineCore", "IncrementalText", "ModelTransports", "SeatDriving"]
+             "AccessibilityFacts", "EngineCore", "IncrementalText", "ModelTransports", "SeatDriving",
+             // A worker's tools reach the desktop through the broker's own conformer of their session role.
+             "AutomationRuntime", "Engine", "Memory"]
         ),
 
         // MARK: Driver tools
@@ -294,7 +296,7 @@ let package = Package(
             "SeatBroker",
             ["SeatBroker", "PerceptionCore", "SeatCore", "SeatCapture",
              "SeatSession", "SeatInput", "TargetReader", "EngineCore", "ModelTransports",
-             "SeatDriving", "AutomationRuntime", "Engine"]
+             "SeatDriving", "AutomationRuntime", "Engine", "AutomationMCP", "LocalMCP"]
         ),
         brokerTests("ModelTransports", ["ModelTransports"]),
 
@@ -389,7 +391,7 @@ let package = Package(
         integration("AutomationMCP", ["AutomationRuntime", "LocalMCP", "EngineCore", "PerceptionCore",
                                      "PrivateSymbols", "SeatCore", "WindowServerListing"]),
         // A worker's turn through a signed-in agent command line, with mecum chat's tools and
-        // instructions, and its record in the workspace. No seat: the desktop refuses in this build.
+        // instructions, and its record in the workspace. No seat of its own: the app supplies the broker's.
         .target(name: "WorkerAgents",
                 dependencies: ["ChatCore", "CLIProviders", "LocalMCP", "AutomationMCP", "AutomationRuntime",
                                "EngineCore", "PerceptionCore", "ModelTransports", "Workspace"],
@@ -428,7 +430,7 @@ let package = Package(
         // The live row runs the real claude CLI with the built mecum as its bridge, gated by MECUM_LIVE_AGENT=1.
         .testTarget(name: "WorkerAgentsTests",
                     dependencies: ["WorkerAgents", "ChatCore", "CLIProviders", "AutomationMCP", "AutomationRuntime",
-                                   "ModelTransports", "Workspace"],
+                                   "ModelTransports", "Workspace", "SeatBroker"],
                     path: "Tests/WorkerAgentsTests", swiftSettings: facility),
         .testTarget(
             name: "MecumCLITests",

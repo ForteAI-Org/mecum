@@ -125,7 +125,8 @@ struct WorkerAgentHostTests {
                 .deletingLastPathComponent().appendingPathComponent(".build/debug/mecum").path)
         let root = URL.temporaryDirectory.appending(path: "mecum-live-agent-\(UUID().uuidString)")
         defer { remove(root) }
-        let host = WorkerAgentHost(workingDirectory: root.appending(path: "work"), bridgeExecutable: bridge)
+        let host = WorkerAgentHost(workingDirectory: root.appending(path: "work"), bridgeExecutable: bridge,
+                                   session: { DesktopUnavailableSession() })
         let selection = ModelSelection(provider: .claudeCode, model: "claude-sonnet-5", effort: .low)
 
         var tools   : [String] = []

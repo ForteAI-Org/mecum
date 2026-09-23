@@ -29,19 +29,25 @@ public struct TeamRow: Sendable, Hashable, Identifiable {
     /// worker keeps its place and its configuration, and needs configuring.
     public let isModelUnavailable: Bool
 
+    /// What the worker is doing right now, in the words its row shows, such
+    /// as "Waiting for the computer". Nil while there is no work in progress.
+    /// The consumer supplies it; nothing here reads a queue or a seat.
+    public let activity: String?
+
     /// Whether the row reads as to configure: no model, or one that is gone.
     public var needsConfiguring: Bool { !worker.isConfigured || isModelUnavailable }
 
     public var id  : UUID   { worker.id }
     public var name: String { worker.name }
 
-    /// The role while there is no work in progress, and the missing
-    /// configuration before it, because a worker that cannot answer must say
-    /// so before it says what it is for. A worker with no role has no
-    /// subtitle; nothing invents a specialisation from the name.
+    /// The role while there is no work in progress and the activity while
+    /// there is (§4.2), and the missing configuration before either, because
+    /// a worker that cannot answer must say so before it says what it is for.
+    /// A worker with no role has no idle subtitle; nothing invents a
+    /// specialisation from the name.
     public var subtitle: String {
         guard !needsConfiguring else { return Self.toConfigure }
-        return role
+        return activity ?? role
     }
 
     /// The whole name, then the role, then the states, so a long name stays
@@ -49,6 +55,7 @@ public struct TeamRow: Sendable, Hashable, Identifiable {
     public var accessibilityLabel: String {
         var parts = [worker.name]
         if !role.isEmpty { parts.append(role) }
+        if let activity { parts.append(activity) }
         if needsConfiguring { parts.append(Self.toConfigure) }
         if worker.isArchived { parts.append("Archived") }
         return parts.joined(separator: ", ")

@@ -5,6 +5,7 @@
 //  Created by Eliomar Alejandro Rodriguez Ferrer on 22/09/2026.
 //
 
+import SeatBroker
 import SwiftUI
 import Workspace
 
@@ -25,6 +26,9 @@ struct TeamWindowView: View {
     /// The connections the team's workers use, shared with the lab's Settings.
     var connections: ModelSettingsStore
 
+    /// The broker the workers' desktop goes through, shared with the lab.
+    var broker: SeatBroker
+
     /// Told once the team is made, so quitting can write what is typed in it.
     var didOpenTeam: (TeamModel) -> Void
 
@@ -36,7 +40,7 @@ struct TeamWindowView: View {
             .task {
                 launch.open()
                 guard team == nil, let store = launch.store else { return }
-                let model = TeamModel(store: store, connections: connections)
+                let model = TeamModel(store: store, connections: connections, broker: broker)
                 didOpenTeam(model)
                 await model.load()
                 team = model

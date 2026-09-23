@@ -163,4 +163,32 @@ struct TeamOutlineTests {
         #expect(row.accessibilityLabel.contains("Research lead"))
         #expect(row.accessibilityLabel.contains(TeamRow.toConfigure))
     }
+
+    @Test("An activity replaces the role in the subtitle and never moves the row")
+    func anActivityReplacesTheRoleAndKeepsTheOrder() async throws {
+        let directory = TemporaryStore.directory()
+        defer { TemporaryStore.discard(directory) }
+
+        let store = try WorkspaceStore.opening(in: directory)
+        let head  = try await store.createWorker(name: "Aaa", role: "Lead", appearance: TemporaryStore.appearance())
+        let scout = try await store.createWorker(name: "Bbb", role: "Scout", managerID: head.id,
+                                                 appearance: TemporaryStore.appearance())
+        let idle  = try await store.createWorker(name: "Ccc", appearance: TemporaryStore.appearance())
+        for worker in [head, scout] {
+            try await store.configure(worker: worker.id, selection: TemporaryStore.firstSelection)
+        }
+        let workers = try await store.workers()
+
+        let before = TeamOutline.rows(of: workers)
+        let after  = TeamOutline.rows(of: workers, activities: [
+            scout.id: "Waiting for the computer (1 ahead)", head.id: "Using Calculator", idle.id: "Using Notes"
+        ])
+
+        #expect(after.map(\.id) == before.map(\.id))
+        #expect(after.map(\.depth) == before.map(\.depth))
+        #expect(after.map(\.subtitle) == ["Using Calculator", "Waiting for the computer (1 ahead)", TeamRow.toConfigure])
+        #expect(before.map(\.subtitle) == ["Lead", "Scout", TeamRow.toConfigure])
+        let scoutRow = try #require(after.first { $0.id == scout.id })
+        #expect(scoutRow.accessibilityLabel == "Bbb, Scout, Waiting for the computer (1 ahead)")
+    }
 }
