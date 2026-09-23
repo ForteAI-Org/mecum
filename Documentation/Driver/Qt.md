@@ -28,7 +28,7 @@ display creation ends a process with exit status zero before the suite ends.
 The ordinary `make live-tests` reports these rows as skipped and needs the
 consumer fixture and browser for its other rows.
 
-`make qt-fixture-live-tests QT_PYTHON=/absolute/path/to/python` runs six more
+`make qt-fixture-live-tests QT_PYTHON=/absolute/path/to/python` runs eight more
 rows against an owned Qt 6 widget fixture. That interpreter must have
 `PySide6-Essentials` installed. Each row launches its own fixture in the
 background, reads target-side JSON counters and measured widget frames, then
@@ -72,6 +72,8 @@ window from an on-screen row alone.
 | `send(.scroll)` | No preparation | Qt 6's scroll area changed its target-side offset from 0 to 60 after one wheel event. DaVinci's thumbnail slider stayed at `-50`; it is not a scroll offset oracle. | Passed on Qt 6 scroll area |
 | Modified key / shortcut / held repeat | No preparation, shared flags and pacing | DaVinci's layout-resolved `⌘A` selected all nine Search characters. Qt 6 counted the `down → 3 repeat → up` sequence while the turn held the key. Other modifiers, shortcut destinations and repeat rates are pending. | Partial |
 | Window watch / modal child / return | Shared | DaVinci's New Project opened window `8616`; the watcher adopted and staged it, then a Qt-policy click on Cancel closed it with the foreground app and cursor unchanged in a run with zero physical HID events. The Qt 6 fixture also opened its own modal child, followed window `14306` into the virtual display and cancelled it through a measured button. Qt kept the hidden dialog's WindowServer surface after Cancel, so its logical presence stayed unreadable; the consumer explicitly released that child with `.leaveOnVirtualDisplay` and returned the parent. Focus recovery was enabled for both rows. | Passed on both measured dialogs; explicit child release required on Qt 6 fixture |
+| Qt widget `QFileDialog` | `QtPlatform` and shared watcher | The owned Qt 6 dialog was an adopted 654 by 491 window on the virtual display. Cancel was addressed from the widget's measured button frame; the target reported the dialog closed and `fileDialogAccepted == false`. Its child record was released, the parent returned and the User Seat stayed unchanged with zero physical HID events. | Passed on fixture widget dialog |
+| Native `QFileDialog` | Qt opener, shared surface route | After its native presentation settled, the owned Qt 6 target exposed a separate level-8, 891 by 448 panel window under the Qt PID; a companion panel-service process also existed. The watcher adopted the panel. The AX Cancel frame gave a scoped click location, and the target reported closed with `fileDialogAccepted == false`. The parent returned and the User Seat stayed unchanged. | Passed on fixture native dialog |
 | `release(..., .returnToUserSeat)` | Shared | Both Qt targets returned after the measured rows, with displays and fences removed. Stage Manager briefly publishes a full-size surface after DaVinci's AX body reaches home; the return path now allows eight observations without rewriting the already-correct AX position. A deterministic unit row verified it. When DaVinci's initial stashed AX body instead appeared at `(1082, 776)`, a separate run refused return with the body at `(1082, 1012)`; that geometry remains unsupported. | Partial across stashed placements |
 | `useDropdownMenu` | Shared | The Qt 6 combo opened a 648 by 62 popup. A scoped Down and Return selected `Beta` in the target state and closed it as `chosenItem`. | Passed on Qt 6 combo |
 | `useNativePopupMenu` | Shared | The fixture supplied a native `QComboBox.showPopup()` opener and a native choice callback through its local command channel. The scoped menu stayed on the virtual display, selected `Beta` in target state and closed as `chosenItem`. This qualifies the scope when a caller has a native Qt action; it does not imply the kit can invent that action for an external app. | Passed on fixture native action |
@@ -81,14 +83,15 @@ window, stage and return it, capture it, toggle Search, follow and cancel a
 dialog, drive text and selection, and choose `Select All` from Search's menu.
 The comparative research runs also tested the Chromium and AppKit
 recipes against Search; the checked-in regression uses `QtPlatform` so it
-qualifies the public Qt entry point directly. Qt file dialogs, custom
-widgets and DaVinci's main editing workspace require separate effect-based
-rows before their functions can be marked passed.
+qualifies the public Qt entry point directly. DaVinci's own file dialogs,
+custom widgets and main editing workspace require separate effect-based rows
+before their functions can be marked passed.
 
 The Qt 6 fixture rows add a scroll offset, slider value, text and key counters,
 a measured context-menu action, both routed and native combo choices, a
-modal child with a target-side open/closed flag, and a second top-level window
-for target switching. They verified every `InputCommand` case on
+modal child with a target-side open/closed flag, a second top-level window
+for target switching, and both widget and native file dialogs cancelled
+without selecting a file. They verified every `InputCommand` case on
 at least one Qt 6 widget, including right click, held-key phases and
 multi-cluster text. The menu choices cover one effect in each target; other
 commands exposed by a menu need their own semantic oracle.

@@ -118,6 +118,338 @@ private final class QtProbeTarget {
 struct QtFixtureLiveTests {
 
     @Test(
+        "a native Qt file dialog is followed and cancelled without selecting a file",
+        .enabled(
+            if: qtFixtureSkipReason() == nil,
+            Comment(rawValue: qtFixtureSkipReason() ?? "")))
+    func nativeFileDialog() async throws {
+        let target = try QtProbeTarget()
+        defer { target.stop() }
+        let processID = target.processID
+        let original = try WindowReader.windowSnapshot(
+            processID: processID, allowUnvalidatedBuild: true
+        )
+        try #require(original.windowTitle == "Mecum Qt Probe")
+
+        func state() throws -> [String: Any] {
+            let data = try Data(contentsOf: URL(fileURLWithPath: target.statePath))
+            return try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        }
+
+        var failure: (any Error)?
+        try await LiveStage.run(
+            needsFixture: false,
+            needsChrome: false,
+            configuration: SeatHostConfiguration(
+                followsNewWindows: true,
+                restoresUserFocus: true,
+                allowUnvalidatedFocusRecovery: true
+            )
+        ) { stage in
+            let handBefore = stage.fence.snapshot().observedEventCount
+            let personBefore = UserSeatState.capture()
+            var parent: AdoptedWindow?
+            do {
+                try #require(personBefore.frontmostProcessID != processID)
+                parent = try await stage.seat.adopt(
+                    original.reference, platform: QtPlatform(), title: original.windowTitle
+                )
+                if let window = parent, !stage.seat.isStaged(window) {
+                    parent = try await stage.seat.stage(window)
+                }
+                let window = try #require(parent)
+                let openerReady = LivePump.run(until: {
+                    guard let frame = try? state()["nativeFileOpenFrame"] as? [NSNumber], frame.count == 4
+                    else { return false }
+                    return stage.virtualBounds.contains(CGPoint(
+                        x: frame[0].doubleValue, y: frame[1].doubleValue
+                    ))
+                }, timeout: 3)
+                try #require(openerReady)
+                let frame = try #require(state()["nativeFileOpenFrame"] as? [NSNumber])
+                let server = try #require(WindowServerProbe.geometry(of: window.id))
+                let geometry = try #require(WindowGeometryProbe.observation(of: server))
+                let location = try #require(InputLocation(
+                    screenPoint: CGPoint(
+                        x: frame[0].doubleValue + frame[2].doubleValue / 2,
+                        y: frame[1].doubleValue + frame[3].doubleValue / 2
+                    ),
+                    observedIn: geometry
+                ))
+                let turn = try await stage.seat.acquire()
+                let reference = try await liveObservation(stage.seat)
+                let receipt = try await stage.seat.send(
+                    .click(location), observation: reference, turn: turn, platform: QtPlatform()
+                )
+                let opened = LivePump.run(until: {
+                    (try? state()["fileDialogOpen"] as? Bool) == true
+                        && (try? state()["fileDialogMode"] as? String) == "native"
+                }, timeout: 4)
+                try stage.seat.confirm(receipt, opened ? .observed : .absent)
+                _ = await stage.seat.concludeObservation()
+                try stage.seat.release(turn)
+                try #require(opened)
+
+                try await Task.sleep(for: .seconds(1))
+                let panelProcesses = NSRunningApplication.runningApplications(
+                    withBundleIdentifier: "com.apple.appkit.xpc.openAndSavePanelService"
+                ).map(\.processIdentifier)
+                let allPIDs = Set(panelProcesses + [processID])
+                let surfaces = WindowServerProbe.surfaces(
+                    ownedBy: allPIDs, allowUnvalidatedBuild: true
+                ) ?? []
+                var nativePanel: ObservedWindow?
+                for surface in surfaces {
+                    print("QT6_NATIVE_FILE owner=\(surface.reference.processID)"
+                        + " window=\(surface.reference.windowNumber)"
+                        + " level=\(surface.level) visible=\(surface.isVisible)"
+                        + " frame=\(surface.reference.frame)")
+                    if surface.reference.processID == processID,
+                       let snapshot = try? WindowReader.windowSnapshot(
+                           processID: processID,
+                           windowNumber: surface.reference.windowNumber,
+                           allowUnvalidatedBuild: true
+                       ) {
+                        if snapshot.windowTitle == "Probe Native File Dialog" {
+                            nativePanel = snapshot
+                        }
+                    }
+                }
+                print("QT6_NATIVE_FILE panel-service-count=\(panelProcesses.count)"
+                    + " parent=\(window.id)"
+                    + " adopted=\(stage.seat.adoptedWindows.map(\.id))"
+                    + " person=\(UserSeatState.capture())")
+                let panel = try #require(nativePanel)
+                try #require(stage.virtualBounds.contains(panel.windowFrame))
+                let cancel = try #require(panel.axTree.first {
+                    $0.role == "AXButton" && $0.title == "Cancel"
+                })
+                let cancelFrame = try #require(cancel.frame)
+                print("QT6_NATIVE_FILE panel=\(panel.windowNumber)"
+                    + " cancel-frame=\(cancelFrame)")
+                let panelServer = try #require(WindowServerProbe.geometry(of: panel.windowNumber))
+                let panelGeometry = try #require(WindowGeometryProbe.observation(of: panelServer))
+                let cancelPoint = try #require(InputLocation(
+                    screenPoint: CGPoint(x: cancelFrame.midX, y: cancelFrame.midY),
+                    observedIn: panelGeometry
+                ))
+                let followed = await LivePump.settle(until: {
+                    stage.seat.adoptedWindows.contains { $0.id == panel.windowNumber }
+                }, timeout: 5)
+                try #require(followed)
+                print("QT6_NATIVE_FILE selected=\(String(describing: stage.seat.currentTarget?.id))"
+                    + " panel=\(panel.windowNumber)")
+                let cancelTurn = try await stage.seat.acquire()
+                do {
+                    let cancelReference = try await liveObservation(stage.seat)
+                    let cancellation = try await stage.seat.send(
+                        .click(cancelPoint), observation: cancelReference,
+                        turn: cancelTurn, platform: QtPlatform()
+                    )
+                    let closed = LivePump.run(until: {
+                        (try? state()["fileDialogOpen"] as? Bool) == false
+                    }, timeout: 4)
+                    try stage.seat.confirm(cancellation, closed ? .observed : .absent)
+                    _ = await stage.seat.concludeObservation()
+                    try stage.seat.release(cancelTurn)
+                    try #require(closed)
+                    #expect((try state()["fileDialogAccepted"] as? Bool) == false)
+                    print("QT6_NATIVE_FILE closed=\(closed) events=\(cancellation.eventCount)")
+                } catch {
+                    _ = await stage.seat.concludeObservation()
+                    try? stage.seat.release(cancelTurn)
+                    throw error
+                }
+            } catch {
+                try? target.sendNativeCommand("closeFileDialog")
+                failure = error
+            }
+            _ = await stage.seat.concludeObservation()
+            if let parent {
+                for child in stage.seat.adoptedWindows where child.id != parent.id {
+                    _ = await stage.seat.release(child, .leaveOnVirtualDisplay)
+                }
+                let outcome = await stage.seat.release(parent, .returnToUserSeat)
+                print("QT6_NATIVE_FILE release=\(outcome)"
+                    + " person-after=\(UserSeatState.capture())")
+                #expect(outcome == .returned)
+                let physicalEvents = stage.fence.snapshot().observedEventCount - handBefore
+                if physicalEvents == 0 {
+                    #expect(UserSeatState.capture() == personBefore)
+                }
+            }
+        }
+        if let failure { throw failure }
+    }
+
+    @Test(
+        "a Qt 6 widget file dialog is followed and cancelled without selecting a file",
+        .enabled(
+            if: qtFixtureSkipReason() == nil,
+            Comment(rawValue: qtFixtureSkipReason() ?? "")))
+    func widgetFileDialog() async throws {
+        let target = try QtProbeTarget()
+        defer { target.stop() }
+        let processID = target.processID
+        let original = try WindowReader.windowSnapshot(
+            processID: processID, allowUnvalidatedBuild: true
+        )
+        try #require(original.windowTitle == "Mecum Qt Probe")
+
+        func state() throws -> [String: Any] {
+            let data = try Data(contentsOf: URL(fileURLWithPath: target.statePath))
+            return try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        }
+
+        func location(_ frameKey: String, in windowNumber: Int) throws -> InputLocation {
+            let frame = try #require(state()[frameKey] as? [NSNumber])
+            try #require(frame.count == 4)
+            let server = try #require(WindowServerProbe.geometry(of: windowNumber))
+            let geometry = try #require(WindowGeometryProbe.observation(of: server))
+            return try #require(InputLocation(
+                screenPoint: CGPoint(
+                    x: frame[0].doubleValue + frame[2].doubleValue / 2,
+                    y: frame[1].doubleValue + frame[3].doubleValue / 2
+                ),
+                observedIn: geometry
+            ))
+        }
+
+        var failure: (any Error)?
+        try await LiveStage.run(
+            needsFixture: false,
+            needsChrome: false,
+            configuration: SeatHostConfiguration(
+                followsNewWindows: true,
+                restoresUserFocus: true,
+                allowUnvalidatedFocusRecovery: true
+            )
+        ) { stage in
+            let handBefore = stage.fence.snapshot().observedEventCount
+            let personBefore = UserSeatState.capture()
+            var parent: AdoptedWindow?
+            var dialog: AdoptedWindow?
+            do {
+                try #require(personBefore.frontmostProcessID != processID)
+                parent = try await stage.seat.adopt(
+                    original.reference, platform: QtPlatform(), title: original.windowTitle
+                )
+                if let window = parent, !stage.seat.isStaged(window) {
+                    parent = try await stage.seat.stage(window)
+                }
+                let window = try #require(parent)
+                let openerReady = LivePump.run(until: {
+                    guard let frame = try? state()["fileOpenFrame"] as? [NSNumber], frame.count == 4
+                    else { return false }
+                    return stage.virtualBounds.contains(CGPoint(
+                        x: frame[0].doubleValue, y: frame[1].doubleValue
+                    ))
+                }, timeout: 3)
+                try #require(openerReady)
+
+                let openTurn = try await stage.seat.acquire()
+                do {
+                    let reference = try await liveObservation(stage.seat)
+                    let receipt = try await stage.seat.send(
+                        .click(try location("fileOpenFrame", in: window.id)),
+                        observation: reference, turn: openTurn, platform: QtPlatform()
+                    )
+                    let opened = LivePump.run(until: {
+                        (try? state()["fileDialogOpen"] as? Bool) == true
+                    }, timeout: 3)
+                    try stage.seat.confirm(receipt, opened ? .observed : .absent)
+                    _ = await stage.seat.concludeObservation()
+                    try stage.seat.release(openTurn)
+                    try #require(opened)
+                } catch {
+                    _ = await stage.seat.concludeObservation()
+                    try? stage.seat.release(openTurn)
+                    throw error
+                }
+
+                var observed: ObservedWindow?
+                let discovered = LivePump.run(until: {
+                    let surfaces = WindowServerProbe.surfaces(
+                        ownedBy: Set([processID]), allowUnvalidatedBuild: true
+                    ) ?? []
+                    observed = surfaces.lazy
+                        .filter { $0.reference.windowNumber != window.id && $0.isVisible }
+                        .compactMap { surface in
+                            try? WindowReader.windowSnapshot(
+                                processID: processID,
+                                windowNumber: surface.reference.windowNumber,
+                                allowUnvalidatedBuild: true
+                            )
+                        }
+                        .first { $0.windowTitle == "Probe Widget File Dialog" }
+                    return observed != nil
+                }, timeout: 4)
+                try #require(discovered)
+                let child = try #require(observed)
+                let followed = await LivePump.settle(until: {
+                    stage.seat.adoptedWindows.contains { $0.id == child.windowNumber }
+                }, timeout: 10)
+                try #require(followed)
+                guard let adopted = stage.seat.adoptedWindows.first(where: {
+                    $0.id == child.windowNumber
+                }) else {
+                    throw LiveFailure.unsupported("The Qt widget file dialog was not adopted")
+                }
+                dialog = adopted
+                let server = try #require(WindowServerProbe.geometry(of: adopted.id))
+                print("QT6_FILE_DIALOG window=\(adopted.id) frame=\(server.frame)")
+                try #require(stage.virtualBounds.contains(server.frame))
+                let cancelReady = LivePump.run(until: {
+                    (try? state()["fileCancelFrame"] as? [NSNumber])?.count == 4
+                }, timeout: 3)
+                try #require(cancelReady)
+
+                let cancelTurn = try await stage.seat.acquire()
+                do {
+                    let reference = try await liveObservation(stage.seat)
+                    let receipt = try await stage.seat.send(
+                        .click(try location("fileCancelFrame", in: adopted.id)),
+                        observation: reference, turn: cancelTurn, platform: QtPlatform()
+                    )
+                    let closed = LivePump.run(until: {
+                        (try? state()["fileDialogOpen"] as? Bool) == false
+                    }, timeout: 3)
+                    try stage.seat.confirm(receipt, closed ? .observed : .absent)
+                    _ = await stage.seat.concludeObservation()
+                    try stage.seat.release(cancelTurn)
+                    try #require(closed)
+                    #expect((try state()["fileDialogAccepted"] as? Bool) == false)
+                    print("QT6_FILE_DIALOG cancelled=\(closed) events=\(receipt.eventCount)")
+                } catch {
+                    _ = await stage.seat.concludeObservation()
+                    try? stage.seat.release(cancelTurn)
+                    throw error
+                }
+                let childRelease = await stage.seat.release(adopted, .leaveOnVirtualDisplay)
+                dialog = nil
+                print("QT6_FILE_DIALOG child-release=\(childRelease)")
+                #expect(childRelease == .leftOnVirtualDisplay)
+                let physicalEvents = stage.fence.snapshot().observedEventCount - handBefore
+                let personAfter = UserSeatState.capture()
+                print("QT6_FILE_DIALOG physical-events=\(physicalEvents)"
+                    + " user-seat-before=\(personBefore) after=\(personAfter)")
+                if physicalEvents == 0 { #expect(personAfter == personBefore) }
+            } catch {
+                try? target.sendNativeCommand("closeFileDialog")
+                failure = error
+            }
+            _ = await stage.seat.concludeObservation()
+            if let dialog { _ = await stage.seat.release(dialog, .leaveOnVirtualDisplay) }
+            if let parent {
+                let outcome = await stage.seat.release(parent, .returnToUserSeat)
+                print("QT6_FILE_DIALOG release=\(outcome)")
+                #expect(outcome == .returned)
+            }
+        }
+        if let failure { throw failure }
+    }
+
+    @Test(
         "two Qt 6 windows can switch the observed target without taking the User Seat",
         .enabled(
             if: qtFixtureSkipReason() == nil,

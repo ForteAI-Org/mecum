@@ -8,6 +8,8 @@ from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
     QDialog,
+    QDialogButtonBox,
+    QFileDialog,
     QLabel,
     QLineEdit,
     QMenu,
@@ -39,9 +41,13 @@ state = {
     "menuOpen": False,
     "menuChoices": 0,
     "modalOpen": False,
+    "fileDialogOpen": False,
+    "fileDialogMode": "",
+    "fileDialogAccepted": False,
 }
 measured_widgets = {}
 active_dialog = None
+active_file_dialog = None
 
 
 def widget_frame(widget):
@@ -202,6 +208,8 @@ def poll_native_command():
         active_dialog.reject()
     elif action == "closeSecond":
         close_second()
+    elif action == "closeFileDialog" and active_file_dialog is not None:
+        active_file_dialog.reject()
     publish()
 
 scroll = QScrollArea()
@@ -247,6 +255,46 @@ modal.setAccessibleName("Open modal")
 modal.clicked.connect(open_modal)
 layout.addWidget(modal)
 
+
+def open_file_dialog(native=False):
+    global active_file_dialog
+    title = "Probe Native File Dialog" if native else "Probe Widget File Dialog"
+    dialog = QFileDialog(window, title)
+    dialog.setFileMode(QFileDialog.FileMode.ExistingFile)
+    dialog.setOption(QFileDialog.Option.DontUseNativeDialog, not native)
+    active_file_dialog = dialog
+    state["fileDialogOpen"] = True
+    state["fileDialogMode"] = "native" if native else "widget"
+    publish()
+
+    def publish_cancel_frame():
+        box = dialog.findChild(QDialogButtonBox)
+        cancel = box.button(QDialogButtonBox.StandardButton.Cancel) if box else None
+        if cancel is not None:
+            measured_widgets["fileCancelFrame"] = cancel
+            update_geometry()
+
+    if not native:
+        QTimer.singleShot(0, publish_cancel_frame)
+    result = dialog.exec()
+    active_file_dialog = None
+    measured_widgets.pop("fileCancelFrame", None)
+    state.pop("fileCancelFrame", None)
+    state["fileDialogOpen"] = False
+    state["fileDialogAccepted"] = result == QDialog.DialogCode.Accepted
+    publish()
+
+
+file_opener = QPushButton("Open widget file dialog")
+file_opener.setAccessibleName("Open widget file dialog")
+file_opener.clicked.connect(lambda: open_file_dialog(False))
+layout.addWidget(file_opener)
+
+native_file_opener = QPushButton("Open native file dialog")
+native_file_opener.setAccessibleName("Open native file dialog")
+native_file_opener.clicked.connect(lambda: open_file_dialog(True))
+layout.addWidget(native_file_opener)
+
 measured_widgets.update({
     "textFrame": field,
     "buttonFrame": button,
@@ -255,6 +303,8 @@ measured_widgets.update({
     "comboFrame": combo,
     "secondOpenFrame": second_opener,
     "modalFrame": modal,
+    "fileOpenFrame": file_opener,
+    "nativeFileOpenFrame": native_file_opener,
 })
 publish()
 window.show()
