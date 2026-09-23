@@ -32,8 +32,10 @@ nonisolated private func qtFixtureSkipReason() -> String? {
 private final class QtProbeTarget {
     let processID: Int32
     let statePath: String
+    private let commandPath: String
     private let process: Process?
     private let ownsStateFile: Bool
+    private var nextCommandSequence = 0
 
     init() throws {
         let environment = ProcessInfo.processInfo.environment
@@ -41,6 +43,7 @@ private final class QtProbeTarget {
            let statePath = environment["AGENTSEAT_QT_FIXTURE_STATE"] {
             self.processID = processID
             self.statePath = statePath
+            commandPath = statePath + ".command"
             process = nil
             ownsStateFile = false
             return
@@ -58,10 +61,11 @@ private final class QtProbeTarget {
         let person = NSWorkspace.shared.frontmostApplication
         let launched = Process()
         launched.executableURL = URL(fileURLWithPath: python)
-        launched.arguments = [script.path, output.path]
+        launched.arguments = [script.path, output.path, output.path + ".command"]
         try launched.run()
         processID = launched.processIdentifier
         statePath = output.path
+        commandPath = output.path + ".command"
         process = launched
         ownsStateFile = true
 
@@ -94,6 +98,16 @@ private final class QtProbeTarget {
             process.waitUntilExit()
         }
         if ownsStateFile { try? FileManager.default.removeItem(atPath: statePath) }
+        if ownsStateFile { try? FileManager.default.removeItem(atPath: commandPath) }
+    }
+
+    func sendNativeCommand(_ action: String) throws {
+        nextCommandSequence += 1
+        let data = try JSONSerialization.data(withJSONObject: [
+            "sequence": nextCommandSequence,
+            "action": action,
+        ])
+        try data.write(to: URL(fileURLWithPath: commandPath), options: .atomic)
     }
 }
 
@@ -102,6 +116,87 @@ private final class QtProbeTarget {
 @Suite("Qt 6 fixture qualification", .serialized)
 @MainActor
 struct QtFixtureLiveTests {
+
+    @Test(
+        "a Qt 6 popup opened by the target's native API is scoped and closed",
+        .enabled(
+            if: qtFixtureSkipReason() == nil,
+            Comment(rawValue: qtFixtureSkipReason() ?? "")))
+    func nativePopupMenu() async throws {
+        let target = try QtProbeTarget()
+        defer { target.stop() }
+        let processID = target.processID
+        let original = try WindowReader.windowSnapshot(
+            processID: processID, allowUnvalidatedBuild: true
+        )
+        try #require(original.windowTitle == "Mecum Qt Probe")
+
+        func probeState() throws -> [String: Any] {
+            let data = try Data(contentsOf: URL(fileURLWithPath: target.statePath))
+            return try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        }
+
+        var failure: (any Error)?
+        try await LiveStage.run(needsFixture: false, needsChrome: false) { stage in
+            let personBefore = UserSeatState.capture()
+            let handBefore = stage.fence.snapshot().observedEventCount
+            var adopted: AdoptedWindow?
+            do {
+                try #require(personBefore.frontmostProcessID != processID)
+                adopted = try await stage.seat.adopt(
+                    original.reference, platform: QtPlatform(), title: original.windowTitle
+                )
+                if let window = adopted, !stage.seat.isStaged(window) {
+                    adopted = try await stage.seat.stage(window)
+                }
+                let window = try #require(adopted)
+                let initial = (try probeState()["comboIndex"] as? NSNumber)?.intValue ?? -1
+                try #require(initial == 0)
+
+                let turn = try await stage.seat.acquire()
+                do {
+                    let receipt = try await stage.seat.useNativePopupMenu(
+                        of: window,
+                        turn: turn,
+                        opening: { try target.sendNativeCommand("openCombo") },
+                        choosing: { menu in
+                            print("QT6_NATIVE menu=\(menu.window.windowNumber) frame=\(menu.frame)")
+                            try target.sendNativeCommand("chooseBeta")
+                            return true
+                        }
+                    )
+                    _ = await stage.seat.concludeObservation()
+                    try stage.seat.release(turn)
+                    let chosen = LivePump.run(until: {
+                        (try? probeState()["comboIndex"] as? NSNumber)?.intValue == 1
+                    }, timeout: 2)
+                    print("QT6_NATIVE requested=\(receipt.selectionRequested)"
+                        + " closed-by=\(receipt.closedBy)"
+                        + " target-chosen=\(chosen)")
+                    #expect(stage.virtualBounds.contains(receipt.menu.frame))
+                    #expect(receipt.selectionRequested)
+                    #expect(receipt.closedBy == .chosenItem)
+                    #expect(chosen)
+                    #expect((try probeState()["comboText"] as? String) == "Beta")
+                } catch {
+                    _ = await stage.seat.concludeObservation()
+                    try? stage.seat.release(turn)
+                    throw error
+                }
+                let physicalEvents = stage.fence.snapshot().observedEventCount - handBefore
+                if physicalEvents == 0 { #expect(UserSeatState.capture() == personBefore) }
+            } catch {
+                failure = error
+            }
+            _ = await stage.seat.concludeObservation()
+            if let adopted {
+                let outcome = await stage.seat.release(adopted, .returnToUserSeat)
+                print("QT6_NATIVE release=\(outcome)")
+                #expect(outcome == .returned)
+            }
+        }
+        if let failure { throw failure }
+    }
 
     @Test(
         "a Qt 6 combo popup is chosen through the dropdown menu scope",

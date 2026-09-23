@@ -27,7 +27,7 @@ display creation ends a process with exit status zero before the suite ends.
 The ordinary `make live-tests` reports these rows as skipped and needs the
 consumer fixture and browser for its other rows.
 
-`make qt-fixture-live-tests QT_PYTHON=/absolute/path/to/python` runs three more
+`make qt-fixture-live-tests QT_PYTHON=/absolute/path/to/python` runs four more
 rows against an owned Qt 6 widget fixture. That interpreter must have
 `PySide6-Essentials` installed. Each row launches its own fixture in the
 background, reads target-side JSON counters and measured widget frames, then
@@ -72,7 +72,7 @@ window from an on-screen row alone.
 | Window watch / modal child / return | Shared | New Project opened window `8616`; the watcher adopted and staged it, then a Qt-policy click on Cancel closed it with the foreground app and cursor unchanged in a run with zero physical HID events. Focus recovery was enabled for this row, though no restoration request was needed. The parent returned to its original AX position. | Passed on this dialog |
 | `release(..., .returnToUserSeat)` | Shared | Both Qt targets returned after the measured rows, with displays and fences removed. Stage Manager briefly publishes a full-size surface after DaVinci's AX body reaches home; the return path now allows eight observations without rewriting the already-correct AX position. A deterministic unit row verified it. When DaVinci's initial stashed AX body instead appeared at `(1082, 776)`, a separate run refused return with the body at `(1082, 1012)`; that geometry remains unsupported. | Partial across stashed placements |
 | `useDropdownMenu` | Shared | The Qt 6 combo opened a 648 by 62 popup. A scoped Down and Return selected `Beta` in the target state and closed it as `chosenItem`. | Passed on Qt 6 combo |
-| `useNativePopupMenu` | Shared | The Qt 6 combo uses a routed click opener; no caller-supplied native Qt popup action has been qualified. | Pending |
+| `useNativePopupMenu` | Shared | The fixture supplied a native `QComboBox.showPopup()` opener and a native choice callback through its local command channel. The scoped menu stayed on the virtual display, selected `Beta` in target state and closed as `chosenItem`. This qualifies the scope when a caller has a native Qt action; it does not imply the kit can invent that action for an external app. | Passed on fixture native action |
 
 The checked-in suite is `QtDriverLiveTests`. Its six stable rows discover the
 window, stage and return it, capture it, toggle Search, follow and cancel a
@@ -84,7 +84,7 @@ widgets, DaVinci context menus and DaVinci's main editing workspace require sepa
 effect-based rows before their functions can be marked passed.
 
 The Qt 6 fixture rows add a scroll offset, slider value, text and key counters,
-a measured context-menu action and a combo choice. They verified every `InputCommand` case on
+a measured context-menu action and both routed and native combo choices. They verified every `InputCommand` case on
 at least one Qt 6 widget, including right click, held-key phases and
 multi-cluster text. This does not remove DaVinci's menu failure or prove those
 effects on other Qt widget implementations.

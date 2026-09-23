@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
 
 
 STATE_PATH = Path(sys.argv[1])
+COMMAND_PATH = Path(sys.argv[2]) if len(sys.argv) > 2 else None
 state = {
     "text": "",
     "selectionStart": -1,
@@ -32,6 +33,7 @@ state = {
     "slider": 0,
     "comboIndex": 0,
     "comboText": "Alpha",
+    "nativeCommandSequence": 0,
     "menuOpen": False,
     "menuChoices": 0,
     "modalOpen": False,
@@ -143,6 +145,26 @@ combo.currentIndexChanged.connect(lambda index: (
 ))
 layout.addWidget(combo)
 
+
+def poll_native_command():
+    if COMMAND_PATH is None or not COMMAND_PATH.exists():
+        return
+    try:
+        command = json.loads(COMMAND_PATH.read_text())
+    except (OSError, json.JSONDecodeError):
+        return
+    sequence = command.get("sequence", 0)
+    if sequence <= state["nativeCommandSequence"]:
+        return
+    state["nativeCommandSequence"] = sequence
+    action = command.get("action")
+    if action == "openCombo":
+        combo.showPopup()
+    elif action == "chooseBeta":
+        combo.setCurrentIndex(1)
+        combo.hidePopup()
+    publish()
+
 scroll = QScrollArea()
 scroll.setAccessibleName("Probe scroll")
 scroll.setWidgetResizable(True)
@@ -192,4 +214,7 @@ window.show()
 timer = QTimer()
 timer.timeout.connect(update_geometry)
 timer.start(100)
+command_timer = QTimer()
+command_timer.timeout.connect(poll_native_command)
+command_timer.start(40)
 sys.exit(app.exec())
