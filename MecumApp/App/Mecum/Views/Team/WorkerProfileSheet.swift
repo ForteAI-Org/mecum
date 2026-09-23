@@ -147,10 +147,7 @@ struct WorkerProfileSheet: View {
     @ViewBuilder
     private func modelPicker(_ provider: ModelProvider) -> some View {
         if isLoadingCatalogue {
-            HStack(spacing: 6) {
-                ProgressView().controlSize(.small)
-                Text("Reading the catalogue…")
-            }
+            Text("Reading the catalogue…").shimmering()
         } else if modelOptions.isEmpty {
             Text(
                 catalogueFailed

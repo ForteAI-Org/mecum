@@ -36,8 +36,9 @@ struct TeamWindowView: View {
 
     @State private var team: TeamModel?
 
+    /// Closed in a new window, and as the person left it in a restored one.
     @SceneStorage("team.inspectorRequested")
-    private var isInspectorRequested = true
+    private var isInspectorRequested = false
 
     /// The selected worker's id, empty for none.
     @SceneStorage("team.selection")
@@ -78,7 +79,9 @@ struct TeamWindowView: View {
                 )
             }
         } else {
-            ProgressView()
+            Text("Opening the team…")
+                .foregroundStyle(.secondary)
+                .shimmering()
         }
     }
 

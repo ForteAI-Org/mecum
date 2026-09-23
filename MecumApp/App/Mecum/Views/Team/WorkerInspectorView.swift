@@ -145,7 +145,15 @@ struct WorkerInspectorView: View {
     private var turnRows: some View {
         switch turn {
         case .reading:
-            ProgressView().controlSize(.small)
+            // Placeholders in the rows' own shape while the turn is read, never a spinning wheel.
+            Group {
+                LabeledContent("Ran with", value: "a model, an effort")
+                LabeledContent("Started", value: "a moment ago")
+                LabeledContent("Outcome", value: "Completed")
+            }
+            .redacted(reason: .placeholder)
+            .shimmering()
+            .accessibilityLabel("Reading the turn")
 
         case .nothingYet:
             Text("No turn yet. The model and effort a turn runs with show here once \(worker.name) answers.")
@@ -237,7 +245,7 @@ struct WorkerInspectorView: View {
         if let state = team.modelStates[worker.id] ?? team.connections.states[provider] {
             StatusText(state.isReady ? state.title : state.message, tone: state.isReady ? .ready : .trouble)
         } else if team.connections.isChecking(provider) {
-            StatusText("Checking…", tone: .waiting)
+            StatusText("Checking…", tone: .waiting).shimmering()
         } else {
             HStack(spacing: 8) {
                 StatusText("Not checked yet", tone: .quiet)

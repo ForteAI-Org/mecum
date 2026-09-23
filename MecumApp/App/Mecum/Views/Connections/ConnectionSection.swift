@@ -57,7 +57,7 @@ struct ConnectionSection: View {
     @ViewBuilder
     private var status: some View {
         if connections.isChecking(provider) {
-            StatusText("Checking…", tone: .waiting)
+            StatusText("Checking…", tone: .waiting).shimmering()
         } else if let state = connections.states[provider] {
             StatusText(state.title, tone: Self.tone(state))
         } else {

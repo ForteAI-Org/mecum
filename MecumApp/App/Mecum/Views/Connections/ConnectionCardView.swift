@@ -68,10 +68,7 @@ struct ConnectionCardView: View {
             }
             .accessibilityElement(children: .combine)
         } else if connections.isChecking(provider) {
-            HStack(spacing: 6) {
-                ProgressView().controlSize(.small)
-                Text("Checking…").font(.callout)
-            }
+            Text("Checking…").font(.callout).shimmering()
         } else {
             Label("Not checked yet", systemImage: "circle.dashed")
                 .font(.callout)
