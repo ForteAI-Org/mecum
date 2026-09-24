@@ -20,7 +20,9 @@ import SwiftUI
 ///
 /// macOS offers three haptic patterns and no intensity, so the climb goes
 /// from alignment to generic to level change, and the top stop answers twice.
-/// Going down is always the light one.
+/// Going down is always the light one. A click on the rail answers too, just
+/// after the release, since the trackpad's own click would swallow an answer
+/// given with it.
 struct EffortSlider: View {
 
     let positions: [ReasoningEffort]
@@ -37,6 +39,9 @@ struct EffortSlider: View {
 
     /// Where on the knob it was taken, from its centre, so taking it never moves it.
     @State private var grab: CGFloat = 0
+
+    /// The stop a click on the rail brought the knob to, answered once the click is released.
+    @State private var unfelt: (movingUp: Bool, stop: Int)?
 
     @Environment(\.accessibilityReduceMotion)
     private var reducesMotion
@@ -230,15 +235,25 @@ struct EffortSlider: View {
             return
         }
 
-        let x = clamped(point.x, in: width)
-        knob  = x
-        grab  = 0
-        move(to: nearestStop(to: x, in: width))
+        let x    = clamped(point.x, in: width)
+        let stop = nearestStop(to: x, in: width)
+        knob     = x
+        grab     = 0
+        if stop != index {
+            unfelt = (
+                movingUp: stop > index,
+                stop    : stop
+            )
+        }
+        move(
+            to   : stop,
+            feels: false
+        )
     }
 
     /// The share of the hand's motion the knob takes. Up, each stretch between two stops divides
     /// it by more, less so near the top, and the last a little less again: all of it on the
-    /// first, then 48%, 36%, 30%, 29% on a rail of six. Near a stop,
+    /// first, then 48%, 40%, 35%, 34% on a rail of six. Near a stop,
     /// within a quarter of the way to the next, the stop holds the knob at 45% more, both ways.
     private func share(
         movingUp: Bool,
@@ -251,8 +266,8 @@ struct EffortSlider: View {
         let along   = (x - inset) / ((width - 2 * inset) / CGFloat(positions.count - 1))
         let stretch = min(max(along.rounded(.down), 0), CGFloat(positions.count - 2))
         let notch   = abs(along - along.rounded()) < 0.25 ? 0.45 : 1
-        let last    = stretch > 0 && stretch == CGFloat(positions.count - 2) ? 1.12 : 1
-        return movingUp ? last * notch / (1 + 1.08 * pow(stretch, 0.7)) : notch
+        let last    = stretch > 0 && stretch == CGFloat(positions.count - 2) ? 1.08 : 1
+        return movingUp ? last * notch / (1 + 1.08 * pow(stretch, 0.5)) : notch
     }
 
     /// Moves the knob by the hand's `delta` times its `share`. Under Reduce Motion the knob is
@@ -285,6 +300,16 @@ struct EffortSlider: View {
     private func release(in width: CGFloat) -> CGFloat? {
         grip = nil
         withAnimation(settling) { knob = nil }
+        if let unfelt {
+            self.unfelt = nil
+            Task {
+                try? await Task.sleep(for: .milliseconds(50))
+                feel(
+                    movingUp: unfelt.movingUp,
+                    to      : unfelt.stop
+                )
+            }
+        }
         return detent(index, in: width) + grab
     }
 
@@ -296,10 +321,21 @@ struct EffortSlider: View {
         return .handled
     }
 
-    private func move(to stop: Int) {
+    /// Puts the effort on `stop`, answered on the trackpad when `feels`. A drag past a stop answers
+    /// it itself, so a click's answer still waiting is dropped.
+    private func move(
+        to stop: Int,
+        feels  : Bool = true
+    ) {
         guard stop != index else { return }
 
-        feel(movingUp: stop > index, to: stop)
+        if feels {
+            unfelt = nil
+            feel(
+                movingUp: stop > index,
+                to      : stop
+            )
+        }
         effort = positions[stop]
     }
 

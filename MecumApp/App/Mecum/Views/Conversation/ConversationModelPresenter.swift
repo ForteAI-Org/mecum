@@ -66,8 +66,9 @@ struct ConversationModelPresenter: ViewModifier {
                         height   : 0,
                         alignment: .bottomLeading
                     )
+                    // It rises from the bar as it opens and sinks back into it as it closes.
                     .transition(
-                        reducesMotion ? .opacity : .opacity.combined(with: .scale(scale: 0.96, anchor: .bottom))
+                        reducesMotion ? .opacity : .opacity.combined(with: .offset(y: 24))
                     )
                 }
             }
