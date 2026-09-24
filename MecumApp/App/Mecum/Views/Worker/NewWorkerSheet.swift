@@ -7,14 +7,17 @@
 
 import SwiftUI
 
-/// NewWorkerSheet creates one worker, by hand.
+/// NewWorkerSheet creates one worker, by hand, in the Connections sheet's
+/// language: a title, a grouped list, and a bar with Cancel and Create, the
+/// default button.
 ///
-/// Name is the only required field. Colour and seed start from a value and the
-/// person can change both, and the preview is the mascot that will be drawn,
-/// not an approximation of it.
+/// The first group is the mascot that will be drawn, not an approximation of
+/// it, with its colour as swatches and a new shape a click away. The second
+/// is the worker's name, the only field required, its role and its
+/// description; the name has the keyboard when the sheet opens.
 ///
 /// The worker is saved with no model attached and is marked to configure. The
-/// sheet says so, and the model is chosen afterwards in the worker's profile:
+/// footer says so, and the provider is chosen afterwards in the inspector:
 /// a worker that cannot answer must not look like one that can.
 struct NewWorkerSheet: View {
 
@@ -28,77 +31,66 @@ struct NewWorkerSheet: View {
     @State private var instructions = ""
     @State private var appearance   = NewWorkerSheet.startingAppearance()
 
+    @FocusState private var namesFirst: Bool
+
     var body: some View {
-        VStack(
-            alignment: .leading,
-            spacing  : 16
-        ) {
-
-            Text("New worker")
-                .font(.title3.bold())
-
-            HStack(
-                alignment: .top,
-                spacing  : 16
-            ) {
-                MascotView(
-                    appearance: appearance,
-                    size      : 64
+        VStack(spacing: 0) {
+            Text("New Worker")
+                .font(.title2.weight(.semibold))
+                .accessibilityAddTraits(.isHeader)
+                .frame(
+                    maxWidth : .infinity,
+                    alignment: .leading
                 )
-                .accessibilityHidden(false)
-                .accessibilityLabel("Mascot preview, \(appearance.palette)")
-
-                VStack(
-                    alignment: .leading,
-                    spacing  : 8
-                ) {
-                    Picker(
-                        "Colour",
-                        selection: $appearance.palette
-                    ) {
-                        ForEach(MascotPalette.all) { palette in
-                            Text(palette.name.capitalized).tag(palette.name)
-                        }
-                    }
-
-                    Button("New shape") {
-                        appearance.seed = Int64.random(in: Int64.min...Int64.max)
-                    }
-                    .help("Draws a different mascot in the same colour")
-                }
-            }
+                .padding(
+                    .horizontal,
+                    20
+                )
+                .padding(
+                    .top,
+                    20
+                )
 
             Form {
-                TextField(
-                    "Name",
-                    text: $name
-                )
-                TextField(
-                    "Role (optional)",
-                    text: $role
-                )
-                TextField(
-                    "Description (optional)",
-                    text: $instructions,
-                    axis: .vertical
-                )
-                .lineLimit(3...6)
-            }
-            .formStyle(.columns)
+                Section {
+                    mascot
+                }
 
-            Label(
-                """
-                Saved without a model attached. The worker is listed as \(TeamRow.toConfigure) \
-                until you choose its provider in Provider and connection. No desktop permission is needed.
-                """,
-                systemImage: "info.circle"
-            )
-            .font(.footnote)
-            .foregroundStyle(.secondary)
-            .fixedSize(
-                horizontal: false,
-                vertical  : true
-            )
+                Section {
+                    TextField(
+                        "Name",
+                        text  : $name,
+                        prompt: Text("Required")
+                    )
+                    .focused($namesFirst)
+
+                    TextField(
+                        "Role",
+                        text  : $role,
+                        prompt: Text("Optional")
+                    )
+
+                    TextField(
+                        "Description",
+                        text  : $instructions,
+                        prompt: Text("Optional"),
+                        axis  : .vertical
+                    )
+                    .lineLimit(2...5)
+                } footer: {
+                    Text("""
+                        It starts without a model and is listed as “\(TeamRow.toConfigure)” until you choose its \
+                        provider in the inspector. It asks for no permission until it first uses the computer.
+                        """)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .formStyle(.grouped)
+            .scrollContentBackground(.hidden)
+            .scrollDisabled(true)
+
+            Divider()
 
             HStack {
                 Spacer()
@@ -115,9 +107,56 @@ struct NewWorkerSheet: View {
                     .keyboardShortcut(.defaultAction)
                     .disabled(trimmedName.isEmpty)
             }
+            .padding(
+                .horizontal,
+                20
+            )
+            .padding(
+                .vertical,
+                14
+            )
         }
-        .padding(20)
-        .frame(width: 440)
+        .frame(
+            width : 460,
+            height: 460
+        )
+        .onAppear { namesFirst = true }
+    }
+
+    // MARK: Parts
+
+    /// The mascot as it will be drawn, its colour and a new shape.
+    private var mascot: some View {
+        VStack(spacing: 14) {
+            MascotView(
+                appearance: appearance,
+                size      : 72
+            )
+
+            HStack(spacing: 12) {
+                MascotPalettePicker(selection: $appearance.palette)
+
+                Divider()
+                    .frame(height: 18)
+
+                Button {
+                    appearance.seed = Int64.random(in: Int64.min...Int64.max)
+                } label: {
+                    Label(
+                        "New Shape",
+                        systemImage: "dice"
+                    )
+                }
+                .labelStyle(.iconOnly)
+                .buttonStyle(.borderless)
+                .help("New Shape, in the same colour")
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(
+            .vertical,
+            8
+        )
     }
 
     private var trimmedName: String {

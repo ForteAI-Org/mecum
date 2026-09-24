@@ -216,6 +216,16 @@ enum WindowSnapshots {
                 )
             }
 
+            for (name, dark) in [("light", false), ("dark", true)] {
+                try await write(
+                    NewWorkerSheet(team: team),
+                    width : 460,
+                    height: 460,
+                    dark  : dark,
+                    to    : output.appending(path: "new-worker-\(name).png")
+                )
+            }
+
             // The composer's model popup, at the bottom, the middle and the top of a Codex model's rail.
             let codex = ModelInfo(
                 id           : "gpt-6-sol",
