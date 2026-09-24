@@ -30,6 +30,21 @@ nonisolated struct ToolStep: Sendable, Hashable {
         case act(verb: String, target: String, section: String?, value: String?)
         case select(control: String, item: String)
 
+        /// Typed `text` into `field`, over what it held unless `replace` is false.
+        case typeText(text: String, field: String, replace: Bool)
+
+        /// Pressed a key or a shortcut, `count` times.
+        case key(name: String, modifiers: [String], count: Int)
+
+        /// Turned the wheel `direction`, over `target` or the window.
+        case scroll(direction: String, target: String?)
+
+        /// Dragged `source` onto `destination`, or by an offset when it is nil.
+        case drag(source: String, destination: String?)
+
+        /// Right-clicked `target` and chose `item` in its contextual menu.
+        case contextMenu(target: String, item: String)
+
         /// Closes the app the session held, when this turn opened it.
         case close(app: String?)
 
@@ -70,6 +85,17 @@ nonisolated struct ToolStep: Sendable, Hashable {
 
     /// The outcome statuses that mean the step did what it says.
     static let successes: Set<String> = ["found_acted", "acted_noop", "dry_run"]
+
+    /// The tools whose result is an outcome with a status, rather than a reading.
+    static let outcomeTools: Set<String> = [
+        "act",
+        "select",
+        "type_text",
+        "press_key",
+        "scroll",
+        "drag",
+        "context_menu",
+    ]
 
     /// The steps `lines` record, in call order.
     static func steps(from lines: [String]) -> [ToolStep] {
@@ -137,7 +163,7 @@ nonisolated struct ToolStep: Sendable, Hashable {
                 batch = []
                 continue
             }
-            let answer = state(of: rest, checksOutcome: name == "act" || name == "select")
+            let answer = state(of: rest, checksOutcome: outcomeTools.contains(name))
             if let index = waiting[name]?.first {
                 waiting[name]?.removeFirst()
                 steps[index].state = answer
@@ -167,6 +193,38 @@ nonisolated struct ToolStep: Sendable, Hashable {
         case "act":
             guard let target = text("target") else { return .other(name: name) }
             return .act(verb: text("verb") ?? "click", target: target, section: text("section"), value: text("value"))
+        case "type_text":
+            guard let typed = text("text"), let field = text("target") else { return .other(name: name) }
+            return .typeText(
+                text   : typed,
+                field  : field,
+                replace: arguments["replace"] as? Bool ?? true
+            )
+        case "press_key":
+            guard let key = text("key") else { return .other(name: name) }
+            return .key(
+                name     : key,
+                modifiers: arguments["modifiers"] as? [String] ?? [],
+                count    : arguments["count"] as? Int ?? 1
+            )
+        case "scroll":
+            guard let direction = text("direction") else { return .other(name: name) }
+            return .scroll(
+                direction: direction,
+                target   : text("target")
+            )
+        case "drag":
+            guard let source = text("from") else { return .other(name: name) }
+            return .drag(
+                source     : source,
+                destination: text("to")
+            )
+        case "context_menu":
+            guard let target = text("target"), let item = text("item") else { return .other(name: name) }
+            return .contextMenu(
+                target: target,
+                item  : item
+            )
         default:
             return .other(name: name)
         }

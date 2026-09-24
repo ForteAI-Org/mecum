@@ -148,16 +148,56 @@ nonisolated enum TranscriptWording {
             switch (verb, value) {
             case ("click", _):          return forms("Pressed", "press", "Pressing", object)
             case ("double_click", _):   return forms("Double-clicked", "double-click", "Double-clicking", object)
+            case ("triple_click", _):   return forms("Triple-clicked", "triple-click", "Triple-clicking", object)
             case ("right_click", _):    return forms("Right-clicked", "right-click", "Right-clicking", object)
             case ("set_toggle", "on"):  return forms("Turned on", "turn on", "Turning on", object)
             case ("set_toggle", "off"): return forms("Turned off", "turn off", "Turning off", object)
             default:                    return forms("Used", "use", "Using", object)
             }
+        case .typeText(let text, let field, let replace):
+            return replace
+                ? forms("Typed", "type", "Typing", "“\(text)” into \(field)")
+                : forms("Added", "add", "Adding", "“\(text)” to \(field)")
+        case .key(let name, let modifiers, let count):
+            let key   = keyName(
+                name,
+                modifiers: modifiers
+            )
+            let times = count > 1 ? " \(count) times" : ""
+            return forms("Pressed", "press", "Pressing", key + times)
+        case .scroll(let direction, let target):
+            return forms("Scrolled", "scroll", "Scrolling", "\(direction) in \(target ?? "the window")")
+        case .drag(let source, let destination):
+            return forms("Dragged", "drag", "Dragging", source + (destination.map { " to \($0)" } ?? ""))
+        case .contextMenu(let target, let item):
+            return ("Chose \(item) from the menu of \(target)",
+                    "choose \(item) from the menu of \(target)",
+                    "Choosing \(item) from the menu of \(target)",
+                    true)
         case .note(let text):
             return (text, text, text, true)
         case .other(let name):
             return (name, name, name, false)
         }
+    }
+
+    /// A key as a Mac prints it: Return or ↓ alone, ⌘⇧N with modifiers held.
+    private static func keyName(
+        _ name   : String,
+        modifiers: [String]
+    ) -> String {
+        let glyphs = [("ctrl", "⌃"), ("opt", "⌥"), ("shift", "⇧"), ("cmd", "⌘")]
+            .filter { modifiers.contains($0.0) }
+            .map(\.1)
+            .joined()
+        let arrows = ["left": "←", "right": "→", "up": "↑", "down": "↓"]
+        if let arrow = arrows[name] {
+            return glyphs + arrow
+        }
+        if name.count == 1 {
+            return glyphs + name.uppercased()
+        }
+        return glyphs + name.capitalized
     }
 
     /// Consecutive equal steps, as one step and how many times it happened.

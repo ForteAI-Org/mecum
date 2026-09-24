@@ -47,6 +47,57 @@ struct ToolLineTests {
         ])
     }
 
+    @Test("Typing, keys, scrolling, drags and contextual menus read as what a person would say")
+    func inputToolPhrases() {
+        let lines = [
+            "→ type_text {\"session\":\"s\",\"target\":\"Project Name\",\"text\":\"Demo\"}",
+            "← type_text {\"status\":\"found_acted\"}",
+            "→ type_text {\"session\":\"s\",\"target\":\"Notes\",\"text\":\" more\",\"replace\":false}",
+            "← type_text {\"status\":\"found_acted\"}",
+            "→ press_key {\"session\":\"s\",\"key\":\"return\"}",
+            "← press_key {\"status\":\"found_acted\"}",
+            "→ press_key {\"session\":\"s\",\"key\":\"n\",\"modifiers\":[\"cmd\",\"shift\"]}",
+            "← press_key {\"status\":\"found_acted\"}",
+            "→ press_key {\"session\":\"s\",\"key\":\"down\",\"count\":3}",
+            "← press_key {\"status\":\"found_acted\"}",
+            "→ scroll {\"session\":\"s\",\"direction\":\"down\",\"target\":\"Media Pool\"}",
+            "← scroll {\"status\":\"found_acted\"}",
+            "→ scroll {\"session\":\"s\",\"direction\":\"up\"}",
+            "← scroll {\"status\":\"found_acted\"}",
+            "→ drag {\"session\":\"s\",\"from\":\"Clip\",\"to\":\"Timeline\"}",
+            "← drag {\"status\":\"found_acted\"}",
+            "→ context_menu {\"session\":\"s\",\"target\":\"Search\",\"item\":\"Select All\"}",
+            "← context_menu {\"status\":\"found_acted\"}",
+            "→ act {\"session\":\"s\",\"target\":\"Name\",\"verb\":\"triple_click\"}",
+            "← act {\"status\":\"found_acted\"}",
+        ]
+        #expect(Self.done(lines) == [
+            "Typed “Demo” into Project Name", "Added “ more” to Notes", "Pressed Return", "Pressed ⇧⌘N",
+            "Pressed ↓ 3 times", "Scrolled down in Media Pool", "Scrolled up in the window", "Dragged Clip to Timeline",
+            "Chose Select All from the menu of Search", "Triple-clicked Name",
+        ])
+    }
+
+    @Test("Every input tool changes the app, and its unverified outcome fails with the engine's reason")
+    func inputToolOutcomes() {
+        let lines = [
+            "→ press_key {\"session\":\"s\",\"key\":\"tab\"}",
+            "← press_key {\"status\":\"acted_unverified\",\"message\":\"the window did NOT change\"}",
+            "→ type_text {\"session\":\"s\",\"target\":\"Name\",\"text\":\"Demo\"}",
+            "← type_text {\"status\":\"refused\",\"message\":\"no field\"}",
+            "→ context_menu {\"session\":\"s\",\"target\":\"Row\",\"item\":\"Copy\"}",
+        ]
+        let steps = ToolStep.steps(from: lines)
+        #expect(steps.allSatisfy { $0.isEffectful })
+        #expect(TranscriptWording.toolSteps(steps, ending: .completed).map(\.text) == [
+            "Could not press Tab: the window did NOT change",
+            "Could not type “Demo” into Name: no field",
+            "Choosing Copy from the menu of Row, did not finish",
+        ])
+        let drag = ToolStep.steps(from: ["→ drag {\"session\":\"s\",\"from\":\"Clip\",\"dx\":40}"])
+        #expect(TranscriptWording.toolSummary(drag, ending: nil) == "Dragging Clip…")
+    }
+
     @Test("A batch is its steps, answered one by one; steps a stopped batch never reached are not shown")
     func batchSteps() {
         let lines = [
