@@ -47,6 +47,10 @@ final class DesktopUnavailableSession: AutomationSessionOperating {
         throw Self.noSession
     }
 
+    func deliver(_ input: InputRequest.Input, section: String?) async throws -> ActOutcome {
+        throw Self.noSession
+    }
+
     /// Nothing is open, so there is nothing to release.
     func close() async {}
 }

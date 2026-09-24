@@ -269,6 +269,22 @@ public final class BrokeredAutomationSession: AutomationSessionOperating {
         return await runtime.engine(allowsDestructive: allowsDestructive).act(request)
     }
 
+    public func deliver(_ input: InputRequest.Input, section: String?) async throws -> ActOutcome {
+        let (application, runtime, seat) = try current()
+        guard try seat.agentSeat().state == .ready else {
+            throw AutomationFailure("The Seat is not ready for input. Observe, then close and reopen if "
+                                    + "recovery is needed.")
+        }
+        let request = InputRequest(
+            processID: application.processIdentifier,
+            bundleID : application.bundleIdentifier ?? "pid.\(application.processIdentifier)",
+            appName  : application.localizedName ?? "application",
+            input    : input,
+            section  : section
+        )
+        return await runtime.engine(allowsDestructive: allowsDestructive).deliver(request)
+    }
+
     public func select(control: String, item: String) async throws -> ActOutcome {
         let (application, _, target) = try current()
         let selector = SeatDropdownSelector(target: target, pipeline: ScenePipeline(text: VisionTextRecognizer()))

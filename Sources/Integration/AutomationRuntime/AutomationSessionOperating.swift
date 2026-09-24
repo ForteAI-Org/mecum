@@ -11,5 +11,7 @@ public protocol AutomationSessionOperating: AnyObject {
     func observe() async throws -> SceneSnapshot
     func act(target: String, verb: ActionVerb, section: String?, desiredState: ControlState?) async throws -> ActOutcome
     func select(control: String, item: String) async throws -> ActOutcome
+    /// Types, presses a key, scrolls, drags or chooses a contextual menu item, resolved and verified.
+    func deliver(_ input: InputRequest.Input, section: String?) async throws -> ActOutcome
     func close() async
 }
