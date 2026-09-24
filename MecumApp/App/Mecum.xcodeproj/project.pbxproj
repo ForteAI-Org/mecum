@@ -13,6 +13,7 @@
 		000000000000000200000004 /* MecumEngine in Frameworks */ = {isa = PBXBuildFile; productRef = 000000000000000200000014 /* MecumEngine */; };
 		000000000000000200000005 /* MecumPerception in Frameworks */ = {isa = PBXBuildFile; productRef = 000000000000000200000016 /* MecumPerception */; };
 		04975A2F3064044900FB69FD /* mecum in Frameworks */ = {isa = PBXBuildFile; productRef = 000000000000000200000015 /* mecum */; };
+		049760CE3065351100FB69FD /* mecum_logo.icon in Resources */ = {isa = PBXBuildFile; fileRef = 049760CD3065351100FB69FD /* mecum_logo.icon */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -28,6 +29,7 @@
 /* Begin PBXFileReference section */
 		000000000000000000000120 /* Mecum.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Mecum.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		000000000000000000000121 /* MecumTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = MecumTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		049760CD3065351100FB69FD /* mecum_logo.icon */ = {isa = PBXFileReference; lastKnownFileType = folder.iconcomposer.icon; path = mecum_logo.icon; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -79,6 +81,7 @@
 		000000000000000000000001 = {
 			isa = PBXGroup;
 			children = (
+				049760CD3065351100FB69FD /* mecum_logo.icon */,
 				000000000000000000000010 /* Mecum */,
 				000000000000000000000030 /* MecumTests */,
 				000000000000000000000020 /* Products */,
@@ -191,6 +194,7 @@
 		000000000000000140000000 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			files = (
+				049760CE3065351100FB69FD /* mecum_logo.icon in Resources */,
 			);
 		};
 		000000000000000440000000 /* Resources */ = {
@@ -376,7 +380,9 @@
 		000000000000000111000000 /* Debug configuration for PBXNativeTarget "Mecum" */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = mecum_logo;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = NMRVFXY8BJ;
@@ -384,6 +390,8 @@
 				ENABLE_PREVIEWS = NO;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Mecum/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = Mecum;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
 				MARKETING_VERSION = 1.0;
@@ -403,7 +411,9 @@
 		000000000000000112000000 /* Release configuration for PBXNativeTarget "Mecum" */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = mecum_logo;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_TEAM = NMRVFXY8BJ;
@@ -411,6 +421,8 @@
 				ENABLE_PREVIEWS = NO;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Mecum/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = Mecum;
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
 				MARKETING_VERSION = 1.0;
