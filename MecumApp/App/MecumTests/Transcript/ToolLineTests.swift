@@ -109,7 +109,7 @@ struct ToolLineTests {
         #expect(healthy.string == "⚙\u{FE0E} Opened Calculator ›")
     }
 
-    @Test("Expanding the line shows one indented line per step; collapsing gives the one line back")
+    @Test("Expanding the line keeps it and puts one line per step on a card under it; collapsing takes the card away")
     func expandAndCollapse() async throws {
         let fixture = try await TranscriptFixture()
         defer { fixture.discard() }
@@ -134,7 +134,8 @@ struct ToolLineTests {
                                                         pipeline: MarkdownContent())
         #expect(collapsedText.string == "⚙\u{FE0E} Opened Calculator · pressed 8 ›")
         #expect(expandedText.string == "⚙\u{FE0E} Opened Calculator · pressed 8 ›\nOpened Calculator\nPressed 8")
-        #expect(expandedText.blocks[0].runs.last?.indent == 1)
+        #expect(expandedText.blocks.map(\.kind) == [.text, .toolSteps])
+        #expect(expandedText.blocks[0].string == collapsedText.string)
 
         let closed = try await fixture.items(expanded: [])
         #expect(closed == folded)

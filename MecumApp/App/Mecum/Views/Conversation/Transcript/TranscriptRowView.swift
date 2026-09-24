@@ -323,6 +323,21 @@ final class TranscriptRowView: NSView {
         case .rule:
             NSColor.separatorColor.setFill()
             NSRect(x: frame.minX, y: frame.midY.rounded(), width: frame.width, height: 1).fill()
+        case .toolSteps:
+            // The steps lift off the background as a card, so they read apart from the replies.
+            let path   = NSBezierPath(roundedRect: frame, xRadius: 8, yRadius: 8)
+            let shadow = NSShadow()
+            shadow.shadowColor      = .black.withAlphaComponent(0.14)
+            shadow.shadowBlurRadius = 3
+            shadow.shadowOffset     = NSSize(width: 0, height: -1)
+            NSGraphicsContext.saveGraphicsState()
+            shadow.set()
+            TranscriptColors.cardSurface.setFill()
+            path.fill()
+            NSGraphicsContext.restoreGraphicsState()
+            NSColor.separatorColor.setStroke()
+            path.lineWidth = 1
+            path.stroke()
         default:
             break
         }
@@ -349,18 +364,8 @@ final class TranscriptRowView: NSView {
 
         case .card:
             let path = NSBezierPath(roundedRect: surface, xRadius: 8, yRadius: 8)
-            NSGraphicsContext.saveGraphicsState()
-            if case .toolRun = row.item.kind {
-                // An opened tool line lifts off the background as a card, so its steps read apart from the replies.
-                let shadow = NSShadow()
-                shadow.shadowColor      = .black.withAlphaComponent(0.14)
-                shadow.shadowBlurRadius = 3
-                shadow.shadowOffset     = NSSize(width: 0, height: -1)
-                shadow.set()
-            }
             TranscriptColors.cardSurface.setFill()
             path.fill()
-            NSGraphicsContext.restoreGraphicsState()
             if case .executionFailed = row.item.kind {
                 NSColor.systemRed.withAlphaComponent(0.6).setStroke()
             } else {
@@ -660,7 +665,7 @@ final class TranscriptRowView: NSView {
                 element.setAccessibilityRole(.staticText)
                 element.setAccessibilityRoleDescription("table")
                 element.setAccessibilityValue(block.string.replacingOccurrences(of: "\n", with: ", "))
-            case .text, .quote:
+            case .text, .quote, .toolSteps:
                 element.setAccessibilityRole(.staticText)
                 element.setAccessibilityValue(block.string)
             }

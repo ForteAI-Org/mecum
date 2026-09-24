@@ -187,11 +187,9 @@ nonisolated struct RowGeometry: Sendable, Hashable {
             self.height  = max(footer?.maxY ?? surface.maxY, self.avatar?.maxY ?? 0).rounded(.up)
 
         case .card:
+            // A stopped or failed turn's card spans the measure.
             let x       = Self.leading(style)
-            // An opened tool line's card fits its steps; a stopped or failed turn's spans the measure.
-            let isTool  = if case .toolRun = item.kind { true } else { false }
-            let width   = isTool ? min(limit, textSize.width + 2 * Self.cardPadding.width) : limit
-            let surface = CGRect(x: x, y: 0, width: width,
+            let surface = CGRect(x: x, y: 0, width: limit,
                                  height: textSize.height + 2 * Self.cardPadding.height)
             self.surface = surface
             self.text    = surface.insetBy(dx: Self.cardPadding.width, dy: Self.cardPadding.height)
@@ -200,8 +198,7 @@ nonisolated struct RowGeometry: Sendable, Hashable {
             self.avatar  = nil
             self.badge   = nil
             self.tail    = nil
-            // The tool card's shadow needs room below it, inside the row.
-            self.height  = (surface.maxY + (isTool ? Self.toolShadowRoom : 0)).rounded(.up)
+            self.height  = surface.maxY.rounded(.up)
 
         case .line:
             // No surface: a caption under the worker's bubble, at its column.
@@ -214,7 +211,8 @@ nonisolated struct RowGeometry: Sendable, Hashable {
             self.avatar  = nil
             self.badge   = nil
             self.tail    = nil
-            self.height  = surface.maxY.rounded(.up)
+            // An opened tool line's card of steps casts a shadow, which needs room below it, inside the row.
+            self.height  = (surface.maxY + (blocks.contains(.toolSteps) ? Self.toolShadowRoom : 0)).rounded(.up)
 
         case .divider:
             let surface = CGRect(x: Self.gutter, y: 0, width: max(0, rowWidth - 2 * Self.gutter),
@@ -265,11 +263,13 @@ nonisolated struct RowGeometry: Sendable, Hashable {
     }
 
     /// Room inside a block around its text: a finished code block's surface
-    /// with the strip that holds Copy, and a quote's bar.
+    /// with the strip that holds Copy, a quote's bar, and a tool line's card of steps.
     static func blockInsets(_ block: PreparedBlock.Kind, style: TranscriptStyle) -> NSEdgeInsets {
         switch block {
         case .code(_, true): NSEdgeInsets(top: style.captionLineHeight + 6, left: 10, bottom: 8, right: 10)
         case .quote:         NSEdgeInsets(top: 0, left: 14, bottom: 0, right: 0)
+        case .toolSteps:     NSEdgeInsets(top: cardPadding.height, left: cardPadding.width,
+                                          bottom: cardPadding.height, right: cardPadding.width)
         default:             NSEdgeInsets(top: 0, left: 0, bottom: 0, right: 0)
         }
     }
@@ -291,7 +291,6 @@ nonisolated struct RowGeometry: Sendable, Hashable {
         switch kind {
         case .personMessage, .workerReply, .thinking:  .bubble
         case .executionFailed, .executionInterrupted:  .card
-        case .toolRun(_, true, _):                     .card
         case .toolRun:                                 .line
         case .daySeparator, .activityNotShown:         .divider
         }

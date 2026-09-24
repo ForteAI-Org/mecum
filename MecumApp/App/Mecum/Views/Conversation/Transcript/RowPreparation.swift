@@ -140,12 +140,15 @@ nonisolated enum RowPreparation {
         block.append(TranscriptWording.toolSummary(steps, ending: ending) + " ", role: .caption)
         block.append(disclosureSlot, role: .disclosureSlot)
         guard isExpanded else { return PreparedText(blocks: [block]) }
-        for line in TranscriptWording.toolSteps(steps, ending: ending) {
-            block.append("\n", role: .caption, indent: 1)
-            if line.isFailed { block.append(errorMark, role: .captionAlert, indent: 1) }
-            block.append(line.text, role: .caption, indent: 1)
+
+        // Opened, the line stays as it is and the steps come in on a card under it.
+        var card = PreparedBlock(kind: .toolSteps)
+        for (index, line) in TranscriptWording.toolSteps(steps, ending: ending).enumerated() {
+            if index > 0 { card.append("\n", role: .caption) }
+            if line.isFailed { card.append(errorMark, role: .captionAlert) }
+            card.append(line.text, role: .caption)
         }
-        return PreparedText(blocks: [block])
+        return PreparedText(blocks: [block, card])
     }
 
     /// The character a tool line's summary ends with, where its chevron is drawn.

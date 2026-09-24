@@ -27,6 +27,9 @@ nonisolated struct PreparedBlock: Sendable, Hashable {
 
         case table(Table)
         case rule
+
+        /// An opened tool line's steps, one a line, on a card of their own under the line.
+        case toolSteps
     }
 
     /// The source offset, in UTF-16 units, of the chunk the block came from,
