@@ -12,7 +12,7 @@
 		000000000000000200000003 /* MecumChat in Frameworks */ = {isa = PBXBuildFile; productRef = 000000000000000200000013 /* MecumChat */; };
 		000000000000000200000004 /* MecumEngine in Frameworks */ = {isa = PBXBuildFile; productRef = 000000000000000200000014 /* MecumEngine */; };
 		000000000000000200000005 /* MecumPerception in Frameworks */ = {isa = PBXBuildFile; productRef = 000000000000000200000016 /* MecumPerception */; };
-		04975A2F3064044900FB69FD /* mecum in Frameworks */ = {isa = PBXBuildFile; productRef = 000000000000000200000015 /* mecum */; };
+		04975A2F3064044900FB69FD /* mecum-bridge in Frameworks */ = {isa = PBXBuildFile; productRef = 000000000000000200000015 /* mecum-bridge */; };
 		049760CE3065351100FB69FD /* mecum_logo.icon in Resources */ = {isa = PBXBuildFile; fileRef = 049760CD3065351100FB69FD /* mecum_logo.icon */; };
 /* End PBXBuildFile section */
 
@@ -62,7 +62,7 @@
 		000000000000000130000000 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			files = (
-				04975A2F3064044900FB69FD /* mecum in Frameworks */,
+				04975A2F3064044900FB69FD /* mecum-bridge in Frameworks */,
 				000000000000000200000001 /* SeatBroker in Frameworks */,
 				000000000000000200000002 /* ModelTransports in Frameworks */,
 				000000000000000200000005 /* MecumPerception in Frameworks */,
@@ -118,7 +118,7 @@
 			packageProductDependencies = (
 				000000000000000200000011 /* SeatBroker */,
 				000000000000000200000012 /* ModelTransports */,
-				000000000000000200000015 /* mecum */,
+				000000000000000200000015 /* mecum-bridge */,
 				000000000000000200000016 /* MecumPerception */,
 				000000000000000200000014 /* MecumEngine */,
 				000000000000000200000013 /* MecumChat */,
@@ -209,11 +209,11 @@
 			isa = PBXShellScriptBuildPhase;
 			inputPaths = (
 				"$(PROJECT_DIR)/Scripts/embed-helper.sh",
-				"$(BUILT_PRODUCTS_DIR)/mecum",
+				"$(BUILT_PRODUCTS_DIR)/mecum-bridge",
 			);
 			name = "Embed Helper";
 			outputPaths = (
-				"$(TARGET_BUILD_DIR)/$(CONTENTS_FOLDER_PATH)/Helpers/mecum",
+				"$(TARGET_BUILD_DIR)/$(CONTENTS_FOLDER_PATH)/Helpers/mecum-bridge",
 			);
 			shellPath = /bin/sh;
 			shellScript = (
@@ -540,10 +540,10 @@
 			package = 000000000000000300000001 /* XCLocalSwiftPackageReference "../.." */;
 			productName = MecumEngine;
 		};
-		000000000000000200000015 /* mecum */ = {
+		000000000000000200000015 /* mecum-bridge */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = 000000000000000300000001 /* XCLocalSwiftPackageReference "../.." */;
-			productName = mecum;
+			productName = "mecum-bridge";
 		};
 		000000000000000200000016 /* MecumPerception */ = {
 			isa = XCSwiftPackageProductDependency;

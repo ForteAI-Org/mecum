@@ -200,8 +200,9 @@ let package = Package(
         ),
         .library(name: "SeatBroker", targets: ["SeatBroker"]),
         .library(name: "ModelTransports", targets: ["ModelTransports"]),
-        // Declared so the app can bundle it as the tool bridge a worker's agent launches.
         .executable(name: "mecum", targets: ["mecum"]),
+        // The tool bridge a worker's agent launches, which the app bundles in place of the whole command line.
+        .executable(name: "mecum-bridge", targets: ["mecum-bridge"]),
     ],
     targets: [
         
@@ -377,6 +378,13 @@ let package = Package(
                            "SeatDriving", "SeatCore", "SeatSession", "PrivateSymbols", "AutomationRuntime",
                            "ChatCore", "CLIProviders", "FileConversations", "LocalMCP", "AutomationMCP", "SceneOverlay"].map { .target(name: $0) },
             path: "Tools/Engine/mecum",
+            swiftSettings: facility
+        ),
+        // `mecum mcp-bridge` alone, for the app: it forwards an agent's MCP messages to the app's host.
+        .executableTarget(
+            name: "mecum-bridge",
+            dependencies: [.target(name: "LocalMCP")],
+            path: "Tools/Engine/mecum-bridge",
             swiftSettings: facility
         ),
 

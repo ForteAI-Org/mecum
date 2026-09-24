@@ -55,8 +55,9 @@ final class WorkerAgentHost {
 
     /// `workingDirectory` is created 0700 on the first turn and must stay the
     /// same across turns: Claude Code finds a session to resume by it.
-    /// `bridgeExecutable` is the `mecum` the provider launches as
-    /// `mecum mcp-bridge --connection <file>`. `session` is called once, here,
+    /// `bridgeExecutable` is the helper the provider launches as
+    /// `mecum-bridge mcp-bridge --connection <file>`, the arguments `mecum`
+    /// takes for the same bridge. `session` is called once, here,
     /// for the desktop the tools drive; the host closes it after a failed or
     /// stopped turn and in `close`, and never builds a seat of its own (§22.3).
     convenience init(

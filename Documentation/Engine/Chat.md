@@ -64,7 +64,9 @@ Likewise, `--allow-destructive` belongs to this invocation, not the saved model 
 
 The chat process owns one host. Each provider turn may launch a fresh
 `mecum mcp-bridge` process, which only forwards MCP messages to that existing host.
-It never starts another capture pipeline or Seat.
+It never starts another capture pipeline or Seat. The app launches the same bridge
+from `mecum-bridge`, a helper that holds only the bridge and depends on LocalMCP
+alone, so the app does not carry the whole command line.
 
 The internal bridge uses authenticated newline-framed JSON on an ephemeral
 127.0.0.1 port. It is not a public Streamable HTTP endpoint. The external provider

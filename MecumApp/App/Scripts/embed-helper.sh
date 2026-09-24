@@ -5,16 +5,16 @@
 #
 #  Created by Eliomar Alejandro Rodriguez Ferrer on 23/09/2026.
 #
-#  Copies the `mecum` helper into Contents/Helpers and makes it load the
+#  Copies the `mecum-bridge` helper into Contents/Helpers and makes it load the
 #  frameworks embedded in Contents/Frameworks, so a copied or archived app runs it.
 
 set -eu
 
-source="$BUILT_PRODUCTS_DIR/mecum"
-helper="$TARGET_BUILD_DIR/$CONTENTS_FOLDER_PATH/Helpers/mecum"
+source="$BUILT_PRODUCTS_DIR/mecum-bridge"
+helper="$TARGET_BUILD_DIR/$CONTENTS_FOLDER_PATH/Helpers/mecum-bridge"
 
 # The script sandbox lets install_name_tool write its scratch files only under TEMP_DIR.
-work="$TEMP_DIR/embed-helper/mecum"
+work="$TEMP_DIR/embed-helper/mecum-bridge"
 mkdir -p "$(dirname "$work")"
 cp -f "$source" "$work"
 

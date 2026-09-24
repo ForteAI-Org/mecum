@@ -368,7 +368,7 @@ final class TeamModel {
             desktop = self.desktop(for: workerID)
             host    = WorkerAgentHost(
                 workingDirectory: workingFolder(of: conversationID),
-                bridgeExecutable: Bundle.main.bundleURL.appending(path: "Contents/Helpers/mecum"),
+                bridgeExecutable: Bundle.main.bundleURL.appending(path: "Contents/Helpers/mecum-bridge"),
                 session         : { desktop }
             )
             hosts[conversationID] = host
