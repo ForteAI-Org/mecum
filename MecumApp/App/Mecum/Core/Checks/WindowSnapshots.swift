@@ -153,10 +153,11 @@ enum WindowSnapshots {
                 try await write(
                     ConnectionsSheet(
                         connections   : connections,
-                        checksOnAppear: false
+                        checksOnAppear: false,
+                        opens         : [.anthropic]
                     ),
-                    width : 560,
-                    height: 680,
+                    width : 520,
+                    height: 600,
                     dark  : dark,
                     to    : output.appending(path: "connections-\(name).png")
                 )

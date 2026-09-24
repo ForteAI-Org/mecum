@@ -9,64 +9,77 @@ import ModelTransports
 import SwiftUI
 
 /// ConnectionsSheet is the team's model connections, from the team window: a
-/// title, a grouped form with one block per connection (`ConnectionSection`)
-/// in the inspector's language, and a bar with Check All at the leading edge
-/// and Done, the default button, at the trailing one.
+/// title, one grouped list of the connections in the inspector's language, a
+/// row each (`ConnectionItem`) that opens in place into what acts on it, and a
+/// bar with Check All at the leading edge and Done, the default button, at
+/// the trailing one.
 ///
 /// It is where "Connect a model" leads on the first launch (§19.1). Opening it
-/// is what checks every connection; nothing is checked before. The offscreen
-/// snapshot turns that off with `checksOnAppear`, since a check runs the
-/// command lines and reaches the network.
+/// checks every connection again; the app has checked them once at launch.
+/// The offscreen snapshot turns that off with `checksOnAppear`, since a check
+/// runs the command lines and reaches the network.
 ///
 /// No connection here has a source that reports a balance or a price, and a
-/// subscription exposes no per-token cost, so neither is estimated; the
-/// sheet says so once, under the last block.
+/// subscription exposes no per-token cost, so neither is estimated; the list
+/// says so once, under its rows.
 struct ConnectionsSheet: View {
 
     let connections: ModelSettingsStore
 
     var checksOnAppear = true
 
+    /// The connections whose rows are open.
+    @State private var open: Set<ModelProvider>
+
     @Environment(\.dismiss)
     private var dismiss
 
+    @Environment(\.accessibilityReduceMotion)
+    private var reducesMotion
+
+    /// - Parameter opens: the rows open from the start, as a snapshot draws them.
+    init(
+        connections   : ModelSettingsStore,
+        checksOnAppear: Bool = true,
+        opens         : Set<ModelProvider> = []
+    ) {
+        self.connections    = connections
+        self.checksOnAppear = checksOnAppear
+        _open               = State(initialValue: opens)
+    }
+
     var body: some View {
         VStack(spacing: 0) {
-            // The title, the blocks and the buttons share one inset, the grouped form's own.
-            VStack(
-                alignment: .leading,
-                spacing  : 2
-            ) {
-                Text("Connections")
-                    .font(.title2.weight(.semibold))
-                    .accessibilityAddTraits(.isHeader)
-                Text("How the team's workers reach their models.")
-                    .foregroundStyle(.secondary)
-            }
-            .frame(
-                maxWidth : .infinity,
-                alignment: .leading
-            )
-            .padding(
-                .horizontal,
-                20
-            )
-            .padding(
-                .top,
-                20
-            )
+            Text("Connections")
+                .font(.title2.weight(.semibold))
+                .accessibilityAddTraits(.isHeader)
+                .frame(
+                    maxWidth : .infinity,
+                    alignment: .leading
+                )
+                .padding(
+                    .horizontal,
+                    20
+                )
+                .padding(
+                    .top,
+                    20
+                )
 
             Form {
-                ForEach(ModelProvider.allCases) { provider in
-                    ConnectionSection(
-                        connections: connections,
-                        provider   : provider
-                    )
-                }
-
                 Section {
+                    ForEach(ModelProvider.allCases) { provider in
+                        ConnectionItem(
+                            connections: connections,
+                            provider   : provider,
+                            isOpen     : open.contains(provider)
+                        ) {
+                            toggle(provider)
+                        }
+                    }
                 } footer: {
-                    Text("None of these connections reports credits or cost, so neither is shown.")
+                    Text("No connection reports credits or cost, so neither is shown.")
+                        .font(.caption)
                         .foregroundStyle(.secondary)
                 }
             }
@@ -94,11 +107,18 @@ struct ConnectionsSheet: View {
             )
         }
         .frame(
-            width : 560,
-            height: 680
+            width : 520,
+            height: 600
         )
         .task {
             if checksOnAppear { connections.refresh() }
+        }
+    }
+
+    /// Opens or closes one connection's row in one animation, its rows coming in and out.
+    private func toggle(_ provider: ModelProvider) {
+        withAnimation(reducesMotion ? nil : .snappy(duration: 0.25)) {
+            if open.contains(provider) { open.remove(provider) } else { open.insert(provider) }
         }
     }
 }
