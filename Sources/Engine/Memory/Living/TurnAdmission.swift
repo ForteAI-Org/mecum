@@ -28,7 +28,7 @@ public enum TurnAdmission {
 
     /// Attempt is one tool call of the turn, as the tool layer observed it.
     public enum Attempt: Sendable, Equatable {
-        /// A read or setup call: status, windows, open_session, observe.
+        /// A read or setup call: status, windows, apps, open_session, observe.
         case preparation(String)
         /// A select with its arguments, its outcome kind, and its evidence when it chose an item.
         case select(control: String, item: String, kind: ActOutcomeKind, evidence: DropdownEvidence?)
@@ -42,7 +42,7 @@ public enum TurnAdmission {
         case failed(String)
 
         /// The preparation calls a single-selection turn may make.
-        public static let preparationTools: Set<String> = ["status", "windows", "open_session", "observe"]
+        public static let preparationTools: Set<String> = ["status", "windows", "apps", "open_session", "observe"]
     }
 
     /// Ending is how the turn ended, as the chat layer knows it, never inferred from wording.

@@ -10,9 +10,14 @@ import WindowServerListing
 
 /// AutomationTools is the MCP adapter over AutomationSession. It validates a complete request before effects,
 /// requires the current ephemeral session ID, and records authoritative outcomes for the transcript.
+/// Every finished call and batch step is also reported to `onEvent` as a typed `AutomationEvent`, before
+/// its transcript line, so an error writing the transcript still reaches the listener as a failure.
 public final class AutomationTools {
     public let session: any AutomationSessionOperating
     public var record: ((String) throws -> Void)?
+    public var onEvent: ((AutomationEvent) -> Void)?
+    /// Adds a `memory` field to every observation of a freshly captured scene, when it returns one.
+    public var annotateObservation: ((SceneSnapshot) -> JSONValue?)?
     private var revision = 0
 
     public init(session: any AutomationSessionOperating) {
@@ -147,6 +152,7 @@ public final class AutomationTools {
         do {
             return try await dispatch(name, arguments)
         } catch {
+            onEvent?(AutomationEvent(operation: .init(name, arguments), result: .failed(String(describing: error))))
             try record?("← \(name) error: \(error). Observe before any retry.")
             throw error
         }
@@ -177,6 +183,7 @@ public final class AutomationTools {
                     "accessibility": .bool(Permissions.preflight(.accessibility)),
                     "postEvent": .bool(Permissions.preflight(.postEvent))
                 ])])
+            onEvent?(AutomationEvent(operation: .status, result: .returned))
         case "windows":
             let apps: [NSRunningApplication]
             if values["app"] != nil { apps = [try RunningApplicationLookup.running(try string(arguments, "app"))] }
@@ -188,6 +195,7 @@ public final class AutomationTools {
                     "windows": .array(rows.map { .object(["id": .number(Double($0.number)),
                                                          "title": .string($0.title ?? "")]) })])
             })])
+            onEvent?(AutomationEvent(operation: .windows, result: .returned))
         case "apps":
             let found = try await session.applications(matching: optionalString(arguments, "query"))
             let shown = found.prefix(Self.applicationLimit)
@@ -196,14 +204,20 @@ public final class AutomationTools {
                 listing["more"] = .string("\(found.count - shown.count) more not listed; pass a query to find them.")
             }
             value = .object(listing)
+            onEvent?(AutomationEvent(operation: .apps, result: .returned))
         case "open_session":
             let scene = try await session.open(application: string(arguments, "app"),
                                                 window: optionalString(arguments, "window"))
             value = observation(scene)
-        case "observe": value = observation(try await session.observe())
+            onEvent?(AutomationEvent(operation: .openSession, result: .returned))
+        case "observe":
+            value = observation(try await session.observe())
+            onEvent?(AutomationEvent(operation: .observe, result: .returned))
         case "act", "select", "type_text", "press_key", "scroll", "drag", "context_menu":
             let step = try Step(name, arguments)
-            value = outcome(try await perform(step))
+            let result = try await perform(step)
+            onEvent?(AutomationEvent(operation: step.operation, result: .outcome(result.kind, result.dropdown)))
+            value = outcome(result)
         case "batch":
             guard let rows = arguments["steps"].array, (1...20).contains(rows.count) else {
                 throw AutomationFailure("batch requires 1...20 steps.")
@@ -217,6 +231,8 @@ public final class AutomationTools {
                 let result: ActOutcome
                 do { result = try await perform(step) }
                 catch {
+                    onEvent?(AutomationEvent(operation: step.operation, result: .failed(String(describing: error)),
+                                             batchStep: index + 1))
                     let failed: JSONValue = .object(["status": .string("error"), "message": .string(String(describing: error)),
                         "guidance": .string("Earlier effects remain. Observe before deciding the next step.")])
                     results.append(failed)
@@ -224,6 +240,8 @@ public final class AutomationTools {
                     complete = false
                     break
                 }
+                onEvent?(AutomationEvent(operation: step.operation, result: .outcome(result.kind, result.dropdown),
+                                         batchStep: index + 1))
                 let value = outcome(result)
                 results.append(value)
                 try record?("← batch step \(index + 1) \(String(decoding: try JSONEncoder().encode(value), as: UTF8.self))")
@@ -236,9 +254,11 @@ public final class AutomationTools {
                              "steps": .array(results), "attemptedSteps": .number(Double(results.count)),
                              "verifiedSteps": .number(Double(verified)),
                              "requested": .number(Double(steps.count))])
+            onEvent?(AutomationEvent(operation: .batch(steps: steps.count), result: .returned))
         case "close_session":
             await session.close()
             value = .object(["status": .string("closed"), "message": .string("Application session closed.")])
+            onEvent?(AutomationEvent(operation: .closeSession, result: .returned))
         default: throw AutomationFailure("Unknown tool: \(name)")
         }
         try record?("← \(name) \(String(decoding: try JSONEncoder().encode(value), as: UTF8.self))")
@@ -258,9 +278,13 @@ public final class AutomationTools {
 
     private func observation(_ scene: SceneSnapshot) -> JSONValue {
         revision += 1
-        return .object(["session": session.id.map { .string($0.uuidString) } ?? .null,
-                        "revision": .number(Double(revision)), "observedAt": .string(Date().ISO8601Format()),
-                        "scene": .string(scene.text())])
+        var values: [String: JSONValue] = [
+            "session": session.id.map { .string($0.uuidString) } ?? .null,
+            "revision": .number(Double(revision)), "observedAt": .string(Date().ISO8601Format()),
+            "scene": .string(scene.text())
+        ]
+        if let memory = annotateObservation?(scene) { values["memory"] = memory }
+        return .object(values)
     }
 
     private func outcome(_ outcome: ActOutcome) -> JSONValue {
@@ -341,6 +365,26 @@ public final class AutomationTools {
 
         var isToggle: Bool {
             if case .act(_, .setToggle, _, _) = self { true } else { false }
+        }
+
+        /// The step in semantic terms: a select's control and item, an act's verb.
+        var operation: AutomationEvent.Operation {
+            switch self {
+                case .act(_, let verb, _, _)       : .act(verb)
+                case .select(let control, let item): .select(control: control, item: item)
+                case .input(let input, _)          : .input(tool: Self.toolName(input))
+            }
+        }
+
+        /// The tool that delivers `input`.
+        private static func toolName(_ input: InputRequest.Input) -> String {
+            switch input {
+                case .typeText   : "type_text"
+                case .pressKey   : "press_key"
+                case .scroll     : "scroll"
+                case .drag       : "drag"
+                case .contextMenu: "context_menu"
+            }
         }
 
         init(_ name: String, _ args: JSONValue) throws {
