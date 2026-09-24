@@ -6,6 +6,7 @@
 //
 
 import AppKit
+import Memory
 import ModelTransports
 import SeatBroker
 import SwiftUI
@@ -186,7 +187,10 @@ enum WindowSnapshots {
                 let brains: [(name: String, page: AnyView)] = [
                     ("brain-apps", AnyView(BrainSettings(directory: URL(filePath: knowledge, directoryHint: .isDirectory)))),
                     ("brain-graph", AnyView(BrainGraphView(simulation: BrainSimulation(graph: BrainGraph(brain: app.brain))))),
-                    ("brain-list", AnyView(BrainListView(brain: app.brain))),
+                    ("brain-list", AnyView(BrainListView(
+                        brain: app.brain,
+                        opens: Set(app.brain.groups.prefix(2).map(\.id))
+                    ))),
                 ]
                 for brain in brains {
                     for (name, dark) in [("light", false), ("dark", true)] {

@@ -79,6 +79,7 @@ struct BrainGraphView: View {
             }
         }
         .task(id: isPlaying) { await play() }
+        .onAppear { simulation.beginEntrance() }
         .onChange(of: progress) { simulation.reveal(upTo: moment) }
         .onChange(
             of     : reducesMotion,

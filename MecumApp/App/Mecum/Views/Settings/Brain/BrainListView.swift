@@ -13,18 +13,31 @@ import SwiftUI
 /// each window, with its groups, which open to show their controls, and then
 /// the controls in no group; last, what the Brain saw a control do. Each
 /// control carries the colour of its kind in the graph, and says how often it
-/// was seen only when it was seen more than once.
+/// was seen only when it was seen more than once. An open group's controls
+/// stand apart from the group's own row, one under the other between dividers.
 struct BrainListView: View {
 
     let brain: UIBrain
+
+    /// The groups open.
+    @State private var open: Set<UUID>
+
+    /// - Parameter opens: the groups open from the start, as a snapshot draws them.
+    init(
+        brain: UIBrain,
+        opens: Set<UUID> = []
+    ) {
+        self.brain = brain
+        _open      = State(initialValue: opens)
+    }
 
     var body: some View {
         Form {
             ForEach(windows, id: \.self) { window in
                 Section(window == "window" ? "Window" : window.capitalized) {
                     ForEach(groups(in: window), id: \.id) { group in
-                        DisclosureGroup {
-                            ForEach(members(of: group), id: \.anchorKey) { row($0) }
+                        DisclosureGroup(isExpanded: isOpen(group)) {
+                            members(members(of: group))
                         } label: {
                             LabeledContent {
                                 Text("\(group.memberAnchors.count) \(group.sharedKind.rawValue)s")
@@ -57,6 +70,42 @@ struct BrainListView: View {
     }
 
     // MARK: Rows
+
+    /// A group's controls as one block under its row, set in under the group's name, the first
+    /// apart from the row and each from the next by a divider.
+    private func members(_ anchors: [ObjectAnchor]) -> some View {
+        VStack(
+            alignment: .leading,
+            spacing  : 0
+        ) {
+            ForEach(Array(anchors.enumerated()), id: \.element.anchorKey) { index, anchor in
+                if index > 0 { Divider() }
+
+                row(anchor)
+                    .padding(
+                        .vertical,
+                        6
+                    )
+            }
+        }
+        .padding(
+            .top,
+            10
+        )
+        .padding(
+            .leading,
+            24
+        )
+    }
+
+    private func isOpen(_ group: SiblingGroup) -> Binding<Bool> {
+        Binding(
+            get: { open.contains(group.id) },
+            set: { isOpen in
+                if isOpen { open.insert(group.id) } else { open.remove(group.id) }
+            }
+        )
+    }
 
     private func row(_ anchor: ObjectAnchor) -> some View {
         LabeledContent {

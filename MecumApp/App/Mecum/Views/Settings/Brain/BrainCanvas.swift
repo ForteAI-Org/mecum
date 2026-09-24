@@ -11,13 +11,18 @@ import SwiftUI
 /// time while it moves and once when it sleeps.
 ///
 /// Every node is a point of light in a soft glow of its colour, a glow that
-/// adds light in the dark. The controls are at the back, the
-/// groups over them and the windows in front; the edges are faint filaments in
-/// the colour of the node they lead to; and a light behind the whole follows a
-/// pan at half its pace, so the graph floats over it. Under the pointer a node
-/// is ringed, what it is joined to stays lit while the rest dims, and a control
-/// shows its name. The camera animates, so the graph glides when it is framed
-/// again.
+/// adds light in the dark. The controls are at the back, the groups over them
+/// and the windows in front; the edges are faint fractal filaments
+/// (`BrainStrand`) in the colour of the node they lead to; and a light behind
+/// the whole follows a pan at half its pace, so the graph floats over it.
+/// Under the pointer a node is ringed, what it is joined to stays lit while
+/// the rest dims, and a control shows its name. The camera animates, so the
+/// graph glides when it is framed again.
+///
+/// The graph comes in from its middle when it appears (`BrainSimulation.
+/// beginEntrance`), and while it is still its lights breathe, each glow
+/// brightening and dimming slowly out of step with the others, so it reads as
+/// alive; that is a frame 24 times a second where there would be none.
 struct BrainCanvas: View, Animatable {
 
     let simulation: BrainSimulation
@@ -26,6 +31,13 @@ struct BrainCanvas: View, Animatable {
 
     @Environment(\.colorScheme)
     private var colorScheme
+
+    @Environment(\.accessibilityReduceMotion)
+    private var reducesMotion
+
+    /// How often the lights are drawn again while the graph is still, which is what their breathing
+    /// costs: a frame this often instead of none.
+    private static let breathingInterval = 1.0 / 24
 
     /// How much of itself a node keeps while the pointer is on one it is not joined to.
     private static let faded = 0.3
@@ -42,15 +54,18 @@ struct BrainCanvas: View, Animatable {
         // Read in the body itself, not in a closure under it, so waking and sleeping start and stop the frames.
         let isAwake = simulation.isAwake
 
-        TimelineView(.animation(paused: !isAwake)) { timeline in
+        // Every frame while it moves; while it is still, often enough for the lights to breathe.
+        TimelineView(.animation(
+            minimumInterval: isAwake ? nil : Self.breathingInterval,
+            paused         : !isAwake && reducesMotion
+        )) { timeline in
             let _ = simulation.advance(to: timeline.date)
 
             Canvas { context, size in
-                // The frame's own date, so every tick is a drawing of its own.
-                _ = timeline.date
                 draw(
                     in  : &context,
-                    size: size
+                    size: size,
+                    at  : timeline.date
                 )
             }
             .overlay(alignment: .topLeading) {
@@ -63,16 +78,31 @@ struct BrainCanvas: View, Animatable {
 
     private func draw(
         in context: inout GraphicsContext,
-        size      : CGSize
+        size      : CGSize,
+        at date   : Date
     ) {
         let isDark  = colorScheme == .dark
         let nodes   = simulation.graph.nodes
         let physics = simulation.physics
         let present = physics.isPresent
-        let points  = physics.positions.map { point in
-            camera.screen(
+
+        // While the graph comes in, each node is on its way out from the middle to where it stands.
+        let middle  = camera.screen(
+            CGPoint(
+                x: simulation.restingBounds.midX,
+                y: simulation.restingBounds.midY
+            ),
+            in: size
+        )
+        let arrived = nodes.indices.map { simulation.arrival(of: $0, at: date) }
+        let points  = physics.positions.enumerated().map { index, point in
+            let placed = camera.screen(
                 point,
                 in: size
+            )
+            return CGPoint(
+                x: middle.x + (placed.x - middle.x) * arrived[index],
+                y: middle.y + (placed.y - middle.y) * arrived[index]
             )
         }
         let lit     = hovered.map { Set(physics.neighbours(of: $0) + [$0]) }
@@ -89,9 +119,11 @@ struct BrainCanvas: View, Animatable {
         var lighted = Path()
         var effects = Path()
         for (index, link) in physics.links.enumerated() where physics.isLinked[index] {
-            var line = Path()
-            line.move(to: points[link.from])
-            line.addLine(to: points[link.to])
+            let line = strand(
+                simulation.strands[index],
+                from: points[link.from],
+                to  : points[link.to]
+            )
             if link.kind == .effect {
                 effects.addPath(line)
             } else if link.from == hovered || link.to == hovered {
@@ -130,7 +162,8 @@ struct BrainCanvas: View, Animatable {
                 bead(
                     nodes[index],
                     at    : points[index],
-                    fade  : lit.map { $0.contains(index) ? 1 : Self.faded } ?? 1,
+                    fade  : (lit.map { $0.contains(index) ? 1 : Self.faded } ?? 1) * min(1, arrived[index]),
+                    breath: breath(of: index, at: date),
                     isDark: isDark,
                     in    : &context
                 )
@@ -144,7 +177,7 @@ struct BrainCanvas: View, Animatable {
                 ? Text(node.label).font(.callout.weight(.semibold))
                 : Text(node.label).font(.caption2).foregroundStyle(.secondary)
             var label = context
-            label.opacity = lit.map { $0.contains(index) ? 1 : Self.faded } ?? 1
+            label.opacity = (lit.map { $0.contains(index) ? 1 : Self.faded } ?? 1) * min(1, arrived[index])
             label.draw(
                 title,
                 at    : CGPoint(
@@ -225,13 +258,14 @@ struct BrainCanvas: View, Animatable {
         _ node    : BrainGraph.Node,
         at centre : CGPoint,
         fade      : Double,
+        breath    : CGFloat,
         isDark    : Bool,
         in context: inout GraphicsContext
     ) {
         let colour = BrainPalette.colour(of: node.kind)
         let radius = camera.radius(node.radius)
         let core   = radius * Self.coreShare
-        let halo   = radius * 2.4
+        let halo   = radius * 2.4 * (0.95 + 0.05 * breath)
 
         var glow = context
         glow.opacity   = fade
@@ -244,11 +278,11 @@ struct BrainCanvas: View, Animatable {
             with: .radialGradient(
                 Gradient(stops: [
                     .init(
-                        color   : colour.opacity(isDark ? 0.34 : 0.2),
+                        color   : colour.opacity((isDark ? 0.34 : 0.2) * breath),
                         location: 0
                     ),
                     .init(
-                        color   : colour.opacity(isDark ? 0.12 : 0.07),
+                        color   : colour.opacity((isDark ? 0.12 : 0.07) * breath),
                         location: 0.45
                     ),
                     .init(
@@ -276,6 +310,43 @@ struct BrainCanvas: View, Animatable {
                 )
                 : colour)
         )
+    }
+
+    /// A link's fractal strand between its two ends, its twigs included.
+    private func strand(
+        _ strand: BrainStrand,
+        from start: CGPoint,
+        to end    : CGPoint
+    ) -> Path {
+        var path = Path()
+        path.addLines(BrainStrand.placed(
+            strand.spine,
+            from: start,
+            to  : end
+        ))
+        for twig in strand.twigs {
+            path.addLines(BrainStrand.placed(
+                twig,
+                from: start,
+                to  : end
+            ))
+        }
+        return path
+    }
+
+    /// How bright a node's glow is at `date`, between 0.8 and 1.2 of itself: a slow breath of
+    /// its own, between three and four seconds long, out of step with the others. Steady under
+    /// Reduce Motion.
+    private func breath(
+        of node: Int,
+        at date: Date
+    ) -> CGFloat {
+        guard !reducesMotion else { return 1 }
+
+        let jitter = BrainSimulation.jitter(of: node)
+        let period = 3 + jitter
+        let phase  = jitter * 7 * .pi
+        return CGFloat(1 + 0.2 * sin(2 * .pi * date.timeIntervalSinceReferenceDate / period + phase))
     }
 
     private func depth(of kind: BrainGraph.Kind) -> Int {

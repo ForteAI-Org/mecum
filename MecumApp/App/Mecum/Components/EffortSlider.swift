@@ -16,7 +16,8 @@ import SwiftUI
 /// up takes more of the hand's motion than the one before, every stop holds
 /// the knob a little as it passes, and going down is otherwise free. The
 /// trackpad answers each stop a little harder, and when the knob is let go it
-/// settles on the nearest stop and the real pointer comes back over it.
+/// settles on the nearest stop and the real pointer comes back over it. A
+/// click on the rail slides the knob there rather than putting it there.
 ///
 /// macOS offers three haptic patterns and no intensity, so the climb goes
 /// from alignment to generic to level change, and the top stop answers twice.
@@ -36,6 +37,10 @@ struct EffortSlider: View {
 
     /// How far down the slider the drag was pressed, where the drawn pointer rides.
     @State private var grip: CGFloat?
+
+    /// Where the drawn pointer is across the slider. It is the knob's place plus `grab`, set with
+    /// no animation, so the pointer stays where the hand is while a clicked knob slides to it.
+    @State private var pointer: CGFloat?
 
     /// Where on the knob it was taken, from its centre, so taking it never moves it.
     @State private var grab: CGFloat = 0
@@ -111,10 +116,10 @@ struct EffortSlider: View {
                 )
             }
             .overlay(alignment: .topLeading) {
-                if let knob, let grip, !reducesMotion {
+                if let pointer, let grip, !reducesMotion {
                     heldPointer(
                         at: CGPoint(
-                            x: knob + grab,
+                            x: pointer,
                             y: grip
                         )
                     )
@@ -221,13 +226,14 @@ struct EffortSlider: View {
     }
 
     /// A press on the knob takes it where it is, at the point it was pressed; a press on the rail
-    /// brings the knob under the pointer, and onto the stop nearest it.
+    /// slides the knob to the pointer, and onto the stop nearest it, rather than putting it there.
     private func press(
         at point: CGPoint,
         in width: CGFloat
     ) {
         let centre = knobCentre(in: width)
-        grip = point.y
+        grip    = point.y
+        pointer = point.x
 
         if abs(point.x - centre) <= Self.knobSide / 2 {
             knob = centre
@@ -237,18 +243,20 @@ struct EffortSlider: View {
 
         let x    = clamped(point.x, in: width)
         let stop = nearestStop(to: x, in: width)
-        knob     = x
-        grab     = 0
+        grab     = point.x - x
         if stop != index {
             unfelt = (
                 movingUp: stop > index,
                 stop    : stop
             )
         }
-        move(
-            to   : stop,
-            feels: false
-        )
+        withAnimation(settling) {
+            knob = x
+            move(
+                to   : stop,
+                feels: false
+            )
+        }
     }
 
     /// The share of the hand's motion the knob takes. Up, each stretch between two stops divides
@@ -291,14 +299,16 @@ struct EffortSlider: View {
             moved = clamped(current + taken, in: width)
         }
 
-        knob = moved
+        knob    = moved
+        pointer = moved + grab
         move(to: nearestStop(to: moved, in: width))
     }
 
     /// Lets the knob settle on its stop, and answers where the pointer comes back to: the point on
     /// the knob it was taken at.
     private func release(in width: CGFloat) -> CGFloat? {
-        grip = nil
+        grip    = nil
+        pointer = nil
         withAnimation(settling) { knob = nil }
         if let unfelt {
             self.unfelt = nil
