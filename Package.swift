@@ -345,6 +345,9 @@ let package = Package(
         // `KnowledgeStoring` over one JSON file per application, with backups and write-behind.
         engine("FileKnowledge", ["Memory"], settings: pure),
 
+        // `LivingMemoryStoring` over one SQLite file: versioned schema, durable transactions. The SDK's SQLite.
+        engine("SQLiteLivingMemory", ["Memory"], settings: pure),
+
         // `SceneProviding` for a window on the real screen: census, capture, pipeline.
         engine("LiveScenes", ["EngineCore", "PerceptionCore", "Perception", "ScreenCapture"], settings: pure),
 
@@ -368,7 +371,7 @@ let package = Package(
                     "WorkspaceActivation", "Memory", "FileKnowledge", "LiveScenes", "PerceptionCore",
                     "SeatDriving", "SeatCore", "SeatSession", "PrivateSymbols"]),
         integration("AutomationMCP", ["AutomationRuntime", "LocalMCP", "EngineCore", "PerceptionCore",
-                                     "PrivateSymbols", "SeatCore", "WindowServerListing"]),
+                                     "PrivateSymbols", "SeatCore", "WindowServerListing", "Memory"]),
         // The foreground command line: windows, scene, act, memory. What a model host does, by hand.
         .executableTarget(
             name: "mecum",
@@ -376,7 +379,8 @@ let package = Package(
                            "ScreenCapture", "Engine", "EngineCore", "HIDActuation", "AccessibilityActions",
                            "WorkspaceActivation", "Memory", "FileKnowledge", "LiveScenes",
                            "SeatDriving", "SeatCore", "SeatSession", "PrivateSymbols", "AutomationRuntime",
-                           "ChatCore", "CLIProviders", "FileConversations", "LocalMCP", "AutomationMCP", "SceneOverlay"].map { .target(name: $0) },
+                           "ChatCore", "CLIProviders", "FileConversations", "LocalMCP", "AutomationMCP", "SceneOverlay",
+                           "SQLiteLivingMemory"].map { .target(name: $0) },
             path: "Tools/Engine/mecum",
             swiftSettings: facility
         ),
@@ -405,11 +409,14 @@ let package = Package(
 
         // MARK: Engine tests
         .testTarget(name: "ChatTests", dependencies: ["ChatCore", "CLIProviders", "FileConversations", "LocalMCP",
-                                                    "AutomationMCP", "AutomationRuntime", "EngineCore", "PerceptionCore"],
+                                                    "AutomationMCP", "AutomationRuntime", "EngineCore", "PerceptionCore",
+                                                    "Memory", "SQLiteLivingMemory"],
                     path: "Tests/Chat", resources: [.copy("Fixtures")], swiftSettings: facility),
         .testTarget(
             name: "MecumCLITests",
-            dependencies: ["mecum", "EngineCore", "PerceptionCore", "ChatCore", "AutomationRuntime", "Perception"],
+            dependencies: ["mecum", "EngineCore", "PerceptionCore", "ChatCore", "AutomationRuntime", "Perception",
+                           "Memory", "SQLiteLivingMemory", "AutomationMCP", "LocalMCP", "FileKnowledge",
+                           "CLIProviders", "FileConversations"],
             path: "Tests/Engine/MecumCLITests",
             swiftSettings: facility
         ),
@@ -419,5 +426,6 @@ let package = Package(
                     resources: [.copy("Fixtures/route-corpus.json"), .copy("Fixtures/misfire-corpus.json"),
                                 .copy("Fixtures/misfire-corpus.md")]),
         engineTests("FileKnowledge", ["FileKnowledge", "Memory", "PerceptionCore"]),
+        engineTests("SQLiteLivingMemory", ["SQLiteLivingMemory", "Memory", "EngineCore", "PerceptionCore"]),
     ]
 )
