@@ -30,7 +30,7 @@ struct WorkerCommands: View {
         }
 
         if !worker.isArchived {
-            Button("Model and connection…") { team.profileWorkerID = worker.id }
+            Button("Provider and connection…") { team.profileWorkerID = worker.id }
             Divider()
         }
 

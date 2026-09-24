@@ -46,7 +46,7 @@ final class TeamModel {
     /// The connection cards, reachable from the team (§19.1).
     var isShowingConnections = false
 
-    /// The worker whose model and connection are being edited, if any.
+    /// The worker whose provider and connection are being edited, if any.
     var profileWorkerID: UUID?
 
     /// What the last check said about each configured worker's model. A

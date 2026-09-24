@@ -8,9 +8,11 @@
 import ModelTransports
 import SwiftUI
 
-/// WorkerProfileSheet is the Model and connection area of a worker's profile
-/// (§6.3): provider, model and reasoning effort, edited as a draft with Save
-/// and Cancel and written through `configure` as a new version.
+/// WorkerProfileSheet is the Provider and connection area of a worker's profile
+/// (§6.3): the provider, edited as a draft with Save and Cancel and written
+/// through `configure` as a new version. The model and the effort are chosen
+/// in the composer's popup; here the model follows the provider, its default
+/// from the provider's catalogue, and is shown and not edited.
 ///
 /// It stays a sheet, opened from the inspector and the worker's commands; the
 /// other three areas of the profile are not built yet.
@@ -18,9 +20,8 @@ import SwiftUI
 /// Every provider is offered. One with no agent in this build is marked so in
 /// the picker and explained the moment it is chosen, in `WorkerAnswer`'s
 /// reason, and saving it stays possible with that said.
-/// A model the catalogue dropped is shown with a proposed replacement that the
-/// person applies; nothing replaces it for them (§7.4). A change between local
-/// and cloud, or between a subscription and a metered key, asks first.
+/// A change between local and cloud, or between a subscription and a metered
+/// key, asks first.
 struct WorkerProfileSheet: View {
 
     let team  : TeamModel
@@ -33,7 +34,7 @@ struct WorkerProfileSheet: View {
     @State private var model   : String
     @State private var effort  : ReasoningEffort
 
-    @State private var catalogue         : [String] = []
+    @State private var catalogue         : [ModelInfo] = []
     @State private var isLoadingCatalogue = false
     @State private var catalogueFailed    = false
 
@@ -81,31 +82,7 @@ struct WorkerProfileSheet: View {
                             provider   : provider
                         )
 
-                        ProfileModelPicker(
-                            provider          : provider,
-                            model             : $model,
-                            catalogue         : catalogue,
-                            isLoadingCatalogue: isLoadingCatalogue,
-                            catalogueFailed   : catalogueFailed
-                        )
-
-                        if let removed = removedModel {
-                            ProfileModelProposal(
-                                removed   : removed,
-                                provider  : provider,
-                                workerName: worker.name,
-                                catalogue : catalogue,
-                                model     : $model
-                            )
-                        }
-
-                        EffortControl(
-                            scale : EffortScale(
-                                provider: provider,
-                                model   : model
-                            ),
-                            effort: $effort
-                        )
+                        modelLine
                     }
                 }
                 .padding(
@@ -114,7 +91,10 @@ struct WorkerProfileSheet: View {
                 )
             }
 
-            Text("Changes apply from the next turn. Answers already given keep the model that produced them.")
+            Text("""
+                Changes apply from the next turn. Answers already given keep the model that produced them. \
+                The model and the effort are changed from the message bar.
+                """)
                 .font(.footnote)
                 .foregroundStyle(.secondary)
 
@@ -148,7 +128,6 @@ struct WorkerProfileSheet: View {
             await team.checkModel(of: worker.id)
         }
         .task(id: provider) { await loadCatalogue() }
-        .onChange(of: model) { clampEffort() }
         .confirmationDialog(
             "Change where \(worker.name) runs?",
             isPresented: Binding(
@@ -176,14 +155,22 @@ struct WorkerProfileSheet: View {
         )
     }
 
-    /// The saved model, when the typed check found it gone and the draft still holds it.
-    private var removedModel: String? {
-        guard case .modelRemoved(let removed) = team.modelStates[worker.id],
-              worker.configuration?.provider == provider,
-              removed == model
-        else { return nil }
-
-        return removed
+    /// The model the provider comes with, as a line; its catalogue's name when it has one.
+    @ViewBuilder
+    private var modelLine: some View {
+        LabeledContent("Model") {
+            if isLoadingCatalogue {
+                Text("Listing models…")
+                    .foregroundStyle(.secondary)
+                    .shimmering()
+            } else if model.isEmpty {
+                Text(catalogueFailed ? "The provider could not list its models." : "The provider lists no models.")
+                    .foregroundStyle(.secondary)
+            } else {
+                Text(catalogue.first { $0.id == model }?.title ?? model)
+                    .foregroundStyle(.secondary)
+            }
+        }
     }
 
     private var draft: ModelSelection? {
@@ -212,36 +199,33 @@ struct WorkerProfileSheet: View {
         defer { isLoadingCatalogue = false }
 
         do {
-            catalogue       = try await team.connections.discoverModels(for: provider)
+            catalogue       = try await team.connections.loadCatalogue(for: provider)
             catalogueFailed = false
         } catch {
             // The reason is the connection card's to state, from the typed check.
             catalogue       = []
             catalogueFailed = true
         }
+        guard self.provider == provider else { return }
 
-        guard self.provider == provider, !catalogue.contains(model) else { return clampEffort() }
-
-        // Back on the saved provider the saved model returns, even one the catalogue dropped.
+        // Back on the saved provider the saved model and effort return, even a model the catalogue dropped.
         if let saved = worker.configuration, saved.provider == provider {
-            model = saved.model
-        } else {
-            model = provider.defaultModels.first(where: catalogue.contains) ?? catalogue.first ?? ""
+            model  = saved.model
+            effort = saved.effort
+            return
         }
-        clampEffort()
+
+        let ids    = catalogue.map(\.id)
+        let chosen = provider.defaultModels.first(where: ids.contains).flatMap { id in catalogue.first { $0.id == id } }
+            ?? catalogue.first
+        model  = chosen?.id ?? ""
+        effort = chosen.map(Self.startingEffort) ?? .medium
     }
 
-    /// Keeps the draft's effort on a detent the chosen model has.
-    private func clampEffort() {
-        guard let provider else { return }
-
-        let scale = EffortScale(
-            provider: provider,
-            model   : model
-        )
-        guard !scale.isEmpty, scale.index(of: effort) == nil else { return }
-
-        effort = scale.positions.contains(.medium) ? .medium : (scale.positions.last ?? effort)
+    /// The level a model starts at: its catalogue's default, else medium, else its highest.
+    private static func startingEffort(of model: ModelInfo) -> ReasoningEffort {
+        model.defaultEffort
+            ?? (model.efforts.contains(.medium) ? .medium : model.efforts.last ?? .medium)
     }
 
     // MARK: Saving

@@ -26,7 +26,7 @@ struct ProfileHeader: View {
             ) {
                 Text(worker.name)
                     .font(.title3.bold())
-                Text("Model and connection")
+                Text("Provider and connection")
                     .foregroundStyle(.secondary)
             }
 

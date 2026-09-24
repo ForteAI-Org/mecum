@@ -8,9 +8,10 @@
 import ModelTransports
 import SwiftUI
 
-/// The worker's profile as it stands: the model a new turn will use, its
-/// provider and that provider's connection. The model row is the way into
-/// the profile, a navigation row as System Settings draws one.
+/// The worker's profile as it stands: the provider, the model a new turn will
+/// use and the provider's connection. The provider row is the way into the
+/// profile, a navigation row as System Settings draws one; the model and the
+/// effort are changed from the composer.
 struct InspectorModelSection: View {
 
     let team  : TeamModel
@@ -19,10 +20,10 @@ struct InspectorModelSection: View {
     var body: some View {
         Section("Model") {
             Button { team.profileWorkerID = worker.id } label: {
-                LabeledContent("Model") {
+                LabeledContent("Provider") {
                     HStack(spacing: 6) {
                         if let selection = worker.configuration {
-                            Text(selection.line)
+                            Text(selection.provider.title)
                                 .foregroundStyle(.secondary)
                         } else {
                             Text("Choose…")
@@ -37,13 +38,13 @@ struct InspectorModelSection: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .help("Change the model and connection")
-            .accessibilityHint("Opens the model and connection")
+            .help("Change the provider and connection")
+            .accessibilityHint("Opens the provider and connection")
 
             if let selection = worker.configuration {
                 LabeledContent(
-                    "Provider",
-                    value: selection.provider.title
+                    "Model",
+                    value: selection.line
                 )
                 LabeledContent("Connection") { connectionState(selection.provider) }
             } else {

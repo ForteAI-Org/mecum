@@ -89,7 +89,7 @@ struct NewWorkerSheet: View {
             Label(
                 """
                 Saved without a model attached. The worker is listed as \(TeamRow.toConfigure) \
-                until you choose its model in Model and connection. No desktop permission is needed.
+                until you choose its provider in Provider and connection. No desktop permission is needed.
                 """,
                 systemImage: "info.circle"
             )

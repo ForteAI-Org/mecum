@@ -316,6 +316,16 @@ final class ModelSettingsStore {
         catalogues[provider] = models
     }
 
+    /// Lists `provider`'s catalogue now and keeps it, for the profile and the composer's popup.
+    func loadCatalogue(for provider: ModelProvider) async throws -> [ModelInfo] {
+        let listed = try await ProviderCatalog.catalogue(
+            provider,
+            settings: providerSettings
+        )
+        catalogues[provider] = listed
+        return listed
+    }
+
     /// Models the provider reports, for the + menu.
     func discoverModels(for provider: ModelProvider) async throws -> [String] {
         try await ProviderCatalog.models(
