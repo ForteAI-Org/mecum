@@ -62,6 +62,7 @@ struct SettingsView: View {
             page
                 .navigationTitle(pane?.title ?? "Settings")
         }
+        // It can grow, which the Brain's graph uses.
         .frame(
             minWidth   : 720,
             idealWidth : 860,
@@ -90,6 +91,11 @@ struct SettingsView: View {
             ComputerSettings(broker: broker)
         case .virtualDisplay:
             VirtualDisplaySettings(broker: broker)
+        case .brain:
+            BrainSettings(directory: WorkspaceLaunch.directory.appending(
+                path         : "Knowledge",
+                directoryHint: .isDirectory
+            ))
         case .sidebar:
             SidebarSettings()
         case .chat:

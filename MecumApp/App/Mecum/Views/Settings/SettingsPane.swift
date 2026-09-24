@@ -16,6 +16,7 @@ enum SettingsPane: Hashable, Identifiable {
     case chat
     case computer
     case virtualDisplay
+    case brain
     case provider(ModelProvider)
 
     static let appPanes: [SettingsPane] = [
@@ -27,6 +28,7 @@ enum SettingsPane: Hashable, Identifiable {
     static let computerPanes: [SettingsPane] = [
         .computer,
         .virtualDisplay,
+        .brain,
     ]
 
     var id: Self { self }
@@ -38,6 +40,7 @@ enum SettingsPane: Hashable, Identifiable {
         case .chat               : "Chat"
         case .computer           : "This Mac"
         case .virtualDisplay     : "Virtual Display"
+        case .brain              : "Brain"
         case .provider(let model): model.title
         }
     }
@@ -49,6 +52,7 @@ enum SettingsPane: Hashable, Identifiable {
         case .chat          : "bubble.left.and.bubble.right"
         case .computer      : "desktopcomputer"
         case .virtualDisplay: "display"
+        case .brain         : "brain"
         case .provider(let provider):
             switch provider {
             case .codex, .claudeCode: "terminal"
