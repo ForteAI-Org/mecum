@@ -162,4 +162,31 @@ struct WindowAdoptionTests {
         #expect(outcome == (bodyReturned ? .returned : .refused))
     }
 
+    @Test("release waits for a late Stage Manager thumbnail without repeating AXPosition")
+    func lateStashedReturn() async throws {
+        let sensing = FakeSensing()
+        let placing = FakePlacing()
+        let original = FakeGeometry.userSeatWindow
+        let seat = makeSeat(sensing: sensing, placing: placing)
+        let adopted = try await seat.adopt(original)
+        #expect(adopted.originalServerFrame == nil)
+
+        let transition = original.replacingFrame(
+            CGRect(x: 1140, y: 1012, width: original.frame.width, height: original.frame.height)
+        )
+        let thumbnail = original.replacingFrame(CGRect(x: 15, y: 117, width: 100, height: 128))
+        var readings = 0
+        sensing.windowGeometryOverride = { windowNumber in
+            guard windowNumber == original.windowNumber else { return nil }
+            readings += 1
+            return readings <= 4 ? transition : thumbnail
+        }
+        placing.onMove = { _ in placing.bodyFrame = original.frame }
+
+        let outcome = await seat.release(adopted)
+        #expect(outcome == .returned)
+        #expect(readings >= 6)
+        #expect(placing.moves.filter { $0 == original.frame.origin }.count == 1)
+    }
+
 }
