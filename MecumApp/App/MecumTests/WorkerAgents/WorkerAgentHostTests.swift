@@ -19,12 +19,13 @@ import Testing
 @Suite("A worker's agent host")
 struct WorkerAgentHostTests {
 
-    /// The text `mecum chat` ran with before it moved to `AutomationTools`, word for word.
+    /// The text `mecum chat` and every worker run with, word for word.
     private static let cliInstructions = """
     You are Mecum's desktop automation assistant. Use only the mecum MCP tools to inspect and control apps.
     All app actions happen on a background Seat. Never use a shell, AppleScript, computer-use fallback,
     or foreground actions. Never claim completion without the tool's evidence.
-    At the beginning of EVERY user turn, call status and observe any existing session before acting.
+    Before the first action on an app in a turn, call status and observe any existing session.
+    A message that needs no app needs no tool: answer it directly.
     For a new app, discover exact names and window titles with windows, then open_session.
     Session IDs refer only to this running Mecum host. Saved chats may contain stale IDs and old screen state.
     Keep the Seat open across turns unless the user asks to release it or the task requires a different app.
