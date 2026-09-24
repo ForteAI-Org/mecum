@@ -11,7 +11,7 @@ import Observation
 
 /// Persisted model preferences: favorite models per provider, provider
 /// knobs, API keys (keychain), and what the last check of each connection
-/// found. Favorites are what the lab composer's model picker shows.
+/// found. Favorites are the models the Settings window lists per provider.
 ///
 /// It is team state as much as the lab's: the team window's connection cards
 /// and worker profiles read the same object, so it asks `ProviderCatalog`
@@ -125,15 +125,6 @@ final class ModelSettingsStore {
         }
     }
 
-    var lastSelection: ModelSelection {
-        didSet {
-            save(
-                lastSelection,
-                key: "selection"
-            )
-        }
-    }
-
     /// What the last check of each connection found. Absent means not checked yet.
     private(set) var states: [ModelProvider: ConnectionState] = [:]
 
@@ -169,10 +160,6 @@ final class ModelSettingsStore {
         ollamaContextTokens   = defaults.object(forKey: "ollama.numCtx") as? Int ?? base.ollamaContextTokens
         ollamaMaxOutputTokens = defaults.object(forKey: "ollama.numPredict") as? Int ?? base.ollamaMaxOutputTokens
         ollamaTimeoutSeconds  = defaults.object(forKey: "ollama.timeout") as? Double ?? base.ollamaTimeoutSeconds
-        lastSelection         = Self.load(
-            UserDefaults.standard,
-            key: "selection"
-        ) ?? .default
     }
 
     var providerSettings: ProviderSettings {
@@ -213,7 +200,7 @@ final class ModelSettingsStore {
 
     func isChecking(_ provider: ModelProvider) -> Bool { checks[provider] != nil }
 
-    /// The line shown in the lab's Settings: the check's own message, or the missing models.
+    /// The line the Settings window shows: the check's own message, or the missing models.
     func statusText(_ provider: ModelProvider) -> String {
         guard let state = states[provider] else { return isChecking(provider) ? "Checking…" : "Not checked yet" }
         guard state.isReady else { return state.message }
@@ -237,7 +224,6 @@ final class ModelSettingsStore {
                 states[provider]    = state
                 checkedAt[provider] = Date()
                 checks[provider]    = nil
-                keepSelectionUsable()
             }
         }
     }
@@ -254,13 +240,6 @@ final class ModelSettingsStore {
         checkedAt[provider] = date
     }
 
-    /// Waits for every check in flight, first starting one for each provider
-    /// never checked. The lab's composer asks this before refusing a goal.
-    func refreshAndWait() async {
-        refresh(ModelProvider.allCases.filter { states[$0] == nil && checks[$0] == nil })
-        for check in checks.values { await check.value }
-    }
-
     /// Checks `model` on `provider`'s connection, for a worker configured with it.
     func check(
         _ provider: ModelProvider,
@@ -271,23 +250,6 @@ final class ModelSettingsStore {
             model   : model,
             settings: providerSettings
         )
-    }
-
-    /// Keeps the lab's selection on a provider that works, once every check
-    /// has answered: moving it on a partial answer would drop a working choice.
-    private func keepSelectionUsable() {
-        guard checks.isEmpty, states.count == ModelProvider.allCases.count else { return }
-
-        if !isAvailable(lastSelection.provider), let first = availableProviders.first {
-            lastSelection = ModelSelection(
-                provider: first,
-                model   : models(for: first).first ?? "",
-                effort  : ModelSelection.supportedEfforts(
-                    provider: first,
-                    model   : ""
-                ).contains(.medium) ? .medium : .high
-            )
-        }
     }
 
     // MARK: Credentials
@@ -361,9 +323,6 @@ final class ModelSettingsStore {
         from provider: ModelProvider
     ) {
         favorites[provider]?.removeAll { $0 == model }
-        if lastSelection.provider == provider, lastSelection.model == model {
-            lastSelection.model = models(for: provider).first ?? ""
-        }
     }
 
     private func save<T: Encodable>(

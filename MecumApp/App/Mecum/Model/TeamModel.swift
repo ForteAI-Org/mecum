@@ -23,7 +23,7 @@ import SeatBroker
 /// through the broker's queue (`BrokeredAutomationSession`, §22.3): a worker
 /// waits for the computer like any other entry and never builds a seat.
 ///
-/// Connections come from `connections`, the same store the lab's Settings
+/// Connections come from `connections`, the same store the Settings window
 /// edits, so a key entered in either place serves both.
 ///
 /// A refusal from the store becomes `problem`, a sentence naming what was
@@ -82,7 +82,7 @@ final class TeamModel {
     /// one loopback host. The provider session lives on the conversation.
     private var hosts: [UUID: WorkerAgentHost] = [:]
 
-    /// The broker every worker's desktop goes through, the lab's own.
+    /// The broker every worker's desktop goes through, the app's one.
     private let broker: SeatBroker
 
     /// Each worker's desktop session, which its row reads while it waits for

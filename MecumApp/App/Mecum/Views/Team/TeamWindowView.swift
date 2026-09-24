@@ -23,10 +23,10 @@ struct TeamWindowView: View {
 
     var launch: WorkspaceLaunch
 
-    /// The connections the team's workers use, shared with the lab's Settings.
+    /// The connections the team's workers use, shared with the Settings window.
     var connections: ModelSettingsStore
 
-    /// The broker the workers' desktop goes through, shared with the lab.
+    /// The broker the workers' desktop goes through, the app's one.
     var broker: SeatBroker
 
     /// Told once the team is made, so quitting can write what is typed in it.

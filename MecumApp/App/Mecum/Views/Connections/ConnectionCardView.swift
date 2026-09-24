@@ -16,7 +16,7 @@ import SwiftUI
 /// Each state has its own symbol, tint and sentence, so an absent key, a
 /// refused one, a server that is down, a usage limit and a removed model do
 /// not read as one red line. The sentence is `ConnectionState.message`, the
-/// one the lab's Settings shows too.
+/// one the Settings window shows too.
 struct ConnectionCardView: View {
 
     let connections: ModelSettingsStore

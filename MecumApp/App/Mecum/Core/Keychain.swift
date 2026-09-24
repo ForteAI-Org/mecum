@@ -12,7 +12,7 @@ import Security
 ///
 /// One item per provider, under the service below and the account a
 /// connection names as its `credentialReference`. The team's connection card
-/// and the lab's Settings read and write the same items, so a key entered
+/// and the Settings window read and write the same items, so a key entered
 /// once serves both: they are one person's key to one provider, in one app.
 enum Keychain {
 

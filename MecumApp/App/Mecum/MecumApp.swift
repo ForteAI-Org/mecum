@@ -11,9 +11,6 @@ import SwiftUI
 @main
 struct MecumApp: App {
 
-    /// The window the desktop lab lives in, opened from the Window menu.
-    static let labWindowID = "desktop-lab"
-
     @State private var model = AppModel()
 
     /// The workspace database, which the team window reads. It is opened here
@@ -67,21 +64,8 @@ struct MecumApp: App {
         .commands {
             // The team's sidebar turns compact and is never hidden, so the View menu has no place for it.
             CommandGroup(replacing: .sidebar) {}
-            LabWindowCommands()
             TextSizeCommands()
             TeamMenuCommands()
-        }
-
-        // The desktop lab, reachable on its own. Opening it is what asks for
-        // the desktop grants and starts the watchers; launching does not.
-        Window(
-            "Desktop Lab",
-            id: Self.labWindowID
-        ) {
-            NavigationStack {
-                ContentView(model: model)
-            }
-            .task { model.startDesktopSurface() }
         }
 
         Settings {

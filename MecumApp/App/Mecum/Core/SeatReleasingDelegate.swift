@@ -50,8 +50,7 @@ final class SeatReleasingDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         let drafts    = teams.allObjects.filter(\.hasUnsavedDraft)
         let agents    = teams.allObjects.filter(\.hasAgentHosts)
-        let seatOwner = model?.session == nil ? nil : model
-        guard !drafts.isEmpty || !agents.isEmpty || seatOwner != nil else { return .terminateNow }
+        guard !drafts.isEmpty || !agents.isEmpty else { return .terminateNow }
 
         Task { @MainActor in
             await Self.bounded(.seconds(2)) {
@@ -62,10 +61,6 @@ final class SeatReleasingDelegate: NSObject, NSApplicationDelegate {
                 for team in agents { await team.closeAgentHosts() }
                 // A worker's seat is parked warm once given back; this takes its display down too.
                 await model?.broker.queue.shutdown()
-            }
-
-            if let seatOwner {
-                await Self.bounded(.seconds(5)) { await seatOwner.closeSession() }
             }
 
             sender.reply(toApplicationShouldTerminate: true)
