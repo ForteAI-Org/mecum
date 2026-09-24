@@ -258,6 +258,7 @@ public final class AgentSeat {
     private var windowInventory = AppWindowInventory()
     private var windowFollowTask: Task<Void, Never>?
     private var windowFollowAgain = false
+    private var windowFollowUntil: ContinuousClock.Instant?
     private var windowFollowPassInFlight = false
 
     /// Most recent focus episode, including a failed verification. Readiness
@@ -1958,6 +1959,7 @@ public final class AgentSeat {
             )
         }
         let previous = state
+        var commandPosted = false
         actionInFlight = true
         transition(to: .acting, reason: .requested)
         defer {
@@ -1968,7 +1970,9 @@ public final class AgentSeat {
             focusRecovery?.dropClosureExpectation()
             // A window opened by the Command that has just finished is looked
             // for here, at the boundary, rather than a beat later.
-            requestWindowFollow()
+            requestWindowFollow(
+                through: commandPosted ? resolved.windowArrivalHorizon(after: routed) : .zero
+            )
         }
 
         do {
@@ -2010,6 +2014,7 @@ public final class AgentSeat {
                     }
                 }
             )
+            commandPosted = true
             // The Command is complete, so the observation it was decided on is
             // no longer current. It is not a fault: the reason says so.
             noteObservationConsumed()
@@ -2923,11 +2928,17 @@ public final class AgentSeat {
     /// the longest measured lead on the third pass.
     private static let windowFollowInterval = Duration.milliseconds(120)
 
+    /// A delayed Qt child has already appeared on the physical display by
+    /// the time the ordinary follow pass sees it. The bounded post-click tail
+    /// samples more often without changing the idle or other-family cadence.
+    private static let anticipatedWindowFollowInterval = Duration.milliseconds(60)
+
     /// The longest burst one wake-up may cause: ten passes at 120 ms covers
     /// 1,2 s, which is four times the longest lead measured. The cap is what
     /// makes a wake-up that arrives every beat cost a bounded amount of work
     /// instead of an unbounded one.
     private static let maximumWindowFollowPasses = 10
+    private static let maximumAnticipatedWindowFollowPasses = 20
 
     /// Starts following the windows of the applications this seat drives.
     /// Installed only through a host configured for it; a seat that was never
@@ -2951,6 +2962,7 @@ public final class AgentSeat {
         windowFollowTask?.cancel()
         windowFollowTask  = nil
         windowFollowAgain = false
+        windowFollowUntil = nil
         windowWatch?.stop()
         windowWatch     = nil
         windowInventory = AppWindowInventory()
@@ -2984,9 +2996,15 @@ public final class AgentSeat {
     /// while a burst is running sets a flag the burst reads, so however many
     /// wake-ups arrive there is at most one task, and it ends after a bounded
     /// number of passes whatever keeps arriving.
-    private func requestWindowFollow() {
+    private func requestWindowFollow(through horizon: Duration = .zero) {
 
         guard windowWatch != nil, !isTearingDown, state != .failed else { return }
+        if horizon > .zero {
+            let until = ContinuousClock.now.advanced(by: horizon)
+            if windowFollowUntil.map({ $0 < until }) ?? true {
+                windowFollowUntil = until
+            }
+        }
         guard windowFollowTask == nil else {
             windowFollowAgain = true
             return
@@ -2994,20 +3012,33 @@ public final class AgentSeat {
 
         windowFollowTask = Task { @MainActor [weak self] in
             var passes = 0
+            var maximumPasses = Self.maximumWindowFollowPasses
             while let self, !Task.isCancelled {
                 self.windowFollowAgain = false
                 await self.runWindowFollowPass()
                 passes += 1
 
-                guard passes < Self.maximumWindowFollowPasses, !Task.isCancelled,
+                let anticipating = self.windowFollowUntil.map {
+                    ContinuousClock.now < $0
+                } == true
+                if anticipating {
+                    maximumPasses = Self.maximumAnticipatedWindowFollowPasses
+                }
+
+                guard passes < maximumPasses, !Task.isCancelled,
                       self.windowWatch != nil, !self.isTearingDown,
                       self.windowFollowAgain || self.windowInventory.hasPendingCandidate
+                          || anticipating
                 else { break }
 
-                await EventLoopWait.sleep(Self.windowFollowInterval)
+                await EventLoopWait.sleep(
+                    anticipating ? Self.anticipatedWindowFollowInterval
+                                 : Self.windowFollowInterval
+                )
             }
             guard let self, !Task.isCancelled else { return }
             self.windowFollowTask = nil
+            self.windowFollowUntil = nil
         }
     }
 
@@ -3757,11 +3788,11 @@ public final class AgentSeat {
     /// must be staged before containment can be confirmed. Missing transitional
     /// readings do not bypass that step when the thumbnail becomes readable.
     ///
-    /// The budget is the two seconds twenty readings at the 100 ms cadence were
-    /// meant to be, written as the absolute deadline it always was. Twenty laps
-    /// are two seconds only while every wait costs what it asks for: on a
-    /// delayed main actor they are however long the actor took, and the limit
-    /// the failure quotes has to be the one the caller waited.
+    /// The budget is an absolute two-second deadline. Four early 20 ms readings
+    /// let a cooperative child finish the same two-reading proof without
+    /// spending 200 ms in fixed waits after its AX move. A slower window then
+    /// uses the original 100 ms cadence until the same deadline; the shorter
+    /// opening does not weaken the identity, geometry or stability checks.
     private func confirmPlacement(
         of window     : WindowReference,
         expectedOrigin: CGPoint,
@@ -3771,13 +3802,17 @@ public final class AgentSeat {
         var previous: WindowReference?
         var last    : WindowReference?
         var didAttemptStage = false
+        var readings = 0
 
         let deadline = DispatchTime.now().uptimeNanoseconds
             + Self.placementConfirmationNanoseconds
 
         while DispatchTime.now().uptimeNanoseconds < deadline {
             try checkAdoptionMayContinue()
-            await EventLoopWait.step(.milliseconds(100))
+            await EventLoopWait.step(
+                readings < 4 ? .milliseconds(20) : .milliseconds(100)
+            )
+            readings += 1
             try checkAdoptionMayContinue()
 
             guard let reading = sensing.windowGeometry(of: window.windowNumber) else {

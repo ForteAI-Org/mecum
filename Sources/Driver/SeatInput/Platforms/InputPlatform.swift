@@ -63,6 +63,11 @@ nonisolated public protocol InputPlatform: Sendable {
     /// repeat, and a target that accelerates while a key is held reads it.
     var keyRepeatPacing: KeyRepeatPacing { get }
 
+    /// How long a window follower should keep checking after a posted Command.
+    /// Some targets create a native child after the Command and its first
+    /// window-server scan have already completed.
+    func windowArrivalHorizon(after command: InputCommand) -> Duration
+
     /// A last field on an event, for a target family that needs one. The
     /// default does nothing, and all shipped platforms keep it that way:
     /// the Chromium stamping this hook was kept for turned out to change no
@@ -91,6 +96,10 @@ nonisolated extension InputPlatform {
     /// measurement of either target family: no row has driven a held key yet,
     /// and ticket A3's sweep is what replaces it with one.
     public var keyRepeatPacing: KeyRepeatPacing { .systemDefault }
+
+    /// An immediate pass at the Command boundary is enough unless a family
+    /// has measured a delayed child window.
+    public func windowArrivalHorizon(after command: InputCommand) -> Duration { .zero }
 
     /// Nothing, which is what both shipped platforms need.
     public func decorate(_ event: CGEvent, for command: InputCommand) {}

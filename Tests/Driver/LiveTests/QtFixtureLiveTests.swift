@@ -190,7 +190,48 @@ struct QtFixtureLiveTests {
                 try stage.seat.release(turn)
                 try #require(opened)
 
-                try await Task.sleep(for: .seconds(1))
+                let searchStarted = DispatchTime.now().uptimeNanoseconds
+                var firstSurfaceAt: UInt64?
+                var firstSurfaceFollowScans: Int?
+                var panelWindowNumber: Int?
+                let foundPanel = await LivePump.settle(until: {
+                    let surfaces = WindowServerProbe.surfaces(
+                        ownedBy: Set([processID]), allowUnvalidatedBuild: true
+                    ) ?? []
+                    for surface in surfaces where surface.level == 8
+                        && surface.reference.windowNumber != window.id {
+                        if firstSurfaceAt == nil {
+                            firstSurfaceAt = DispatchTime.now().uptimeNanoseconds
+                            firstSurfaceFollowScans = stage.seat.windowFollowScanCount
+                        }
+                        panelWindowNumber = surface.reference.windowNumber
+                        return true
+                    }
+                    return false
+                }, timeout: 3)
+                try #require(foundPanel, "Qt did not publish the native file panel")
+                let panelNumber = try #require(panelWindowNumber)
+                let autoContained = await LivePump.settle(until: {
+                    guard stage.seat.adoptedWindows.contains(where: {
+                        $0.id == panelNumber
+                    }), let surface = WindowServerProbe.geometry(of: panelNumber)
+                    else { return false }
+                    return stage.virtualBounds.contains(surface.frame)
+                }, timeout: 1.1)
+                let autoCheckedAt = DispatchTime.now().uptimeNanoseconds
+                let visibleToAutoCheckMS = firstSurfaceAt.map {
+                    Int((autoCheckedAt - $0) / 1_000_000)
+                } ?? -1
+                print("QT6_NATIVE_FILE auto-contained=\(autoContained)"
+                    + " visible-to-auto-check-ms=\(visibleToAutoCheckMS)"
+                    + " follow-scans=\(stage.seat.windowFollowScanCount)")
+                #expect(autoContained, "Qt window follower did not automatically contain the native panel")
+                let panel = try WindowReader.windowSnapshot(
+                    processID: processID,
+                    windowNumber: panelNumber,
+                    allowUnvalidatedBuild: true
+                )
+                try #require(panel.windowTitle == "Probe Native File Dialog")
                 let panelProcesses = NSRunningApplication.runningApplications(
                     withBundleIdentifier: "com.apple.appkit.xpc.openAndSavePanelService"
                 ).map(\.processIdentifier)
@@ -198,40 +239,50 @@ struct QtFixtureLiveTests {
                 let surfaces = WindowServerProbe.surfaces(
                     ownedBy: allPIDs, allowUnvalidatedBuild: true
                 ) ?? []
-                var nativePanel: ObservedWindow?
                 for surface in surfaces {
                     print("QT6_NATIVE_FILE owner=\(surface.reference.processID)"
                         + " window=\(surface.reference.windowNumber)"
                         + " level=\(surface.level) visible=\(surface.isVisible)"
                         + " frame=\(surface.reference.frame)")
-                    if surface.reference.processID == processID,
-                       let snapshot = try? WindowReader.windowSnapshot(
-                           processID: processID,
-                           windowNumber: surface.reference.windowNumber,
-                           allowUnvalidatedBuild: true
-                       ) {
-                        if snapshot.windowTitle == "Probe Native File Dialog" {
-                            nativePanel = snapshot
-                        }
-                    }
                 }
+                let panelAttestedAt = DispatchTime.now().uptimeNanoseconds
+                let firstSurfaceMS = firstSurfaceAt.map {
+                    Int(($0 - searchStarted) / 1_000_000)
+                } ?? -1
+                let panelAttestedMS = Int((panelAttestedAt - searchStarted) / 1_000_000)
+                print("QT6_NATIVE_FILE first-surface-ms=\(firstSurfaceMS)"
+                    + " panel-attested-ms=\(panelAttestedMS)"
+                    + " first-surface-follow-scans=\(firstSurfaceFollowScans ?? -1)"
+                    + " follow-scans=\(stage.seat.windowFollowScanCount)")
                 print("QT6_NATIVE_FILE panel-service-count=\(panelProcesses.count)"
                     + " parent=\(window.id)"
                     + " adopted=\(stage.seat.adoptedWindows.map(\.id))"
                     + " person=\(UserSeatState.capture())")
-                let panel = try #require(nativePanel)
-                if !stage.virtualBounds.contains(panel.windowFrame) {
+                let currentPanelFrame = try #require(
+                    WindowServerProbe.geometry(of: panel.windowNumber)
+                ).frame
+                if !stage.virtualBounds.contains(currentPanelFrame) {
                     print("QT6_NATIVE_FILE physical-panel=\(panel.windowFrame)"
                         + " attempting-exact-adoption=\(panel.windowNumber)")
-                    if !stage.seat.adoptedWindows.contains(where: { $0.id == panel.windowNumber }) {
-                        let adoptedPanel = try await stage.seat.adopt(
+                    let ownedPanel: AdoptedWindow
+                    if let existing = stage.seat.adoptedWindows.first(where: {
+                        $0.id == panel.windowNumber
+                    }) {
+                        ownedPanel = existing
+                    } else {
+                        ownedPanel = try await stage.seat.adopt(
                             panel.reference, platform: QtPlatform(), title: panel.windowTitle
                         )
-                        if !stage.seat.isStaged(adoptedPanel) {
-                            _ = try await stage.seat.stage(adoptedPanel)
-                        }
+                    }
+                    if !stage.seat.isStaged(ownedPanel) {
+                        _ = try await stage.seat.stage(ownedPanel)
                     }
                 }
+                let panelContainedAt = DispatchTime.now().uptimeNanoseconds
+                let containmentMS = Int((panelContainedAt - searchStarted) / 1_000_000)
+                let moveAndStageMS = Int((panelContainedAt - panelAttestedAt) / 1_000_000)
+                print("QT6_NATIVE_FILE containment-ms=\(containmentMS)"
+                    + " move-and-stage-ms=\(moveAndStageMS)")
                 let placedPanel = try WindowReader.windowSnapshot(
                     processID: processID,
                     windowNumber: panel.windowNumber,

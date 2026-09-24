@@ -10,14 +10,14 @@ evidence that every Qt widget has been qualified.
 
 ## Live target and limits
 
-The measured target is **DaVinci Resolve's Project Manager**
+The measured targets are **DaVinci Resolve's Project Manager and the user's
+disposable recent project, `New Project 1`**
 (`com.blackmagic-design.DaVinciResolve`) on macOS build **26A428**. The build is
 not in the compatibility ledger; the Live harness marks every receipt
-`unvalidatedBuild`. The test is opt in with both `AGENTSEAT_LIVE_TESTS=1` and
-`AGENTSEAT_QT_TESTS=1`, and requires DaVinci to be open on Project Manager.
-The target is the existing application, so tests restore the Search control
-and open then cancel the New Project dialog. They never create or delete a
-project.
+`unvalidatedBuild`. The Project Manager tier is opt in with both
+`AGENTSEAT_LIVE_TESTS=1` and `AGENTSEAT_QT_TESTS=1`, and requires DaVinci to be
+open on Project Manager. It restores the Search control and opens then cancels
+the New Project dialog. It never creates or deletes a project.
 
 Run `make qt-live-tests` with DaVinci open on Project Manager. It runs each of
 the seven rows in a separate test process and checks that each printed its
@@ -27,6 +27,15 @@ This avoids accepting the macOS failure mode where repeated virtual
 display creation ends a process with exit status zero before the suite ends.
 The ordinary `make live-tests` reports these rows as skipped and needs the
 consumer fixture and browser for its other rows.
+
+With `New Project 1` already open, `make qt-editor-live-tests` runs two separate
+processes. One switches Cut to Edit and back through measured Qt controls. The
+other opens DaVinci's own Import Media panel, waits for exact owned-surface
+containment, clicks Cancel through that panel's observation and verifies the
+editor returned. Neither selects a file, changes clips or saves the project.
+This tier uses `AGENTSEAT_QT_EDITOR_TESTS=1`; it is separate from the Project
+Manager tier because they require different starting windows. Both editor rows
+and all eight fixture rows passed together on 26A428 after the follower change.
 
 `make qt-fixture-live-tests QT_PYTHON=/absolute/path/to/python` runs eight more
 rows against an owned Qt 6 widget fixture. That interpreter must have
@@ -63,6 +72,7 @@ window from an on-screen row alone.
 | `switchTarget` | Shared | The Qt 6 fixture opened a second top-level window; the watcher adopted its exact WindowServer and AX identity. An explicit switch to it and back to the parent changed the observed target, and a routed click incremented each window's own counter once. The secondary was closed and explicitly released, then the parent returned. | Passed between two Qt 6 windows |
 | `observe` / window capture | Shared | Qualified BGRA frame and reference for DaVinci's staged window; the Qt 6 menu's dedicated 128 by 26 frame was also captured. | Passed on measured surfaces |
 | `send(.click(..., .left, count: 1))` | No preparation | DaVinci Search changed `0 → 1 → 0`; New Project and Cancel opened and closed a dialog. The Qt 6 fixture's button counter incremented. A prepared DaVinci Cancel click caused `activationUnverified`, so clicks remain unprepared. | Passed on measured controls |
+| DaVinci editor page controls | `QtPlatform` click | In the disposable `New Project 1` project, background clicks changed Cut `1 → 0`, Edit `0 → 1`, then restored Cut `1` and Edit `0`. The main window returned; no media or project contents were changed. | Passed on Cut and Edit |
 | `send(.key)` | No preparation | Backspace removed one character and Right Arrow collapsed a selection in DaVinci. In Qt 6, `down`, three `repeated` key downs and `up` changed the target's key-down counter by 1, 3 and 0. Other virtual keys and modifier combinations need separate oracles. | Partial |
 | `send(.text)` | No preparation | A typed `x` appended in DaVinci; Qt 6 accepted `é🧪` as two grapheme clusters and four events. Active IME composition remains untested. | Partial |
 | `send(.insertText)` | Prepare, 150 ms | Atomic `qtbgprobe` insertion appeared in DaVinci Search and `qt6bulk` in the Qt 6 line edit. The unprepared AppKit recipe also worked on DaVinci's field. | Passed for simple text |
@@ -75,20 +85,20 @@ window from an on-screen row alone.
 | Modified key / shortcut / held repeat | No preparation, shared flags and pacing | DaVinci's layout-resolved `⌘A` selected all nine Search characters. Qt 6 counted the `down → 3 repeat → up` sequence while the turn held the key. Other modifiers, shortcut destinations and repeat rates are pending. | Partial |
 | Window watch / modal child / return | Shared | DaVinci's New Project opened window `8616`; the watcher adopted and staged it, then a Qt-policy click on Cancel closed it with the foreground app and cursor unchanged in a run with zero physical HID events. The Qt 6 fixture also opened its own modal child, followed window `14306` into the virtual display and cancelled it through a measured button. Qt kept the hidden dialog's WindowServer surface after Cancel, so its logical presence stayed unreadable; the consumer explicitly released that child with `.leaveOnVirtualDisplay` and returned the parent. Focus recovery was enabled for both rows. | Passed on both measured dialogs; explicit child release required on Qt 6 fixture |
 | Qt widget `QFileDialog` | `QtPlatform` and shared watcher | The owned Qt 6 dialog was an adopted 654 by 491 window on the virtual display. Cancel was addressed from the widget's measured button frame; the target reported the dialog closed and `fileDialogAccepted == false`. Its child record was released, the parent returned and the User Seat stayed unchanged with zero physical HID events. | Passed on fixture widget dialog |
-| Native `QFileDialog` | Qt opener, shared surface route | After presentation settled, the owned Qt 6 target exposed a separate level-8, 891 by 448 panel window under the Qt PID; panel-service processes were also present. When it appeared on the virtual display, the watcher adopted it. In another run it appeared at `(310, 159)` on the physical display; the test adopted that exact AX and WindowServer identity, moved it to the virtual display, reread Cancel's frame and only then clicked. Both paths closed with `fileDialogAccepted == false`, returned the parent and kept the User Seat unchanged. The physical opening was briefly visible before adoption, so this does not meet a strict invisible-background guarantee for all native panels. | Functional after exact adoption; transient physical exposure pending |
+| Native `QFileDialog` and DaVinci Import Media | Qt opener, shared surface route | The owned Qt 6 target and DaVinci each exposed a separate native panel, initially on the physical display despite a virtual parent. A bounded Qt post-click follow tail now adopted both automatically before Cancel was sent; the target rejected its file dialog and DaVinci returned to the editor without an import. The fixture's first physical surface to confirmed containment measured 251 ms in one run. DaVinci's corresponding confirmation took 506–587 ms across three runs; those figures include stable-record confirmation, so they are not exact visibility durations. An instrumented DaVinci run found AX frame read at 1 ms, `AXPosition` returning immediately, full virtual containment 192 ms after the write, and two-reading confirmation at 396 ms. The initial physical presentation remains visible and does not meet a strict invisible-background guarantee. | Functional cancellation on both; physical exposure pending |
 | `release(..., .returnToUserSeat)` | Shared | Both Qt targets returned after the measured rows, with displays and fences removed. Stage Manager briefly publishes a full-size surface after DaVinci's AX body reaches home; the return path now allows eight observations without rewriting the already-correct AX position. A deterministic unit row verified it. When DaVinci's initial stashed AX body instead appeared at `(1082, 776)`, a separate run refused return with the body at `(1082, 1012)`; that geometry remains unsupported. | Partial across stashed placements |
 | `releaseAssignedApplication` / `releaseAssignment` | Shared | The Qt 6 command row explicitly ended the assignment after returning its window. The native-popup row used coordinated `releaseAssignment`: outcome `released`, the window `returned`, zero obligations. | Passed for one-window Qt 6 assignments |
 | `useDropdownMenu` | Shared | The Qt 6 combo opened a 648 by 62 popup. A scoped Down and Return selected `Beta` in the target state and closed it as `chosenItem`. | Passed on Qt 6 combo |
 | `useNativePopupMenu` | Shared | The fixture supplied a native `QComboBox.showPopup()` opener and a native choice callback through its local command channel. The scoped menu stayed on the virtual display, selected `Beta` in target state and closed as `chosenItem`. This qualifies the scope when a caller has a native Qt action; it does not imply the kit can invent that action for an external app. | Passed on fixture native action |
 
-The checked-in suite is `QtDriverLiveTests`. Its seven rows discover the
+The checked-in Project Manager suite is `QtDriverLiveTests`. Its seven rows discover the
 window, stage and return it, capture it, toggle Search, follow and cancel a
 dialog, drive text and selection, and choose `Select All` from Search's menu.
 The comparative research runs also tested the Chromium and AppKit
 recipes against Search; the checked-in regression uses `QtPlatform` so it
-qualifies the public Qt entry point directly. DaVinci's own file dialogs,
-custom panels and main editing workspace require separate effect-based rows
-before their functions can be marked passed.
+qualifies the public Qt entry point directly. `QtEditorLiveTests` adds two rows
+for the real editing window and its Import Media dialog. DaVinci's other
+custom panels and editor actions still require separate effect-based rows.
 
 The Qt 6 fixture rows add a scroll offset, slider value, text and key counters,
 a measured context-menu action, both routed and native combo choices, a
@@ -118,6 +128,26 @@ checks the target's own effect, closes its temporary Search state and verifies
 that the parent window was returned. User Seat comparisons begin after the HID
 fence starts, so cursor movement during host startup is not assigned to a
 driver command.
+
+## Native panel visibility
+
+A posted Qt click now keeps the window follower awake for at most one second.
+During that bounded interval it scans every 60 ms, up to 20 passes; other
+platforms retain their prior 120 ms cadence and ten-pass cap. This catches a
+native panel published after the opening Command's first scan, without making
+the watcher poll at rest. Placement confirmation also takes four early 20 ms
+readings before returning to 100 ms polling; it still requires two agreeing
+WindowServer frames of the same identity inside the virtual display.
+
+These changes reduce avoidable delay, not the native panel's own presentation
+or DaVinci's WindowServer movement animation. An external follower receives
+the panel only after it exists on screen, so it cannot promise that the person
+never sees it. A Qt application under the consumer's control can request a
+widget file dialog with `QFileDialog::DontUseNativeDialog`; the owned widget
+dialog was born in the virtual display. This option cannot be imposed on
+DaVinci's existing native Import Media panel by the BG driver. The product
+must surface this case as a visibility limitation until an application-level
+offscreen creation path is available.
 
 Qt's own documentation distinguishes native and widget file dialogs, and
 documents accessibility support for built-in widgets separately from custom

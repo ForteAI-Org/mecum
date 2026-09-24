@@ -59,10 +59,11 @@ HOST_REST_TESTS := 29
 # they take a window in and out of fullscreen, which is the person's screen.
 # Verified by `xcrun swift test list | rg LiveTests` on 2026-09-21. This is an
 # assertion over the reported Live bundle, including intentionally skipped rows.
-LIVE_TESTS := 97
+LIVE_TESTS := 99
 QT_LIVE_ROWS := discoverDaVinci adoptAndReturnDaVinci observeDaVinci \
                 clickDaVinciSearch openAndCancelDaVinciProjectDialog insertTextIntoDaVinciSearch \
                 openDaVinciSearchContextMenu
+QT_EDITOR_ROWS := switchEditorPages cancelImportMedia
 QT_FIXTURE_ROWS := widgetCommands contextMenu dropdownMenu nativePopupMenu modalChild switchTargets widgetFileDialog nativeFileDialog
 QT_PYTHON ?= $(shell command -v python3)
 
@@ -76,7 +77,7 @@ QT_PYTHON ?= $(shell command -v python3)
 BENCH ?= fence-callback fence-clamp input-trace-overhead send-click display-lifecycle \
          monitor-60 monitor-120 stage seat-idle window-watch focus-refresh recovery
 
-.PHONY: all test host-tests live-tests qt-live-tests qt-fixture-live-tests bench compat-report promote-build clean help
+.PHONY: all test host-tests live-tests qt-live-tests qt-editor-live-tests qt-fixture-live-tests bench compat-report promote-build clean help
 
 all: test
 
@@ -85,6 +86,7 @@ help:
 	@echo 'make host-tests     host tier: TCC and a real display, two commands, counts asserted'
 	@echo 'make live-tests     live tier: real windows and a real browser'
 	@echo 'make qt-live-tests  Qt tier: open DaVinci Project Manager, one process per row'
+	@echo 'make qt-editor-live-tests  Qt editor tier: open the disposable New Project 1 project'
 	@echo 'make qt-fixture-live-tests QT_PYTHON=<PySide6 Python>  Qt 6 controlled fixture tier'
 	@echo 'make bench          the measurements of spec section 8, each one a gate'
 	@echo 'make compat-report  runs the tiers and writes Documentation/Driver/compatibility/Build<build>.{md,json}'
@@ -136,6 +138,15 @@ qt-live-tests:
 	@for row in $(QT_LIVE_ROWS); do \
 	    AGENTSEAT_LIVE_TESTS=1 AGENTSEAT_QT_TESTS=1 \
 	        $(TIER) "qt-$$row" 1 $(SWIFT) test --filter "QtDriverLiveTests.$$row" --no-parallel \
+	        || exit $$?; \
+	done
+
+# The user's disposable recent project is already open. The rows return to Cut
+# and cancel Import Media, without changing clips or saving the project.
+qt-editor-live-tests:
+	@for row in $(QT_EDITOR_ROWS); do \
+	    AGENTSEAT_LIVE_TESTS=1 AGENTSEAT_QT_EDITOR_TESTS=1 \
+	        $(TIER) "qt-editor-$$row" 1 $(SWIFT) test --filter "QtEditorLiveTests.$$row" --no-parallel \
 	        || exit $$?; \
 	done
 
