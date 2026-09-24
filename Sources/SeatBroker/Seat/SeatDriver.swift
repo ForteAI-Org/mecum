@@ -172,6 +172,31 @@ final class SeatDriver {
         return CapabilityReport(entries: entries)
     }
 
+    /// Each grant the seat needs, in the order System Settings lists them, and whether it is held.
+    static func grants() -> [DesktopGrant] {
+        [
+            ("Accessibility", PermissionKind.accessibility),
+            ("Post Event", .postEvent),
+            ("Screen Recording", .screenRecording),
+        ].map { name, kind in
+            DesktopGrant(
+                name     : name,
+                isGranted: Permissions.preflight(kind)
+            )
+        }
+    }
+
+    /// This Mac's build, validated when the bundled ledger has an entry for it.
+    static func buildValidation() -> BuildValidation {
+        let identity = BuildIdentity.current
+        let ledger   = try? Ledger.bundled()
+        return BuildValidation(
+            build         : identity.osVersion,
+            productVersion: identity.productVersion,
+            isValidated   : ledger?.entry(for: identity) != nil
+        )
+    }
+
     /// Prompts for every grant that is still missing. macOS shows each of these
     /// prompts once per app: after a denial `request` answers false and never
     /// asks again, and the person has to be sent to System Settings instead,

@@ -81,6 +81,16 @@ public final class SeatBroker {
         SeatDriver.capabilities()
     }
 
+    /// The macOS permissions a worker's seat needs, and which of them this process holds.
+    public func desktopGrants() -> [DesktopGrant] {
+        SeatDriver.grants()
+    }
+
+    /// This Mac's macOS build and whether the ledger lists it.
+    public func buildValidation() -> BuildValidation {
+        SeatDriver.buildValidation()
+    }
+
     /// Prompts for every grant that is still missing, and answers whether
     /// they are all there now. Screen Recording is read once per process, so a
     /// fresh grant needs an app restart. macOS shows each prompt once: after a
