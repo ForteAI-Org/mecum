@@ -22,7 +22,8 @@ import SeatSession
 /// the union of the window and the pop-up: the scene then holds the pop-up's rows and the returned
 /// frame is that union. Accessibility geometry is never mixed in; the augmenter's trust rule drops
 /// frames that do not intersect the captured rectangle, and on the Seat the application's own child
-/// frames still point at the window's old place.
+/// frames still point at the window's old place. The scene's `coverage` says which of the two
+/// shapes it is, so a consumer never mistakes the pop-up's rows for the window's own controls.
 public struct SeatSceneProvider: SceneProviding {
 
     private let target: SeatTarget
@@ -88,7 +89,8 @@ public struct SeatSceneProvider: SceneProviding {
             processID: processID,
             frame    : frame
         )
-        let scene = try await pipeline.perceive(image, of: window)
+        var scene = try await pipeline.perceive(image, of: window)
+        scene.coverage = popups.isEmpty ? .window : .windowAndPopups
         return PerceivedWindow(scene: scene, frame: frame)
     }
 }

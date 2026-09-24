@@ -28,18 +28,52 @@ public enum ActOutcomeKind: String, Sendable, Codable, CaseIterable {
 
 /// ActOutcome is one action's answer: its kind, a sentence a person can act on, and the scene after
 /// acting when one was taken, so the caller never pays a second perception to see what happened.
+/// A dropdown selection also carries its `DropdownEvidence`; the sentence is for people only.
 public struct ActOutcome: Sendable, Equatable {
 
     public let kind: ActOutcomeKind
     public let message: String
     public let scene: SceneSnapshot?
 
-    public init(_ kind: ActOutcomeKind, _ message: String, scene: SceneSnapshot? = nil) {
-        self.kind    = kind
-        self.message = message
-        self.scene   = scene
+    /// The structured proof of a dropdown selection, or nil for any other action and for a
+    /// selection that never chose an item.
+    public let dropdown: DropdownEvidence?
+
+    public init(
+        _ kind   : ActOutcomeKind,
+        _ message: String,
+        scene    : SceneSnapshot? = nil,
+        dropdown : DropdownEvidence? = nil
+    ) {
+        self.kind      = kind
+        self.message   = message
+        self.scene     = scene
+        self.dropdown  = dropdown
     }
 
     /// True for the one outcome that claims success. Everything else asks the caller to look again.
     public var isSuccess: Bool { kind == .foundActed }
+
+    /// The dropdown evidence when the outcome claims success and its readback shows the requested
+    /// item. A `found_acted` without evidence proves nothing structured and answers nil.
+    public var verifiedDropdown: DropdownEvidence? {
+        guard isSuccess, let dropdown, dropdown.isVerified else { return nil }
+        return dropdown
+    }
+
+    /// The answer to a selection whose item was chosen and whose menu closed: `found_acted` when
+    /// the readback shows the item, `acted_unverified` otherwise, always with the evidence. The
+    /// menu's window number appears in the sentence only; it is not evidence.
+    public static func dropdownSelection(
+        _ evidence      : DropdownEvidence,
+        menuWindowNumber: Int,
+        scene           : SceneSnapshot
+    ) -> ActOutcome {
+        let item = evidence.requestedItem
+        let message = evidence.isVerified
+            ? "selected '\(item)' in menu window #\(menuWindowNumber); the dropdown now reads '\(item)'"
+            : "requested '\(item)' in menu window #\(menuWindowNumber), but the dropdown value was not verified"
+        return ActOutcome(evidence.isVerified ? .foundActed : .actedUnverified, message, scene: scene,
+                          dropdown: evidence)
+    }
 }

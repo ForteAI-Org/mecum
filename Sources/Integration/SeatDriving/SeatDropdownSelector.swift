@@ -30,8 +30,9 @@ public struct SeatDropdownSelector {
     }
 
     /// Selects one item in a flat native dropdown. Success requires the requested value to be
-    /// visible at the original control after the menu closes. Capture diagnostics are optional and
-    /// remain local to the caller; no images enter the outcome's text scene.
+    /// visible at the original control after the menu closes, in a window of unchanged size. Once
+    /// an item was chosen, the outcome carries its `DropdownEvidence`. Capture diagnostics are
+    /// optional and remain local to the caller; no images enter the outcome's text scene.
     public func select(
         control: String,
         item: String,
@@ -191,27 +192,33 @@ public struct SeatDropdownSelector {
             let labels = menuScene?.elements.map(\.label).joined(separator: ", ") ?? "unreadable"
             return (ActOutcome(.honestMiss, "no unique '\(item)' in the dropdown; menu closed. Items: \(labels)", scene: after.scene), receipt)
         }
-        let verified: Bool
+        let windowSizeKept = after.frame.size == before.frame.size
+        let readback: DropdownReadback
         if let scopedBounds {
-            let scoped = try await controlScene(afterStill, bounds: scopedBounds, identity: identity, title: window.title)
-            if let scoped, case .found(let value) = scoped.resolve(target: item) {
-                verified = LabelText.normalize(value.label) == LabelText.normalize(item)
-                    && after.frame.size == before.frame.size
-            } else { verified = false }
+            let scoped = windowSizeKept
+                ? try await controlScene(afterStill, bounds: scopedBounds, identity: identity, title: window.title)
+                : nil
+            readback = .inCrop(scoped, item: item, windowSizeKept: windowSizeKept)
         } else {
-            verified = after.scene.elements.contains { element in
-                let original = opener.bounds.cgRect
-                let current = element.bounds.cgRect
-                let overlap = original.intersection(current)
-                return LabelText.normalize(element.label) == LabelText.normalize(item)
-                    && !overlap.isNull && overlap.width > 0
-                    && overlap.height > min(original.height, current.height) * 0.5
-            }
+            readback = .atControl(opener.bounds, in: after.scene, item: item, windowSizeKept: windowSizeKept)
         }
-        let message = verified
-            ? "selected '\(item)' in menu window #\(receipt.menu.window.windowNumber); the dropdown now reads '\(item)'"
-            : "requested '\(item)' in menu window #\(receipt.menu.window.windowNumber), but the dropdown value was not verified"
-        return (ActOutcome(verified ? .foundActed : .actedUnverified, message, scene: after.scene), receipt)
+        let evidence = DropdownEvidence(
+            bundleID          : identity.bundleID,
+            windowTitle       : window.title,
+            control           : opener.label,
+            controlRole       : opener.role,
+            section           : opener.section,
+            valueBefore       : opener.value ?? opener.label,
+            requestedItem     : item,
+            readback          : readback,
+            menuClosedByChoice: receipt.closedBy == .chosenItem
+        )
+        let outcome = ActOutcome.dropdownSelection(
+            evidence,
+            menuWindowNumber: receipt.menu.window.windowNumber,
+            scene           : after.scene
+        )
+        return (outcome, receipt)
     }
 
     private func controlScene(
@@ -242,9 +249,11 @@ public struct SeatDropdownSelector {
         guard still.geometry.isValid, let image = still.makeCGImage() else { throw SeatDrivingFailure.frameUnusable }
         try onCapture(stage, image)
         let frame = still.geometry.screenRect
-        let scene = try await pipeline.perceive(image, of: ScenePipeline.Window(
+        var scene = try await pipeline.perceive(image, of: ScenePipeline.Window(
             bundleID: identity.bundleID, appName: identity.name, title: title
         ))
+        // Before and after are stills of the adopted window alone; a menu's own still is not the window.
+        scene.coverage = stage == "menu" ? .unattributed : .window
         return PerceivedWindow(scene: scene, frame: frame)
     }
 }
