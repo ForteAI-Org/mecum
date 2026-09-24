@@ -88,7 +88,7 @@ public actor BrainMemory: EffectExpecting, ActionObserving {
         guard let knowledge = try? await store.load(bundleID: scene.bundleID) else { return scene }
         let elements = knowledge.brain.enrich(scene.elements)
         guard elements != scene.elements else { return scene }
-        return SceneSnapshot(
+        var enriched = SceneSnapshot(
             bundleID         : scene.bundleID,
             appName          : scene.appName,
             windowTitle      : scene.windowTitle,
@@ -97,5 +97,7 @@ public actor BrainMemory: EffectExpecting, ActionObserving {
             sections         : scene.sections,
             commands         : scene.commands
         )
+        enriched.coverage = scene.coverage
+        return enriched
     }
 }

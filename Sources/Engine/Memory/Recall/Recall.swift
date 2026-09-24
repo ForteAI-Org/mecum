@@ -36,18 +36,41 @@ public enum Recall {
         case abstain(Abstention)
     }
 
-    /// World is everything a decision reads: the remembered experiences and the entity evidence.
+    /// World is everything a decision reads: the remembered experiences and the entity evidence,
+    /// and, for the living memory, the durable records they came from, the sightings, and the
+    /// context the decision is made in.
     public struct World: Sendable {
         public let memories: [Experience]
         public let evidence: RecallEvidence
+        public let records: [ExperienceRecord]
+        public let sightings: [Sighting]
+        public let context: Context
 
         public init(memories: [Experience], evidence: RecallEvidence) {
-            self.memories = memories
-            self.evidence = evidence
+            self.memories  = memories
+            self.evidence  = evidence
+            self.records   = []
+            self.sightings = []
+            self.context   = Context()
         }
 
         public init(memories: [Experience], graph: SightingGraph = SightingGraph()) {
             self.init(memories: memories, evidence: RecallEvidence(graph: graph))
+        }
+
+        /// The world of the living memory: each record projected to an `Experience` that cites it, and
+        /// the sightings as the per-application entity graph. Sightings are history, never presence.
+        public init(records: [ExperienceRecord], sightings: [Sighting], context: Context) {
+            var sighted: [String: Set<String>] = [:]
+            for sighting in sightings {
+                let bundle = sighting.key.context.bundleID.lowercased()
+                sighted[bundle, default: []].insert(LabelText.coreKey(sighting.name))
+            }
+            self.memories  = records.map(\.recallExperience)
+            self.evidence  = RecallEvidence(graph: SightingGraph(sighted: sighted))
+            self.records   = records
+            self.sightings = sightings
+            self.context   = context
         }
     }
 
@@ -61,7 +84,7 @@ public enum Recall {
             return .abstain(Abstention(reason: "nothing to match on in \"\(input)\"", refused: nil))
         }
         var refusal: Abstention?
-        for memory in world.memories where memory.ok > memory.fail && memory.tool != "send_message" {
+        for memory in world.memories where memory.isTrustworthy && memory.tool != "send_message" {
             switch consider(memory, inputTokens: inputTokens, evidence: world.evidence) {
                 case .fire(let fire):
                     return .fire(fire)
