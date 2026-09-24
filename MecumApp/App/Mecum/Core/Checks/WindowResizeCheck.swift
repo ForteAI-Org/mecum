@@ -22,9 +22,9 @@ enum WindowResizeCheck {
 
     static var isRequested: Bool { ProcessInfo.processInfo.environment["MECUM_WINDOW_CHECK"] == "1" }
 
-    /// The widths stepped through: around the full sidebar's line (1100), the compact one (912) and back.
+    /// The widths stepped through: around the full sidebar's line (1100), the compact one (960) and back.
     private static let widths: [Double] = [
-        900, 1150, 1090, 1110, 1099, 1101, 1130, 980, 1105, 912, 911, 940, 1250, 900,
+        900, 1150, 1090, 1110, 1099, 1101, 1130, 980, 1105, 960, 959, 980, 1250, 900,
     ]
 
     static func runAndQuit() async {

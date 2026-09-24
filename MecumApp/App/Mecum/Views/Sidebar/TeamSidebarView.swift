@@ -38,8 +38,8 @@ import SwiftUI
 ///
 /// The Hub and the meeting rooms belong above the team in the finished
 /// sidebar. They are increment 3 and nothing stands in for them here.
-struct TeamSidebarView: View {
-
+struct TeamSidebarView: View, Equatable {
+    
     @Bindable
     var team: TeamModel
 
@@ -55,10 +55,20 @@ struct TeamSidebarView: View {
 
     @Environment(\.accessibilityReduceMotion)
     private var reducesMotion
+    
+    static func == (
+        lhs: borrowing TeamSidebarView,
+        rhs: borrowing TeamSidebarView
+        
+    ) -> Bool {
+        lhs.isFocused == rhs.isFocused
+    }
 
     var body: some View {
+        
         ScrollViewReader { scroller in
             ScrollView {
+            
                 VStack(spacing: 0) {
                     ForEach(team.rows) { row in
                         workerRow(row)
@@ -94,19 +104,35 @@ struct TeamSidebarView: View {
         .accessibilityLabel("Team")
         .background(SidebarBridge())
         .onGeometryChange(for: Bool.self) { proxy in
-            ShellMetrics.showsCompactTiles(sidebarWidth: proxy.size.width)
+            ShellMetrics.showsCompactTiles(
+                sidebarWidth: proxy.size.width
+            )
         } action: { isCompact in
             withAnimation(motion) { self.isCompact = isCompact }
         }
-        .safeAreaBar(
-            edge   : .top,
-            spacing: 0
-        ) {
-            TeamSidebarHeader(
-                team     : team,
-                isCompact: isCompact
-            )
+        .toolbar {
+            
+            ToolbarSpacer(.flexible)
+            
+            ToolbarItem {
+                Button(
+                    "New Worker",
+                    systemImage: "plus"
+                ) {
+                    team.isCreatingWorker = true
+                }
+            }
+            
         }
+//        .safeAreaBar(
+//            edge   : .top,
+//            spacing: 0
+//        ) {
+//            TeamSidebarHeader(
+//                team     : team,
+//                isCompact: isCompact
+//            )
+//        }
         .safeAreaBar(
             edge   : .bottom,
             spacing: 0

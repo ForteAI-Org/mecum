@@ -28,8 +28,10 @@ nonisolated enum ShellMetrics {
 
     /// The compact sidebar: a 32 point mascot and its name under it, in a tile
     /// that clears the window's traffic lights. It is also the narrowest the
-    /// person can drag the sidebar.
-    static let compactSidebar: Double = 92
+    /// person can drag the sidebar, and wide enough for the traffic lights
+    /// (79 points), the toolbar's gap (17) and New Worker (36) with its 8 point
+    /// inset, so the button never goes into the toolbar's overflow menu.
+    static let compactSidebar: Double = 140
 
     /// The narrowest conversation whose bubbles still read: a short bubble is
     /// 34 ems of the 14 point body (476 points), less the margins it gives up.

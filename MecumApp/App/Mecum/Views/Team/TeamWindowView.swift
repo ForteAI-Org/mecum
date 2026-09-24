@@ -68,17 +68,23 @@ struct TeamWindowView: View {
     @ViewBuilder
     private var content: some View {
         if let team {
+            
             TeamShellView(
                 team                : team,
                 isInspectorRequested: $isInspectorRequested
             )
-            .onChange(of: team.selection) { storedSelection = team.selection?.uuidString ?? "" }
+            .onChange(of: team.selection) {
+                storedSelection = team.selection?.uuidString ?? ""
+            }
+            
         } else if let failure = launch.failure {
+            
             ContentUnavailableView {
                 Label(
                     "The workspace did not open",
                     systemImage: "externaldrive.badge.xmark"
                 )
+                
             } description: {
                 Text(
                     """
@@ -87,6 +93,7 @@ struct TeamWindowView: View {
                     """
                 )
             }
+            
         } else {
             Text("Opening the team…")
                 .foregroundStyle(.secondary)

@@ -24,7 +24,7 @@ struct ShellMetricsTests {
         }
         #expect(ShellMetrics.sidebar   == ColumnWidth(ideal: 280, minimum: 200, maximum: 340))
         #expect(ShellMetrics.inspector == ColumnWidth(ideal: 360, minimum: 320, maximum: 440))
-        #expect(ShellMetrics.compactSidebar == 92)
+        #expect(ShellMetrics.compactSidebar == 140)
         #expect(ShellMetrics.compactSidebar < ShellMetrics.sidebar.minimum)
     }
 
@@ -41,9 +41,9 @@ struct ShellMetricsTests {
         // 1100 = 280 + 360 + 460: all three fit exactly; one point less needs the compact sidebar.
         #expect(ShellMetrics.division(window: 1100, previous: nil) == Self.full)
         #expect(ShellMetrics.division(window: 1099, previous: nil) == Self.compact)
-        // 912 = 92 + 360 + 460: the inspector still fits beside the compact sidebar; one point less does not.
-        #expect(ShellMetrics.division(window: 912, previous: nil) == Self.compact)
-        #expect(ShellMetrics.division(window: 911, previous: nil) == Self.closed)
+        // 960 = 140 + 360 + 460: the inspector still fits beside the compact sidebar; one point less does not.
+        #expect(ShellMetrics.division(window: 960, previous: nil) == Self.compact)
+        #expect(ShellMetrics.division(window: 959, previous: nil) == Self.closed)
     }
 
     @Test("A resize across either line changes the division once and restores it only with room to spare")
@@ -57,9 +57,9 @@ struct ShellMetricsTests {
         #expect(divide(1123, Self.compact) == Self.compact)
         #expect(divide(1124, Self.compact) == Self.full)
         // Closed below the compact line: it opens again only with room to spare.
-        #expect(divide(911, Self.compact) == Self.closed)
-        #expect(divide(913, Self.closed) == Self.closed)
-        #expect(divide(936, Self.closed) == Self.compact)
+        #expect(divide(959, Self.compact) == Self.closed)
+        #expect(divide(961, Self.closed) == Self.closed)
+        #expect(divide(984, Self.closed) == Self.compact)
         // Walk a jittering resize across the full line and count the flips: one each way.
         var division = Self.full
         var flips    = 0
@@ -74,7 +74,7 @@ struct ShellMetricsTests {
 
     @Test("The window's minimum lets the inspector open beside the compact sidebar")
     func theWindowMinimumAlwaysAdmitsTheInspector() {
-        #expect(ShellMetrics.windowMinimum == 912)
+        #expect(ShellMetrics.windowMinimum == 960)
         #expect(ShellMetrics.division(window: ShellMetrics.windowMinimum, previous: nil) == Self.compact)
         #expect(ShellMetrics.windowMinimum - ShellMetrics.sidebar.ideal >= ShellMetrics.conversationMinimum)
     }

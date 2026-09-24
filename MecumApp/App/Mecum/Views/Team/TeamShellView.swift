@@ -77,6 +77,7 @@ struct TeamShellView: View {
     }
 
     var body: some View {
+        
         NavigationSplitView(columnVisibility: $columns) {
             TeamSidebarView(team: team)
                 .toolbar(removing: .sidebarToggle)
