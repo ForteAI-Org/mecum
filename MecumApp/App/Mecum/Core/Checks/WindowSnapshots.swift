@@ -23,6 +23,9 @@ enum WindowSnapshots {
 
     static var isRequested: Bool { ProcessInfo.processInfo.environment["MECUM_SNAPSHOTS"] == "1" }
 
+    /// True while a snapshot draws the composer with its model popup open.
+    static var opensModelPopup = false
+
     /// Writes every snapshot, prints each path, and ends the process: 0 when
     /// all were written, 1 with the reason on standard error otherwise.
     static func writeAndQuit() async {
@@ -35,6 +38,23 @@ enum WindowSnapshots {
         do {
             let team   = try await syntheticTeam(in: store)
             let output = try directory()
+
+            // Codex's catalogue as the composer's popup lists it, without running the command line.
+            team.connections.recordCatalogue(
+                [
+                    ModelInfo(
+                        id     : "gpt-5.4-mini",
+                        title  : "GPT-5.4-Mini",
+                        efforts: [.low, .medium, .high, .xhigh]
+                    ),
+                    ModelInfo(
+                        id     : "gpt-5.6-luna",
+                        title  : "GPT-5.6-Luna",
+                        efforts: [.low, .medium, .high, .xhigh, .max]
+                    ),
+                ],
+                for: .codex
+            )
 
             // The narrowest window holds the inspector only beside the compact sidebar.
             let narrowest = Int(ShellMetrics.windowMinimum)
@@ -57,6 +77,19 @@ enum WindowSnapshots {
                     to   : output.appending(path: "window-\(shot.name).png")
                 )
             }
+
+            // The model popup open above the composer, in the narrowest window, where it has least room.
+            opensModelPopup = true
+            try await write(
+                Root(
+                    team                : team,
+                    isInspectorRequested: true
+                ),
+                width: ShellMetrics.windowMinimum,
+                dark : false,
+                to   : output.appending(path: "window-\(narrowest)-light-model-popup.png")
+            )
+            opensModelPopup = false
 
             // The split's sidebar is glass and draws blank offscreen, so its rows are drawn alone too, on the
             // sidebar material, full and compact, with two connections ready for the footer's badge.
@@ -102,6 +135,61 @@ enum WindowSnapshots {
                     height: 680,
                     dark  : dark,
                     to    : output.appending(path: "connections-\(name).png")
+                )
+            }
+
+            // The composer's model popup, at the bottom, the middle and the top of a Codex model's rail.
+            let codex = ModelInfo(
+                id           : "gpt-6-sol",
+                title        : "GPT-6-Sol",
+                efforts      : [.low, .medium, .high, .xhigh, .max, .ultra],
+                defaultEffort: .medium
+            )
+            for effort in [ReasoningEffort.low, .high, .ultra] {
+                for (name, dark) in [("light", false), ("dark", true)] {
+                    try await write(
+                        ConversationModelPopup(
+                            selection: .constant(ModelSelection(
+                                provider: .codex,
+                                model   : codex.id,
+                                effort  : effort
+                            )),
+                            catalogue: [codex]
+                        )
+                        .padding(24)
+                        .background(Color(nsColor: .windowBackgroundColor)),
+                        width : 368,
+                        height: 180,
+                        dark  : dark,
+                        to    : output.appending(path: "model-popup-\(effort.rawValue)-\(name).png")
+                    )
+                }
+            }
+
+            let models = [codex] + ["GPT-6-Astra", "GPT-6-Luna", "GPT-5.6-Sol", "GPT-5.5"].map { title in
+                ModelInfo(
+                    id     : title.lowercased(),
+                    title  : title,
+                    efforts: [.low, .medium, .high]
+                )
+            }
+            for (name, dark) in [("light", false), ("dark", true)] {
+                try await write(
+                    ConversationModelPopup(
+                        selection  : .constant(ModelSelection(
+                            provider: .codex,
+                            model   : codex.id,
+                            effort  : .high
+                        )),
+                        catalogue  : models,
+                        showsModels: true
+                    )
+                    .padding(24)
+                    .background(Color(nsColor: .windowBackgroundColor)),
+                    width : 368,
+                    height: 300,
+                    dark  : dark,
+                    to    : output.appending(path: "model-popup-list-\(name).png")
                 )
             }
         } catch {

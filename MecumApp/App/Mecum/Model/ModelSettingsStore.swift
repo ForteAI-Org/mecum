@@ -308,6 +308,14 @@ final class ModelSettingsStore {
         refresh([provider])
     }
 
+    /// Stands `models` in for `provider`'s catalogue, for the offscreen snapshots.
+    func recordCatalogue(
+        _ models    : [ModelInfo],
+        for provider: ModelProvider
+    ) {
+        catalogues[provider] = models
+    }
+
     /// Models the provider reports, for the + menu.
     func discoverModels(for provider: ModelProvider) async throws -> [String] {
         try await ProviderCatalog.models(

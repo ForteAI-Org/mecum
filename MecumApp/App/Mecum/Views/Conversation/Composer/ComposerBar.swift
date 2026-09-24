@@ -17,9 +17,10 @@ import SwiftUI
 /// its text. The caller lays it over the transcript and gives the transcript
 /// the bar's height as its bottom inset, so the last message scrolls clear of it.
 ///
-/// It carries no model, effort, tokens or provider, and no Add context or
-/// microphone: nothing supplies attachments or voice yet, and a control that
-/// does nothing is not shown (§21.2). A recipient that cannot answer says so
+/// The caller may put one accessory in the row, before the buttons: the
+/// conversation puts the worker's model and effort there. There is no Add
+/// context or microphone: nothing supplies attachments or voice yet, and a
+/// control that does nothing is not shown (§21.2). A recipient that cannot answer says so
 /// only in the placeholder, with Send disabled; the draft stays editable, as
 /// it does during a turn, where only sending waits for the turn to end.
 struct ComposerBar: View {
@@ -51,6 +52,9 @@ struct ComposerBar: View {
     /// since glass composites only in the window server. Nil is the platform's: glass unless
     /// Reduce Transparency is on, and never before macOS 26, which has no glass.
     var buttonGlass: Bool?
+
+    /// What sits in the row before the buttons, set with `accessory(_:)`.
+    private var accessoryView: AnyView?
 
     @Namespace
     private var glass
@@ -103,6 +107,7 @@ struct ComposerBar: View {
         HStack(alignment: .bottom, spacing: 8) {
             ComposerField(text: $draft, placeholder: placeholder, onSubmit: canSend ? send : nil)
                 .padding(.vertical, 2)
+            accessoryView
             actions
         }
         .padding(.leading, 14)
@@ -113,6 +118,13 @@ struct ComposerBar: View {
         ))
         .padding(.horizontal, 16)
         .padding(.bottom, 12)
+    }
+
+    /// The bar with `content` in its row, before the buttons.
+    func accessory(@ViewBuilder _ content: () -> some View) -> ComposerBar {
+        var bar = self
+        bar.accessoryView = AnyView(content())
+        return bar
     }
 
     private var isGlass: Bool {
