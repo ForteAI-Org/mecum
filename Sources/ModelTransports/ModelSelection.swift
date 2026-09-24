@@ -65,9 +65,10 @@ public enum ModelProvider: String, Sendable, CaseIterable, Codable, Identifiable
 
 /// How hard the model may think. Each provider maps this onto its own knob:
 /// Codex and Anthropic take it as reasoning effort, Gemini as thinking level,
-/// Ollama as thinking off (`low`) or on (`high`).
+/// Ollama as thinking off (`low`) or on (`high`). `ultra` is Codex's alone,
+/// on the models its catalogue offers it for.
 public enum ReasoningEffort: String, Sendable, CaseIterable, Codable, Identifiable {
-    case low, medium, high, xhigh, max
+    case low, medium, high, xhigh, max, ultra
     public var id: String { rawValue }
     public var title: String { rawValue == "xhigh" ? "XHigh" : rawValue.capitalized }
 
@@ -91,12 +92,14 @@ public struct ModelSelection: Sendable, Hashable, Codable {
     }
 
     /// Efforts a provider/model pair accepts, in order. Empty when the model
-    /// has no effort parameter at all, so no level is offered for it.
+    /// has no effort parameter at all, so no level is offered for it. Codex's
+    /// own catalogue (`ProviderCatalog.catalogue`) narrows its levels per model;
+    /// without it every level passes and the command line has the last word.
     public static func supportedEfforts(provider: ModelProvider, model: String) -> [ReasoningEffort] {
         switch provider {
-        case .codex: model == "gpt-5.6-luna" ? ReasoningEffort.allCases : [.low, .medium, .high, .xhigh]
+        case .codex: ReasoningEffort.allCases
         // Haiku 4.5 has no effort parameter (extended thinking only).
-        case .claudeCode, .anthropic: model.contains("haiku") ? [] : ReasoningEffort.allCases
+        case .claudeCode, .anthropic: model.contains("haiku") ? [] : [.low, .medium, .high, .xhigh, .max]
         case .gemini: [.low, .medium, .high]
         case .ollama: [.low, .high]
         }

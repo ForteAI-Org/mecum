@@ -24,8 +24,17 @@ public struct EffortScale: Sendable, Hashable {
     public let positions: [ReasoningEffort]
 
     public init(provider: ModelProvider, model: String) {
+        self.init(provider: provider, positions: ModelSelection.supportedEfforts(provider: provider, model: model))
+    }
+
+    /// The scale of a model as its provider's catalogue lists it.
+    public init(provider: ModelProvider, model: ModelInfo) {
+        self.init(provider: provider, positions: model.efforts)
+    }
+
+    private init(provider: ModelProvider, positions: [ReasoningEffort]) {
         self.provider  = provider
-        self.positions = ModelSelection.supportedEfforts(provider: provider, model: model)
+        self.positions = positions
     }
 
     /// True when the model takes no effort parameter.
@@ -72,7 +81,8 @@ public struct EffortScale: Sendable, Hashable {
         case .medium: return "A balance between processing and speed."
         case .high:   return "More processing before answering, so replies take longer."
         case .xhigh:  return "Extended processing: noticeably slower replies."
-        case .max:    return "The most processing this model allows: the slowest replies."
+        case .max:    return "The most processing most models allow: the slowest replies."
+        case .ultra:  return "Beyond the maximum, where the model offers it: the slowest replies of all."
         }
     }
 }

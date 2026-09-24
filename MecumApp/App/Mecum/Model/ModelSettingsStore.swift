@@ -129,6 +129,10 @@ final class ModelSettingsStore {
     /// What the last check of each connection found. Absent means not checked yet.
     private(set) var states: [ModelProvider: ConnectionState] = [:]
 
+    /// Each provider's models as its catalogue listed them after its last check
+    /// that passed. Absent until then, and kept when a later listing fails.
+    private(set) var catalogues: [ModelProvider: [ModelInfo]] = [:]
+
     /// When each of those checks finished.
     private(set) var checkedAt: [ModelProvider: Date] = [:]
 
@@ -224,7 +228,16 @@ final class ModelSettingsStore {
 
                 states[provider]    = state
                 checkedAt[provider] = Date()
-                checks[provider]    = nil
+
+                if state.isReady, let listed = try? await ProviderCatalog.catalogue(
+                    provider,
+                    settings: settings
+                ), !Task.isCancelled {
+                    catalogues[provider] = listed
+                }
+                guard !Task.isCancelled else { return }
+
+                checks[provider] = nil
             }
         }
     }

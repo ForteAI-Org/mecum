@@ -25,7 +25,10 @@ struct WorkerModelChoiceTests {
 
     @Test func thePositionsAreNotAlwaysFourAndAreNoneWithoutAParameter() {
         #expect(EffortScale(provider: .gemini, model: "gemini-3-pro-preview").positions == [.low, .medium, .high])
-        #expect(EffortScale(provider: .codex, model: "gpt-5.6-luna").positions.count == 5)
+        // Codex without its catalogue passes every level; the catalogue narrows it per model.
+        #expect(EffortScale(provider: .codex, model: "gpt-5.6-luna").positions == ReasoningEffort.allCases)
+        let listed = ModelInfo(id: "gpt-5.5", efforts: [.low, .medium, .high, .xhigh])
+        #expect(EffortScale(provider: .codex, model: listed).positions.count == 4)
 
         let ollama = EffortScale(provider: .ollama, model: "qwen3:8b")
         #expect(ollama.positions == [.low, .high])

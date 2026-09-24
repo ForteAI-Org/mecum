@@ -13,34 +13,9 @@ public enum ProviderCatalog {
         return state.isReady ? nil : state.message
     }
 
-    /// Models the provider reports as available to this account or server.
+    /// Models the provider reports as available to this account or server, by id; see `catalogue`.
     public static func models(_ provider: ModelProvider, settings: ProviderSettings) async throws -> [String] {
-        switch provider {
-        case .codex, .claudeCode:
-            return provider.knownModels
-        case .anthropic:
-            guard !settings.anthropicAPIKey.isEmpty else { throw ProviderError.missingAPIKey(.anthropic) }
-            var request = URLRequest(url: URL(string: "https://api.anthropic.com/v1/models?limit=100")!, timeoutInterval: 15)
-            request.setValue(settings.anthropicAPIKey, forHTTPHeaderField: "x-api-key")
-            request.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
-            let json = try await HTTPTransport.getJSON(request)
-            let data = json["data"] as? [[String: Any]] ?? []
-            return data.compactMap { $0["id"] as? String }.sorted()
-        case .gemini:
-            guard !settings.geminiAPIKey.isEmpty else { throw ProviderError.missingAPIKey(.gemini) }
-            var request = URLRequest(url: URL(string: "https://generativelanguage.googleapis.com/v1beta/models?pageSize=200")!,
-                                     timeoutInterval: 15)
-            request.setValue(settings.geminiAPIKey, forHTTPHeaderField: "x-goog-api-key")
-            let json = try await HTTPTransport.getJSON(request)
-            let models = json["models"] as? [[String: Any]] ?? []
-            return models.compactMap { model -> String? in
-                guard let methods = model["supportedGenerationMethods"] as? [String], methods.contains("generateContent"),
-                      let name = model["name"] as? String else { return nil }
-                return name.hasPrefix("models/") ? String(name.dropFirst(7)) : name
-            }.sorted()
-        case .ollama:
-            return try await OllamaClient.models(host: settings.ollamaHost)
-        }
+        try await catalogue(provider, settings: settings).map(\.id)
     }
 
     /// Models the local Ollama server has pulled, for a host that is not the
