@@ -28,6 +28,19 @@ public enum ActionPolicy {
         guard let lowered = label?.lowercased() else { return false }
         return destructiveTerms.contains { lowered.contains($0) }
     }
+
+    /// True for Command with Q or W, whatever else is held: they quit or close what the agent is
+    /// driving, so they are refused even when the person allowed destructive actions.
+    public static func closesTheTarget(_ chord: KeyChord) -> Bool {
+        guard chord.modifiers.contains(.command), case .character(let character) = chord.key else { return false }
+        return ["q", "w"].contains(character.lowercased())
+    }
+
+    /// True for Command with Delete, whatever else is held: it moves to the Trash, deletes a message
+    /// or empties the Trash in the applications that bind it.
+    public static func isDestructive(_ chord: KeyChord) -> Bool {
+        chord.modifiers.contains(.command) && chord.key == .delete
+    }
 }
 
 /// ActionPermissions is what the person, and only the person, has allowed. A model never sets it.

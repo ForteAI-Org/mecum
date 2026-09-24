@@ -28,11 +28,11 @@ enum Usage {
     case-insensitive and a name may be a prefix.
 
     act options:
-      --verb click|double_click|right_click|set_toggle   default click
-      --value on|off                                     the state a set_toggle must reach
-      --section <name>                                   a panel name that disambiguates a shared label
-      --dry-run                                          resolve and report, perform nothing
-      --allow-destructive                                permit a target whose label names a destructive act
+      --verb click|double_click|triple_click|right_click|set_toggle   default click
+      --value on|off                                                  the state a set_toggle must reach
+      --section <name>                                                a panel name that disambiguates a shared label
+      --dry-run                                                       resolve and report, perform nothing
+      --allow-destructive                                             permit a target whose label names a destructive act
 
     common options:
       --knowledge <dir>          where memory lives; default ~/Library/Application Support/Mecum/Knowledge

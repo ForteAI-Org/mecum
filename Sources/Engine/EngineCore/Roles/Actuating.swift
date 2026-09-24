@@ -20,7 +20,16 @@ public enum Gesture: Sendable, Equatable {
     case click(at: CGPoint, button: MouseButton = .left, count: Int = 1)
     case scroll(at: CGPoint, deltaY: Int, deltaX: Int = 0)
     case key(code: UInt16, modifiers: KeyModifiers = [])
+    /// A letter or digit pressed on whichever key the installed layout produces it from, because a
+    /// shortcut is matched on the character: on an Italian keyboard Z sits where a US one has W.
+    case character(Character, modifiers: KeyModifiers = [])
+    /// One key down and up per character, the way a hand types.
     case type(String)
+    /// The whole string on one key event: flat in cost where typing grows with the text, dropped by a
+    /// field already composing with an input method, and seen by the target as one keystroke.
+    case insert(String)
+    /// A press at `from`, a paced path of moves and a release at `to`.
+    case drag(from: CGPoint, to: CGPoint)
 }
 
 /// KeyModifiers are the modifier keys held for a key gesture.

@@ -11,7 +11,7 @@ import PerceptionCore
 
 /// ControlPressing acts on and reads a window's controls by name rather than by coordinate, where
 /// the application exposes them: opening a dropdown with its own press action, reading a combo
-/// box's current value, reading a toggle's state under a point.
+/// box's current value, reading a toggle's state under a point, reading the focused field's text.
 ///
 /// Every answer is about the current moment. A conformer that cannot see the tree answers false or
 /// nil; it never guesses. `pressControl` opens a CLOSED list only: pressing an open one closes it,
@@ -28,4 +28,8 @@ public protocol ControlPressing: Sendable {
 
     /// The state of the stateful control under a global point, when the application reports one.
     func toggleState(at point: CGPoint, in processID: pid_t) async -> ControlState?
+
+    /// The value of the text field or text area that holds the keyboard focus in the application; nil
+    /// when none does or the application does not say. What typed text is verified by.
+    func focusedFieldValue(in processID: pid_t) async -> String?
 }

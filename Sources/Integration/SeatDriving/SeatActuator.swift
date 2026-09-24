@@ -9,6 +9,7 @@ import CoreGraphics
 import EngineCore
 import Foundation
 import SeatCore
+import SeatInput
 import SeatSession
 
 /// SeatActuator is `Actuating` over the Seat: every gesture becomes one Command admitted under one
@@ -62,8 +63,21 @@ public actor SeatActuator: Actuating {
             case .key(let code, let modifiers):
                 let shortcut = Shortcut(.virtualKey(CGKeyCode(code)), holding: Self.modifiers(modifiers))
                 receipts.append(try await seat.send(shortcut, observation: observation.reference, turn: turn))
+            case .character(let character, let modifiers):
+                // The seat resolves a character through the installed layout, as a menu matches it.
+                let shortcut = Shortcut.character(character, holding: Self.modifiers(modifiers))
+                receipts.append(try await seat.send(shortcut, observation: observation.reference, turn: turn))
             case .type(let text):
                 receipts.append(try await seat.send(.text(text), observation: observation.reference, turn: turn))
+            case .insert(let text):
+                receipts.append(try await seat.send(.insertText(text), observation: observation.reference, turn: turn))
+            case .drag(let start, let end):
+                // Both ends are routed under the one observation, so a drag leaving the window is refused.
+                let path = InputCommand.drag(
+                    from: try routed(start, in: observation.geometry),
+                    to  : try routed(end, in: observation.geometry)
+                )
+                receipts.append(try await seat.send(path, observation: observation.reference, turn: turn))
         }
         // The events are out: the observation they rode has spent its authority and the next
         // gesture needs a new one.

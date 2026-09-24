@@ -57,12 +57,14 @@ struct ActionEngineTests {
         var pressSucceeds = false
         var values: [String?]
         var toggle: ControlState?
+        var focused: String?
         init(values: [String?] = [nil], toggle: ControlState? = nil) { self.values = values; self.toggle = toggle }
         func pressControl(labelled label: String, in processID: pid_t) async -> Bool { pressed.append(label); return pressSucceeds }
         func controlValue(matchingAny labels: Set<String>, in processID: pid_t) async -> String? {
             values.count > 1 ? values.removeFirst() : values.first ?? nil
         }
         func toggleState(at point: CGPoint, in processID: pid_t) async -> ControlState? { toggle }
+        func focusedFieldValue(in processID: pid_t) async -> String? { focused }
     }
 
     final class FakeActivation: ApplicationActivating, @unchecked Sendable {
@@ -274,6 +276,16 @@ struct ActionEngineTests {
         let inFront = FakeActivation(frontmost: pid)
         _ = await engine(scenes: ScriptedScenes([scene([export]), scene([export], title: "Q")]), activation: inFront).act(request("Export"))
         #expect(inFront.activated.isEmpty)
+    }
+
+    @Test("a triple click is one train of three at the element's point")
+    func tripleClick() async {
+        let actuator = RecordingActuator()
+        let outcome = await engine(scenes: ScriptedScenes([scene([export]), scene([export], title: "Q")]), actuator: actuator)
+            .act(request("Export", verb: .tripleClick))
+        #expect(outcome.kind == .foundActed)
+        #expect(outcome.message.hasPrefix("triple-clicked 'Export'"))
+        #expect(actuator.gestures == [.click(at: scene([export]).globalPoint(of: export), count: 3)])
     }
 
     @Test("a dropdown opened by its own press action is not also clicked")

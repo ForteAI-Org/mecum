@@ -14,7 +14,8 @@ import PerceptionCore
 
 /// AccessibilityController fills `ControlPressing` with the live accessibility tree: it finds a
 /// combo box or pop-up button by its value or title and presses it, reads the value of the one
-/// control whose value is among a set of labels, and reads a toggle's state under a point.
+/// control whose value is among a set of labels, reads a toggle's state under a point, and reads
+/// the value of the text field that holds the application's focus.
 ///
 /// Every read and press hops to the main actor, where the C API is safe. Geometry is used only for
 /// the hit test under a point, never to relate a control to a pop-up: after a window-server move
@@ -22,6 +23,7 @@ import PerceptionCore
 public struct AccessibilityController: ControlPressing {
 
     private static let controlRoles: Set<String> = ["AXComboBox", "AXPopUpButton"]
+    private static let fieldRoles: Set<String> = ["AXTextField", "AXTextArea", "AXComboBox"]
 
     public init() {}
 
@@ -71,6 +73,22 @@ public struct AccessibilityController: ControlPressing {
                 case 2 : return .mixed
                 default: return nil
             }
+        }
+    }
+
+    public func focusedFieldValue(in processID: pid_t) async -> String? {
+        await MainActor.run {
+            let reader = LiveAccessibilityReader()
+            let application = reader.application(processID: processID)
+            reader.setMessagingTimeout(application, seconds: 1)
+            var focused: CFTypeRef?
+            guard AXUIElementCopyAttributeValue(application, kAXFocusedUIElementAttribute as CFString, &focused)
+                    == .success,
+                  let focused, CFGetTypeID(focused) == AXUIElementGetTypeID() else { return nil }
+            // The type id was checked one line up; a Swift cast cannot see through a CF type here.
+            let field = unsafeDowncast(focused, to: AXUIElement.self)
+            guard Self.fieldRoles.contains(reader.role(field) ?? "") else { return nil }
+            return reader.value(field)
         }
     }
 
