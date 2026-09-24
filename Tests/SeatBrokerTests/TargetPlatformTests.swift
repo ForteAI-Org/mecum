@@ -60,6 +60,24 @@ struct TargetPlatformTests {
             == .embeddedRenderer)
     }
 
+    @Test("a bundle that ships Qt is driven with the Qt recipe, whichever way it ships it")
+    func qtApplicationIsQt() throws {
+        // DaVinci Resolve ships Qt 5 as dylibs; a `macdeployqt` bundle ships the framework.
+        for library in ["libQt5Core.5.dylib", "libQt6Core.6.dylib", "QtCore.framework"] {
+            let bundle = try Self.bundle(embedding: [library])
+            let choice = TargetPlatform.chosen(
+                bundleURL       : bundle,
+                bundleIdentifier: "com.blackmagic-design.DaVinciResolve"
+            )
+            #expect(choice == .qtToolkit, "\(library)")
+            #expect(choice.platform is QtPlatform)
+        }
+
+        // A Chromium renderer inside a Qt application is still the renderer.
+        let both = try Self.bundle(embedding: ["Chromium Embedded Framework.framework", "QtCore.framework"])
+        #expect(TargetPlatform.chosen(bundleURL: both, bundleIdentifier: "com.example.both") == .embeddedRenderer)
+    }
+
     @Test("an application nobody has measured is driven without preparation")
     func unknownApplicationIsAppKit() throws {
         let plain = try Self.bundle()
@@ -77,9 +95,9 @@ struct TargetPlatformTests {
             == .appleNative)
     }
 
-    @Test("the renderer is the one branch of the three that is prepared")
+    @Test("the renderer is the one branch whose clicks are prepared")
     func onlyTheRendererIsPrepared() {
-        let prepared = [TargetPlatform.embeddedRenderer, .appleNative, .unmeasured]
+        let prepared = [TargetPlatform.embeddedRenderer, .qtToolkit, .appleNative, .unmeasured]
             .filter { $0.platform is ChromiumPlatform }
         #expect(prepared == [.embeddedRenderer])
     }

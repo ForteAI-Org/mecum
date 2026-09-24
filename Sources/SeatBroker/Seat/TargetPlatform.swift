@@ -35,10 +35,17 @@ import SeatInput
 ///
 /// 1. the bundle embeds Electron or the Chromium Embedded Framework, which is
 ///    the renderer the measurement is about, whoever shipped the bundle, and
-///    the one case that is prepared;
-/// 2. the bundle identifier is Apple's, and Apple ships its applications in
+///    the one case whose clicks are prepared;
+/// 2. the bundle ships Qt's core library, as the framework `macdeployqt`
+///    bundles or as the dylib Qt 5 and 6 builds also ship, which DaVinci
+///    Resolve does: it is driven with `QtPlatform`, the recipe measured on
+///    DaVinci and an owned Qt 6 fixture (Documentation/Driver/Qt.md), whose
+///    clicks are unprepared, since a prepared one activated a followed dialog,
+///    whose bulk insertion is prepared for 150 ms, and which keeps the window
+///    follower awake a second after a click for the native panels Qt opens late;
+/// 3. the bundle identifier is Apple's, and Apple ships its applications in
 ///    AppKit, Finder included;
-/// 3. nothing is known, and nothing known is not a renderer: an application
+/// 4. nothing is known, and nothing known is not a renderer: an application
 ///    nobody has measured is driven without preparation, like the native one.
 ///
 /// **The known limit**: a Chromium-based browser that ships neither framework
@@ -51,10 +58,13 @@ enum TargetPlatform: Sendable, Equatable {
     /// Rule 1: a renderer found inside the bundle.
     case embeddedRenderer
 
-    /// Rule 2: an Apple bundle identifier.
+    /// Rule 2: Qt's core library found inside the bundle.
+    case qtToolkit
+
+    /// Rule 3: an Apple bundle identifier.
     case appleNative
 
-    /// Rule 3: no evidence either way, which is not evidence of a renderer.
+    /// Rule 4: no evidence either way, which is not evidence of a renderer.
     case unmeasured
 
     /// The frameworks that say the window is drawn by a Chromium renderer.
@@ -62,6 +72,14 @@ enum TargetPlatform: Sendable, Equatable {
     private static let renderers = [
         "Electron Framework.framework",
         "Chromium Embedded Framework.framework",
+    ]
+
+    /// What says the window is drawn by Qt: the core framework of a
+    /// `macdeployqt` bundle, or the core dylib of a Qt 5 or Qt 6 build.
+    private static let qtLibraries = [
+        "QtCore.framework",
+        "libQt5Core.5.dylib",
+        "libQt6Core.6.dylib",
     ]
 
     /// The choice for one application, from what `NSRunningApplication` already
@@ -72,15 +90,21 @@ enum TargetPlatform: Sendable, Equatable {
     /// launches nothing and throws nothing, which is what lets an adoption ask
     /// for it inline.
     static func chosen(bundleURL: URL?, bundleIdentifier: String?) -> TargetPlatform {
-        if let bundleURL, embedsRenderer(bundleURL) { return .embeddedRenderer }
+        if let bundleURL, frameworks(of: bundleURL, contain: renderers) { return .embeddedRenderer }
+        if let bundleURL, frameworks(of: bundleURL, contain: qtLibraries) { return .qtToolkit }
         if bundleIdentifier?.hasPrefix("com.apple.") == true { return .appleNative }
         return .unmeasured
     }
 
-    /// The platform the seat is handed. Only the renderer is prepared;
-    /// `AppKitPlatform` prepares nothing and is what the other two answer.
+    /// The platform the seat is handed. Only the renderer's clicks are
+    /// prepared; `AppKitPlatform` prepares nothing and is what the Apple and
+    /// the unmeasured cases answer.
     var platform: any InputPlatform {
-        self == .embeddedRenderer ? ChromiumPlatform() : AppKitPlatform()
+        switch self {
+            case .embeddedRenderer         : ChromiumPlatform()
+            case .qtToolkit                : QtPlatform()
+            case .appleNative, .unmeasured : AppKitPlatform()
+        }
     }
 
     /// The chosen platform's own name. Derived from `platform` rather than
@@ -93,14 +117,19 @@ enum TargetPlatform: Sendable, Equatable {
     var reason: String {
         switch self {
             case .embeddedRenderer: "the bundle embeds a Chromium renderer"
+            case .qtToolkit       : "the bundle ships Qt"
             case .appleNative     : "the bundle identifier is Apple's"
             case .unmeasured      : "nothing in the bundle says it is a renderer"
         }
     }
 
-    private static func embedsRenderer(_ bundleURL: URL) -> Bool {
+    /// Whether the bundle's Contents/Frameworks holds any of `names`.
+    private static func frameworks(
+        of bundleURL: URL,
+        contain names: [String]
+    ) -> Bool {
         let frameworks = bundleURL.appending(path: "Contents/Frameworks")
-        return renderers.contains {
+        return names.contains {
             FileManager.default.fileExists(atPath: frameworks.appending(path: $0).path)
         }
     }
