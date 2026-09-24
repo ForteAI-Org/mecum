@@ -171,8 +171,7 @@ struct ConversationModelPopup: View {
     private func choose(_ model: ModelInfo) {
         selection.model = model.id
         if !model.efforts.isEmpty, !model.efforts.contains(selection.effort) {
-            selection.effort = model.defaultEffort
-                ?? (model.efforts.contains(.medium) ? .medium : model.efforts[model.efforts.count - 1])
+            selection.effort = model.startingEffort
         }
         morph(toModels: false)
     }

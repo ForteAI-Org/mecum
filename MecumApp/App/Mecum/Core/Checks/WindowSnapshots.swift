@@ -124,6 +124,30 @@ enum WindowSnapshots {
                 }
             }
 
+            // The inspector drawn alone, as the split draws it blank offscreen, with the selected
+            // worker's list of providers open.
+            if let worker = team.selectedWorker {
+                team.choosingProviderFor = worker.id
+                team.connections.recordCheck(
+                    .credentialMissing,
+                    for: .anthropic,
+                    at : Self.checkedAt
+                )
+                for (name, dark) in [("light", false), ("dark", true)] {
+                    try await write(
+                        WorkerInspectorView(
+                            team  : team,
+                            worker: worker
+                        ),
+                        width : ShellMetrics.inspector.ideal,
+                        height: 900,
+                        dark  : dark,
+                        to    : output.appending(path: "inspector-providers-\(name).png")
+                    )
+                }
+                team.choosingProviderFor = nil
+            }
+
             let connections = syntheticConnections()
             for (name, dark) in [("light", false), ("dark", true)] {
                 try await write(

@@ -46,8 +46,9 @@ final class TeamModel {
     /// The connection cards, reachable from the team (§19.1).
     var isShowingConnections = false
 
-    /// The worker whose provider and connection are being edited, if any.
-    var profileWorkerID: UUID?
+    /// The worker whose list of providers is open in the inspector, if any. The worker's
+    /// commands set it to open the inspector on that list.
+    var choosingProviderFor: UUID?
 
     /// What the last check said about each configured worker's model. A
     /// worker absent here has not been checked, which is not the same as fine.
@@ -603,6 +604,34 @@ final class TeamModel {
 
         connections.refresh([selection.provider])
         await checkModel(of: id)
+    }
+
+    /// Moves the worker to `provider`, with the model the provider comes with: its default from the
+    /// catalogue, else the first listed, at the model's own starting effort. The model and the
+    /// effort are then changed from the composer. A provider that lists no model leaves the
+    /// worker where it was, and says so.
+    func changeProvider(
+        of id       : UUID,
+        to provider : ModelProvider
+    ) async {
+        guard let worker = worker(id), worker.configuration?.provider != provider else { return }
+
+        let catalogue = (try? await connections.loadCatalogue(for: provider)) ?? []
+        let ids       = catalogue.map(\.id)
+        let preferred = provider.defaultModels.first(where: ids.contains)
+        guard let model = catalogue.first(where: { $0.id == preferred }) ?? catalogue.first else {
+            problem = "\(provider.title) listed no models, so \(worker.name) keeps the provider it had."
+            return
+        }
+
+        await configure(
+            id,
+            selection: ModelSelection(
+                provider: provider,
+                model   : model.id,
+                effort  : model.startingEffort
+            )
+        )
     }
 
     /// Asks the worker's provider whether its model is still in the catalogue.

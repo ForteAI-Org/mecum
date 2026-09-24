@@ -128,11 +128,9 @@ struct TeamShellView: View {
         .sheet(isPresented: $team.isShowingConnections) {
             ConnectionsSheet(connections: team.connections)
         }
-        .sheet(item: profileWorker) { worker in
-            WorkerProfileSheet(
-                team  : team,
-                worker: worker
-            )
+        // The worker's commands open its list of providers, which lives in the inspector.
+        .onChange(of: team.choosingProviderFor) {
+            if team.choosingProviderFor != nil, !target.isInspectorShown { toggleInspector() }
         }
         // The window keeps the worker's name for Mission Control and the Window menu; the header shows it.
         .toolbar(removing: .title)
@@ -334,13 +332,5 @@ struct TeamShellView: View {
                 description: Text("Select a worker to see what it is doing and the model its last turn ran with.")
             )
         }
-    }
-
-    /// The worker being edited, as the sheet's item. Closing the sheet clears it.
-    private var profileWorker: Binding<WorkerSnapshot?> {
-        Binding(
-            get: { team.profileWorkerID.flatMap(team.worker) },
-            set: { team.profileWorkerID = $0?.id }
-        )
     }
 }

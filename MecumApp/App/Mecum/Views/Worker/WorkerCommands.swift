@@ -30,7 +30,10 @@ struct WorkerCommands: View {
         }
 
         if !worker.isArchived {
-            Button("Provider and connection…") { team.profileWorkerID = worker.id }
+            Button("Choose Provider…") {
+                team.selection = worker.id
+                withAnimation(.snappy(duration: 0.25)) { team.choosingProviderFor = worker.id }
+            }
             Divider()
         }
 

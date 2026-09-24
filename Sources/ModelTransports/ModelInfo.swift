@@ -35,6 +35,12 @@ public struct ModelInfo: Sendable, Hashable, Identifiable {
         self.defaultEffort = defaultEffort.flatMap { efforts.contains($0) ? $0 : nil }
     }
 
+    /// The level a worker starts at on this model: its catalogue's default, else medium, else
+    /// its highest, and medium for a model with no levels.
+    public var startingEffort: ReasoningEffort {
+        defaultEffort ?? (efforts.contains(.medium) ? .medium : efforts.last ?? .medium)
+    }
+
     /// A model the catalogue knows only by id, with the efforts the provider takes for it.
     static func known(
         _ id    : String,
