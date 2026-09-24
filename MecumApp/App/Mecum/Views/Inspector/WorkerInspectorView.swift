@@ -6,8 +6,6 @@
 //
 
 import SwiftUI
-import TeamShell
-import Workspace
 
 /// WorkerInspectorView is the inspector for the selected worker (§14.2): what
 /// it is doing right now and the computer it drives, the model and connection

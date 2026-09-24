@@ -6,7 +6,6 @@
 //
 
 import SwiftUI
-import Transcript
 
 /// TextSizeCommands is View > Bigger, Smaller and Actual Size for the
 /// conversation body (§3.3), with the shortcuts every Mac text app uses.

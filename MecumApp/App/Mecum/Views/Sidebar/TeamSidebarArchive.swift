@@ -6,7 +6,6 @@
 //
 
 import SwiftUI
-import Workspace
 
 /// The archive's title, which folds and unfolds it, and its rows while unfolded.
 struct TeamSidebarArchive: View {

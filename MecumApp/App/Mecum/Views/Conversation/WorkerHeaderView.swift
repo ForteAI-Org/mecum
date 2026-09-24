@@ -6,7 +6,6 @@
 //
 
 import SwiftUI
-import TeamShell
 
 /// WorkerHeaderView names the selected worker in the window's title bar
 /// (§3.4): its mascot with the name beside it, at the leading edge of the

@@ -6,7 +6,6 @@
 //
 
 import SwiftUI
-import Workspace
 
 /// The worker's mascot, name and role, small at the top of the inspector.
 struct InspectorIdentitySection: View {

@@ -6,8 +6,6 @@
 //
 
 import SwiftUI
-import TeamShell
-import Workspace
 
 /// TeamSidebarView lists the team and the archive, under a title with the
 /// button that adds a worker and above the connections.

@@ -6,8 +6,6 @@
 //
 
 import SwiftUI
-import TeamShell
-import Workspace
 
 /// The worker's current or last turn as it ran, from the reading the
 /// inspector keeps: the model and effort it ran with, when it started and

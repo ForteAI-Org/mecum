@@ -7,8 +7,6 @@
 
 import AppKit
 import SwiftUI
-import TeamShell
-import Workspace
 
 /// WindowResizeCheck puts the team shell in a real window on screen, with a real display cycle,
 /// and resizes it back and forth across the widths where the sidebar turns compact and where the

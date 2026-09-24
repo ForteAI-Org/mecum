@@ -6,7 +6,6 @@
 //
 
 import SwiftUI
-import Workspace
 
 /// The live screen while there is a window to watch; nothing otherwise, and
 /// one line while it floats over the conversation.

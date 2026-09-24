@@ -6,7 +6,6 @@
 //
 
 import SwiftUI
-import Workspace
 
 /// Where the worker is in the flow: whether it answers, and what it does with the computer.
 struct InspectorNowSection: View {

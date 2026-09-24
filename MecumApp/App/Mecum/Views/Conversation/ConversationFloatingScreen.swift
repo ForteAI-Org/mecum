@@ -6,7 +6,6 @@
 //
 
 import SwiftUI
-import Workspace
 
 /// The worker's live screen at the top right, below the title bar, when the
 /// person moved it here from the inspector and there is a window to watch.

@@ -6,8 +6,6 @@
 //
 
 import SwiftUI
-import Transcript
-import Workspace
 
 /// WorkerConversationView shows one worker's direct conversation.
 ///

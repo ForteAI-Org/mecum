@@ -5,10 +5,8 @@
 //  Created by Eliomar Alejandro Rodriguez Ferrer on 22/09/2026.
 //
 
-import Composer
 import ModelTransports
 import SwiftUI
-import Workspace
 
 /// The composer (§13), floating over the transcript's bottom edge. Its field
 /// hands the draft committed text only, never a composition in progress, so

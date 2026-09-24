@@ -7,8 +7,6 @@
 
 import AppKit
 import SwiftUI
-import TeamShell
-import Workspace
 
 /// WindowClickCheck puts the team shell in a real key window, when the app is
 /// launched with MECUM_CLICK_CHECK=1, and drives the window's chrome with

@@ -7,7 +7,6 @@
 
 import Foundation
 import Observation
-import Workspace
 
 /// WorkspaceLaunch opens the workspace store when the app starts.
 ///

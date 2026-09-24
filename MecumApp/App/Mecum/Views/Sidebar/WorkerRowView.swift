@@ -6,7 +6,6 @@
 //
 
 import SwiftUI
-import Workspace
 
 /// WorkerRowView is one worker of the team, as a block: mascot, name, the
 /// line under it and the indicator that says the worker wants attention, or,

@@ -7,7 +7,6 @@
 
 import ModelTransports
 import SwiftUI
-import Workspace
 
 /// The worker's profile as it stands: the model a new turn will use, its
 /// provider and that provider's connection. The model row is the way into

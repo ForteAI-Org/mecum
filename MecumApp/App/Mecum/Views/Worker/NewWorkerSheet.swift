@@ -6,7 +6,6 @@
 //
 
 import SwiftUI
-import Workspace
 
 /// NewWorkerSheet creates one worker, by hand.
 ///

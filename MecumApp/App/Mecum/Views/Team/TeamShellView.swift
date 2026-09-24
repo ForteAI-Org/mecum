@@ -6,8 +6,6 @@
 //
 
 import SwiftUI
-import TeamShell
-import Workspace
 
 /// TeamShellView is the team window once the workspace is open (§3.1): a two
 /// column split of the team and the selected worker's conversation, and a

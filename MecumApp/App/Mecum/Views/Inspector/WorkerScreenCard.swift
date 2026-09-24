@@ -6,7 +6,6 @@
 //
 
 import SwiftUI
-import Workspace
 
 /// WorkerScreenCard is the worker's live screen with the one control it needs:
 /// moving it between the inspector and the top right of the conversation.

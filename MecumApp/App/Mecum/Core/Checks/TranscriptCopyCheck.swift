@@ -7,7 +7,6 @@
 
 import AppKit
 import SwiftUI
-import TeamShell
 
 /// TranscriptCopyCheck shows the team shell in a real key window when the app
 /// is launched with MECUM_WINDOW_CHECK=copy, focuses the composer, drags across

@@ -10,10 +10,6 @@ import Foundation
 import ModelTransports
 import Observation
 import SeatBroker
-import TeamShell
-import Transcript
-import WorkerAgents
-import Workspace
 
 /// TeamModel is the only thing in the app that talks to `WorkspaceStore`.
 ///

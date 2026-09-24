@@ -7,8 +7,6 @@
 
 import SeatBroker
 import SwiftUI
-import TeamShell
-import Workspace
 
 /// TeamWindowView is the app's front door: it opens the workspace and hands
 /// the team to `TeamShellView`, the three areas of the window.

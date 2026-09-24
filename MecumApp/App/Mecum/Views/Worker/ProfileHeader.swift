@@ -6,7 +6,6 @@
 //
 
 import SwiftUI
-import Workspace
 
 /// The profile's title: the worker's mascot and name, the area's name under
 /// it, and the configuration version at the trailing edge once there is one.

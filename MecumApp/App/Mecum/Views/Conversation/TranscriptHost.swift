@@ -7,7 +7,6 @@
 
 import AppKit
 import SwiftUI
-import Transcript
 
 /// TranscriptHost puts the AppKit transcript in the SwiftUI shell (§12.1).
 ///

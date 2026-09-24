@@ -9,8 +9,6 @@ import AppKit
 import ModelTransports
 import SeatBroker
 import SwiftUI
-import TeamShell
-import Workspace
 
 /// WindowSnapshots draws the team window's content offscreen into PNGs for a
 /// person to look at, when the app is launched with MECUM_SNAPSHOTS=1, then

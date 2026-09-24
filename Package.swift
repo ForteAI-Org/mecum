@@ -200,12 +200,6 @@ let package = Package(
         ),
         .library(name: "SeatBroker", targets: ["SeatBroker"]),
         .library(name: "ModelTransports", targets: ["ModelTransports"]),
-        .library(name: "MecumWorkspace", targets: ["Workspace"]),
-        .library(name: "WorkerAgents", targets: ["WorkerAgents"]),
-        .library(name: "MecumTranscript", targets: ["Transcript"]),
-        .library(name: "MecumComposer", targets: ["Composer"]),
-        .library(name: "MecumMascots", targets: ["Mascots"]),
-        .library(name: "MecumTeamShell", targets: ["TeamShell"]),
         // Declared so the app can bundle it as the tool bridge a worker's agent launches.
         .executable(name: "mecum", targets: ["mecum"]),
     ],
@@ -247,57 +241,6 @@ let package = Package(
         // How a model is talked to: one structured request, one streamed
         // conversation, and the providers behind both. No seat, no scene.
         broker("ModelTransports", []),
-
-        // MARK: Workspace
-        // The persistent domain of the app: workers and their versioned
-        // configuration, conversations, messages and the operational event
-        // record, over SwiftData. No view, no seat, no perception: the store
-        // takes its directory from whoever opens it.
-        .target(
-            name         : "Workspace",
-            dependencies : [.target(name: "ModelTransports")],
-            path         : "Sources/Workspace",
-            swiftSettings: pure
-        ),
-
-        // MARK: Mascots
-        // The mascot as a cached static image, drawn from the Workspace's `MascotDrawing`. AppKit only:
-        // the sidebar and the transcript render through this one place, and so does the snapshot.
-        .target(
-            name         : "Mascots",
-            dependencies : [.target(name: "Workspace")],
-            path         : "Sources/Mascots",
-            swiftSettings: pure
-        ),
-
-        // MARK: Transcript
-        // The conversation's AppKit transcript (§12): projection, measurement and the recycled
-        // collection view. Nonisolated by default; the AppKit types say main actor themselves.
-        .target(
-            name         : "Transcript",
-            dependencies : [.target(name: "Workspace"), .target(name: "Mascots")],
-            path         : "Sources/Transcript",
-            swiftSettings: pure
-        ),
-
-        // MARK: Composer
-        // The conversation's composer (§13): an AppKit text view in a SwiftUI bar. It knows no store and
-        // no model: the draft is a binding, and sending and stopping are the caller's actions.
-        .target(
-            name         : "Composer",
-            path         : "Sources/Composer",
-            swiftSettings: pure
-        ),
-
-        // MARK: TeamShell
-        // The team window's rules apart from its views: the width tokens and how space is divided
-        // (§3.1), and the turn the inspector shows (§14.2). Foundation and the Workspace only.
-        .target(
-            name         : "TeamShell",
-            dependencies : [.target(name: "Workspace"), .target(name: "ModelTransports")],
-            path         : "Sources/TeamShell",
-            swiftSettings: pure
-        ),
 
         // MARK: SeatBroker
         broker(
@@ -342,47 +285,6 @@ let package = Package(
              "SeatDriving", "AutomationRuntime", "Engine", "AutomationMCP", "LocalMCP"]
         ),
         brokerTests("ModelTransports", ["ModelTransports"]),
-
-        // MARK: Workspace tests
-        .testTarget(
-            name         : "WorkspaceTests",
-            dependencies : [.target(name: "Workspace"), .target(name: "ModelTransports")],
-            path         : "Tests/WorkspaceTests",
-            swiftSettings: suite
-        ),
-
-        // The snapshot row draws offscreen and runs only with MECUM_SNAPSHOTS=1.
-        .testTarget(
-            name         : "TranscriptTests",
-            dependencies : [.target(name: "Transcript"), .target(name: "Workspace")],
-            path         : "Tests/TranscriptTests",
-            swiftSettings: suite
-        ),
-
-        // The composer's keys, growth and draft path; its snapshot row runs only with MECUM_SNAPSHOTS=1.
-        .testTarget(
-            name         : "ComposerTests",
-            dependencies : [.target(name: "Composer")],
-            path         : "Tests/ComposerTests",
-            swiftSettings: suite
-        ),
-
-        .testTarget(
-            name         : "TeamShellTests",
-            dependencies : [.target(name: "TeamShell"), .target(name: "Workspace"),
-                            .target(name: "ModelTransports")],
-            path         : "Tests/TeamShellTests",
-            swiftSettings: suite
-        ),
-
-        // The transcript's measurements over a synthetic 10,000 message store (§20.1, §20.2), and the
-        // composer's typing latency under that load, apart from the functional tests and run only with MECUM_BENCH=1.
-        .testTarget(
-            name         : "TranscriptBenchmarks",
-            dependencies : [.target(name: "Transcript"), .target(name: "Workspace"), .target(name: "Composer")],
-            path         : "Tests/TranscriptBenchmarks",
-            swiftSettings: suite
-        ),
 
         // Host (TCC, real display) and Live (fixture and reader) tiers, gated by
         // AGENTSEAT_HOST_TESTS=1 and AGENTSEAT_LIVE_TESTS=1 and run serialized.
@@ -466,12 +368,6 @@ let package = Package(
                     "SeatDriving", "SeatCore", "SeatSession", "PrivateSymbols"]),
         integration("AutomationMCP", ["AutomationRuntime", "LocalMCP", "EngineCore", "PerceptionCore",
                                      "PrivateSymbols", "SeatCore", "WindowServerListing"]),
-        // A worker's turn through a signed-in agent command line, with mecum chat's tools and
-        // instructions, and its record in the workspace. No seat of its own: the app supplies the broker's.
-        .target(name: "WorkerAgents",
-                dependencies: ["ChatCore", "CLIProviders", "LocalMCP", "AutomationMCP", "AutomationRuntime",
-                               "EngineCore", "PerceptionCore", "ModelTransports", "Workspace"],
-                path: "Sources/WorkerAgents", swiftSettings: facility),
         // The foreground command line: windows, scene, act, memory. What a model host does, by hand.
         .executableTarget(
             name: "mecum",
@@ -503,11 +399,6 @@ let package = Package(
         .testTarget(name: "ChatTests", dependencies: ["ChatCore", "CLIProviders", "FileConversations", "LocalMCP",
                                                     "AutomationMCP", "AutomationRuntime", "EngineCore", "PerceptionCore"],
                     path: "Tests/Chat", swiftSettings: facility),
-        // The live row runs the real claude CLI with the built mecum as its bridge, gated by MECUM_LIVE_AGENT=1.
-        .testTarget(name: "WorkerAgentsTests",
-                    dependencies: ["WorkerAgents", "ChatCore", "CLIProviders", "AutomationMCP", "AutomationRuntime",
-                                   "ModelTransports", "Workspace", "SeatBroker"],
-                    path: "Tests/WorkerAgentsTests", swiftSettings: facility),
         .testTarget(
             name: "MecumCLITests",
             dependencies: ["mecum", "EngineCore", "PerceptionCore", "ChatCore", "AutomationRuntime", "Perception"],

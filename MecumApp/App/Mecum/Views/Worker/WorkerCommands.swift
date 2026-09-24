@@ -6,7 +6,6 @@
 //
 
 import SwiftUI
-import Workspace
 
 /// WorkerCommands is what can be done to one worker, as menu items.
 ///

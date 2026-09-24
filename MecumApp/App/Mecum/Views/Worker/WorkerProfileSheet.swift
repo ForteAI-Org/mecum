@@ -7,7 +7,6 @@
 
 import ModelTransports
 import SwiftUI
-import Workspace
 
 /// WorkerProfileSheet is the Model and connection area of a worker's profile
 /// (§6.3): provider, model and reasoning effort, edited as a draft with Save
