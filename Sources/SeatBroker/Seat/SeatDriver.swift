@@ -519,10 +519,17 @@ final class SeatDriver {
     ///
     /// Each call makes a new target with an observation of its own. The seat keeps one outstanding
     /// observation, so `observe` here or on another borrow supersedes it and its next Command is
-    /// refused before any event. Throws `sessionClosed` while there is no seat or no window.
+    /// refused before any event. Every observation the borrow takes moves the preview, as one taken
+    /// by `observe` does, so the monitor shows the dialog the engine reads. Throws `sessionClosed`
+    /// while there is no seat or no window.
     func borrowedTarget() throws -> SeatTarget {
         guard let seat, window != nil else { throw SeatBrokerError.sessionClosed }
-        let target = SeatTarget(borrowing: host, seat: seat)
+        let target = SeatTarget(
+            borrowing: host,
+            seat     : seat
+        ) { [weak self] delivery in
+            self?.preview.follow(delivery)
+        }
         lent.append(target)
         return target
     }

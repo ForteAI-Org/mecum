@@ -29,6 +29,8 @@ public final class SeatTarget {
     private var adopted: AdoptedWindow?
     /// True when another owner started `host` and `seat` and keeps their lifecycle.
     private let isBorrowed: Bool
+    /// Told of every observation taken through a borrow, so the owner can follow the window read here.
+    private let observed: (@MainActor (SeatObservationDelivery) -> Void)?
 
     /// The observation the last Frame was delivered with, and whether a Command already consumed it.
     private var delivery: SeatObservationDelivery?
@@ -42,6 +44,7 @@ public final class SeatTarget {
     public init(configuration: SeatHostConfiguration = SeatHostConfiguration(restoresUserFocus: true)) {
         host = SeatHost(configuration: configuration)
         isBorrowed = false
+        observed   = nil
     }
 
     /// Wraps a host and a seat another owner started, so the Engine's roles act on that owner's seat.
@@ -53,11 +56,17 @@ public final class SeatTarget {
     ///
     /// The observation kept here is this target's own, and the seat keeps one outstanding
     /// observation: one the owner takes afterwards supersedes it, so the next Command from here is
-    /// refused before any event and never redirected.
-    package init(borrowing host: SeatHost, seat: AgentSeat) {
-        self.host  = host
-        self.seat  = seat
-        isBorrowed = true
+    /// refused before any event and never redirected. `observed` hears every observation taken
+    /// here, so the owner's live picture shows the window the engine reads and not the one it adopted.
+    package init(
+        borrowing host: SeatHost,
+        seat          : AgentSeat,
+        observed      : (@MainActor (SeatObservationDelivery) -> Void)? = nil
+    ) {
+        self.host     = host
+        self.seat     = seat
+        self.observed = observed
+        isBorrowed    = true
     }
 
     /// Brings up the virtual display and the fence, atomically, and makes the seat.
@@ -126,6 +135,7 @@ public final class SeatTarget {
         lastCapturedWindow = seat.adoptedWindows.first {
             $0.reference.identity == delivered.reference.recipient
         }
+        observed?(delivered)
         return delivered
     }
 

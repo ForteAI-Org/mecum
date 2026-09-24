@@ -61,6 +61,27 @@ struct BorrowedSeatTargetTests {
         #expect(try await context.target.currentObservation().reference != delivery.reference)
     }
 
+    @Test("every observation taken through a borrow is handed to its owner")
+    func aBorrowHandsItsObservationsToItsOwner() async throws {
+
+        let context = try await ObservationAdmissionTests.composed(sender: FakeSender(), marker: 951)
+        _ = try await observe(context.seat)
+        var heard: [SeatObservationDelivery] = []
+        let target = SeatTarget(
+            borrowing: SeatHost(),
+            seat     : context.seat
+        ) { heard.append($0) }
+
+        let first  = try await target.observe()
+        let second = try await target.observe()
+        #expect(heard.map(\.reference) == [first.reference, second.reference])
+
+        // A revoked borrow observes nothing, so its owner hears nothing more.
+        await target.stop()
+        _ = try? await target.observe()
+        #expect(heard.count == 2)
+    }
+
     @Test("an observation either holder takes supersedes the other's, and the refused Command posts nothing")
     func eitherHoldersObservationSupersedesTheOther() async throws {
 
