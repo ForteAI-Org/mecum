@@ -7,28 +7,20 @@
 
 import SwiftUI
 
-/// The live screen while there is a window to watch; nothing otherwise, and
-/// one line while it floats over the conversation.
+/// The live screen while there is a window to watch and it is not over the
+/// conversation, where the toolbar's screen toggle puts it; nothing otherwise.
 struct InspectorScreenSection: View {
 
     let team  : TeamModel
     let worker: WorkerSnapshot
 
     var body: some View {
-        if team.hasScreen(worker.id) {
+        if team.hasScreen(worker.id), !team.showsScreenInConversation {
             Section("Screen") {
-                if team.showsScreenInConversation {
-                    LabeledContent("Shown over the conversation") {
-                        Button("Put back") { withAnimation(.snappy) { team.showsScreenInConversation = false } }
-                            .controlSize(.small)
-                    }
-                } else {
-                    WorkerScreenCard(
-                        team  : team,
-                        worker: worker,
-                        place : .inspector
-                    )
-                }
+                WorkerScreenCard(
+                    team  : team,
+                    worker: worker
+                )
             }
         }
     }

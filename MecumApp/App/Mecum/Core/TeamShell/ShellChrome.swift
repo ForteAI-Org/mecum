@@ -21,6 +21,8 @@ nonisolated enum ShellChrome {
     /// A control that belongs to the window rather than to a worker. There is
     /// no sidebar toggle: the sidebar turns compact and is never hidden.
     enum ToolbarControl: Sendable, Hashable, CaseIterable {
+        /// Moves the worker's live screen between the inspector and the top right of the conversation.
+        case screenToggle
         case inspectorToggle
     }
 
@@ -36,7 +38,10 @@ nonisolated enum ShellChrome {
 
     /// Everything the toolbar holds, in order. Worker actions live with the
     /// worker (the composer, the menu bar, the row's context menu), not here.
-    static let toolbar: [ToolbarControl] = [.inspectorToggle]
+    static let toolbar: [ToolbarControl] = [
+        .screenToggle,
+        .inspectorToggle,
+    ]
 
     /// The header for the selected worker, or nil when none is selected.
     static func header(for worker: WorkerSnapshot?) -> Header? {

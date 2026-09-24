@@ -159,7 +159,7 @@ struct TeamShellView: View {
     // MARK: Toolbar
 
     /// The window's own controls, `ShellChrome.toolbar`: the worker's header at
-    /// the leading edge and the inspector toggle at the trailing edge. The
+    /// the leading edge, and the screen and inspector toggles at the trailing edge. The
     /// connections are at the foot of the sidebar, and Release the computer is
     /// in the composer beside Send and in the worker's commands.
     @ToolbarContentBuilder
@@ -176,6 +176,18 @@ struct TeamShellView: View {
         }
 
         ToolbarItem {
+            Toggle(isOn: screenOverConversation) {
+                Label(
+                    "Screen Over the Conversation",
+                    systemImage: "display"
+                )
+            }
+            .toggleStyle(.button)
+            .disabled(!hasScreen)
+            .help("Show the worker's screen over the conversation, or put it back in the inspector")
+        }
+
+        ToolbarItem {
             Button(
                 target.isInspectorShown ? "Hide Inspector" : "Show Inspector",
                 systemImage: "info.circle",
@@ -187,6 +199,19 @@ struct TeamShellView: View {
             )
             .help("Show or hide the inspector (Control-Option-Command-I)")
         }
+    }
+
+    /// True while the selected worker has a screen to watch, which is when the screen toggle works.
+    private var hasScreen: Bool {
+        team.selection.map(team.hasScreen) ?? false
+    }
+
+    /// The screen at the top right of the conversation, or in the inspector; the change is animated.
+    private var screenOverConversation: Binding<Bool> {
+        Binding(
+            get: { team.showsScreenInConversation },
+            set: { shows in withAnimation(.snappy) { team.showsScreenInConversation = shows } }
+        )
     }
 
     /// Closes a shown inspector and gives the sidebar back its width, or opens

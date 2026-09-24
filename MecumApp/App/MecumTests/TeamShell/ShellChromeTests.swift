@@ -42,9 +42,9 @@ struct ShellChromeTests {
         }
     }
 
-    @Test("The toolbar holds only the inspector toggle, since the sidebar cannot be hidden")
-    func theToolbarHoldsOnlyTheInspectorToggle() {
-        #expect(ShellChrome.toolbar == [.inspectorToggle])
+    @Test("The toolbar holds the screen and inspector toggles only, since the sidebar cannot be hidden")
+    func theToolbarHoldsOnlyTheScreenAndInspectorToggles() {
+        #expect(ShellChrome.toolbar == [.screenToggle, .inspectorToggle])
         #expect(Set(ShellChrome.toolbar) == Set(ShellChrome.ToolbarControl.allCases))
     }
 }
