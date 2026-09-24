@@ -42,6 +42,9 @@ public final class AgentSession {
     public var isUsingApp: Bool { held != nil }
 
     private let driver: SeatDriver
+
+    /// The virtual display the session's seat is made with.
+    var display: SeatDisplay { driver.display }
     private let ledger: LaunchLedger
     /// The runtime that made this session. It is here for one reason: opening
     /// an application is launching one, and `SeatBroker.launch` is the

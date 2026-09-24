@@ -10,6 +10,7 @@ import SeatDriving
 import SeatInput
 import SeatSession
 import TargetReader
+import VirtualScreens
 import WindowPlacement
 
 /// The one wrapper around the seat driver: virtual display, adopted window,
@@ -30,10 +31,23 @@ final class SeatDriver {
     /// from so far.
     private static let log = Logger(subsystem: "dev.forte.AgentSeatKit", category: "Lab")
 
-    private let host = SeatHost(configuration: SeatHostConfiguration(
-        followsNewWindows: true,
-        restoresUserFocus: true
-    ))
+    /// The virtual display this driver's seat is made with, fixed for its life.
+    let display: SeatDisplay
+
+    private let host: SeatHost
+
+    init(display: SeatDisplay = .standard) {
+        self.display = display
+        host = SeatHost(configuration: SeatHostConfiguration(
+            display          : VirtualDisplayConfiguration(
+                pixelWidth : UInt32(display.pixelWidth),
+                pixelHeight: UInt32(display.pixelHeight),
+                refreshRate: display.refreshRate == 120 ? .high : .standard
+            ),
+            followsNewWindows: true,
+            restoresUserFocus: true
+        ))
+    }
     private var seat: AgentSeat?
     private(set) var window: AdoptedWindow?
     private let preview = PreviewStreamController()

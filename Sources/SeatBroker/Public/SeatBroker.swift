@@ -55,6 +55,16 @@ public final class SeatBroker {
     /// consumer that could route around the wait.
     public private(set) lazy var queue = SeatQueue(broker: self, capacity: configuration.seatCapacity)
 
+    /// The virtual display a new seat is made with. A change closes the parked seats, so the next
+    /// turn that needs the computer gets one of the new size; a seat in use keeps its display until
+    /// it is given back, and is then closed instead of parked for reuse.
+    public var display = SeatDisplay.standard {
+        didSet {
+            guard display != oldValue else { return }
+            Task { await queue.shutdown() }
+        }
+    }
+
     public convenience init(configuration: SeatBrokerConfiguration = .init()) {
         self.init(configuration: configuration, ledger: LaunchLedger())
     }
@@ -192,7 +202,7 @@ public final class SeatBroker {
     /// on the seat, `open(applicationNamed:)` is the planner's way in, and
     /// `AgentSession.close` takes the display back down.
     func openSession() -> AgentSession {
-        AgentSession(driver: SeatDriver(), ledger: ledger, perception: perception,
+        AgentSession(driver: SeatDriver(display: display), ledger: ledger, perception: perception,
                      recorder: recorder, environment: self)
     }
 }

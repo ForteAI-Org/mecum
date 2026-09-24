@@ -154,8 +154,18 @@ public final class SeatQueue {
 
         // `admitNext` marks the entry acting before it resumes, so reaching here
         // means the slot is already this entry's.
-        let session = warm.popLast() ?? broker.openSession()
+        let session = await takeWarm() ?? broker.openSession()
         return SeatLease(id: id, session: session, queue: self)
+    }
+
+    /// A parked seat made with the display the broker makes now. One made with another display,
+    /// parked before the display was changed or given back after, is closed rather than handed on.
+    private func takeWarm() async -> AgentSession? {
+        while let session = warm.popLast() {
+            if session.display == broker.display { return session }
+            _ = await session.close()
+        }
+        return nil
     }
 
     /// Gives up a place in the queue. It affects a waiting entry, which leaves
