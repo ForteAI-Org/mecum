@@ -1,0 +1,39 @@
+name: Feature or improvement
+description: Explain a task Mecum should support or make easier.
+title: "Feature: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Search [existing issues](https://github.com/ForteAI-Org/mecum/issues?q=is%3Aissue) first.
+        Describe the task and desired result. You do not need to propose code or commit to implementing it.
+  - type: textarea
+    id: task
+    attributes:
+      label: Task and current limitation
+      description: What are you trying to accomplish, and what gets in the way today?
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Desired result
+      description: Give one concrete example of how the improved behavior would help.
+    validations:
+      required: true
+  - type: dropdown
+    id: interface
+    attributes:
+      label: Relevant interface (optional)
+      options:
+        - CLI
+        - Chat or MCP
+        - Swift libraries
+        - Developer tooling
+        - Multiple interfaces
+        - Not sure
+  - type: textarea
+    id: context
+    attributes:
+      label: Alternatives or ideas (optional)
+      description: Add workarounds, target applications, constraints or an implementation idea if you have one.
