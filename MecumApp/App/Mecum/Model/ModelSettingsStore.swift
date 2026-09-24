@@ -13,12 +13,13 @@ import Observation
 /// knobs, API keys (keychain), and what the last check of each connection
 /// found. Favorites are the models the Settings window lists per provider.
 ///
-/// It is team state as much as the lab's: the team window's connection cards
-/// and worker profiles read the same object, so it asks `ProviderCatalog`
-/// directly and holds no seat. Nothing is checked at construction. A check
-/// runs when a connection card or a model picker appears, when a key or the
-/// Ollama address changes, and when a worker is configured, because checking
-/// runs the `codex` and `claude` command lines and probes a server.
+/// The team window's connection cards, the worker profiles and the Settings
+/// window read the same object, so it asks `ProviderCatalog`
+/// directly and holds no seat. Nothing is checked at construction; the app
+/// checks every connection once at launch (`AppModel`). A check runs again
+/// when a connection card or a model picker appears, when a key or the Ollama
+/// address changes, and when a worker is configured. Checking runs the `codex`
+/// and `claude` command lines and probes a server.
 @Observable
 @MainActor
 final class ModelSettingsStore {
