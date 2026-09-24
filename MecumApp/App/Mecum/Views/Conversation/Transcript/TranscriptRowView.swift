@@ -251,12 +251,17 @@ final class TranscriptRowView: NSView {
         return NSImage(systemSymbolName: name, accessibilityDescription: nil) ?? NSImage()
     }
 
-    /// How far the person's bubble moves right of where it was placed: a live
-    /// resize widens the row before its parts are placed again off the main
-    /// thread, and a bubble anchored to the right edge must follow the edge.
+    /// How far a row's parts move from where they were placed: a live resize
+    /// widens the row before its parts are placed again off the main thread,
+    /// so the person's bubble, anchored to the right edge, follows the edge,
+    /// and a divider, centred, follows the centre on a whole point.
     private func drift(of row: PreparedRow) -> CGFloat {
-        guard case .personMessage = row.item.kind else { return 0 }
-        return bounds.width - row.geometry.rowWidth
+        let widened = bounds.width - row.geometry.rowWidth
+        switch row.item.kind {
+        case .personMessage:                   return widened
+        case .daySeparator, .activityNotShown: return (widened / 2).rounded()
+        default:                               return 0
+        }
     }
 
     override func setFrameSize(_ newSize: NSSize) {
@@ -368,8 +373,26 @@ final class TranscriptRowView: NSView {
         case .line, .divider:
             // A quiet caption with no surface of its own; focus still outlines it.
             let frame = geometry.text.insetBy(dx: -6, dy: -2)
+            if case .daySeparator = row.item.kind { drawRules(beside: geometry.text, drift: drift(of: row)) }
             if isOutlined { strokeFocus(NSBezierPath(roundedRect: frame, xRadius: 4, yRadius: 4)) }
         }
+    }
+
+    /// A day's label between two hairlines that run out to the gutters. They reach the edges of
+    /// the row as it is now, so a live resize stretches them at once; the context is moved by
+    /// `drift` already, which they undo at their outer ends.
+    private func drawRules(
+        beside label: CGRect,
+        drift       : CGFloat
+    ) {
+        let gap   = CGFloat(12)
+        let hair  = 1 / (window?.backingScaleFactor ?? 2)
+        let y     = label.midY.rounded()
+        let start = RowGeometry.gutter - drift
+        let end   = bounds.width - RowGeometry.gutter - drift
+        NSColor.separatorColor.setFill()
+        NSRect(x: start, y: y, width: max(0, label.minX - gap - start), height: hair).fill()
+        NSRect(x: label.maxX + gap, y: y, width: max(0, end - label.maxX - gap), height: hair).fill()
     }
 
     /// A selected bubble is its own fill made lighter, with no border: toward

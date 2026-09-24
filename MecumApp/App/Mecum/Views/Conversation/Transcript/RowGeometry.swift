@@ -221,7 +221,8 @@ nonisolated struct RowGeometry: Sendable, Hashable {
                                  height: max(caption, textSize.height) + 8)
             let textWidth = min(surface.width, textSize.width)
             self.surface = surface
-            self.text    = CGRect(x: surface.midX - textWidth / 2, y: 4, width: textWidth,
+            // On a whole point, so the label does not shimmer as the row is laid out again.
+            self.text    = CGRect(x: (surface.midX - textWidth / 2).rounded(), y: 4, width: textWidth,
                                   height: textSize.height)
             self.header  = nil
             self.footer  = nil
