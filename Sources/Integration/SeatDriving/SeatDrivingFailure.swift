@@ -23,10 +23,6 @@ public enum SeatDrivingFailure: Error, Equatable {
     case gestureUnsupported(String)
     /// No pixel-to-screen geometry has been observed yet; a scene must be perceived before acting.
     case noGeometry
-    /// The seat has no observation to admit the next Command under, and says why. A gesture is
-    /// addressed by the observation it was decided on, so without one there is nothing to post
-    /// under and nothing is posted: a stale reference is never reused to get past this.
-    case notObservable(String)
     /// The target borrows a host and a seat another owner started, and bringing them up is that
     /// owner's: nothing was started.
     case borrowedLifecycle

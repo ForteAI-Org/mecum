@@ -114,7 +114,7 @@ public final class SeatTarget {
     /// admitted under, kept here so the gesture that follows a scene is posted under the very
     /// picture that scene was read from. ScreenCaptureKit sometimes answers a one-shot with no
     /// buffer right after a window moved, so an unavailable observation is retried before it is an
-    /// error.
+    /// error. The error is the seat's own `ObservationUnavailable`, so the consumer can word it.
     ///
     /// Which window is observed is the seat's own choice and no longer this layer's: the seat
     /// follows the application through a dialog's closure and selects the surviving surface, which
@@ -126,7 +126,7 @@ public final class SeatTarget {
         let delivered = try await Self.retrying {
             switch await seat.observe() {
                 case .success(let delivery): return delivery
-                case .failure(let reason)  : throw SeatDrivingFailure.notObservable(String(describing: reason))
+                case .failure(let reason)  : throw reason
             }
         }
         delivery           = delivered

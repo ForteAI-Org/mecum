@@ -287,6 +287,14 @@ struct BrokeredAutomationSessionTests {
                 + "Notes was closed again, since this open had launched it.")
     }
 
+    @Test("a seat that cannot observe is worded for the agent, not printed as its case")
+    func aSeatThatCannotObserveIsWorded() {
+        let refusal = BrokeredAutomationSession.refusal(for: ObservationUnavailable.suspended([.noEligibleTarget]))
+        #expect(refusal is AutomationFailure)
+        #expect(String(describing: refusal) == "The seat cannot observe while suspended: "
+            + "no window of the assigned application is eligible to act in.")
+    }
+
     @Test("a holder idle between turns gives the seat back as soon as another entry waits",
           .timeLimit(.minutes(1)))
     func anIdleHolderReleasesWhenAnEntryStartsWaiting() async throws {

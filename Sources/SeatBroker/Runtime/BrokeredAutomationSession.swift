@@ -247,7 +247,11 @@ public final class BrokeredAutomationSession: AutomationSessionOperating {
 
     public func observe() async throws -> SceneSnapshot {
         let (application, runtime, _) = try current()
-        return try await perceiving(runtime, application.processIdentifier)
+        do {
+            return try await perceiving(runtime, application.processIdentifier)
+        } catch {
+            throw Self.refusal(for: error)
+        }
     }
 
     public func act(target: String, verb: ActionVerb, section: String?, desiredState: ControlState?) async throws
@@ -416,9 +420,14 @@ public final class BrokeredAutomationSession: AutomationSessionOperating {
             + ". Do not retry until it is granted."
     }
 
-    /// The worker's sentence for an application that showed no window, and every other error as it
-    /// came, so a cancellation stays a cancellation.
+    /// The worker's sentence for an application that showed no window or a seat that could not
+    /// observe, and every other error as it came, so a cancellation stays a cancellation.
     static func refusal(for error: any Error) -> any Error {
+        // The seat's own reason reaches the agent as the router prints it, which for an enum is its
+        // case and payload: the sentence is the one the seat's mapper writes for a person.
+        if error is ObservationUnavailable {
+            return AutomationFailure(SeatErrorMapper.message(for: error))
+        }
         guard case .noWindowShown(let name, let seconds, let wasLaunched, let wasQuit)? = error as? SeatBrokerError
         else { return error }
         let fact = wasLaunched
