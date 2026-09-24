@@ -138,6 +138,29 @@ struct TeamShellView: View {
             \.team,
             team
         )
+        .confirmationDialog(
+            deletionTitle,
+            isPresented    : Binding(
+                get: { team.deletingWorker != nil },
+                set: { if !$0 { team.deletingWorker = nil } }
+            ),
+            titleVisibility: .visible,
+            presenting     : team.deletingWorker.flatMap(team.worker)
+        ) { worker in
+            Button(
+                "Delete",
+                role: .destructive
+            ) {
+                Task { await team.deleteWorker(worker.id) }
+            }
+        } message: { _ in
+            Text("""
+                Its conversation, its history and its model settings are removed from this Mac, and its \
+                working folder goes to the Trash. What the Brain learned about applications stays, since \
+                every worker shares it, and what its provider already received stays with the provider. \
+                To only take it off the team, archive it.
+                """)
+        }
         .alert(
             "That could not be done",
             isPresented: Binding(
@@ -152,6 +175,11 @@ struct TeamShellView: View {
         } message: {
             Text(team.problem ?? "")
         }
+    }
+
+    private var deletionTitle: String {
+        let name = team.deletingWorker.flatMap(team.worker)?.name ?? "this worker"
+        return "Delete \(name) for good?"
     }
 
     // MARK: Toolbar

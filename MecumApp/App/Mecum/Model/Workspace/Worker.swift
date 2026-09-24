@@ -40,8 +40,8 @@ nonisolated final class Worker {
     /// specialisation from its name.
     var instructions: String?
 
-    /// Archiving is the ordinary removal from the active team. Hard deletion
-    /// is a separate act and is not implemented here.
+    /// Archiving is the ordinary removal from the active team. Deleting for
+    /// good is a separate act, `WorkspaceStore.deleteWorker`.
     var isArchived: Bool
 
     var createdAt: Date

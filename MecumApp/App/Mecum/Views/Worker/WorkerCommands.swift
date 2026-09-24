@@ -11,7 +11,8 @@ import SwiftUI
 ///
 /// The same content fills the row's context menu and the Team menu,
 /// so archiving is reachable from the keyboard and not only from a right
-/// click.
+/// click. Deleting for good comes last and asks first, in the team window;
+/// it waits while the worker is answering.
 struct WorkerCommands: View {
 
     let worker: WorkerSnapshot
@@ -56,5 +57,15 @@ struct WorkerCommands: View {
                 }
             }
         }
+
+        Divider()
+
+        Button(
+            "Delete…",
+            role: .destructive
+        ) {
+            team.deletingWorker = worker.id
+        }
+        .disabled(team.isAnswering(worker.id))
     }
 }

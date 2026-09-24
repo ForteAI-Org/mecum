@@ -113,4 +113,65 @@ struct WorkerStoreTests {
         #expect(try await store.workers(includingArchived: true).count == 1)
         #expect(try await store.worker(worker.id)?.isArchived == true)
     }
+
+    @Test("Deleting a worker takes its conversation, history and record with it, and nothing of another's")
+    func deleting() async throws {
+        let directory = TemporaryStore.directory()
+        defer { TemporaryStore.discard(directory) }
+
+        let store     = try WorkspaceStore.opening(in: directory)
+        let workspace = UUID()
+
+        // Two workers with the same history each: a version, a conversation with a message, a turn and its event.
+        var histories: [(worker: UUID, conversation: UUID)] = []
+        for name in ["Nova", "Atlas"] {
+            let worker = try await store.createWorker(
+                name      : name,
+                appearance: TemporaryStore.appearance()
+            )
+            try await store.configure(
+                worker   : worker.id,
+                selection: TemporaryStore.firstSelection
+            )
+            let conversation = try await store.createConversation(participants: [worker.id])
+            try await store.appendMessage(
+                to  : conversation.id,
+                text: "Hello, \(name)."
+            )
+            let execution = try await store.startExecution(
+                worker      : worker.id,
+                conversation: conversation.id
+            )
+            try await store.append(NewEvent(
+                workspaceID   : workspace,
+                subjectID     : execution.id,
+                conversationID: conversation.id,
+                workerID      : worker.id,
+                type          : .executionCompleted
+            ))
+            histories.append((worker.id, conversation.id))
+        }
+        let (deleted, kept) = (histories[0], histories[1])
+
+        #expect(try await store.deleteWorker(deleted.worker) == [deleted.conversation])
+
+        let reopened = try WorkspaceStore.opening(in: directory)
+        #expect(try await reopened.worker(deleted.worker) == nil)
+        #expect(try await reopened.conversation(deleted.conversation) == nil)
+        #expect(try await reopened.messages(in: deleted.conversation).isEmpty)
+        #expect(try await reopened.latestExecution(of: deleted.worker) == nil)
+        #expect(try await reopened.events(matching: EventQuery(scope: .worker(deleted.worker))).isEmpty)
+        #expect(try await reopened.events(matching: EventQuery(scope: .conversation(deleted.conversation))).isEmpty)
+
+        let context  = ModelContext(try WorkspaceStoreFile.open(in: directory))
+        let workerID = deleted.worker
+        #expect(try context.fetchCount(FetchDescriptor<WorkerConfiguration>(
+            predicate: #Predicate { $0.workerID == workerID }
+        )) == 0)
+
+        #expect(try await reopened.worker(kept.worker)?.configurationVersion == 1)
+        #expect(try await reopened.messages(in: kept.conversation).count == 1)
+        #expect(try await reopened.latestExecution(of: kept.worker) != nil)
+        #expect(try await reopened.events(matching: EventQuery(scope: .worker(kept.worker))).count == 1)
+    }
 }

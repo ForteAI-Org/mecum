@@ -84,6 +84,58 @@ extension WorkspaceStore {
         return version
     }
 
+    /// Deletes the worker for good, the act that is separate from archiving
+    /// (§4.4): its row, every configuration version, its direct conversation
+    /// with the messages in it, its executions and what the record holds on
+    /// them, in one save or not at all. The record is append-only except for
+    /// this (§18.3). A message it wrote where others take part stays,
+    /// attributed to it and to no one else.
+    ///
+    /// Returns the conversations deleted with it, whose working folders the
+    /// caller owns.
+    @discardableResult
+    func deleteWorker(_ id: UUID) throws -> [UUID] {
+        guard let worker = try workerRow(id) else { throw WorkspaceStoreError.workerNotFound(id) }
+
+        let conversations = try modelContext.fetch(FetchDescriptor<Conversation>())
+            .filter { $0.kind == .direct && $0.participantIDs == [id] }
+            .map(\.id)
+
+        for conversation in conversations {
+            let recorded: UUID? = conversation
+            try modelContext.delete(
+                model: Message.self,
+                where: #Predicate { $0.conversationID == conversation }
+            )
+            try modelContext.delete(
+                model: WorkspaceEvent.self,
+                where: #Predicate { $0.conversationID == recorded }
+            )
+            try modelContext.delete(
+                model: Conversation.self,
+                where: #Predicate { $0.id == conversation }
+            )
+        }
+
+        let worked: UUID? = id
+        try modelContext.delete(
+            model: WorkspaceEvent.self,
+            where: #Predicate { $0.workerID == worked }
+        )
+        try modelContext.delete(
+            model: Execution.self,
+            where: #Predicate { $0.workerID == id }
+        )
+        try modelContext.delete(
+            model: WorkerConfiguration.self,
+            where: #Predicate { $0.workerID == id }
+        )
+        modelContext.delete(worker)
+
+        try saveOrRollBack()
+        return conversations
+    }
+
     /// Starts an attempt and freezes the settings into it.
     ///
     /// Throws `workerNotConfigured` when no model is attached: an execution

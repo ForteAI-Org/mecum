@@ -50,6 +50,9 @@ final class TeamModel {
     /// commands set it to open the inspector on that list.
     var choosingProviderFor: UUID?
 
+    /// The worker the person asked to delete, whose confirmation the team window shows.
+    var deletingWorker: UUID?
+
     /// What the last check said about each configured worker's model. A
     /// worker absent here has not been checked, which is not the same as fine.
     private(set) var modelStates: [UUID: ConnectionState] = [:]
@@ -364,10 +367,7 @@ final class TeamModel {
         } else {
             desktop = self.desktop(for: workerID)
             host    = WorkerAgentHost(
-                workingDirectory: WorkspaceLaunch.directory.appending(
-                    path         : "WorkerWorkspaces/\(conversationID.uuidString)",
-                    directoryHint: .isDirectory
-                ),
+                workingDirectory: workingFolder(of: conversationID),
                 bridgeExecutable: Bundle.main.bundleURL.appending(path: "Contents/Helpers/mecum"),
                 session         : { desktop }
             )
@@ -672,6 +672,69 @@ final class TeamModel {
             problem = isArchived
                 ? "The worker was not archived and is still on the active team. \(describe(error))"
                 : "The worker was not restored and is still in the archive. \(describe(error))"
+        }
+    }
+
+    /// Deletes the worker for good (§4.4), once the person has confirmed what
+    /// goes with it. A worker still answering is not deleted, since its turn
+    /// would go on writing into a conversation that is gone. Its seat is given
+    /// back and its conversation closed first, and its working folder goes to
+    /// the Trash, where the files it wrote can still be taken back.
+    func deleteWorker(_ id: UUID) async {
+        let name = name(of: id)
+        guard !isAnswering(id) else {
+            problem = "\(name) is still answering, so it was not deleted. Stop it, then delete it again."
+            return
+        }
+
+        await releaseComputer(id)
+        desktops[id] = nil
+
+        if selection == id {
+            selection = nil
+            await openSelectedConversation()
+        }
+
+        let conversations: [UUID]
+        do {
+            conversations = try await store.deleteWorker(id)
+        } catch {
+            problem = "\(name) was not deleted, and everything it had is still there. \(describe(error))"
+            return
+        }
+
+        modelStates[id] = nil
+        for conversationID in conversations {
+            if let host = hosts.removeValue(forKey: conversationID) {
+                do { try await host.close() }
+                catch { problem = "\(name)'s temporary tool configuration could not be removed. \(describe(error))" }
+            }
+            trashWorkingFolder(of: conversationID)
+        }
+        await load()
+    }
+
+    /// Where the agent works for the conversation, and keeps the files it writes.
+    private func workingFolder(of conversationID: UUID) -> URL {
+        WorkspaceLaunch.directory.appending(
+            path         : "WorkerWorkspaces/\(conversationID.uuidString)",
+            directoryHint: .isDirectory
+        )
+    }
+
+    /// Moves a deleted conversation's working folder to the Trash, when it has one.
+    private func trashWorkingFolder(of conversationID: UUID) {
+        let folder = workingFolder(of: conversationID)
+        guard FileManager.default.fileExists(atPath: folder.path(percentEncoded: false)) else { return }
+
+        do {
+            try FileManager.default.trashItem(
+                at              : folder,
+                resultingItemURL: nil
+            )
+        } catch {
+            problem = "The deleted worker's folder could not be moved to the Trash, so it is still at "
+                + "\(folder.path(percentEncoded: false)). \(describe(error))"
         }
     }
 
