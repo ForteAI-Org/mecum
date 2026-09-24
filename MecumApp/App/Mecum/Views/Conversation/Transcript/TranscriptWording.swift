@@ -71,9 +71,10 @@ nonisolated enum TranscriptWording {
 
     /// A tool line's summary: what the turn changed, repeats collapsed, a
     /// failure or a step in progress always named, at most `summaryLimit`
-    /// phrases. Steps that only looked are named only when nothing else was done.
+    /// phrases. Steps that only looked are named only when nothing else was done,
+    /// and the worker's notes only in the expanded line.
     static func toolSummary(_ steps: [ToolStep], ending: TranscriptItem.TurnEnding?) -> String {
-        let groups = collapsed(steps)
+        let groups = collapsed(steps).filter { !$0.step.isNote }
         var shown  = groups.filter { $0.step.isEffectful || $0.step.state != .done }
         if shown.isEmpty { shown = groups }
         var parts = shown.prefix(summaryLimit).map { toolStep($0.step, count: $0.count, ending: ending) }
@@ -152,6 +153,8 @@ nonisolated enum TranscriptWording {
             case ("set_toggle", "off"): return forms("Turned off", "turn off", "Turning off", object)
             default:                    return forms("Used", "use", "Using", object)
             }
+        case .note(let text):
+            return (text, text, text, true)
         case .other(let name):
             return (name, name, name, false)
         }

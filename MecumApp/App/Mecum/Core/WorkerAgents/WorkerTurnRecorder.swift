@@ -16,9 +16,14 @@ import ModelTransports
 /// with, records `executionStarted` and moves the person's message to sent.
 /// Then it runs the agent once and writes what it reports in order: each reply
 /// block as a message authored by the worker, and each tool record as a
-/// `toolActivity` event, so a tool row is never a reply (§11.2). A provider
-/// session it reports is stored on the conversation with that provider, and
-/// the next turn on the same provider is handed it to resume, across relaunches.
+/// `toolActivity` event, so a tool row is never a reply (§11.2). A block the
+/// worker writes just before a tool call says what it is about to do rather
+/// than answering, so it goes on the tool line as a note
+/// (`ToolStep.noteRecord`). Which of the two a block is shows only in what
+/// comes next, so each waits for the next event: a tool record makes it a
+/// note, anything else a reply. A provider session it reports is stored on
+/// the conversation with that provider, and the next turn on the same
+/// provider is handed it to resume, across relaunches.
 ///
 /// The turn ends with exactly one terminal event: `executionCompleted`,
 /// `executionFailed` carrying the reason, or `executionCancelled` carrying the
@@ -138,6 +143,9 @@ final class WorkerTurnRecorder {
                 do { try await write(event, execution: execution.id, provider: provider, state: &state) }
                 catch { state.firstFailure = state.firstFailure ?? error }
             }
+            // A block still waiting when the agent stopped was its last word: a reply.
+            do { try await reply(&state) }
+            catch { state.firstFailure = state.firstFailure ?? error }
             return state
         }
 
@@ -169,6 +177,9 @@ final class WorkerTurnRecorder {
         var reportedFailure: String?
         var firstFailure   : (any Error)?
 
+        /// The worker's last block, waiting to learn whether it introduces a tool call or answers.
+        var held: String?
+
         /// The session the store holds for this provider, so a repeated id writes nothing.
         var session: String?
     }
@@ -181,16 +192,22 @@ final class WorkerTurnRecorder {
     ) async throws {
         switch event {
         case .provider(.assistant(let text)):
-            try await store.appendMessage(to: conversationID, author: workerID, text: text, delivery: .completed)
-            if !state.hasReply {
-                state.hasReply = true
-                try await store.update(message: messageID, delivery: .responding)
-            }
+            // A block after a block: the first one answered.
+            try await reply(&state)
+            state.held = text
+            guard !state.hasReply else { return }
+
+            state.hasReply = true
+            try await store.update(message: messageID, delivery: .responding)
         case .provider(.failure(let reason)):
+            try await reply(&state)
             // Kept for the one terminal event; the provider also throws it at the end.
             state.reportedFailure = reason
-            return
         case .tool(let text):
+            if let note = state.held {
+                state.held = nil
+                try await append(.toolActivity, subject: execution, text: ToolStep.noteRecord(note))
+            }
             try await append(.toolActivity, subject: execution, text: text)
         case .processStarted(let identity):
             let encoded = try JSONEncoder().encode(identity)
@@ -201,10 +218,20 @@ final class WorkerTurnRecorder {
             try await store.update(conversation: conversationID, .providerSession(provider: provider, id: id))
             state.session = id
             return
-        case .provider(.activity), .provider(.completed):
+        case .provider(.completed):
+            try await reply(&state)
+        case .provider(.activity):
             return
         }
         await onRecorded()
+    }
+
+    /// Writes the waiting block as a reply, when one is waiting.
+    private func reply(_ state: inout WriteState) async throws {
+        guard let text = state.held else { return }
+
+        state.held = nil
+        try await store.appendMessage(to: conversationID, author: workerID, text: text, delivery: .completed)
     }
 
     private func finish(_ ending: Ending, execution: UUID) async throws {

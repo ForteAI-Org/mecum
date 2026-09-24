@@ -10,7 +10,9 @@ import Foundation
 /// ToolStep is one thing a worker's tools did in a turn, read back from the
 /// records the host stores (`AutomationTools.record`): a call `→ name {args}`,
 /// then its result `← name {json}` or `← name error: reason`. A batch call is
-/// its steps, answered by `← batch step N`.
+/// its steps, answered by `← batch step N`. What the worker wrote just before
+/// a call, saying what it was about to do, is a note `» text`: the turn's
+/// recorder keeps it on the line rather than as a reply.
 ///
 /// A result is matched to the oldest call of the same tool still waiting, so
 /// calls that overlap still pair. A result with no call, as after a capped
@@ -30,6 +32,10 @@ nonisolated struct ToolStep: Sendable, Hashable {
 
         /// Closes the app the session held, when this turn opened it.
         case close(app: String?)
+
+        /// What the worker said it was about to do, in its own words.
+        case note(String)
+
         case other(name: String)
     }
 
@@ -47,10 +53,20 @@ nonisolated struct ToolStep: Sendable, Hashable {
     /// True for a step that changes the app, rather than one that only looks.
     var isEffectful: Bool {
         switch action {
-        case .status, .windows, .observe: false
-        default:                          true
+        case .status, .windows, .observe, .note: false
+        default:                                 true
         }
     }
+
+    var isNote: Bool {
+        if case .note = action { true } else { false }
+    }
+
+    /// The mark a note's record starts with.
+    static let noteMark = "» "
+
+    /// The record of a note: what the worker wrote before a tool call.
+    static func noteRecord(_ text: String) -> String { noteMark + text }
 
     /// The outcome statuses that mean the step did what it says.
     static let successes: Set<String> = ["found_acted", "acted_noop", "dry_run"]
@@ -64,6 +80,10 @@ nonisolated struct ToolStep: Sendable, Hashable {
         var lastApp: String?
 
         for line in lines {
+            if line.hasPrefix(noteMark) {
+                steps.append(ToolStep(action: .note(String(line.dropFirst(noteMark.count))), state: .done))
+                continue
+            }
             let isCall = line.hasPrefix("→ ")
             guard isCall || line.hasPrefix("← ") else {
                 steps.append(ToolStep(action: .other(name: line), state: .done))

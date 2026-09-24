@@ -45,6 +45,32 @@ struct WorkerTurnRecorderTests {
         #expect(events.allSatisfy { $0.correlationID == fixture.message && $0.workerID == fixture.worker })
     }
 
+    @Test func aBlockBeforeAToolCallIsANoteOnTheLineAndTheLastBlockIsTheReply() async throws {
+        let fixture = try await Fixture()
+        defer { fixture.discard() }
+        let ending = try await fixture.recorder.run { _, _, emit in
+            emit(.provider(.assistant("Checking what is open.")))
+            emit(.tool(#"→ windows {}"#))
+            emit(.tool(#"← windows {"applications":[]}"#))
+            emit(.provider(.assistant("Nothing is open.")))
+            emit(.provider(.completed))
+        }
+        #expect(ending == .completed)
+
+        let messages = try await fixture.store.messages(in: fixture.conversation)
+        #expect(messages.map(\.text) == ["Which apps have windows?", "Nothing is open."])
+
+        let events = try await fixture.events()
+        #expect(events.compactMap(WorkerTurnRecorder.text(of:)) == [
+            ToolStep.noteRecord("Checking what is open."),
+            #"→ windows {}"#,
+            #"← windows {"applications":[]}"#,
+        ])
+        let steps = ToolStep.steps(from: events.compactMap(WorkerTurnRecorder.text(of:)))
+        #expect(steps.first?.action == .note("Checking what is open."))
+        #expect(TranscriptWording.toolSummary(steps, ending: .completed) == "Listed the open windows")
+    }
+
     @Test func aFailureIsRecordedOnceAndNotRetried() async throws {
         let fixture = try await Fixture()
         defer { fixture.discard() }
