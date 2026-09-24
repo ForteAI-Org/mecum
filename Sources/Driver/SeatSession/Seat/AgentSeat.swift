@@ -3183,6 +3183,79 @@ public final class AgentSeat {
         _ = await waitForWindowFollowPass(until: deadlineNanoseconds)
     }
 
+    /// Takes into the seat the windows the assigned application already had
+    /// open outside it when it was handed over, once the assignment nucleus
+    /// has planned their containment and its unqualified effector refused it.
+    ///
+    /// ## Why the follower is not the one
+    ///
+    /// An explicitly assigned application is entrusted whole, so the handover
+    /// reading records every window it had as a pre-existing member and plans
+    /// to move each one that stands outside. The follower was built for the
+    /// opposite reading of the same moment: a window already there is in its
+    /// baseline and it never takes it. Between the two nobody moved the window,
+    /// its containment deadline ran out, and the first observation suspended
+    /// the seat. Measured on DaVinci Resolve with a New Project dialog left
+    /// open after a crash, the same dialog the follower adopts without a word
+    /// when it opens during a session.
+    ///
+    /// ## What it takes, and through what
+    ///
+    /// A member of the assigned instance itself, recorded at the handover, that
+    /// two agreeing readings put outside the seat, whose move the nucleus
+    /// refused as `adapterNotQualified`, that is not drawn inside a host and
+    /// that the seat does not hold yet. Nothing else: a window of another
+    /// process or of a helper and a surface the nucleus does not count as a
+    /// member are left where they are, and a window born during the
+    /// assignment is the follower's.
+    ///
+    /// It moves nothing the follower would not move at this moment: the pass's
+    /// own scope has to be full, so the person's recent physical intent, a
+    /// focus restore in flight or a transfer already running hold it back the
+    /// same way. The one difference is that it runs without a window watch,
+    /// because the assignment reader found these members either way and the
+    /// seat cannot be observed until they are contained.
+    ///
+    /// It goes through `transferDetectedWindow`, the follower's own entry to
+    /// the detected-window transaction, so every refusal of that path stands:
+    /// fullscreen, not movable, too large to shrink, attempts exhausted. The
+    /// record it makes owes the frame the window was found at, which is what
+    /// the release gives back to a window the person already had open.
+    func takeInRefusedPreexistingMembers(until deadlineNanoseconds: UInt64) async {
+
+        guard let assignment = assignmentKit.lifecycle.current,
+              let blocks     = selectionKit.lastAssignmentStatus?.blocks
+        else { return }
+
+        let refused = blocks.compactMap { block -> Int? in
+            guard case .effectRefused(let number, .adapterNotQualified) = block else { return nil }
+            return number
+        }
+        for number in refused {
+            // Read again before each one: a transfer awaits, and the person
+            // may have acted in the meantime.
+            guard !Task.isCancelled,
+                  DispatchTime.now().uptimeNanoseconds < deadlineNanoseconds,
+                  case .full = windowFollowScope(requiringWatch: false),
+                  state.acceptsCommands || containmentOnlyFollowWait
+            else { return }
+            guard let member = assignmentKit.inventory.surfaces[number],
+                  member.identity.process == assignment.instance,
+                  member.origin == .preexisting,
+                  member.presence == .outsideSeat,
+                  member.isVerified,
+                  !member.isAttachedToHost,
+                  session[number] == nil
+            else { continue }
+
+            Self.log.info("""
+                window \(number, privacy: .public) was already open outside the seat when the \
+                application was handed over and its direct move was refused: taking it in
+                """)
+            await transferDetectedWindow(member.reference, level: nil)
+        }
+    }
+
     /// Waits for the one notification or observation pass that owns the
     /// follower. Actor reentrancy lets another pass start at every `await`, so
     /// the observation bridge joins before both reads and once more before it
@@ -4241,8 +4314,11 @@ public final class AgentSeat {
         }
     }
 
-    private func windowFollowScope() -> WindowFollowScope {
-        if windowWatch == nil                     { return .standDown(reason: "there is no window watch") }
+    /// `requiringWatch` is false only for `takeInRefusedPreexistingMembers`,
+    /// whose members the assignment reader found whether or not the seat
+    /// follows: every other stand-down still holds it back.
+    private func windowFollowScope(requiringWatch: Bool = true) -> WindowFollowScope {
+        if requiringWatch, windowWatch == nil     { return .standDown(reason: "there is no window watch") }
         if isTearingDown                          { return .standDown(reason: "the seat is tearing down") }
         if actionInFlight                         { return .standDown(reason: "a Command is in flight") }
         if adoptionInFlight                       { return .standDown(reason: "an adoption is in flight") }
