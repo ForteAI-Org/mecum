@@ -56,7 +56,7 @@ public struct HIDActuator: Actuating {
             case .key(let code, let modifiers):
                 try pressKey(code, modifiers: modifiers, source: source)
             case .character(let character, let modifiers):
-                guard let code = Self.virtualKey(producing: character, holdingCommand: modifiers.contains(.command))
+                guard let code = await Self.virtualKey(producing: character, holdingCommand: modifiers.contains(.command))
                 else { throw HIDActuationFailure.noKeyProduces(character) }
                 try pressKey(code, modifiers: modifiers, source: source)
             case .type(let text):
@@ -114,7 +114,9 @@ public struct HIDActuator: Actuating {
 
     /// The virtual key the installed layout produces `character` from, asked of the layout the way a menu
     /// matches a key equivalent and never assumed from US positions: Command can select another
-    /// arrangement, so it is asked with Command held when the chord holds it.
+    /// arrangement, so it is asked with Command held when the chord holds it. On the main actor because
+    /// HIToolbox asserts that input sources are read on the main thread.
+    @MainActor
     private static func virtualKey(producing character: Character, holdingCommand: Bool) -> UInt16? {
         guard let source = TISCopyCurrentKeyboardLayoutInputSource()?.takeRetainedValue(),
               let raw = TISGetInputSourceProperty(source, kTISPropertyUnicodeKeyLayoutData) else { return nil }

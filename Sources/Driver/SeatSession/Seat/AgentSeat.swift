@@ -424,10 +424,11 @@ public final class AgentSeat {
     ) async throws -> InputReceipt {
 
         let needsLayout: Bool = if case .character = shortcut.key { true } else { false }
+        let layout = needsLayout ? await KeyboardLayoutReader.current() : nil
         let resolved = try ShortcutResolution.resolve(
             shortcut,
             phase    : phase,
-            layout   : needsLayout ? KeyboardLayoutReader.current() : nil,
+            layout   : layout,
             owner    : turn.correlationID,
             processID: await keyboardRecipientProcessID(of: observation)
                 ?? observation.recipient.processID
