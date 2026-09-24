@@ -200,6 +200,7 @@ struct RichContentTests {
     }
 
     @Test("Headings are headings, code is named as code, and Copy block is a VoiceOver action")
+    @available(macOS 26, *)
     @MainActor
     func accessibility() async {
         let prepared = await RowPreparation.prepare([Self.reply(TranscriptFixture.richReply)], workerName: "Atlas",

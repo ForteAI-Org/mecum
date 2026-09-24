@@ -164,11 +164,16 @@ struct TeamShellView: View {
     /// in the composer beside Send and in the worker's commands.
     @ToolbarContentBuilder
     private var toolbar: some ToolbarContent {
-        // The worker's name leads the conversation's side of the bar, in place of a title.
-        ToolbarItem(placement: .navigation) { header }
-            .sharedBackgroundVisibility(.hidden)
+        // The worker's name leads the conversation's side of the bar, in place of a title,
+        // without the glass a macOS 26 toolbar gives its items.
+        if #available(macOS 26, *) {
+            ToolbarItem(placement: .navigation) { header }
+                .sharedBackgroundVisibility(.hidden)
 
-        ToolbarSpacer(.flexible)
+            ToolbarSpacer(.flexible)
+        } else {
+            ToolbarItem(placement: .navigation) { header }
+        }
 
         ToolbarItem {
             Button(

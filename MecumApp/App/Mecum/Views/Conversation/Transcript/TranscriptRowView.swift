@@ -622,7 +622,12 @@ final class TranscriptRowView: NSView {
             case .rule:
                 return nil
             case .heading:
-                element.setAccessibilityRole(.headingRole)
+                // macOS 15 has no heading role; the heading is read as text there.
+                if #available(macOS 26, *) {
+                    element.setAccessibilityRole(.headingRole)
+                } else {
+                    element.setAccessibilityRole(.staticText)
+                }
                 element.setAccessibilityLabel(block.string)
             case .code(let language, _):
                 element.setAccessibilityRole(.staticText)

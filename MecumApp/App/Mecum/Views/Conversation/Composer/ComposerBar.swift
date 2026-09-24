@@ -49,7 +49,7 @@ struct ComposerBar: View {
 
     /// Whether the round buttons are Liquid Glass; a test measuring the drawn circle turns it off,
     /// since glass composites only in the window server. Nil is the platform's: glass unless
-    /// Reduce Transparency is on.
+    /// Reduce Transparency is on, and never before macOS 26, which has no glass.
     var buttonGlass: Bool?
 
     @Namespace
@@ -115,22 +115,33 @@ struct ComposerBar: View {
         .padding(.bottom, 12)
     }
 
-    private var isGlass: Bool { buttonGlass ?? !reducesTransparency }
+    private var isGlass: Bool {
+        guard #available(macOS 26, *) else { return false }
+        return buttonGlass ?? !reducesTransparency
+    }
 
     /// Release, when shown, beside the circle: it comes out of the circle to the left and goes back
     /// into it, and on glass the two shapes merge as one control.
     private var actions: some View {
-        GlassEffectContainer(spacing: 6) {
-            HStack(spacing: 6) {
-                if let release {
-                    releaseButton(release)
-                        .transition(isGlass ? .identity : .scale(scale: 0.3, anchor: .trailing)
-                            .combined(with: .opacity))
-                }
-                circle
+        Group {
+            if #available(macOS 26, *) {
+                GlassEffectContainer(spacing: 6) { buttons }
+            } else {
+                buttons
             }
         }
         .animation(reducesMotion ? nil : .spring(duration: 0.35, bounce: 0.15), value: release != nil)
+    }
+
+    private var buttons: some View {
+        HStack(spacing: 6) {
+            if let release {
+                releaseButton(release)
+                    .transition(isGlass ? .identity : .scale(scale: 0.3, anchor: .trailing)
+                        .combined(with: .opacity))
+            }
+            circle
+        }
     }
 
     private func releaseButton(_ release: @escaping () -> Void) -> some View {

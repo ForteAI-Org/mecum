@@ -21,7 +21,7 @@
 // pure types are nonisolated by default, facilities are main actor by default.
 import PackageDescription
 
-let deployment: SupportedPlatform = .macOS(.v26)
+let deployment: SupportedPlatform = .macOS(.v15)
 
 // Pure types and role protocols: nonisolated by default.
 let pure: [SwiftSetting] = [

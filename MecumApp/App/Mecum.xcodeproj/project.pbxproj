@@ -7,11 +7,11 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		000000000000000200000005 /* MecumPerception in Frameworks */ = {isa = PBXBuildFile; productRef = 000000000000000200000016 /* MecumPerception */; };
-		000000000000000200000004 /* MecumEngine in Frameworks */ = {isa = PBXBuildFile; productRef = 000000000000000200000014 /* MecumEngine */; };
-		000000000000000200000003 /* MecumChat in Frameworks */ = {isa = PBXBuildFile; productRef = 000000000000000200000013 /* MecumChat */; };
 		000000000000000200000001 /* SeatBroker in Frameworks */ = {isa = PBXBuildFile; productRef = 000000000000000200000011 /* SeatBroker */; };
 		000000000000000200000002 /* ModelTransports in Frameworks */ = {isa = PBXBuildFile; productRef = 000000000000000200000012 /* ModelTransports */; };
+		000000000000000200000003 /* MecumChat in Frameworks */ = {isa = PBXBuildFile; productRef = 000000000000000200000013 /* MecumChat */; };
+		000000000000000200000004 /* MecumEngine in Frameworks */ = {isa = PBXBuildFile; productRef = 000000000000000200000014 /* MecumEngine */; };
+		000000000000000200000005 /* MecumPerception in Frameworks */ = {isa = PBXBuildFile; productRef = 000000000000000200000016 /* MecumPerception */; };
 		04975A2F3064044900FB69FD /* mecum in Frameworks */ = {isa = PBXBuildFile; productRef = 000000000000000200000015 /* mecum */; };
 /* End PBXBuildFile section */
 
@@ -26,8 +26,8 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
-		000000000000000000000121 /* MecumTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = MecumTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		000000000000000000000120 /* Mecum.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Mecum.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		000000000000000000000121 /* MecumTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = MecumTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
@@ -298,7 +298,7 @@
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 27.0;
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
-				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
@@ -362,7 +362,7 @@
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 27.0;
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
-				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				MACOSX_DEPLOYMENT_TARGET = 15.0;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				PROJECT_UNIQUE_VALUE = OQ8OOM6F;
@@ -508,21 +508,6 @@
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
-		000000000000000200000016 /* MecumPerception */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = 000000000000000300000001 /* XCLocalSwiftPackageReference "../.." */;
-			productName = MecumPerception;
-		};
-		000000000000000200000014 /* MecumEngine */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = 000000000000000300000001 /* XCLocalSwiftPackageReference "../.." */;
-			productName = MecumEngine;
-		};
-		000000000000000200000013 /* MecumChat */ = {
-			isa = XCSwiftPackageProductDependency;
-			package = 000000000000000300000001 /* XCLocalSwiftPackageReference "../.." */;
-			productName = MecumChat;
-		};
 		000000000000000200000011 /* SeatBroker */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = 000000000000000300000001 /* XCLocalSwiftPackageReference "../.." */;
@@ -533,10 +518,25 @@
 			package = 000000000000000300000001 /* XCLocalSwiftPackageReference "../.." */;
 			productName = ModelTransports;
 		};
+		000000000000000200000013 /* MecumChat */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 000000000000000300000001 /* XCLocalSwiftPackageReference "../.." */;
+			productName = MecumChat;
+		};
+		000000000000000200000014 /* MecumEngine */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 000000000000000300000001 /* XCLocalSwiftPackageReference "../.." */;
+			productName = MecumEngine;
+		};
 		000000000000000200000015 /* mecum */ = {
 			isa = XCSwiftPackageProductDependency;
 			package = 000000000000000300000001 /* XCLocalSwiftPackageReference "../.." */;
 			productName = mecum;
+		};
+		000000000000000200000016 /* MecumPerception */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 000000000000000300000001 /* XCLocalSwiftPackageReference "../.." */;
+			productName = MecumPerception;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

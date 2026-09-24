@@ -112,7 +112,9 @@ struct TeamSidebarView: View, Equatable {
         }
         .toolbar {
             
-            ToolbarSpacer(.flexible)
+            if #available(macOS 26, *) {
+                ToolbarSpacer(.flexible)
+            }
             
             ToolbarItem {
                 Button(
@@ -133,7 +135,7 @@ struct TeamSidebarView: View, Equatable {
 //                isCompact: isCompact
 //            )
 //        }
-        .safeAreaBar(
+        .edgeBar(
             edge   : .bottom,
             spacing: 0
         ) {

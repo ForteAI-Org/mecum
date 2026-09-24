@@ -215,8 +215,9 @@ a run that happens to be fast never saves its own numbers over one.
 
 ## Requirements
 
-macOS 26 or later to build, though every private primitive is validated per
-build: see `docs/SpiLedger.md` for what is used and what was discarded, and
+macOS 15 or later to build, the lowest version the package compiles for, though
+every private primitive is validated per build, so the seat runs only on a build
+the ledger lists: see `docs/SpiLedger.md` for what is used and what was discarded, and
 `docs/compatibility/` for the report of each validated build. Accessibility is
 required for input and the fence, Screen Recording for capture. The kit relies on
 undocumented system interfaces, so it is not a basis for the Mac App Store.

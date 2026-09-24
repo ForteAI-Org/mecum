@@ -10,7 +10,8 @@ import SwiftUI
 /// RoundGlass puts one of the composer's round buttons on interactive Liquid
 /// Glass, tinted when it is given a tint, with an identity in the enclosing
 /// `GlassEffectContainer` so the buttons merge and one comes out of the other.
-/// Off glass it leaves the button as drawn. The bar under them is never glass.
+/// Off glass, and before macOS 26, it leaves the button as drawn. The bar under
+/// them is never glass.
 struct RoundGlass: ViewModifier {
 
     let isGlass  : Bool
@@ -19,7 +20,7 @@ struct RoundGlass: ViewModifier {
     let namespace: Namespace.ID
 
     func body(content: Content) -> some View {
-        if isGlass {
+        if isGlass, #available(macOS 26, *) {
             content
                 .glassEffect(.regular.tint(tint).interactive(), in: .circle)
                 .glassEffectID(id, in: namespace)
