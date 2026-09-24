@@ -1,0 +1,64 @@
+name: Seat compatibility
+description: Report an unvalidated macOS build or Mac model and any results you already have.
+title: "Seat compatibility: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Search [existing reports](https://github.com/ForteAI-Org/mecum/issues?q=is%3Aissue+Seat) first.
+        A refusal before adoption is enough to report; no research opt-in or extra test run is required.
+        One successful operation does not establish full Driver validation. Share only test content.
+        Do not include suspected vulnerabilities in public issues. Private reporting instructions will be added on GitHub.
+  - type: textarea
+    id: environment
+    attributes:
+      label: Revision, macOS build and hardware
+      description: Paste the output of the commands below. Include Swift/Xcode versions if building failed.
+      placeholder: |
+        git rev-parse HEAD
+        sw_vers
+        sysctl -n hw.model
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Command and setup
+      description: Include all command options, target app/version, launcher and permissions. Note whether the physical display was awake or another Seat was running.
+      placeholder: |
+        Command:
+        Target application and version:
+        Launcher and permissions:
+        Display and other Seat sessions:
+    validations:
+      required: true
+  - type: dropdown
+    id: research-flag
+    attributes:
+      label: Was --allow-unvalidated-build used?
+      options:
+        - "No"
+        - "Yes"
+        - "Both (identify each run below)"
+        - "Not sure"
+    validations:
+      required: true
+  - type: textarea
+    id: result
+    attributes:
+      label: Result and desktop restoration
+      description: Include the error or outcome. If setup was refused, write "blocked before starting" for restoration.
+      placeholder: |
+        Expected and actual result:
+        Window returned, including position and size:
+        Original foreground application restored:
+        Virtual display removed:
+        Any unexpected input or cursor movement:
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Additional evidence (optional)
+      description: Attach relevant logs, test captures or existing compatibility reports with private content removed.

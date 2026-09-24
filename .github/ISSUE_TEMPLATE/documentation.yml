@@ -1,0 +1,30 @@
+name: Documentation
+description: Report an unclear, incorrect or missing explanation.
+title: "Docs: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Documentation feedback is welcome even if you have never contributed code.
+        Search [existing issues](https://github.com/ForteAI-Org/mecum/issues?q=is%3Aissue) first.
+        For changes, link an issue in the pull request, including small wording fixes.
+  - type: input
+    id: location
+    attributes:
+      label: Page or command help
+      description: Link the page, name the file/section, or give the help command. For missing docs, say where you looked.
+      placeholder: "QUICKSTART.md — Enable macOS permissions"
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: What needs explaining or correcting?
+      description: What were you trying to understand or do, and where did the documentation leave you stuck?
+    validations:
+      required: true
+  - type: textarea
+    id: suggestion
+    attributes:
+      label: Suggested improvement (optional)
+      description: Add wording, an example or a screenshot if useful. A finished solution is not required.

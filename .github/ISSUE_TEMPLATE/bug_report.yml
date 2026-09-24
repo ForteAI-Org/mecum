@@ -1,0 +1,52 @@
+name: Bug report
+description: Report a command, tool or library that behaves incorrectly.
+title: "Bug: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Search [existing issues](https://github.com/ForteAI-Org/mecum/issues?q=is%3Aissue) first.
+        Do not include suspected vulnerabilities in public issues. Private reporting instructions will be added on GitHub.
+        Use test content and remove secrets from anything you share.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Expected and actual result
+      description: What were you trying to do, and what happened instead?
+      placeholder: |
+        Expected:
+        Actual:
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Smallest reproduction
+      description: Include the exact command or tool call, all options, and the initial app/window state.
+      placeholder: |
+        1. Open a test document in ...
+        2. Run ...
+        3. Observe ...
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: |
+        Share what you know; write "unknown" for details you cannot obtain.
+        Add launcher/permissions for capture or input failures, or provider version/model for chat failures.
+      placeholder: |
+        Mecum commit (git rev-parse HEAD):
+        macOS version and build (sw_vers):
+        Mac model (sysctl -n hw.model):
+        Target application and version:
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Logs or other evidence (optional)
+      description: |
+        Include the error and relevant output or screenshots. For Seat failures,
+        note whether windows, foreground focus and display layout were restored.
