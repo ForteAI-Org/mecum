@@ -45,6 +45,12 @@ struct TeamSidebarView: View, Equatable {
 
     @State private var showsArchive = false
 
+    /// What the search field holds; empty shows every worker.
+    @State private var query = ""
+
+    @AppStorage(AppPreferences.sidebarShowsSearch)
+    private var showsSearch = AppPreferences.sidebarShowsSearchDefault
+
     /// Decided from the width the split gives the sidebar; nothing here changes that width.
     @State private var isCompact = false
 
@@ -70,11 +76,30 @@ struct TeamSidebarView: View, Equatable {
             ScrollView {
             
                 VStack(spacing: 0) {
-                    ForEach(team.rows) { row in
+                    ForEach(visibleRows) { row in
                         workerRow(row)
                     }
 
-                    if !team.archived.isEmpty {
+                    if isSearching, visibleRows.isEmpty {
+                        Text("No worker matches “\(query)”.")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                            .frame(
+                                maxWidth : .infinity,
+                                alignment: .leading
+                            )
+                            .padding(
+                                .horizontal,
+                                SidebarBlock.contentInset - SidebarBlock.gutter
+                            )
+                            .padding(
+                                .top,
+                                12
+                            )
+                    }
+
+                    // The archive is left out while searching: the search finds the team's own workers.
+                    if !team.archived.isEmpty, !isSearching {
                         TeamSidebarArchive(
                             team        : team,
                             showsArchive: $showsArchive,
@@ -136,6 +161,19 @@ struct TeamSidebarView: View, Equatable {
 //            )
 //        }
         .edgeBar(
+            edge   : .top,
+            spacing: 0
+        ) {
+            searchBar
+        }
+        // A search the field no longer shows would hide workers with nothing to say why.
+        .onChange(of: isCompact) {
+            if isCompact { query = "" }
+        }
+        .onChange(of: showsSearch) {
+            if !showsSearch { query = "" }
+        }
+        .edgeBar(
             edge   : .bottom,
             spacing: 0
         ) {
@@ -165,7 +203,33 @@ struct TeamSidebarView: View, Equatable {
 
     /// The rows Up and Down step through, in the order they are shown.
     private var navigableIDs: [UUID] {
-        team.rows.map(\.id) + (showsArchive ? team.archived.map(\.id) : [])
+        visibleRows.map(\.id) + (showsArchive && !isSearching ? team.archived.map(\.id) : [])
+    }
+
+    private var isSearching: Bool { !query.trimmingCharacters(in: .whitespaces).isEmpty }
+
+    /// The team's workers, or those the search finds by name or role.
+    private var visibleRows: [TeamRow] {
+        guard isSearching else { return team.rows }
+
+        let words = query.trimmingCharacters(in: .whitespaces)
+        return team.rows.filter { $0.matches(words) }
+    }
+
+    /// The search field at the top of the full sidebar, when Settings keeps it.
+    @ViewBuilder
+    private var searchBar: some View {
+        if showsSearch, !isCompact {
+            SidebarSearchField(text: $query)
+                .padding(
+                    .horizontal,
+                    SidebarBlock.gutter + 4
+                )
+                .padding(
+                    .vertical,
+                    6
+                )
+        }
     }
 
     /// Up and Down select the row above or below and stop at either end; with
@@ -214,7 +278,7 @@ struct TeamSidebarView: View, Equatable {
         // A little more room between the title and the first block than between blocks.
         .padding(
             .top,
-            row.id == team.rows.first?.id ? 5 : 0
+            row.id == visibleRows.first?.id ? 5 : 0
         )
         .contentShape(Rectangle())
         .onTapGesture { select(row.id) }

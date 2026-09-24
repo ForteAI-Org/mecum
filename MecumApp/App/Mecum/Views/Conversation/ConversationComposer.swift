@@ -26,6 +26,9 @@ struct ConversationComposer: View {
 
     @State private var isChoosingModel = WindowSnapshots.opensModelPopup
 
+    @AppStorage(AppPreferences.chatSendsWithCommandReturn)
+    private var sendsWithCommandReturn = AppPreferences.chatSendsWithCommandReturnDefault
+
     /// The model button's frame in the window, which the popup is centred on.
     @State private var modelButton = CGRect.zero
 
@@ -39,6 +42,7 @@ struct ConversationComposer: View {
             stop       : { team.stopAnswering(worker.id) },
             release    : team.holdsComputer(worker.id) ? { Task { await team.releaseComputer(worker.id) } } : nil
         )
+        .sendsOnReturn(!sendsWithCommandReturn)
         .accessory {
             if let configuration = worker.configuration {
                 ConversationModelButton(

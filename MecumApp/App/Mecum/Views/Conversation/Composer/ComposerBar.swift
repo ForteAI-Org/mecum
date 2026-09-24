@@ -56,6 +56,9 @@ struct ComposerBar: View {
     /// What sits in the row before the buttons, set with `accessory(_:)`.
     private var accessoryView: AnyView?
 
+    /// Whether Return sends, or starts a new line with Command-Return sending; see `sendsOnReturn(_:)`.
+    private var returnSends = true
+
     @Namespace
     private var glass
 
@@ -105,7 +108,7 @@ struct ComposerBar: View {
 
     var body: some View {
         HStack(alignment: .bottom, spacing: 8) {
-            ComposerField(text: $draft, placeholder: placeholder, onSubmit: canSend ? send : nil)
+            ComposerField(text: $draft, placeholder: placeholder, onSubmit: canSend ? send : nil, returnSends: returnSends)
                 .padding(.vertical, 2)
             accessoryView
             actions
@@ -118,6 +121,13 @@ struct ComposerBar: View {
         ))
         .padding(.horizontal, 16)
         .padding(.bottom, 12)
+    }
+
+    /// The bar with Return sending, or starting a new line with Command-Return sending.
+    func sendsOnReturn(_ sends: Bool) -> ComposerBar {
+        var bar = self
+        bar.returnSends = sends
+        return bar
     }
 
     /// The bar with `content` in its row, before the buttons.
@@ -192,7 +202,7 @@ struct ComposerBar: View {
         .disabled(!isEnabled)
         .keyboardShortcut(isAnswering ? KeyboardShortcut(".", modifiers: .command)
                                       : KeyboardShortcut(.return, modifiers: .command))
-        .help(isAnswering ? "Stop the answer (Command Period)" : "Send (Return)")
+        .help(isAnswering ? "Stop the answer (Command Period)" : returnSends ? "Send (Return)" : "Send (Command-Return)")
         .accessibilityLabel(isAnswering ? "Stop \(recipient)'s answer" : "Send")
     }
 }

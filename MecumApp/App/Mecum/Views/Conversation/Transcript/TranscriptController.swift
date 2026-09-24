@@ -324,7 +324,7 @@ final class TranscriptController: NSObject {
         let cache    = cache
         let pipeline = pipeline
         let now      = Date()
-        let items    = await Self.project(window, expanded: expanded, now: now)
+        let items    = await Self.project(window, expanded: expanded, opensToolSteps: style.opensToolSteps, now: now)
         let result   = await RowPreparation.prepare(items, workerName: name, width: width, style: style,
                                                     cache: cache, pipeline: pipeline)
         guard window.conversationID == conversationID else { return }
@@ -396,10 +396,10 @@ final class TranscriptController: NSObject {
     }
 
     @concurrent
-    private static func project(_ window: TranscriptWindow, expanded: Set<TranscriptItem.ID>, now: Date) async
-        -> [TranscriptItem] {
+    private static func project(_ window: TranscriptWindow, expanded: Set<TranscriptItem.ID>, opensToolSteps: Bool,
+                                now: Date) async -> [TranscriptItem] {
         ConversationProjection.items(messages: window.messages, events: window.events, expanded: expanded,
-                                     elidedBefore: window.elidedBefore, now: now, calendar: .autoupdatingCurrent,
+                                     opensToolSteps: opensToolSteps, elidedBefore: window.elidedBefore, now: now, calendar: .autoupdatingCurrent,
                                      isAtNewest: window.isAtNewest)
     }
 

@@ -28,6 +28,15 @@ struct TranscriptHost: NSViewRepresentable {
     @AppStorage(TextSizeCommands.storageKey)
     private var bodyPointSize = Double(TranscriptStyle.actualSize.bodyPointSize)
 
+    @AppStorage(AppPreferences.chatFontFamily)
+    private var fontFamily = AppPreferences.chatFontFamilyDefault
+
+    @AppStorage(AppPreferences.chatShowsTimes)
+    private var showsTimes = AppPreferences.chatShowsTimesDefault
+
+    @AppStorage(AppPreferences.chatOpensToolSteps)
+    private var opensToolSteps = AppPreferences.chatOpensToolStepsDefault
+
     func makeNSView(context: Context) -> NSView {
         applyStyle()
         let view = controller.view
@@ -61,7 +70,12 @@ struct TranscriptHost: NSViewRepresentable {
     }
 
     private func applyStyle() {
-        let style = TranscriptStyle(bodyPointSize: CGFloat(bodyPointSize))
+        let style = TranscriptStyle(
+            bodyPointSize : CGFloat(bodyPointSize),
+            fontFamily    : fontFamily,
+            showsTimes    : showsTimes,
+            opensToolSteps: opensToolSteps
+        )
         if controller.style != style { controller.style = style }
         if controller.topInset != topInset { controller.topInset = topInset }
         if controller.bottomInset != bottomInset { controller.bottomInset = bottomInset }

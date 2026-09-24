@@ -122,22 +122,22 @@ nonisolated struct PreparedText: Sendable, Hashable {
         var attributes: [NSAttributedString.Key: Any]
         switch run.role {
         case .body:
-            attributes = [.font: NSFont.systemFont(ofSize: style.bodyPointSize), .foregroundColor: NSColor.labelColor]
+            attributes = [.font: style.textFont(ofSize: style.bodyPointSize), .foregroundColor: NSColor.labelColor]
         case .bodyOnAccent:
-            attributes = [.font: NSFont.systemFont(ofSize: style.bodyPointSize), .foregroundColor: NSColor.white]
+            attributes = [.font: style.textFont(ofSize: style.bodyPointSize), .foregroundColor: NSColor.white]
         case .caption:
-            attributes = [.font: NSFont.systemFont(ofSize: style.captionPointSize),
+            attributes = [.font: style.textFont(ofSize: style.captionPointSize),
                           .foregroundColor: NSColor.secondaryLabelColor]
         case .captionStrong:
-            attributes = [.font: NSFont.boldSystemFont(ofSize: style.captionPointSize),
+            attributes = [.font: style.textFont(ofSize: style.captionPointSize, weight: .bold),
                           .foregroundColor: NSColor.secondaryLabelColor]
         case .monospaced:
             attributes = [.font: NSFont.monospacedSystemFont(ofSize: style.monospacedPointSize, weight: .regular),
                           .foregroundColor: NSColor.secondaryLabelColor]
         case .alert:
-            attributes = [.font: NSFont.systemFont(ofSize: style.bodyPointSize), .foregroundColor: NSColor.systemRed]
+            attributes = [.font: style.textFont(ofSize: style.bodyPointSize), .foregroundColor: NSColor.systemRed]
         case .heading(let level):
-            attributes = [.font: NSFont.systemFont(ofSize: style.headingPointSize(level: level), weight: .semibold),
+            attributes = [.font: style.textFont(ofSize: style.headingPointSize(level: level), weight: .semibold),
                           .foregroundColor: NSColor.labelColor]
         case .code:
             attributes = [.font: NSFont.monospacedSystemFont(ofSize: style.codePointSize, weight: .regular),
@@ -149,15 +149,15 @@ nonisolated struct PreparedText: Sendable, Hashable {
             attributes = [.font: NSFont.monospacedSystemFont(ofSize: style.codePointSize, weight: .regular),
                           .foregroundColor: TranscriptColors.syntax(kind)]
         case .disclosureSlot:
-            attributes = [.font: NSFont.systemFont(ofSize: style.captionPointSize), .foregroundColor: NSColor.clear]
+            attributes = [.font: style.textFont(ofSize: style.captionPointSize), .foregroundColor: NSColor.clear]
         case .captionAlert:
-            attributes = [.font: NSFont.systemFont(ofSize: style.captionPointSize, weight: .semibold),
+            attributes = [.font: style.textFont(ofSize: style.captionPointSize, weight: .semibold),
                           .foregroundColor: NSColor.systemRed]
         case .link:
-            attributes = [.font: NSFont.systemFont(ofSize: style.bodyPointSize), .foregroundColor: NSColor.linkColor,
+            attributes = [.font: style.textFont(ofSize: style.bodyPointSize), .foregroundColor: NSColor.linkColor,
                           .underlineStyle: NSUnderlineStyle.single.rawValue]
         case .destination:
-            attributes = [.font: NSFont.systemFont(ofSize: style.bodyPointSize),
+            attributes = [.font: style.textFont(ofSize: style.bodyPointSize),
                           .foregroundColor: NSColor.secondaryLabelColor]
         }
         if !run.traits.isEmpty, let font = attributes[.font] as? NSFont {

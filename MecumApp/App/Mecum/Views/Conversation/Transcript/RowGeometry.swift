@@ -165,7 +165,7 @@ nonisolated struct RowGeometry: Sendable, Hashable {
             self.surface = surface
             self.text    = surface.insetBy(dx: Self.bubblePadding.width, dy: Self.bubblePadding.height)
             self.header  = hasName ? CGRect(x: bubbleX, y: 0, width: width, height: caption) : nil
-            let footer   = (item.endsGroup && item.kind != .thinking) || hasBadge
+            let footer   = (style.showsTimes && item.endsGroup && item.kind != .thinking) || hasBadge
                 ? CGRect(x: bubbleX, y: surface.maxY + 2, width: width, height: caption)
                 : nil
             self.footer  = footer

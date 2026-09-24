@@ -74,10 +74,21 @@ struct MecumApp: App {
             DebugAppearanceCommands(choice: $debugAppearance)
             #endif
             TeamMenuCommands()
+            SettingsCommands()
         }
 
-        Settings {
-            SettingsView(store: model.settings)
+        // A window of its own rather than the Settings scene, for the full title bar and toolbar.
+        Window(
+            "Settings",
+            id: SettingsView.windowID
+        ) {
+            SettingsView(
+                store : model.settings,
+                broker: model.broker
+            )
         }
+        .windowResizability(.contentMinSize)
+        .defaultLaunchBehavior(.suppressed)
+        .restorationBehavior(.disabled)
     }
 }

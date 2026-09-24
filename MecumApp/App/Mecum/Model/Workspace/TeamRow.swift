@@ -79,6 +79,17 @@ nonisolated struct TeamRow: Sendable, Hashable, Identifiable {
         return activity ?? selection.line
     }
 
+    /// The line under the name as the sidebar shows it: nil when it would be the model and the
+    /// model is not to be shown. The activity and the missing configuration are shown either way.
+    func subtitle(showingModel: Bool) -> String? {
+        showingModel || needsConfiguring || activity != nil ? subtitle : nil
+    }
+
+    /// Whether the row answers a search for `query`, by the worker's name or role.
+    func matches(_ query: String) -> Bool {
+        worker.name.localizedStandardContains(query) || role.localizedStandardContains(query)
+    }
+
     /// The whole name, then the role, then the states and the model, so a
     /// long name stays readable to assistive technology after the view has
     /// truncated it, and a compact tile that shows only the name reads the rest.

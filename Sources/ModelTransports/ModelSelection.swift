@@ -6,8 +6,8 @@ public enum ModelProvider: String, Sendable, CaseIterable, Codable, Identifiable
 
     public var title: String {
         switch self {
-        case .codex: "Codex · ChatGPT"
-        case .claudeCode: "Claude · Claude Code"
+        case .codex: "Codex"
+        case .claudeCode: "Claude"
         case .anthropic: "Anthropic"
         case .gemini: "Gemini"
         case .ollama: "Ollama"
@@ -142,17 +142,6 @@ public struct ProviderSettings: Sendable, Hashable, Codable {
         self.ollamaContextTokens = ollamaContextTokens
         self.ollamaMaxOutputTokens = ollamaMaxOutputTokens
         self.ollamaTimeoutSeconds = ollamaTimeoutSeconds
-    }
-
-    /// Qwen's recommended sampling for a thinking or non-thinking run.
-    public mutating func applyQwenRecommendation(thinking: Bool) {
-        if thinking {
-            ollamaTemperature = 0.6; ollamaTopP = 0.95; ollamaTopK = 20; ollamaPresencePenalty = 0
-            ollamaMaxOutputTokens = 8192
-        } else {
-            ollamaTemperature = 0.7; ollamaTopP = 0.8; ollamaTopK = 20; ollamaPresencePenalty = 1.5
-            ollamaMaxOutputTokens = 2048
-        }
     }
 }
 

@@ -89,8 +89,17 @@ struct ConnectionsSheet: View {
             Divider()
 
             HStack {
-                Button("Check All") { connections.refresh() }
-                    .disabled(ModelProvider.allCases.allSatisfy(connections.isChecking))
+                Button {
+                    connections.refresh()
+                } label: {
+                    Label(
+                        "Check All",
+                        systemImage: "arrow.clockwise"
+                    )
+                }
+                .labelStyle(.iconOnly)
+                .help("Check All")
+                .disabled(ModelProvider.allCases.allSatisfy(connections.isChecking))
 
                 Spacer()
 

@@ -5,6 +5,7 @@
 //  Created by Eliomar Alejandro Rodriguez Ferrer on 23/09/2026.
 //
 
+import AppKit
 import CoreGraphics
 
 /// TranscriptStyle is everything besides content and width that changes how
@@ -19,9 +20,48 @@ nonisolated struct TranscriptStyle: Sendable, Hashable {
     /// conversation has one other side, which the title bar already names, so it shows neither.
     var showsAuthors: Bool
 
-    init(bodyPointSize: CGFloat = 14, showsAuthors: Bool = false) {
-        self.bodyPointSize = max(10, bodyPointSize)
-        self.showsAuthors  = showsAuthors
+    /// The family of the conversation's text, nil for the system font. Code stays monospaced.
+    var fontFamily: String?
+
+    /// Whether the time is written under the last message of a group. A delivery badge is shown either way.
+    var showsTimes: Bool
+
+    /// Whether a turn's tool steps open by default; toggling one opens or closes it against this.
+    var opensToolSteps: Bool
+
+    init(
+        bodyPointSize : CGFloat = 14,
+        showsAuthors  : Bool    = false,
+        fontFamily    : String? = nil,
+        showsTimes    : Bool    = true,
+        opensToolSteps: Bool    = false
+    ) {
+        self.bodyPointSize  = max(10, bodyPointSize)
+        self.showsAuthors   = showsAuthors
+        self.fontFamily     = fontFamily.flatMap { $0.isEmpty ? nil : $0 }
+        self.showsTimes     = showsTimes
+        self.opensToolSteps = opensToolSteps
+    }
+
+    /// The conversation's text face at `size` and `weight`: the chosen family when it is
+    /// installed, else the system font. Built through a descriptor, which is safe off the main
+    /// thread, where rows are measured.
+    func textFont(
+        ofSize size: CGFloat,
+        weight     : NSFont.Weight = .regular
+    ) -> NSFont {
+        guard let fontFamily else {
+            return .systemFont(
+                ofSize: size,
+                weight: weight
+            )
+        }
+
+        let descriptor = NSFontDescriptor(fontAttributes: [
+            .family: fontFamily,
+            .traits: [NSFontDescriptor.TraitKey.weight: weight.rawValue],
+        ])
+        return NSFont(descriptor: descriptor, size: size) ?? .systemFont(ofSize: size, weight: weight)
     }
 
     /// Names, times and delivery states.

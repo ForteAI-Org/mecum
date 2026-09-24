@@ -10,7 +10,8 @@ import SwiftUI
 
 /// ConnectionActions is what can be done to one connection (§7.3): connect,
 /// check, replace the credential and disconnect, as its kind of
-/// authentication allows, with the buttons at the trailing edge.
+/// authentication allows, with the buttons at the trailing edge. The check is
+/// left out where the page checks from its toolbar, as Settings does.
 ///
 /// The body is several rows, so a grouped form gives each its own line and a
 /// card stacks them. A key is typed into a secure field, handed to the
@@ -27,6 +28,9 @@ struct ConnectionActions: View {
     /// connection was last checked; nil leaves it empty.
     let note: String?
 
+    /// Whether the row of buttons has the check.
+    let checks: Bool
+
     @State private var enteredKey  = ""
     @State private var isReplacing = false
     @State private var address     : String
@@ -34,11 +38,13 @@ struct ConnectionActions: View {
     init(
         connections: ModelSettingsStore,
         provider   : ModelProvider,
-        note       : String? = nil
+        note       : String? = nil,
+        checks     : Bool    = true
     ) {
         self.connections = connections
         self.provider    = provider
         self.note        = note
+        self.checks      = checks
         _address         = State(initialValue: connections.ollamaHost)
     }
 
@@ -130,7 +136,7 @@ struct ConnectionActions: View {
 
                 Button("Replace Key…") { isReplacing = true }
 
-                checkButton
+                if checks { checkButton }
             }
         }
     }
@@ -141,7 +147,9 @@ struct ConnectionActions: View {
             secondary(provider.accessHint)
         }
 
-        buttons { checkButton }
+        if checks || note != nil {
+            buttons { if checks { checkButton } }
+        }
     }
 
     @ViewBuilder
@@ -165,7 +173,9 @@ struct ConnectionActions: View {
             }
         }
 
-        buttons { checkButton }
+        if checks || note != nil {
+            buttons { if checks { checkButton } }
+        }
     }
 
     // MARK: Parts
@@ -182,8 +192,17 @@ struct ConnectionActions: View {
     }
 
     private var checkButton: some View {
-        Button("Check") { connections.refresh([provider]) }
-            .disabled(connections.isChecking(provider))
+        Button {
+            connections.refresh([provider])
+        } label: {
+            Label(
+                "Check Again",
+                systemImage: "arrow.clockwise"
+            )
+        }
+        .labelStyle(.iconOnly)
+        .help("Check Again")
+        .disabled(connections.isChecking(provider))
     }
 
     private func secondary(_ text: String) -> some View {

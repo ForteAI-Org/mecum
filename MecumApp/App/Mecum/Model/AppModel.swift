@@ -5,6 +5,7 @@
 //  Created by Eliomar Alejandro Rodriguez Ferrer on 22/09/2026.
 //
 
+import Foundation
 import ModelTransports
 import SeatBroker
 
@@ -13,8 +14,8 @@ import SeatBroker
 ///
 /// Every connection is checked once as the app starts, in the background, so
 /// the sidebar's badge and the workers' models are known before anyone opens
-/// Connections. A check or test run checks nothing: it would run the `codex`
-/// and `claude` command lines for real.
+/// Connections, unless Settings > General turns it off. A check or test run
+/// checks nothing: it would run the `codex` and `claude` command lines for real.
 @MainActor
 final class AppModel {
 
@@ -23,6 +24,19 @@ final class AppModel {
     let settings = ModelSettingsStore()
 
     init() {
-        if !MecumApp.isCheckRun { settings.refresh() }
+        broker.display = Self.storedDisplay
+        let checks = AppPreferences.bool(
+            AppPreferences.checksConnectionsAtLaunch,
+            default: AppPreferences.checksConnectionsAtLaunchDefault
+        )
+        if checks, !MecumApp.isCheckRun { settings.refresh() }
+    }
+
+    /// The virtual display Settings chose, the standard one until it chooses another.
+    static var storedDisplay: SeatDisplay {
+        let defaults = UserDefaults.standard
+        let size     = defaults.string(forKey: AppPreferences.seatDisplaySize) ?? AppPreferences.seatDisplaySizeDefault
+        let rate     = defaults.object(forKey: AppPreferences.seatRefreshRate) as? Int ?? AppPreferences.seatRefreshRateDefault
+        return SeatDisplay(size: size, refreshRate: rate) ?? .standard
     }
 }

@@ -7,46 +7,99 @@
 
 import ModelTransports
 import SeatBroker
-import AppKit
 import SwiftUI
 
-/// One tab per provider: access (sign-in state or API key), the model list
-/// the composer's picker shows, and Ollama's knobs. The + button proposes the
-/// models the provider itself reports.
+/// SettingsView is the Settings window: a sidebar of pages at the leading
+/// edge, the app's own and then one per provider, and the chosen page beside
+/// it as a grouped form, in the inspector's language, with its title in the
+/// window's bar. Opening it checks every connection again, since the provider
+/// pages show their state.
+///
+/// The sidebar's symbols are not in the accent: primary on the chosen page and
+/// secondary on the rest, so the accent is left to the selection itself.
 struct SettingsView: View {
 
-    @Bindable
-    var store: ModelSettingsStore
+    /// The Settings window's scene, which the app menu's Settings… opens.
+    static let windowID = "settings"
+
+    let store : ModelSettingsStore
+    let broker: SeatBroker
+
+    @State private var pane: SettingsPane?
+
+    /// - Parameter pane: the page shown first, General unless a snapshot asks for another.
+    init(
+        store : ModelSettingsStore,
+        broker: SeatBroker,
+        pane  : SettingsPane = .general
+    ) {
+        self.store  = store
+        self.broker = broker
+        _pane       = State(initialValue: pane)
+    }
 
     var body: some View {
-        TabView {
-            ForEach(ModelProvider.allCases) { provider in
-                ProviderTab(
-                    store   : store,
-                    provider: provider
-                )
-                .tabItem {
-                    Label(
-                        provider.title,
-                        systemImage: icon(provider)
-                    )
+        NavigationSplitView {
+            List(selection: $pane) {
+                Section {
+                    ForEach(SettingsPane.appPanes) { row($0) }
+                }
+
+                Section("Computer") {
+                    ForEach(SettingsPane.computerPanes) { row($0) }
+                }
+
+                Section("Providers") {
+                    ForEach(ModelProvider.allCases) { row(.provider($0)) }
                 }
             }
+            .navigationSplitViewColumnWidth(
+                min  : 180,
+                ideal: 200,
+                max  : 240
+            )
+        } detail: {
+            page
+                .navigationTitle(pane?.title ?? "Settings")
         }
         .frame(
-            width : 560,
-            height: 520
+            minWidth   : 720,
+            idealWidth : 860,
+            minHeight  : 540,
+            idealHeight: 620
         )
-        .padding()
-        // Every tab is a connection's status and a model list, so opening Settings asks for the checks.
         .task { store.refresh() }
     }
 
-    private func icon(_ provider: ModelProvider) -> String {
-        switch provider {
-            case .codex, .claudeCode: "terminal"
-            case .anthropic, .gemini: "key"
-            case .ollama            : "desktopcomputer"
+    private func row(_ pane: SettingsPane) -> some View {
+        Label {
+            Text(pane.title)
+        } icon: {
+            Image(systemName: pane.symbol)
+                .foregroundStyle(pane == self.pane ? Color.primary : Color.secondary)
+        }
+        .tag(pane)
+    }
+
+    @ViewBuilder
+    private var page: some View {
+        switch pane ?? .general {
+        case .general:
+            GeneralSettings()
+        case .computer:
+            ComputerSettings(broker: broker)
+        case .virtualDisplay:
+            VirtualDisplaySettings(broker: broker)
+        case .sidebar:
+            SidebarSettings()
+        case .chat:
+            ChatSettings()
+        case .provider(let provider):
+            ProviderSettingsPage(
+                store   : store,
+                provider: provider
+            )
+            .id(provider)
         }
     }
 }

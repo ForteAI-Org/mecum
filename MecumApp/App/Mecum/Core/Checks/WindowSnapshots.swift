@@ -148,6 +148,38 @@ enum WindowSnapshots {
                 team.choosingProviderFor = nil
             }
 
+            // Settings, the window and each page alone, as the split may draw its sidebar blank offscreen.
+            let broker = SeatBroker(configuration: .init(allowUnvalidatedBuild: true))
+            try await write(
+                SettingsView(
+                    store : team.connections,
+                    broker: broker,
+                    pane  : .provider(.ollama)
+                ),
+                width : 720,
+                height: 540,
+                dark  : false,
+                to    : output.appending(path: "settings-window-light.png")
+            )
+            let pages: [(name: String, page: AnyView)] = [
+                ("general", AnyView(GeneralSettings())),
+                ("computer", AnyView(ComputerSettings(broker: broker))),
+                ("virtual-display", AnyView(VirtualDisplaySettings(broker: broker))),
+                ("sidebar", AnyView(SidebarSettings())),
+                ("chat", AnyView(ChatSettings())),
+                ("anthropic", AnyView(ProviderSettingsPage(store: team.connections, provider: .anthropic))),
+                ("ollama", AnyView(ProviderSettingsPage(store: team.connections, provider: .ollama))),
+            ]
+            for page in pages {
+                try await write(
+                    page.page,
+                    width : 530,
+                    height: 700,
+                    dark  : false,
+                    to    : output.appending(path: "settings-\(page.name)-light.png")
+                )
+            }
+
             let connections = syntheticConnections()
             for (name, dark) in [("light", false), ("dark", true)] {
                 try await write(

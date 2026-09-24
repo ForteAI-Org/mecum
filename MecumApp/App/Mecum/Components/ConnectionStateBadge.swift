@@ -12,13 +12,20 @@ import SwiftUI
 /// when it works, the trouble's symbol when it does not, grey for a missing
 /// credential, orange for a usage limit and red for the rest, and a quiet
 /// dot while it is checked or before its first check. The words are its help
-/// and what VoiceOver reads.
+/// and what VoiceOver reads. As the light in Settings' toolbar it is larger
+/// and its green glows.
 struct ConnectionStateBadge: View {
 
     /// The last check, nil before the first.
     let state: ConnectionState?
 
     let isChecking: Bool
+
+    /// Whether it is a light, larger and glowing while the connection works.
+    var glows = false
+
+    /// What it says under the pointer, the state's words when nil.
+    var help: String?
 
     var body: some View {
         Group {
@@ -30,11 +37,15 @@ struct ConnectionStateBadge: View {
                     .foregroundStyle(tone(of: state))
             } else if state != nil {
                 dot(.green)
+                    .shadow(
+                        color : glows ? .green.opacity(0.9) : .clear,
+                        radius: 4
+                    )
             } else {
                 dot(.tertiary)
             }
         }
-        .help(words)
+        .help(help ?? words)
         .accessibilityElement()
         .accessibilityLabel(words)
     }
@@ -43,8 +54,8 @@ struct ConnectionStateBadge: View {
         Circle()
             .fill(fill)
             .frame(
-                width : 8,
-                height: 8
+                width : glows ? 10 : 8,
+                height: glows ? 10 : 8
             )
     }
 

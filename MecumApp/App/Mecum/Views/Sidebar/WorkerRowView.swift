@@ -39,6 +39,12 @@ struct WorkerRowView: View {
 
     @Namespace private var morph
 
+    @AppStorage(AppPreferences.sidebarShowsModel)
+    private var showsModel = AppPreferences.sidebarShowsModelDefault
+
+    @AppStorage(AppPreferences.sidebarShowsUnreadCount)
+    private var showsUnreadCount = AppPreferences.sidebarShowsUnreadCountDefault
+
     @Environment(\.accessibilityReduceMotion)
     private var reducesMotion
 
@@ -99,8 +105,8 @@ struct WorkerRowView: View {
                     .lineLimit(1)
                     .truncationMode(.tail)
 
-                if !isCompact {
-                    Text(row.subtitle)
+                if !isCompact, let subtitle = row.subtitle(showingModel: showsModel) {
+                    Text(subtitle)
                         .font(.subheadline)
                         .foregroundStyle(isEmphasized ? AnyShapeStyle(.white.opacity(0.85)) : AnyShapeStyle(.secondary))
                         .lineLimit(1)
@@ -140,8 +146,8 @@ struct WorkerRowView: View {
     }
 
     /// The attention mark when a turn failed or stopped unseen, else the unread
-    /// replies as an accent capsule, else nothing; a quiet row shows neither
-    /// (§4.3). On the accent selection the mark and the capsule turn white, so
+    /// replies as an accent capsule unless Settings turns the count off, else
+    /// nothing; a quiet row shows neither (§4.3). On the accent selection the mark and the capsule turn white, so
     /// they stay apart from the block they sit on.
     @ViewBuilder
     private var indicator: some View {
@@ -149,7 +155,7 @@ struct WorkerRowView: View {
             Image(systemName: "exclamationmark.triangle.fill")
                 .foregroundStyle(isEmphasized ? AnyShapeStyle(.white) : AnyShapeStyle(.red))
                 .font(isCompact ? .caption : .body)
-        } else if let count = row.badgeText {
+        } else if showsUnreadCount, let count = row.badgeText {
             Text(count)
                 .font((isCompact ? Font.caption2 : .caption).weight(.semibold))
                 .monospacedDigit()

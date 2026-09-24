@@ -29,6 +29,10 @@ final class ComposerTextView: NSTextView {
     /// a Return then does nothing.
     var onSubmit: (() -> Void)?
 
+    /// Whether Return sends. When it does not, Return starts a new line and
+    /// Command-Return sends, through the send button's shortcut.
+    var returnSends = true
+
     /// Drawn while the field is empty and nothing is being composed.
     var placeholder = "" {
         didSet {
@@ -58,7 +62,7 @@ final class ComposerTextView: NSTextView {
             return
         }
         // Shift-Return reaches this command like Return does; only its modifier tells them apart.
-        if isInterpreting(.shift) {
+        if isInterpreting(.shift) || !returnSends {
             insertLineBreak()
             return
         }

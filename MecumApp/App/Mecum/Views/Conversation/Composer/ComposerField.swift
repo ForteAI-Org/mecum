@@ -28,6 +28,9 @@ struct ComposerField: NSViewRepresentable {
     /// What Return does. Nil while nothing can be sent.
     let onSubmit: (() -> Void)?
 
+    /// Whether Return sends, or starts a new line with Command-Return sending.
+    var returnSends = true
+
     func makeNSView(context: Context) -> ComposerScrollView {
         let view = ComposerScrollView()
         view.textView.delegate = context.coordinator
@@ -42,6 +45,7 @@ struct ComposerField: NSViewRepresentable {
         coordinator.field    = self
         textView.placeholder = placeholder
         textView.onSubmit    = onSubmit
+        textView.returnSends = returnSends
         textView.setAccessibilityLabel(placeholder)
 
         guard text != coordinator.agreed else { return }

@@ -187,8 +187,17 @@ struct InspectorModelSection: View {
                     "Not checked yet",
                     tone: .quiet
                 )
-                Button("Check") { Task { await team.checkModel(of: worker.id) } }
-                    .controlSize(.small)
+                Button {
+                    Task { await team.checkModel(of: worker.id) }
+                } label: {
+                    Label(
+                        "Check",
+                        systemImage: "arrow.clockwise"
+                    )
+                }
+                .labelStyle(.iconOnly)
+                .buttonStyle(.borderless)
+                .help("Check")
             }
         }
     }

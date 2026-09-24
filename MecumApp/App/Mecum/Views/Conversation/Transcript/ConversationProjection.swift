@@ -49,13 +49,14 @@ nonisolated enum ConversationProjection {
     /// `isAtNewest` is false for a window that stops short of the newest
     /// message, whose last turn may have ended past it: no bubble is shown there.
     static func items(
-        messages    : [MessageSnapshot],
-        events      : [RecordedEvent],
-        expanded    : Set<TranscriptItem.ID>,
-        elidedBefore: Set<UUID> = [],
-        now         : Date,
-        calendar    : Calendar = .autoupdatingCurrent,
-        isAtNewest  : Bool = true
+        messages      : [MessageSnapshot],
+        events        : [RecordedEvent],
+        expanded      : Set<TranscriptItem.ID>,
+        opensToolSteps: Bool = false,
+        elidedBefore  : Set<UUID> = [],
+        now           : Date,
+        calendar      : Calendar = .autoupdatingCurrent,
+        isAtNewest    : Bool = true
     ) -> [TranscriptItem] {
 
         var merge = Merge()
@@ -88,7 +89,7 @@ nonisolated enum ConversationProjection {
                 merge.add(event)
             }
         }
-        let ordered = merge.finish(expanded: expanded, showsThinking: isAtNewest)
+        let ordered = merge.finish(expanded: expanded, opensToolSteps: opensToolSteps, showsThinking: isAtNewest)
         return grouped(dated(ordered, now: now, calendar: calendar))
     }
 
@@ -253,7 +254,8 @@ nonisolated enum ConversationProjection {
 
         /// The rows with each tool line in place: an ended turn's after its
         /// anchor, any other at the end, below the thinking bubble when there is one.
-        mutating func finish(expanded: Set<TranscriptItem.ID>, showsThinking: Bool) -> [TranscriptItem] {
+        mutating func finish(expanded: Set<TranscriptItem.ID>, opensToolSteps: Bool, showsThinking: Bool)
+            -> [TranscriptItem] {
             if showsThinking, let open = openTurn, let worker = open.event.workerID,
                !(lastReplyIndex != nil && isLastReplyStreaming) {
                 rows.append(TranscriptItem(id: .thinking(execution: open.event.subjectID, replies: open.replies),
@@ -266,7 +268,8 @@ nonisolated enum ConversationProjection {
                 guard let line = lines[subject] else { continue }
                 let row = TranscriptItem(
                     id            : line.id,
-                    kind          : .toolRun(lines: line.lines, isExpanded: expanded.contains(line.id),
+                    // `expanded` holds the lines toggled against the default.
+                    kind          : .toolRun(lines: line.lines, isExpanded: opensToolSteps != expanded.contains(line.id),
                                              ending: line.ending),
                     date          : line.date,
                     authorWorkerID: line.worker,

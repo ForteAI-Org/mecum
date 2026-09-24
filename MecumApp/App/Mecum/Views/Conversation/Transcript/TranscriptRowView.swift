@@ -411,7 +411,7 @@ final class TranscriptRowView: NSView {
         guard let name = TranscriptWording.header(for: row.item, workerName: workerName).name else { return }
         NSAttributedString(
             string    : name,
-            attributes: [.font: NSFont.boldSystemFont(ofSize: style.captionPointSize),
+            attributes: [.font: style.textFont(ofSize: style.captionPointSize, weight: .bold),
                          .foregroundColor: NSColor.labelColor]
         ).draw(at: frame.origin)
     }
@@ -419,10 +419,10 @@ final class TranscriptRowView: NSView {
     /// The time sits at the bubble's inner corner, in from its edge, past the
     /// badge when there is one: bottom left under the person's, bottom right under the worker's.
     private func drawTime(_ row: PreparedRow, in frame: CGRect, isPerson: Bool) {
-        guard row.item.endsGroup else { return }
+        guard row.item.endsGroup, style.showsTimes else { return }
         let time = NSAttributedString(
             string    : TranscriptWording.header(for: row.item, workerName: workerName).time,
-            attributes: [.font: NSFont.systemFont(ofSize: style.captionPointSize - 1),
+            attributes: [.font: style.textFont(ofSize: style.captionPointSize - 1),
                          .foregroundColor: NSColor.tertiaryLabelColor]
         )
         let size  = time.size()

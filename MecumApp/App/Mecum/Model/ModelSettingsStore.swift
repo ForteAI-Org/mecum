@@ -9,14 +9,14 @@ import Foundation
 import ModelTransports
 import Observation
 
-/// Persisted model preferences: favorite models per provider, provider
-/// knobs, API keys (keychain), and what the last check of each connection
-/// found. Favorites are the models the Settings window lists per provider.
+/// Persisted provider settings: the Ollama knobs, the API keys (keychain),
+/// what the last check of each connection found, and each provider's
+/// catalogue of models.
 ///
-/// The team window's connection cards, the worker profiles and the Settings
-/// window read the same object, so it asks `ProviderCatalog`
-/// directly and holds no seat. Nothing is checked at construction; the app
-/// checks every connection once at launch (`AppModel`). A check runs again
+/// Connections, the inspector, the composer and Settings read the same
+/// object, so it asks `ProviderCatalog` directly and holds no seat. Nothing is
+/// checked at construction; the app checks every connection once at launch
+/// (`AppModel`) unless Settings turns that off. A check runs again
 /// when a connection card or a model picker appears, when a key or the Ollama
 /// address changes, and when a worker is configured. Checking runs the `codex`
 /// and `claude` command lines and probes a server.
@@ -25,15 +25,6 @@ import Observation
 final class ModelSettingsStore {
 
     private let defaults = UserDefaults.standard
-
-    var favorites: [ModelProvider: [String]] {
-        didSet {
-            save(
-                favorites.mapKeys { $0.rawValue },
-                key: "favorites"
-            )
-        }
-    }
 
     var anthropicAPIKey: String {
         didSet {
@@ -146,14 +137,6 @@ final class ModelSettingsStore {
 
     init() {
         let base = ProviderSettings()
-        let stored: [String: [String]] = Self.load(
-            UserDefaults.standard,
-            key: "favorites"
-        ) ?? [:]
-
-        favorites = Dictionary(uniqueKeysWithValues: ModelProvider.allCases.map { provider in
-            (provider, stored[provider.rawValue] ?? provider.defaultModels)
-        })
         anthropicAPIKey       = Keychain.string(for: "anthropic")
         geminiAPIKey          = Keychain.string(for: "gemini")
         ollamaHost            = defaults.string(forKey: "ollama.host") ?? base.ollamaHost
@@ -182,36 +165,9 @@ final class ModelSettingsStore {
         )
     }
 
-    /// Qwen's published sampling for thinking on or off, applied to the Ollama knobs.
-    func applyQwenRecommendation(thinking: Bool) {
-        var settings = providerSettings
-        settings.applyQwenRecommendation(thinking: thinking)
-
-        ollamaTemperature     = settings.ollamaTemperature
-        ollamaTopP            = settings.ollamaTopP
-        ollamaTopK            = settings.ollamaTopK
-        ollamaPresencePenalty = settings.ollamaPresencePenalty
-        ollamaMaxOutputTokens = settings.ollamaMaxOutputTokens
-    }
-
-    // MARK: Availability
-
-    /// A provider is usable when its check passed and it has at least one model to pick.
-    func isAvailable(_ provider: ModelProvider) -> Bool {
-        states[provider]?.isReady == true && !models(for: provider).isEmpty
-    }
-
-    var availableProviders: [ModelProvider] { ModelProvider.allCases.filter(isAvailable) }
+    // MARK: Checking
 
     func isChecking(_ provider: ModelProvider) -> Bool { checks[provider] != nil }
-
-    /// The line the Settings window shows: the check's own message, or the missing models.
-    func statusText(_ provider: ModelProvider) -> String {
-        guard let state = states[provider] else { return isChecking(provider) ? "Checking…" : "Not checked yet" }
-        guard state.isReady else { return state.message }
-
-        return models(for: provider).isEmpty ? "No models in the list. Add one with +." : "Ready"
-    }
 
     /// Checks the named connections again, each on its own.
     func refresh(_ providers: [ModelProvider] = ModelProvider.allCases) {
@@ -324,67 +280,5 @@ final class ModelSettingsStore {
         )
         catalogues[provider] = listed
         return listed
-    }
-
-    /// Models the provider reports, for the + menu.
-    func discoverModels(for provider: ModelProvider) async throws -> [String] {
-        try await ProviderCatalog.models(
-            provider,
-            settings: providerSettings
-        )
-    }
-
-    // MARK: Favorites
-
-    func models(for provider: ModelProvider) -> [String] {
-        favorites[provider] ?? []
-    }
-
-    func add(
-        _ model    : String,
-        to provider: ModelProvider
-    ) {
-        let name = model.trimmingCharacters(in: .whitespaces)
-        guard !name.isEmpty, !models(for: provider).contains(name) else { return }
-
-        favorites[provider, default: []].append(name)
-    }
-
-    func remove(
-        _ model      : String,
-        from provider: ModelProvider
-    ) {
-        favorites[provider]?.removeAll { $0 == model }
-    }
-
-    private func save<T: Encodable>(
-        _ value: T,
-        key    : String
-    ) {
-        if let data = try? JSONEncoder().encode(value) {
-            defaults.set(
-                data,
-                forKey: key
-            )
-        }
-    }
-
-    private static func load<T: Decodable>(
-        _ defaults: UserDefaults,
-        key       : String
-    ) -> T? {
-        defaults.data(forKey: key).flatMap {
-            try? JSONDecoder().decode(
-                T.self,
-                from: $0
-            )
-        }
-    }
-}
-
-private extension Dictionary {
-
-    func mapKeys<K: Hashable>(_ transform: (Key) -> K) -> [K: Value] {
-        Dictionary<K, Value>(uniqueKeysWithValues: map { (transform($0.key), $0.value) })
     }
 }
