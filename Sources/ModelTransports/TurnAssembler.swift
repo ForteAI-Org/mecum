@@ -22,15 +22,20 @@ struct TurnAssembler: Sendable {
 
     private var reader: EventStreamReader
     private let decode: PayloadDecoding
+    private let recordProvider: ModelProvider?
     private(set) var progress = TurnProgress()
     private(set) var deltaCount = 0
 
     /// How many of `progress.toolCalls` have been taken.
     private var takenToolCalls = 0
 
-    init(format: EventStreamReader.Format, decode: @escaping PayloadDecoding) {
+    /// `recording` names the provider whose turn is kept as a `TurnRecord`,
+    /// nil for a provider that is never sent its turn back.
+    init(format: EventStreamReader.Format, decode: @escaping PayloadDecoding,
+         recording recordProvider: ModelProvider? = nil) {
         self.reader = EventStreamReader(format: format)
         self.decode = decode
+        self.recordProvider = recordProvider
     }
 
     /// The text this byte completed, if it completed any.
@@ -44,6 +49,12 @@ struct TurnAssembler: Sendable {
     /// The texts this chunk completed, in the order the provider sent them.
     mutating func accept(_ chunk: Data) throws -> [String] {
         try chunk.compactMap { try accept($0) }
+    }
+
+    /// The provider's own copy of the turn, when it keeps one and the turn had content.
+    var record: TurnRecord? {
+        guard let recordProvider, !progress.contentBlocks.isEmpty else { return nil }
+        return TurnRecord(provider: recordProvider, blocks: progress.contentBlocks)
     }
 
     /// The tool calls completed since the last take, in the order they arrived.

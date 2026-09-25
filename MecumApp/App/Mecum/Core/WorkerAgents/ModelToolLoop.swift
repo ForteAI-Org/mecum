@@ -18,8 +18,10 @@ import ModelTransports
 ///
 /// Each round streams one tool turn, reports its text as one reply block, and
 /// runs the calls it made in order, each one's result or failure going back to
-/// the model the way the loopback MCP tells a command line. A round without
-/// calls ends the turn. A model that cannot call tools is sent none, and
+/// the model the way the loopback MCP tells a command line. The assistant
+/// message that made the calls keeps the provider's record of the round, which
+/// its transport sends back instead of rebuilding it. A round without calls
+/// ends the turn. A model that cannot call tools is sent none, and
 /// instructions that say so.
 ///
 /// Memory across turns is the history the caller passes; within a turn the
@@ -116,7 +118,8 @@ final class ModelToolLoop {
             messages.append(TurnMessage(
                 role     : .assistant,
                 text     : reply.text,
-                toolCalls: reply.calls
+                toolCalls: reply.calls,
+                record   : reply.record
             ))
             for toolCall in reply.calls {
                 if isStopRequested { throw CancellationError() }
@@ -135,10 +138,12 @@ final class ModelToolLoop {
 
     // MARK: Rounds
 
-    /// What one round delivered: its text, its calls, and the failure that ended it early, if any.
+    /// What one round delivered: its text, its calls, the provider's record of it, and the failure
+    /// that ended it early, if any.
     private struct Round: Sendable {
         var text   = ""
         var calls  : [ToolCall] = []
+        var record : TurnRecord?
         var failure: (any Error)?
     }
 
@@ -147,9 +152,10 @@ final class ModelToolLoop {
         do {
             for try await event in stream {
                 switch event {
-                case .delta(let text):     round.text += text
-                case .toolCall(let call):  round.calls.append(call)
-                case .completed:           break
+                case .delta(let text):       round.text += text
+                case .toolCall(let call):    round.calls.append(call)
+                case .record(let record):    round.record = record
+                case .completed:             break
                 }
             }
         } catch {

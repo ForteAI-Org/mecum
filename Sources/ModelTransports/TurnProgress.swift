@@ -30,6 +30,14 @@ struct TurnProgress: Sendable {
     /// appends a call only once its arguments are whole.
     var toolCalls: [ToolCall] = []
 
+    /// Content blocks still streaming, by the provider's own index, for a
+    /// provider that streams its turn as indexed blocks (Anthropic).
+    var streamingBlocks: [Int: StreamingBlock] = [:]
+
+    /// The turn's content in the provider's own shape, each block encoded
+    /// whole, for the `TurnRecord` a provider that keeps one sends back.
+    var contentBlocks: [Data] = []
+
     /// The stop reason names a whole answer. Only the provider's decoder can
     /// say so, because only it knows the vocabulary; an unknown reason leaves
     /// this false, so a turn that stopped for a reason nobody recognises fails
@@ -46,4 +54,12 @@ struct TurnProgress: Sendable {
     func usage(wallClock: Duration) -> ModelUsage {
         ModelUsage(inputTokens: inputTokens, outputTokens: outputTokens, duration: generated ?? wallClock)
     }
+}
+
+/// One content block while it streams: the block as its start carried it, and
+/// what its deltas appended (text, thinking or partial JSON) and signed.
+struct StreamingBlock: Sendable {
+    let start: Data
+    var appended = ""
+    var signature = ""
 }

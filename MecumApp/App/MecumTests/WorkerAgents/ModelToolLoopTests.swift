@@ -11,7 +11,7 @@ import ChatCore
 import EngineCore
 import Foundation
 import LocalMCP
-import ModelTransports
+@testable import ModelTransports
 import PerceptionCore
 import Synchronization
 import Testing
@@ -229,6 +229,32 @@ struct ModelToolLoopTests {
         #expect(answered.call == statusCall)
         #expect(!answered.isError)
         #expect(answered.text.contains(#""permissions""#))
+    }
+
+    @Test func theRoundsRecordGoesBackOnTheAssistantMessageThatMadeTheCalls() async throws {
+        let record = TurnRecord(
+            provider: .anthropic,
+            blocks  : [Data(#"{"signature":"EqQB","thinking":"","type":"thinking"}"#.utf8)]
+        )
+        let transport = ScriptedTransport(
+            supportsTools: true,
+            rounds       : [
+                [.toolCall(statusCall), .record(record), .completed(usage)],
+                [.delta("Done."), .completed(usage)],
+            ]
+        )
+
+        try await ModelToolLoop { _, _ in MCPRouter.toolResult(.object([:])) }.run(
+            transport: transport,
+            role     : nil,
+            history  : [],
+            prompt   : "Check."
+        ) { _ in }
+
+        let asked = try #require(transport.sent.last?.messages.dropLast().last)
+        #expect(asked.role == .assistant)
+        #expect(asked.toolCalls == [statusCall])
+        #expect(asked.record == record)
     }
 
     @Test func aModelWithoutToolsIsSentNoneAndToldSo() async throws {

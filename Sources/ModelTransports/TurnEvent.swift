@@ -6,7 +6,8 @@
 //
 
 /// One element of a streamed conversational turn: a piece of the answer, a
-/// tool the model called, or the single terminal element that closes it.
+/// tool the model called, the provider's own copy of the turn, or the single
+/// terminal element that closes it.
 ///
 /// `.completed` arrives only when the provider ended the turn with a reason
 /// that means the answer is whole. A turn the model ended to call tools is
@@ -24,6 +25,11 @@ public enum TurnEvent: Sendable, Hashable {
     /// A tool the model called, whole, in the order it called them. Only a
     /// turn that was handed tools yields one.
     case toolCall(ToolCall)
+
+    /// The provider's own copy of the turn, once, just before `.completed`,
+    /// from a provider that must be sent the turn back whole. A caller that
+    /// runs the calls passes it on the assistant message it sends back.
+    case record(TurnRecord)
 
     /// The provider declared the turn whole, and what it says it cost.
     case completed(ModelUsage)
@@ -60,12 +66,18 @@ public struct TurnMessage: Sendable, Hashable {
     /// than its result.
     public let isError: Bool
 
-    public init(role: Role, text: String, toolCalls: [ToolCall] = []) {
+    /// On an `assistant` message that made calls, the record the turn came
+    /// with, which its own transport sends back in place of `text` and
+    /// `toolCalls`. Nil on any other, and for a provider that keeps none.
+    public let record: TurnRecord?
+
+    public init(role: Role, text: String, toolCalls: [ToolCall] = [], record: TurnRecord? = nil) {
         self.role = role
         self.text = text
         self.toolCalls = toolCalls
         self.call = nil
         self.isError = false
+        self.record = record
     }
 
     /// The answer to `call`: what the tool returned, or its failure when `isError`.
@@ -75,5 +87,6 @@ public struct TurnMessage: Sendable, Hashable {
         self.toolCalls = []
         self.call = call
         self.isError = isError
+        self.record = nil
     }
 }

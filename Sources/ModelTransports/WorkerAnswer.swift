@@ -30,9 +30,9 @@ public enum WorkerAnswer: Sendable, Hashable {
         switch provider {
         case .claudeCode, .codex:
             self = .agent
-        case .ollama:
+        case .anthropic, .ollama:
             self = .modelLoop
-        case .anthropic, .gemini:
+        case .gemini:
             self = .notYet(reason: "this provider is not available for workers in this version")
         }
     }

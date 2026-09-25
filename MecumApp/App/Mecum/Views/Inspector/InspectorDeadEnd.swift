@@ -17,7 +17,7 @@ struct InspectorDeadEnd: View {
     var body: some View {
         Label(
             """
-            \(provider.title) can’t respond to worker messages yet. Choose Codex, Claude or Ollama.
+            \(provider.title) can’t respond to worker messages yet. Choose \(Self.answering).
             """,
             systemImage: "exclamationmark.bubble"
         )
@@ -26,5 +26,13 @@ struct InspectorDeadEnd: View {
             horizontal: false,
             vertical  : true
         )
+    }
+
+    /// The providers that answer, in the app's order, as the end of a sentence.
+    private static var answering: String {
+        ModelProvider.inApp
+            .filter { WorkerAnswer(provider: $0).refusal == nil }
+            .map(\.title)
+            .formatted(.list(type: .or))
     }
 }

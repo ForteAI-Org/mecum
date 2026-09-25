@@ -49,7 +49,8 @@ enum HTTPTransport {
     }
 
     /// One streamed turn: the provider's deltas and tool calls as they arrive,
-    /// then the terminal element the assembler only gives once the provider
+    /// then, for a whole turn, the provider's record of it when it keeps one
+    /// and the terminal element the assembler only gives once the provider
     /// has declared the turn finished.
     ///
     /// The request is built by the caller, so the body's JSON is serialized
@@ -82,7 +83,10 @@ enum HTTPTransport {
                         for call in assembler.takeToolCalls() { continuation.yield(.toolCall(call)) }
                         if assembler.progress.isFinished { break }
                     }
-                    continuation.yield(try assembler.completion(wallClock: started.duration(to: .now)))
+                    // The record goes out only with a whole turn, ahead of the element that says so.
+                    let terminal = try assembler.completion(wallClock: started.duration(to: .now))
+                    if let record = assembler.record { continuation.yield(.record(record)) }
+                    continuation.yield(terminal)
                     continuation.finish()
                 } catch {
                     continuation.finish(throwing: error)

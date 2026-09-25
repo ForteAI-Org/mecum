@@ -36,7 +36,7 @@ struct TransportCapabilityTests {
     }
 
     @Test("a transport without a tool turn refuses tools and claims nothing",
-          arguments: [ModelProvider.codex, .claudeCode, .anthropic, .gemini])
+          arguments: [ModelProvider.codex, .claudeCode, .gemini])
     func aTransportWithoutAToolTurnRefusesTools(provider: ModelProvider) async throws {
         let transport = ModelSelection(provider: provider, model: "any-model").transport()
         let tool = ToolDefinition(name: "status", description: "Reads the status.", parameters: Data("{}".utf8))

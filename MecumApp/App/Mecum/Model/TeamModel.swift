@@ -42,10 +42,10 @@ nonisolated struct UserFacingIssue: Sendable, Equatable {
 /// boundary.
 ///
 /// A worker on Claude Code or Codex answers through its agent command line with
-/// Mecum's tools (`WorkerAgents`), and a worker on Ollama through Mecum's own
-/// loop with the same tools. Those tools reach the desktop only through the
-/// broker's queue (`BrokeredAutomationSession`, §22.3): a worker waits for the
-/// computer like any other entry and never builds a seat.
+/// Mecum's tools (`WorkerAgents`), and a worker on Anthropic or Ollama through
+/// Mecum's own loop with the same tools. Those tools reach the desktop only
+/// through the broker's queue (`BrokeredAutomationSession`, §22.3): a worker
+/// waits for the computer like any other entry and never builds a seat.
 ///
 /// Connections come from `connections`, the same store the Settings window
 /// edits, so a key entered in either place serves both.
