@@ -112,7 +112,8 @@ struct TokenCounterPopover: View {
                     label   : UsageWording.windowName(limit),
                     value   : limitLine(limit),
                     fraction: limit.usedFraction,
-                    isHigh  : UsageWording.isLimitHigh(limit.usedFraction),
+                    fill    : UsageWording.isLimitHigh(limit.usedFraction) ? AnyShapeStyle(.orange)
+                        : AnyShapeStyle(.secondary),
                     spoken  : wording.limitSpoken(limit)
                 )
             }

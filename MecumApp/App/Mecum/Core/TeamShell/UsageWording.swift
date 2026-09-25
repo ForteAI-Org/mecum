@@ -55,8 +55,24 @@ nonisolated struct UsageWording {
         max(0, tokens.input - tokens.cacheReads) + tokens.output
     }
 
-    /// The ring turns amber from 80% of the context, a plan's bar from 75% of its limit.
-    static func isContextHigh(_ fraction: Double) -> Bool { fraction >= 0.8 }
+    /// How full the model's context is, as the ring and the context popover colour it.
+    enum ContextLevel: Equatable {
+
+        /// Below 70%: plenty of room, green.
+        case roomy
+
+        /// From 70%: filling up, orange.
+        case filling
+
+        /// From 90%, where Mecum compacts the context: red.
+        case full
+    }
+
+    static func contextLevel(_ fraction: Double) -> ContextLevel {
+        fraction >= 0.9 ? .full : fraction >= 0.7 ? .filling : .roomy
+    }
+
+    /// A plan's bar turns amber from 75% of its limit.
 
     static func isLimitHigh(_ fraction: Double) -> Bool { fraction >= 0.75 }
 

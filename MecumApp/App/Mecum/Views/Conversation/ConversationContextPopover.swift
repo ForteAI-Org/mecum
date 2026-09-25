@@ -46,7 +46,7 @@ struct ConversationContextPopover: View {
                 label   : "Used",
                 value   : wording.contextUsed(context),
                 fraction: fraction,
-                isHigh  : UsageWording.isContextHigh(fraction),
+                fill    : ConversationContextRing.style(of: UsageWording.contextLevel(fraction)),
                 spoken  : "Context used: \(wording.contextSpoken(context))"
             )
         }

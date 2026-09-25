@@ -8,9 +8,10 @@
 import SwiftUI
 
 /// ConversationContextRing is how full the model's context is, drawn as a
-/// ring: a quiet track, and the fill in the secondary label colour, amber once
-/// the context is high (`UsageWording.isContextHigh`), never red. A new fill
-/// moves round the ring, and changes at once with Reduce Motion.
+/// ring: a quiet track, and the fill green while there is room, orange as it
+/// fills and red from where Mecum compacts it (`UsageWording.contextLevel`),
+/// the owner's choice for this one indicator. A new fill moves round the ring,
+/// and changes at once with Reduce Motion.
 struct ConversationContextRing: View {
 
     /// The context's fill, from 0 to 1; more than 1 draws a full ring.
@@ -52,7 +53,14 @@ struct ConversationContextRing: View {
         .animation(reducesMotion ? nil : .smooth(duration: 0.4), value: fraction)
     }
 
-    private var fill: AnyShapeStyle {
-        UsageWording.isContextHigh(fraction) ? AnyShapeStyle(.orange) : AnyShapeStyle(.secondary)
+    private var fill: AnyShapeStyle { Self.style(of: UsageWording.contextLevel(fraction)) }
+
+    /// A context level's colour, which the context popover's bar shares.
+    static func style(of level: UsageWording.ContextLevel) -> AnyShapeStyle {
+        switch level {
+            case .roomy  : AnyShapeStyle(.green)
+            case .filling: AnyShapeStyle(.orange)
+            case .full   : AnyShapeStyle(.red)
+        }
     }
 }

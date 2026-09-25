@@ -119,10 +119,12 @@ struct UsageWordingTests {
         #expect(wording.resets(now.addingTimeInterval(-60)) == nil)
     }
 
-    @Test("The ring turns amber from 80%, a plan's bar from 75%")
-    func amberThresholds() {
-        #expect(!UsageWording.isContextHigh(0.79))
-        #expect(UsageWording.isContextHigh(0.8))
+    @Test("The ring is green, orange from 70% and red from 90%; a plan's bar is amber from 75%")
+    func thresholds() {
+        #expect(UsageWording.contextLevel(0.69) == .roomy)
+        #expect(UsageWording.contextLevel(0.7) == .filling)
+        #expect(UsageWording.contextLevel(0.89) == .filling)
+        #expect(UsageWording.contextLevel(0.9) == .full)
         #expect(!UsageWording.isLimitHigh(0.74))
         #expect(UsageWording.isLimitHigh(0.75))
     }
