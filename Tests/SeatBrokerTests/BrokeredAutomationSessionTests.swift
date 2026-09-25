@@ -585,4 +585,26 @@ struct BrokeredAutomationSessionTests {
         #expect(ledger.provenance(of: launched) == .alreadyRunning)
         #expect(broker.queue.entries.isEmpty)
     }
+
+    @Test("apps keeps the ranking's order and names the folder only where two share a name")
+    func appsNameTheFolderOnlyWhereTwoShareAName() {
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        let apps = [
+            TargetApp(pid: 7, bundleID: "com.avid.ProTools", name: "Pro Tools",
+                      bundleURL: URL(fileURLWithPath: "/Applications/Pro Tools.app"), windows: [],
+                      version: "26.4.1.179"),
+            TargetApp(pid: nil, bundleID: "com.example.ProTools", name: "Pro Tools",
+                      bundleURL: home.appending(path: "Applications/Pro Tools.app"), windows: []),
+            TargetApp(pid: nil, bundleID: "com.avid.ProToolsDeveloper", name: "Pro Tools Developer",
+                      bundleURL: URL(fileURLWithPath: "/Applications/Pro Tools Developer.app"), windows: []),
+        ]
+        #expect(BrokeredAutomationSession.candidates(apps) == [
+            ApplicationCandidate(name: "Pro Tools", bundleID: "com.avid.ProTools", version: "26.4.1.179",
+                                 isRunning: true, location: "/Applications"),
+            ApplicationCandidate(name: "Pro Tools", bundleID: "com.example.ProTools", version: nil,
+                                 isRunning: false, location: "~/Applications"),
+            ApplicationCandidate(name: "Pro Tools Developer", bundleID: "com.avid.ProToolsDeveloper", version: nil,
+                                 isRunning: false),
+        ])
+    }
 }

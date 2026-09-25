@@ -66,6 +66,20 @@ struct ToolLineTests {
         ])
     }
 
+    @Test("Looking up apps reads as a lookup, of the query when there is one, and only looks")
+    func appsPhrase() {
+        let lines = [
+            "→ apps {}", "← apps {\"applications\":[]}",
+            "→ apps {\"query\":\"pro tools\"}", "← apps {\"applications\":[]}",
+        ]
+        #expect(Self.done(lines) == ["Looked up apps", "Looked up “pro tools”"])
+        #expect(ToolStep.steps(from: lines).allSatisfy { !$0.isEffectful })
+        #expect(TranscriptWording.toolSteps(
+            ToolStep.steps(from: ["→ apps {\"query\":\"PT\"}"]),
+            ending: nil
+        ) == ["Looking up “PT”…"])
+    }
+
     @Test("Typing, keys, scrolling, drags and contextual menus read as what a person would say")
     func inputToolPhrases() {
         let lines = [

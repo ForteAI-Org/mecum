@@ -245,6 +245,30 @@ public final class BrokeredAutomationSession: AutomationSessionOperating {
         }
     }
 
+    /// The installed and running applications `query` names, ranked as `open` resolves a name, so
+    /// what the worker is offered and what it may open cannot disagree. Needs no seat and no grant.
+    public func applications(matching query: String?) async throws -> [ApplicationCandidate] {
+        Self.candidates(ApplicationOpening.ranked(query, in: TargetEnumerator.targets()))
+    }
+
+    /// `apps` as the worker reads them, in their order, each one's folder added only where two
+    /// of them share a name, since the name alone would not say which is which.
+    static func candidates(_ apps: [TargetApp]) -> [ApplicationCandidate] {
+        let shared = Set(Dictionary(grouping: apps, by: \.name).filter { $0.value.count > 1 }.keys)
+        return apps.map { app in
+            let folder = app.bundleURL.map {
+                ($0.deletingLastPathComponent().path as NSString).abbreviatingWithTildeInPath
+            }
+            return ApplicationCandidate(
+                name     : app.name,
+                bundleID : app.bundleID,
+                version  : app.version,
+                isRunning: app.isRunning,
+                location : shared.contains(app.name) ? folder : nil
+            )
+        }
+    }
+
     public func observe() async throws -> SceneSnapshot {
         let (application, runtime, _) = try current()
         do {

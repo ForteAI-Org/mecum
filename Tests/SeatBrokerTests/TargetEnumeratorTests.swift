@@ -202,7 +202,7 @@ func theExclusionNeverLeavesNothing() {
     #expect(TargetEnumerator.mainWindow(among: []) == nil)
 }
 
-@Test func anApplicationOneFolderDownIsInstalledAndOneInsideABundleIsNot() throws {
+@Test func anApplicationTwoFoldersDownIsInstalledAndOneInsideABundleOrDeeperIsNot() throws {
     let root  = URL.temporaryDirectory.appending(path: "applications-\(UUID().uuidString)")
     let files = FileManager.default
     defer { try? files.removeItem(at: root) }
@@ -212,12 +212,40 @@ func theExclusionNeverLeavesNothing() {
         "Utilities/Terminal.app/Contents",
         "Xcode.app/Contents/Applications/Instruments.app",
         "Suite/Tools/Deep.app",
+        "Vendor/Suite/Tools/Deeper.app",
     ] {
         try files.createDirectory(at: root.appending(path: path), withIntermediateDirectories: true)
     }
 
     let names = TargetEnumerator.applicationURLs(in: [root]).map(\.lastPathComponent).sorted()
-    #expect(names == ["DaVinci Resolve.app", "Notes.app", "Terminal.app", "Xcode.app"])
+    #expect(names == ["DaVinci Resolve.app", "Deep.app", "Notes.app", "Terminal.app", "Xcode.app"])
+}
+
+private func row(_ path: String, _ bundleID: String?) -> TargetEnumerator.InstalledRow {
+    TargetEnumerator.InstalledRow(path: path, bundleID: bundleID, displayName: nil, lastUsed: nil)
+}
+
+@Test func spotlightRowsKeepOneOpenableBundlePerIdentifier() {
+    let rows = [
+        row("/Applications/Xcode.app", "com.apple.dt.Xcode"),
+        row("/Applications/Xcode.app/Contents/Applications/Instruments.app", "com.apple.dt.Instruments"),
+        row("/Users/me/.Trash/Old.app", "com.example.Old"),
+        row("/System/Library/Input Methods/CharacterPalette.app", "com.apple.CharacterPaletteIM"),
+        row("/System/Library/CoreServices/Finder.app", "com.apple.finder"),
+        row("/Users/me/Library/DerivedData/Build/Mecum.app", "dev.forte.Mecum"),
+        row("/Applications/Mecum.app", "dev.forte.Mecum"),
+        row("/Users/me/Downloads/Mecum.app", "dev.forte.Mecum"),
+        row("/Users/me/Projects/build/Output/Xcode.app", nil),
+    ]
+    let kept = TargetEnumerator.installable(rows) { _ in nil }.map(\.path)
+    #expect(kept == ["/Applications/Mecum.app", "/Applications/Xcode.app", "/System/Library/CoreServices/Finder.app"])
+
+    // The copy Launch Services names wins over the one under /Applications.
+    let named = TargetEnumerator.installable(rows) {
+        $0 == "dev.forte.Mecum" ? "/Users/me/Library/DerivedData/Build/Mecum.app" : nil
+    }
+    #expect(named.filter { $0.bundleID == "dev.forte.Mecum" }.map(\.path)
+        == ["/Users/me/Library/DerivedData/Build/Mecum.app"])
 }
 
 @Test func aSplashScreenNobodyNamesIsNotAWindowToAdopt() {
@@ -226,4 +254,15 @@ func theExclusionNeverLeavesNothing() {
                                frame: CGRect(x: 0, y: 0, width: 910, height: 640))
     #expect(TargetEnumerator.adoptable([splash], named: []).isEmpty)
     #expect(TargetEnumerator.adoptable([splash, manager], named: [39468]) == [manager])
+}
+
+@Test func aCoreServicesAgentIsNotAnApplicationToOpenButFinderIs() {
+    // PeopleViewService calls itself "Contacts" and made "open Contacts" ambiguous while Contacts was closed.
+    #expect(TargetEnumerator.isSystemAgent(path: "/System/Library/CoreServices/PeopleViewService.app",
+                                           info: ["LSUIElement": true]))
+    #expect(TargetEnumerator.isSystemAgent(path: "/System/Library/CoreServices/GameTrampoline.app",
+                                           info: ["LSBackgroundOnly": "1"]))
+    #expect(!TargetEnumerator.isSystemAgent(path: "/System/Library/CoreServices/Finder.app", info: [:]))
+    // A menu bar application a person installed is not the system's, and stays listed.
+    #expect(!TargetEnumerator.isSystemAgent(path: "/Applications/Raycast.app", info: ["LSUIElement": true]))
 }

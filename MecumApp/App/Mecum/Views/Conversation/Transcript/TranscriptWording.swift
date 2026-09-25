@@ -154,6 +154,8 @@ nonisolated enum TranscriptWording {
             return forms("Checked", "check", "Checking", "open apps")
         case .windows(let app):
             return forms("Checked", "check", "Checking", app.map { "\(label($0))’s open windows" } ?? "open windows")
+        case .apps(let query):
+            return forms("Looked up", "look up", "Looking up", query.map { "“\(label($0))”" } ?? "apps")
         case .open(let app):
             return forms("Opened", "open", "Opening", label(app))
         case .observe:

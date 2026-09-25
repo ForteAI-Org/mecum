@@ -25,6 +25,10 @@ nonisolated struct ToolStep: Sendable, Hashable {
     enum Action: Sendable, Hashable {
         case status
         case windows(app: String?)
+
+        /// Looked up the applications it can open, matching `query` when there is one.
+        case apps(query: String?)
+
         case open(app: String)
         case observe
         case act(verb: String, target: String, section: String?, value: String?)
@@ -68,8 +72,8 @@ nonisolated struct ToolStep: Sendable, Hashable {
     /// True for a step that changes the app, rather than one that only looks.
     var isEffectful: Bool {
         switch action {
-        case .status, .windows, .observe, .note: false
-        default:                                 true
+        case .status, .windows, .apps, .observe, .note: false
+        default:                                        true
         }
     }
 
@@ -184,6 +188,7 @@ nonisolated struct ToolStep: Sendable, Hashable {
         switch name {
         case "status":        return .status
         case "windows":       return .windows(app: text("app"))
+        case "apps":          return .apps(query: text("query"))
         case "open_session":  return text("app").map(Action.open) ?? .other(name: name)
         case "observe":       return .observe
         case "close_session": return .close(app: lastApp)

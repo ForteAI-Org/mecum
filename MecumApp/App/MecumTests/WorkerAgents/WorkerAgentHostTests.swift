@@ -49,7 +49,9 @@ struct WorkerAgentHostTests {
 
     /// The app's own line, word for word.
     private static let appLine = "In this app, open_session also opens an installed application that is "
-        + "not running yet; you do not need to find it with windows first."
+        + "not running yet: find it with apps and pass its bundleID to open_session. When several match and "
+        + "the conversation does not make clear which one the person means, ask them which one, naming the "
+        + "candidates, before opening either."
 
     @Test func theCLITextIsUnchangedAndARoleComesAfterIt() throws {
         #expect(AutomationTools.instructions == Self.cliInstructions)

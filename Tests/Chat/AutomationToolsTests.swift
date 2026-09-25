@@ -1,3 +1,4 @@
+import AppKit
 import AutomationMCP
 import AutomationRuntime
 import EngineCore
@@ -187,6 +188,90 @@ struct AutomationToolsTests {
         #expect(result["structuredContent"]["status"].string == "stopped")
         #expect(result["structuredContent"]["verifiedSteps"] == .number(1))
     }
+}
+
+extension AutomationToolsTests {
+    @Test
+    func appsIsListedReadOnlyWithAnOptionalQuery() throws {
+        let apps = try #require(AutomationTools.definitions.first { $0["name"].string == "apps" })
+        #expect(apps["annotations"]["readOnlyHint"] == .bool(true))
+        #expect(apps["inputSchema"]["required"] == .array([]))
+        #expect(apps["inputSchema"]["properties"].object?.keys.sorted() == ["query"])
+        #expect(apps["description"].string?.contains("then pass its bundleID to open_session") == true)
+    }
+
+    @Test
+    func appsNeedsNoSessionAndReturnsTheCandidatesFields() async throws {
+        let session = CatalogueSession(candidates: [
+            ApplicationCandidate(name: "Pro Tools", bundleID: "com.avid.ProTools", version: "26.4.1.179",
+                                 isRunning: false),
+            ApplicationCandidate(name: "Pro Tools", bundleID: "com.example.ProTools", version: nil, isRunning: true,
+                                 location: "~/Applications")
+        ])
+        let tools = AutomationTools(session: session)
+        var records: [String] = []
+        tools.record = { records.append($0) }
+        let result = try await tools.call("apps", .object(["query": .string("pro tools")]))
+        #expect(session.queries == ["pro tools"])
+        #expect(result["structuredContent"] == .object(["applications": .array([
+            .object(["name": .string("Pro Tools"), "bundleID": .string("com.avid.ProTools"),
+                     "version": .string("26.4.1.179"), "running": .bool(false)]),
+            .object(["name": .string("Pro Tools"), "bundleID": .string("com.example.ProTools"),
+                     "running": .bool(true), "location": .string("~/Applications")])
+        ])]))
+        #expect(records.first?.hasPrefix("→ apps ") == true)
+        #expect(records.last?.hasPrefix("← apps ") == true)
+
+        _ = try await tools.call("apps", .null)
+        #expect(session.queries == ["pro tools", nil])
+    }
+
+    @Test
+    func appsListsSixtyAndCountsTheRest() async throws {
+        let many = (1...61).map { ApplicationCandidate(name: "App \($0)", bundleID: "com.example.\($0)", version: nil,
+                                                       isRunning: false) }
+        let result = try await AutomationTools(session: CatalogueSession(candidates: many)).call("apps", .null)
+        #expect(result["structuredContent"]["applications"].array?.count == 60)
+        #expect(result["structuredContent"]["more"] == .string("1 more not listed; pass a query to find them."))
+    }
+
+    @Test
+    func theDefaultListsRunningApplicationsOnly() async throws {
+        let listed = try await SyntheticSession().applications(matching: nil)
+        #expect(!listed.isEmpty)
+        #expect(listed.allSatisfy { app in
+            app.isRunning && NSRunningApplication.runningApplications(withBundleIdentifier: app.bundleID)
+                .contains { $0.activationPolicy == .regular }
+        })
+        let finder = try await SyntheticSession().applications(matching: "com.apple.FINDER")
+        #expect(finder.map(\.bundleID) == ["com.apple.finder"])
+    }
+}
+
+/// CatalogueSession answers only apps, with a fixed list, and has no session to open.
+@MainActor
+private final class CatalogueSession: AutomationSessionOperating {
+    let id: UUID? = nil
+    let candidates: [ApplicationCandidate]
+    var queries: [String?] = []
+
+    init(candidates: [ApplicationCandidate]) { self.candidates = candidates }
+
+    func applications(matching query: String?) async throws -> [ApplicationCandidate] {
+        queries.append(query)
+        return candidates
+    }
+
+    func open(application: String, window: String?) async throws -> SceneSnapshot { throw AutomationFailure("unused") }
+    func observe() async throws -> SceneSnapshot { throw AutomationFailure("unused") }
+    func act(target: String, verb: ActionVerb, section: String?, desiredState: ControlState?) async throws -> ActOutcome {
+        throw AutomationFailure("unused")
+    }
+    func select(control: String, item: String) async throws -> ActOutcome { throw AutomationFailure("unused") }
+    func deliver(_ input: InputRequest.Input, section: String?) async throws -> ActOutcome {
+        throw AutomationFailure("unused")
+    }
+    func close() async {}
 }
 
 /// SyntheticSession preserves call order and ID invalidation without touching a real application.

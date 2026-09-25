@@ -1,6 +1,7 @@
 import AppKit
 import ApplicationServices
 import CoreGraphics
+import CoreServices
 import SeatCore
 import WindowPlacement
 
@@ -19,14 +20,11 @@ enum TargetEnumerator {
         let windowsByPID = onScreenWindows(minimumSize: minimumSize)
         let me = ProcessInfo.processInfo.processIdentifier
         var byPath: [String: TargetApp] = [:]
+        var pathByBundleID: [String: String] = [:]
 
-        for url in installedApplicationURLs() {
-            guard let bundle = Bundle(url: url) else { continue }
-            let name = (bundle.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String)
-                ?? (bundle.object(forInfoDictionaryKey: "CFBundleName") as? String)
-                ?? url.deletingPathExtension().lastPathComponent
-            byPath[url.path] = TargetApp(pid: nil, bundleID: bundle.bundleIdentifier ?? "", name: name,
-                                         bundleURL: url, windows: [])
+        for app in installedApplications() {
+            byPath[app.id] = app
+            pathByBundleID[app.bundleID] = app.id
         }
         for app in NSWorkspace.shared.runningApplications where app.processIdentifier != me {
             let windows = windowsByPID[app.processIdentifier] ?? []
@@ -36,11 +34,139 @@ enum TargetEnumerator {
             // exists because a host asked for it and nothing can launch it.
             let launchable = app.activationPolicy == .regular ? app.bundleURL : nil
             let key = launchable?.path ?? "pid:\(app.processIdentifier)"
+            // The running copy stands in for the installed one of its bundle ID wherever each sits:
+            // Safari runs from its cryptex while Spotlight lists /Applications/Safari.app.
+            let sibling   = launchable == nil ? nil : app.bundleIdentifier.flatMap { pathByBundleID[$0] }
+            let installed = sibling.flatMap { byPath.removeValue(forKey: $0) }
+                ?? launchable.flatMap { application(at: $0, row: nil) }
             byPath[key] = TargetApp(pid: app.processIdentifier, bundleID: app.bundleIdentifier ?? "",
-                                    name: app.localizedName ?? byPath[key]?.name ?? "?",
-                                    bundleURL: launchable, windows: windows)
+                                    name: app.localizedName ?? installed?.name ?? "?",
+                                    bundleURL: launchable, windows: windows, bundleName: installed?.bundleName,
+                                    version: installed?.version, lastUsed: installed?.lastUsed)
         }
         return byPath.values.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
+
+    // MARK: Which applications are installed
+
+    /// One application bundle found on disk, before its bundle is read.
+    struct InstalledRow: Equatable {
+        let path       : String
+        let bundleID   : String?
+        let displayName: String?
+        let lastUsed   : Date?
+    }
+
+    // ponytail: the installed list is kept 5 s, so apps then open_session asks Spotlight once;
+    // an application installed meanwhile is found when it expires.
+    private static let installedLifetime: Duration = .seconds(5)
+
+    @MainActor
+    private static var installedCache: (taken: ContinuousClock.Instant, apps: [TargetApp])?
+
+    /// Every installed application, from Spotlight, or from the folder scan when Spotlight finds
+    /// none or fails, as with indexing off. Read again once the cached list is `installedLifetime` old.
+    @MainActor
+    private static func installedApplications() -> [TargetApp] {
+        if let installedCache, ContinuousClock.now - installedCache.taken < installedLifetime {
+            return installedCache.apps
+        }
+        let rows = spotlightRows() ?? applicationURLs(in: applicationFolders).map { url in
+            InstalledRow(path: url.path, bundleID: Bundle(url: url)?.bundleIdentifier, displayName: nil,
+                         lastUsed: nil)
+        }
+        let kept = installable(rows) { NSWorkspace.shared.urlForApplication(withBundleIdentifier: $0)?.path }
+        let apps = kept.compactMap { application(at: URL(fileURLWithPath: $0.path), row: $0) }
+        installedCache = (ContinuousClock.now, apps)
+        return apps
+    }
+
+    /// The application at `url`, not running, named as its bundle names it. A system agent is none:
+    /// see `isSystemAgent`.
+    private static func application(at url: URL, row: InstalledRow?) -> TargetApp? {
+        guard let bundle = Bundle(url: url),
+              !isSystemAgent(path: url.path, info: bundle.infoDictionary ?? [:]) else { return nil }
+        let bundleName = bundle.object(forInfoDictionaryKey: "CFBundleName") as? String
+        let name = (bundle.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String)
+            ?? bundleName
+            ?? row?.displayName
+            ?? url.deletingPathExtension().lastPathComponent
+        return TargetApp(pid: nil, bundleID: bundle.bundleIdentifier ?? "", name: name, bundleURL: url,
+                         windows: [], bundleName: bundleName,
+                         version: bundle.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String,
+                         lastUsed: row?.lastUsed)
+    }
+
+    /// The rows that are applications a person opens, one per bundle identifier.
+    ///
+    /// A bundle inside another bundle is left out: Xcode's Instruments or Finder's own helpers are
+    /// parts of that application, not applications of their own. So is the Trash, whose contents
+    /// the person threw away. So is `/System/Library` outside `CoreServices`: the rest of it is
+    /// frameworks' helpers, input methods and services, while `CoreServices` holds Finder and the
+    /// system's own applications. So is a bundle with no identifier: `open_session` is told to
+    /// open by one, and the ones Spotlight found here were test fixtures named "Xcode". When one
+    /// identifier sits at several paths, the one Launch Services names (`preferred`) is kept, then
+    /// one under `/Applications`, then the first by path.
+    static func installable(_ rows: [InstalledRow], preferred: (String) -> String?) -> [InstalledRow] {
+        func isApplication(_ path: String) -> Bool {
+            let components = path.split(separator: "/")
+            return !components.dropLast().contains { $0.hasSuffix(".app") }
+                && !components.contains { $0 == ".Trash" || $0 == ".Trashes" }
+                && (!path.hasPrefix("/System/Library/") || path.hasPrefix("/System/Library/CoreServices/"))
+        }
+        func rank(_ row: InstalledRow, _ bundleID: String) -> Int {
+            row.path == preferred(bundleID) ? 0 : row.path.hasPrefix("/Applications/") ? 1 : 2
+        }
+        var kept: [String: InstalledRow] = [:]
+        for row in rows.sorted(by: { $0.path < $1.path }) where isApplication(row.path) {
+            guard let bundleID = row.bundleID, !bundleID.isEmpty else { continue }
+            if let held = kept[bundleID], rank(held, bundleID) <= rank(row, bundleID) { continue }
+            kept[bundleID] = row
+        }
+        return kept.values.sorted { $0.path < $1.path }
+    }
+
+    /// Whether the bundle at `path` is one of `CoreServices`' agents: a helper with no Dock presence
+    /// (`LSUIElement` or `LSBackgroundOnly`), which Finder is not. They borrow real applications'
+    /// names: PeopleViewService shows as "Contacts", GameTrampoline as "Games", TipsSpotlightHandler
+    /// as "Tips", so kept they made "open Contacts" ambiguous while Contacts was not running. A
+    /// running agent is left out the same way (`listable`).
+    static func isSystemAgent(path: String, info: [String: Any]) -> Bool {
+        func isOn(_ key: String) -> Bool {
+            switch info[key] {
+            case let flag as Bool:   flag
+            case let text as String: ["1", "yes", "true"].contains(text.lowercased())
+            default:                 false
+            }
+        }
+        return path.hasPrefix("/System/Library/CoreServices/") && (isOn("LSUIElement") || isOn("LSBackgroundOnly"))
+    }
+
+    /// Every application bundle Spotlight has indexed, or nil when the query fails or finds none.
+    ///
+    /// The query runs synchronously, so no run loop is needed. The path is read from each item,
+    /// and the other attributes from the query's own value lists, which is what keeps it fast:
+    /// copying them item by item took 260 ms for 376 bundles here, against 4 ms this way.
+    private static func spotlightRows() -> [InstalledRow]? {
+        let attributes = [kMDItemCFBundleIdentifier, kMDItemDisplayName, kMDItemLastUsedDate] as CFArray
+        guard let query = MDQueryCreate(kCFAllocatorDefault,
+                                        "kMDItemContentType == \"com.apple.application-bundle\"" as CFString,
+                                        attributes, nil),
+              MDQueryExecute(query, CFOptionFlags(kMDQuerySynchronous.rawValue))
+        else { return nil }
+        func value(_ name: CFString, at index: Int) -> Any? {
+            MDQueryGetAttributeValueOfResultAtIndex(query, name, index)
+                .map { Unmanaged<AnyObject>.fromOpaque($0).takeUnretainedValue() }
+        }
+        let rows = (0..<MDQueryGetResultCount(query)).compactMap { index -> InstalledRow? in
+            guard let result = MDQueryGetResultAtIndex(query, index) else { return nil }
+            let item = Unmanaged<MDItem>.fromOpaque(result).takeUnretainedValue()
+            guard let path = MDItemCopyAttribute(item, kMDItemPath) as? String else { return nil }
+            return InstalledRow(path: path, bundleID: value(kMDItemCFBundleIdentifier, at: index) as? String,
+                                displayName: value(kMDItemDisplayName, at: index) as? String,
+                                lastUsed: value(kMDItemLastUsedDate, at: index) as? Date)
+        }
+        return rows.isEmpty ? nil : rows
     }
 
     /// Whether a running process is offered as a target.
@@ -202,20 +328,17 @@ enum TargetEnumerator {
         return (value as! AXUIElement)
     }
 
-    private static func installedApplicationURLs() -> [URL] {
-        applicationURLs(in: applicationFolders)
-    }
-
-    /// The applications in `folders`: the ones standing there, and the ones one folder down, where
-    /// a suite installs itself ("DaVinci Resolve/DaVinci Resolve.app") and macOS keeps its
-    /// Utilities. An application's own bundle is never looked into.
-    static func applicationURLs(in folders: [URL]) -> [URL] {
-        func entries(of folder: URL) -> [URL] {
-            (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil,
-                                                          options: [.skipsHiddenFiles])) ?? []
-        }
-        return folders.flatMap { entries(of: $0) }.flatMap { entry in
-            entry.pathExtension == "app" ? [entry] : entries(of: entry).filter { $0.pathExtension == "app" }
+    /// The applications in `folders`: the ones standing there, and the ones up to `depth` folders
+    /// down, where a suite installs itself ("DaVinci Resolve/DaVinci Resolve.app", or a vendor's
+    /// folder holding a suite's) and macOS keeps its Utilities. An application's own bundle is never
+    /// looked into. This is the fallback for when Spotlight finds nothing.
+    static func applicationURLs(in folders: [URL], depth: Int = 2) -> [URL] {
+        folders.flatMap { folder in
+            let entries = (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil,
+                                                                         options: [.skipsHiddenFiles])) ?? []
+            return entries.flatMap { entry in
+                entry.pathExtension == "app" ? [entry] : depth > 0 ? applicationURLs(in: [entry], depth: depth - 1) : []
+            }
         }
     }
 

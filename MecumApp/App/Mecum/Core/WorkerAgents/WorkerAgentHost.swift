@@ -117,9 +117,11 @@ final class WorkerAgentHost {
     }
 
     /// What this app adds to the command line's text: its `open_session` launches an installed
-    /// application, which the base text, written around `windows`, does not say.
+    /// application, found with `apps`, which the base text, written around `windows`, does not say.
     static let appInstructions = "In this app, open_session also opens an installed application that is "
-        + "not running yet; you do not need to find it with windows first."
+        + "not running yet: find it with apps and pass its bundleID to open_session. When several match and "
+        + "the conversation does not make clear which one the person means, ask them which one, naming the "
+        + "candidates, before opening either."
 
     /// What a model that cannot call tools is told instead of the tools' text.
     static let textOnlyInstructions = "You are Mecum's assistant. You have no tools in this conversation "

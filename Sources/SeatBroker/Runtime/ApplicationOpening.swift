@@ -44,35 +44,82 @@ enum ApplicationOpening {
         return line
     }
 
+    /// How a query matched an application, best first.
+    private enum Match: Comparable {
+
+        /// Its bundle identifier, exactly.
+        case bundleID
+
+        /// One of `names(of:)`, ignoring case and diacritics.
+        case name
+
+        /// One of them ignoring spaces and punctuation as well: "ProTools" for "Pro Tools".
+        case normalizedName
+
+        /// The starts of its words in order, or their initials: "pro to" and "PT" for "Pro Tools".
+        case wordStarts
+
+        /// A part of one of them, ignoring spaces and punctuation.
+        case substring
+    }
+
+    /// The openable applications `query` matches, best match first and equal matches in
+    /// `precedes` order; every openable application in that order when there is no query.
+    ///
+    /// `resolve` and the `apps` tool both read this one ranking, so what the model is offered
+    /// and what it may open cannot disagree.
+    static func ranked(_ query: String?, in apps: [TargetApp]) -> [TargetApp] {
+        let wanted   = query.map(requested) ?? ""
+        let openable = apps.filter(isOpenable)
+        guard !wanted.isEmpty else { return openable.sorted(by: precedes) }
+        return openable
+            .compactMap { app in match(wanted, app).map { (app: app, match: $0) } }
+            .sorted { $0.match == $1.match ? precedes($0.app, $1.app) : $0.match < $1.match }
+            .map(\.app)
+    }
+
     /// The one application `name` names, or a refusal the run can act on.
     ///
     /// Nothing is opened and nothing is released on the way out, so a refused
     /// name leaves the seat holding whatever it held and the run free to
-    /// decide again. An exact name wins outright; otherwise a name that
-    /// appears in exactly one installed name is taken as meant ("Chrome" for
-    /// "Google Chrome"), and anything that names none or several is refused
-    /// with what the model would need to correct itself.
+    /// decide again. The best of `ranked` is taken only when it is
+    /// unambiguous: alone in the best tier anything matched in, or the only
+    /// one of that tier that is running. An exact name therefore wins
+    /// outright, and a part of one name ("Chrome" for "Google Chrome") is
+    /// meant when nothing matches better. Anything that names none or several
+    /// is refused with what the model would need to correct itself.
     static func resolve(_ name: String, in apps: [TargetApp]) throws -> TargetApp {
-        var wanted = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        if wanted.lowercased().hasSuffix(".app") { wanted = String(wanted.dropLast(4)) }
+        let wanted = requested(name)
         guard !wanted.isEmpty else {
             throw SeatBrokerError.applicationNotResolved("No application was named to open.")
         }
-        let openable = apps.filter(isOpenable)
-        let exact = openable.filter { app in
-            same(app.bundleID, wanted) || names(of: app).contains { same($0, wanted) }
+        let candidates = ranked(wanted, in: apps)
+        guard let best = candidates.first.flatMap({ match(wanted, $0) }) else {
+            throw SeatBrokerError.applicationNotResolved(
+                "\"\(wanted)\" is not an application installed on this machine; "
+                    + "call apps with a shorter query, then open_session with the bundleID it lists.")
         }
-        if let only = exact.first, exact.count == 1 { return only }
-        if exact.count > 1 { throw ambiguity(wanted, exact) }
+        let tier    = candidates.prefix { match(wanted, $0) == best }
+        let running = tier.filter(\.isRunning)
+        if tier.count == 1, let only = tier.first { return only }
+        if running.count == 1, let only = running.first { return only }
+        throw ambiguity(wanted, Array(tier))
+    }
 
-        let partial = openable.filter { app in
-            names(of: app).contains { $0.range(of: wanted, options: comparison) != nil }
-        }
-        if let only = partial.first, partial.count == 1 { return only }
-        if partial.count > 1 { throw ambiguity(wanted, partial) }
-        throw SeatBrokerError.applicationNotResolved(
-            "\"\(wanted)\" is not an application installed on this machine; "
-                + "name one of the installed applications listed in the prompt, exactly as it is written there.")
+    /// The order among equally good matches: running first, then the most recently used, then the
+    /// shorter name, so a base product comes before its "Developer" or "Beta", then alphabetical.
+    static func precedes(_ a: TargetApp, _ b: TargetApp) -> Bool {
+        if a.isRunning != b.isRunning { return a.isRunning }
+        if a.lastUsed != b.lastUsed { return (a.lastUsed ?? .distantPast) > (b.lastUsed ?? .distantPast) }
+        if a.name.count != b.name.count { return a.name.count < b.name.count }
+        let order = a.name.localizedCaseInsensitiveCompare(b.name)
+        return order == .orderedSame ? a.bundleID < b.bundleID : order == .orderedAscending
+    }
+
+    /// One candidate as a refusal lists it: its name, then its bundle identifier, its version when
+    /// the bundle declares one and whether it is running.
+    static func described(_ app: TargetApp) -> String {
+        "\(app.name) — \(app.bundleID)" + (app.version.map { " \($0)" } ?? "") + (app.isRunning ? " (running)" : "")
     }
 
     /// An application that opened and then could not take the seat: not
@@ -96,12 +143,12 @@ enum ApplicationOpening {
         }
     }
 
-    /// Every name an application answers to: the one its bundle declares, the name of its file and
-    /// the name the Finder shows in the person's language. They differ for many applications: Visual
-    /// Studio Code's bundle calls it "Code", and on an Italian Mac Calculator reads "Calcolatrice".
-    /// Its bundle identifier is matched as well, exactly.
+    /// Every name an application answers to: the one its bundle declares, its `CFBundleName` when
+    /// a display name hides it, the name of its file and the name the Finder shows in the person's
+    /// language. They differ for many applications: Visual Studio Code's bundle calls it "Code", and
+    /// on an Italian Mac Calculator reads "Calcolatrice". Its bundle identifier is matched as well.
     static func names(of app: TargetApp) -> [String] {
-        var names = [app.name]
+        var names = [app.name, app.bundleName ?? ""]
         if let url = app.bundleURL {
             names.append(url.deletingPathExtension().lastPathComponent)
             let shown = FileManager.default.displayName(atPath: url.path)
@@ -117,13 +164,61 @@ enum ApplicationOpening {
         a.compare(b, options: comparison) == .orderedSame
     }
 
-    /// Six names, because this sentence is read back to the model as history in
-    /// every later prompt and a list of forty would crowd out the scene.
+    /// A name as the model wrote it, trimmed and without an ".app" suffix.
+    private static func requested(_ name: String) -> String {
+        let wanted = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        return wanted.lowercased().hasSuffix(".app") ? String(wanted.dropLast(4)) : wanted
+    }
+
+    /// How well `wanted` names `app`, or nil when it does not name it at all.
+    private static func match(_ wanted: String, _ app: TargetApp) -> Match? {
+        if same(app.bundleID, wanted) { return .bundleID }
+        let names = names(of: app)
+        if names.contains(where: { same($0, wanted) }) { return .name }
+        let key = normalized(wanted)
+        guard !key.isEmpty else { return nil }
+        let keys = names.map(normalized)
+        if keys.contains(key) { return .normalizedName }
+        if names.contains(where: { startsWords(key[...], of: words(of: $0)[...]) }) { return .wordStarts }
+        if keys.contains(where: { $0.contains(key) }) { return .substring }
+        return nil
+    }
+
+    /// Whether `key` splits, in order, into the starts of different words: "pt" and "proto" both
+    /// do for "pro tools", taking "p" or "pro" from its first word and "t" or "to" from its second.
+    private static func startsWords(_ key: Substring, of words: ArraySlice<Substring>) -> Bool {
+        guard !key.isEmpty else { return true }
+        for index in words.indices {
+            let shared = zip(key, words[index]).prefix { $0 == $1 }.count
+            for length in stride(from: shared, to: 0, by: -1)
+            where startsWords(key.dropFirst(length), of: words[(index + 1)...]) {
+                return true
+            }
+        }
+        return false
+    }
+
+    private static func folded(_ text: String) -> String {
+        text.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: nil)
+    }
+
+    /// Letters and digits only, folded: "Pro Tools" and "ProTools" are both "protools".
+    private static func normalized(_ text: String) -> String {
+        folded(text).filter { $0.isLetter || $0.isNumber }
+    }
+
+    private static func words(of text: String) -> [Substring] {
+        folded(text).split { !$0.isLetter && !$0.isNumber }
+    }
+
+    /// Six candidates, because this sentence is read back to the model as history in every later
+    /// prompt and a list of forty would crowd out the scene. The bundle identifier is what tells
+    /// two applications of one name apart, and it is what `open_session` takes exactly.
     private static func ambiguity(_ wanted: String, _ matches: [TargetApp]) -> SeatBrokerError {
-        let names = matches.map(\.name).sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
-        let shown = names.prefix(6).joined(separator: ", ")
+        let shown = matches.prefix(6).map(described).joined(separator: "; ")
         return .applicationNotResolved(
-            "\"\(wanted)\" names \(names.count) installed applications (\(shown)); "
-                + "name the one you mean exactly as it is written.")
+            "\"\(wanted)\" names \(matches.count) installed applications: \(shown). "
+                + "Choose from the conversation's context; if it does not say which one, ask the person "
+                + "which one they mean, naming these; then call open_session with the chosen bundleID.")
     }
 }

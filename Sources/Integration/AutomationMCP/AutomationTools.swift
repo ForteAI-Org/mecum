@@ -99,6 +99,10 @@ public final class AutomationTools {
             tool("status", "Read Mecum's permission and session status. Never prompts.", [:], [], readOnly: true),
             tool("windows", "Discover exact running application names, bundle IDs and window titles. Optional app filter.",
                  ["app": text], [], readOnly: true),
+            tool("apps", "List the applications open_session can open, best match first, with name, bundleID, version "
+                 + "and running. Use it to find an application that is not running, then pass its bundleID to "
+                 + "open_session. Optional query: part of a name, a bundle ID or initials.",
+                 ["query": text], [], readOnly: true),
             tool("open_session", "Adopt an app into one persistent background Seat and observe it. "
                  + "Use an exact window title when needed. Close the current session before opening another.",
                  ["app": text, "window": text], ["app"]),
@@ -160,7 +164,7 @@ public final class AutomationTools {
         }
         try record?("→ \(name) \(String(decoding: try JSONEncoder().encode(arguments), as: UTF8.self))")
         let value: JSONValue
-        if !["status", "windows", "open_session"].contains(name) {
+        if !["status", "windows", "apps", "open_session"].contains(name) {
             guard let id = session.id, arguments["session"].string == id.uuidString else {
                 throw AutomationFailure("Session ID is missing or stale. Use status; open a session if necessary and observe again.")
             }
@@ -184,6 +188,14 @@ public final class AutomationTools {
                     "windows": .array(rows.map { .object(["id": .number(Double($0.number)),
                                                          "title": .string($0.title ?? "")]) })])
             })])
+        case "apps":
+            let found = try await session.applications(matching: optionalString(arguments, "query"))
+            let shown = found.prefix(Self.applicationLimit)
+            var listing: [String: JSONValue] = ["applications": .array(shown.map(Self.candidate))]
+            if found.count > shown.count {
+                listing["more"] = .string("\(found.count - shown.count) more not listed; pass a query to find them.")
+            }
+            value = .object(listing)
         case "open_session":
             let scene = try await session.open(application: string(arguments, "app"),
                                                 window: optionalString(arguments, "window"))
@@ -282,6 +294,18 @@ public final class AutomationTools {
 
     private static func optionalString(_ object: JSONValue, _ key: String) throws -> String? {
         object.object?[key] == nil ? nil : try requiredString(object, key)
+    }
+
+    // ponytail: apps lists 60 candidates at most, so a listing without a query stays short;
+    // the rest are only counted, and a query reaches them.
+    private static let applicationLimit = 60
+
+    private static func candidate(_ app: ApplicationCandidate) -> JSONValue {
+        var fields: [String: JSONValue] = ["name": .string(app.name), "bundleID": .string(app.bundleID),
+                                           "running": .bool(app.isRunning)]
+        if let version = app.version { fields["version"] = .string(version) }
+        if let location = app.location { fields["location"] = .string(location) }
+        return .object(fields)
     }
 
     /// The tools that deliver an input through the engine, in the order they are listed.
