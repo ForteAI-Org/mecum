@@ -32,7 +32,7 @@ struct InspectorModelSection: View {
             providerRow
 
             if isChoosing {
-                ForEach(ModelProvider.allCases) { provider in
+                ForEach(ModelProvider.inApp) { provider in
                     InspectorProviderRow(
                         provider : provider,
                         isCurrent: provider == worker.configuration?.provider,
@@ -43,7 +43,7 @@ struct InspectorModelSection: View {
                     // The first provider stands a little apart from the row that opened the list.
                     .padding(
                         .top,
-                        provider == ModelProvider.allCases.first ? 5 : 0
+                        provider == ModelProvider.inApp.first ? 5 : 0
                     )
                     .listRowSeparatorTint(Color(nsColor: .tertiaryLabelColor))
                 }

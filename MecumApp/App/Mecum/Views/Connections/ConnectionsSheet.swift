@@ -68,7 +68,7 @@ struct ConnectionsSheet: View {
 
             Form {
                 Section {
-                    ForEach(ModelProvider.allCases) { provider in
+                    ForEach(ModelProvider.inApp) { provider in
                         ConnectionItem(
                             connections: connections,
                             provider   : provider,
@@ -95,7 +95,7 @@ struct ConnectionsSheet: View {
                 }
                 .labelStyle(.iconOnly)
                 .help("Check all connections.")
-                .disabled(ModelProvider.allCases.allSatisfy(connections.isChecking))
+                .disabled(ModelProvider.inApp.allSatisfy(connections.isChecking))
 
                 Spacer()
 

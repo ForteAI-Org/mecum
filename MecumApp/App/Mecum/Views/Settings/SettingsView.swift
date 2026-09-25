@@ -50,7 +50,7 @@ struct SettingsView: View {
                 }
 
                 Section("Providers") {
-                    ForEach(ModelProvider.allCases) { row(.provider($0)) }
+                    ForEach(ModelProvider.inApp) { row(.provider($0)) }
                 }
             }
             .navigationSplitViewColumnWidth(

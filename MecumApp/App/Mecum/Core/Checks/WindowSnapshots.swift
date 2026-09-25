@@ -155,7 +155,7 @@ enum WindowSnapshots {
                 SettingsView(
                     store : team.connections,
                     broker: broker,
-                    pane  : .provider(.ollama)
+                    pane  : .provider(.claudeCode)
                 ),
                 width : 720,
                 height: 540,
@@ -168,8 +168,8 @@ enum WindowSnapshots {
                 ("virtual-display", AnyView(VirtualDisplaySettings(broker: broker))),
                 ("sidebar", AnyView(SidebarSettings())),
                 ("chat", AnyView(ChatSettings())),
-                ("anthropic", AnyView(ProviderSettingsPage(store: team.connections, provider: .anthropic))),
-                ("ollama", AnyView(ProviderSettingsPage(store: team.connections, provider: .ollama))),
+                ("claude", AnyView(ProviderSettingsPage(store: team.connections, provider: .claudeCode))),
+                ("codex", AnyView(ProviderSettingsPage(store: team.connections, provider: .codex))),
             ]
             for page in pages {
                 try await write(
@@ -211,7 +211,7 @@ enum WindowSnapshots {
                     ConnectionsSheet(
                         connections   : connections,
                         checksOnAppear: false,
-                        opens         : [.anthropic]
+                        opens         : [.claudeCode]
                     ),
                     width : 520,
                     height: 600,
