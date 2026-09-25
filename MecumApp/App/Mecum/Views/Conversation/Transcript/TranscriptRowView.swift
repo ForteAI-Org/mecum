@@ -87,6 +87,16 @@ final class TranscriptRowView: NSView {
     private var isHoveringLine = false { didSet { if isHoveringLine != oldValue { needsDisplay = true } } }
     private var hoverArea: NSTrackingArea?
 
+    /// The footer's time, made and measured once per row and text size rather than on every draw:
+    /// formatting the date and measuring it again cost most of a row's drawing.
+    private var footerTime: (key: FooterTimeKey, text: NSAttributedString, size: CGSize)?
+
+    private struct FooterTimeKey: Equatable {
+        let item     : TranscriptItem.ID
+        let date     : Date
+        let pointSize: CGFloat
+    }
+
     override var isFlipped: Bool { true }
 
     func configure(
@@ -101,6 +111,7 @@ final class TranscriptRowView: NSView {
         let previousRow = self.row?.item.id == row.item.id ? self.row : nil
         let oldStacks   = stacks
         if previousRow == nil { isHoveringLine = false }
+        let oldLine     = self.row.flatMap(Self.lineFrame(of:))
         self.row        = row
         self.style      = style
         self.workerName = workerName
@@ -119,7 +130,8 @@ final class TranscriptRowView: NSView {
         showCopyIcons(row, keepsCopied: previous != nil)
         showChevron(row, wasExpanded: Self.isExpanded(previousRow))
         configureAccessibility(row)
-        window?.invalidateCursorRects(for: self)
+        // Only when the summary moved or came and went: every other update keeps the same cursor.
+        if Self.lineFrame(of: row) != oldLine { window?.invalidateCursorRects(for: self) }
         needsDisplay = true
     }
 
@@ -494,12 +506,21 @@ final class TranscriptRowView: NSView {
     /// badge when there is one: bottom left under the person's, bottom right under the worker's.
     private func drawTime(_ row: PreparedRow, in frame: CGRect, isPerson: Bool) {
         guard row.item.endsGroup, style.showsTimes else { return }
-        let time = NSAttributedString(
-            string    : TranscriptWording.header(for: row.item, workerName: workerName).time,
-            attributes: [.font: style.textFont(ofSize: style.captionPointSize - 1),
-                         .foregroundColor: NSColor.tertiaryLabelColor]
+        let key = FooterTimeKey(
+            item     : row.item.id,
+            date     : row.item.date,
+            pointSize: style.captionPointSize - 1
         )
-        let size  = time.size()
+        if footerTime?.key != key {
+            // The colour is the dynamic tertiary label, so a kept string still follows the appearance.
+            let text = NSAttributedString(
+                string    : TranscriptWording.header(for: row.item, workerName: workerName).time,
+                attributes: [.font: style.textFont(ofSize: key.pointSize),
+                             .foregroundColor: NSColor.tertiaryLabelColor]
+            )
+            footerTime = (key, text, text.size())
+        }
+        guard let (_, time, size) = footerTime else { return }
         let badge = row.geometry.badge.map { $0.width + 4 } ?? 0
         let x     = isPerson ? frame.minX + RowGeometry.footerInset + badge
                              : frame.maxX - RowGeometry.footerInset - badge - size.width
