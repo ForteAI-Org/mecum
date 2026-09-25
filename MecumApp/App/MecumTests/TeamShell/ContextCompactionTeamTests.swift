@@ -17,16 +17,22 @@ import Testing
 /// arguments and what it was sent, answers a turn with the context in its
 /// `context` file against a 1,000 token window, and `/compact` as its
 /// `compaction` file says: compacted to 120, refused, signed out, or hanging.
-/// A `turn` file makes a turn fail or hang after it answered.
+/// A `turn` file makes a turn fail or hang after it answered. The team reads
+/// its preferences from `preferences`, a suite of the harness's own.
 @MainActor
 private final class Harness {
 
-    let root  : URL
-    let store : WorkspaceStore
-    let team  : TeamModel
-    let worker: UUID
+    let root       : URL
+    let store      : WorkspaceStore
+    let team       : TeamModel
+    let worker     : UUID
+    let preferences: UserDefaults
+
+    private let suite: String
 
     init() async throws {
+        suite       = "mecum-team-compaction-\(UUID().uuidString)"
+        preferences = try #require(UserDefaults(suiteName: suite))
         root = URL.temporaryDirectory.appending(path: "mecum-team-compaction-\(UUID().uuidString)")
         try FileManager.default.createDirectory(
             at                         : root.appending(path: "log"),
@@ -57,7 +63,8 @@ private final class Harness {
             connections     : ModelSettingsStore(),
             broker          : SeatBroker(),
             agents          : { _ in (.claude, agent) },
-            bridgeExecutable: agent
+            bridgeExecutable: agent,
+            preferences     : preferences
         )
         await team.load()
         team.selection = worker
@@ -162,6 +169,7 @@ private final class Harness {
 
     func discard() async {
         await team.closeAgentHosts()
+        preferences.removePersistentDomain(forName: suite)
         try? FileManager.default.removeItem(at: root)
     }
 }
@@ -198,6 +206,41 @@ struct ContextCompactionTeamTests {
         #expect(try await harness.messages().map(\.text) == ["Hello", "ok"], "a compaction writes no message")
         #expect(harness.team.problem == nil)
         #expect(!harness.team.isCompacting(harness.worker))
+        await harness.discard()
+    }
+
+    /// Web search is on until Settings turn it off, read as each turn starts, and never on a compaction.
+    @Test func aTurnSearchesTheWebUnlessSettingsSayNotAndItsCompactionNever() async throws {
+        let harness = try await Harness()
+        try harness.set(
+            "context",
+            to: "900"
+        )
+
+        await harness.send("Hello")
+        try await harness.idle()
+        harness.preferences.set(
+            false,
+            forKey: AppPreferences.workersSearchWeb
+        )
+        await harness.send("Again")
+        try await harness.idle()
+
+        let calls = try harness.calls()
+        #expect(calls.map(\.received) == ["Hello", "/compact", "Again", "/compact"])
+        func tools(_ arguments: [String]) -> [String] {
+            ["--tools", "--allowedTools"].map { flag in
+                arguments.firstIndex(of: flag).map { arguments[$0 + 1] } ?? "missing"
+            }
+        }
+        #expect(calls.map { tools($0.arguments) } == [
+            ["WebSearch,WebFetch", "mcp__mecum__*,WebSearch,WebFetch"],
+            ["", "mcp__mecum__*"],
+            ["", "mcp__mecum__*"],
+            ["", "mcp__mecum__*"],
+        ])
+        #expect(calls.map { $0.arguments.contains { $0.contains(WorkerAgentHost.webInstructions) } }
+                == [true, false, false, false])
         await harness.discard()
     }
 

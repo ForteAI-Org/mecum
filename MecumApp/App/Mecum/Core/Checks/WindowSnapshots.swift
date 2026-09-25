@@ -27,6 +27,18 @@ enum WindowSnapshots {
     /// True while a snapshot draws the composer with its model popup open.
     static var opensModelPopup = false
 
+    /// The defaults the drawn views read, a suite of their own apart from the person's.
+    private static let appStorage = UserDefaults(suiteName: "dev.forte.Mecum.snapshots")
+
+    /// A turn that read a page and searched the web, as `WebToolRecords` writes it.
+    private static let webTools = [
+        "» I’ll check the release notes first.",
+        "→ web_fetch {\"url\":\"https://www.swift.org/blog/\"}",
+        "→ web_search {\"query\":\"capture suite timeout on a virtual display\"}",
+        "← web_fetch done",
+        "← web_search done",
+    ]
+
     /// Writes every snapshot, prints each path, and ends the process: 0 when
     /// all were written, 1 with the reason on standard error otherwise.
     static func writeAndQuit() async {
@@ -201,6 +213,36 @@ enum WindowSnapshots {
                 )
             }
 
+            // Atlas's turn read a page and searched the web: its tool line closed, then open.
+            let searched = try await syntheticTeam(
+                in   : store.appending(
+                    path         : "Web",
+                    directoryHint: .isDirectory
+                ),
+                tools: webTools
+            )
+            guard let appStorage else { throw SnapshotFailure("no defaults of the snapshots' own") }
+            do {
+                defer { appStorage.removeObject(forKey: AppPreferences.chatOpensToolSteps) }
+                for opens in [false, true] {
+                    appStorage.set(
+                        opens,
+                        forKey: AppPreferences.chatOpensToolSteps
+                    )
+                    for (name, dark) in [("light", false), ("dark", true)] {
+                        try await write(
+                            Root(
+                                team                : searched,
+                                isInspectorRequested: false
+                            ),
+                            width: 1200,
+                            dark : dark,
+                            to   : output.appending(path: "window-1200-\(name)-web\(opens ? "-open" : "").png")
+                        )
+                    }
+                }
+            }
+
             // The split's sidebar is glass and draws blank offscreen, so its rows are drawn alone too, on the
             // sidebar material, full and compact, with two connections ready for the footer's badge.
             let badges = try await badgedTeam(in: store.appending(
@@ -292,6 +334,14 @@ enum WindowSnapshots {
                     to    : output.appending(path: "settings-\(page.name)-light.png")
                 )
             }
+            // The Chat page in dark too, for its switch that lets workers search the web.
+            try await write(
+                ChatSettings(),
+                width : 530,
+                height: 700,
+                dark  : true,
+                to    : output.appending(path: "settings-chat-dark.png")
+            )
 
             // The Brain, from a knowledge directory the run names, since the snapshot store learns nothing.
             if let knowledge = ProcessInfo.processInfo.environment["MECUM_SNAPSHOT_KNOWLEDGE_DIR"],
@@ -456,11 +506,15 @@ enum WindowSnapshots {
     /// to show the turn's model and not the profile's. With `contextTokens` the
     /// turn records its usage too (`atlasUsage`), so the context ring and the
     /// token counter are drawn. With `compaction` the context is compacted
-    /// after the turn, to 38,200 tokens.
+    /// after the turn, to 38,200 tokens. `tools` are the turn's tool records.
     static func syntheticTeam(
         in directory : URL,
         contextTokens: Int?                       = nil,
-        compaction   : ContextCompaction.Trigger? = nil
+        compaction   : ContextCompaction.Trigger? = nil,
+        tools        : [String]                   = [
+            "→ read_log {\"job\":\"nightly\"}",
+            "← read_log 2 bundles failed",
+        ]
     ) async throws -> TeamModel {
         let store = try WorkspaceStore.opening(in: directory)
         let iris  = try await store.createWorker(
@@ -563,16 +617,13 @@ enum WindowSnapshots {
             .executionStarted,
             at: 1
         )
-        try await record(
-            .toolActivity,
-            at  : 2,
-            text: "→ read_log {\"job\":\"nightly\"}"
-        )
-        try await record(
-            .toolActivity,
-            at  : 3,
-            text: "← read_log 2 bundles failed"
-        )
+        for (index, line) in tools.enumerated() {
+            try await record(
+                .toolActivity,
+                at  : 2 + Double(index),
+                text: line
+            )
+        }
         if let contextTokens {
             let usage = try atlasUsage(contextTokens: contextTokens).encoded()
             try await record(
@@ -777,7 +828,7 @@ enum WindowSnapshots {
         NSApp.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
 
         let hosting = NSHostingView(rootView: content
-            .defaultAppStorage(UserDefaults(suiteName: "dev.forte.Mecum.snapshots") ?? .standard))
+            .defaultAppStorage(appStorage ?? .standard))
         hosting.sceneBridgingOptions = [.toolbars, .title]
 
         let window = NSWindow(

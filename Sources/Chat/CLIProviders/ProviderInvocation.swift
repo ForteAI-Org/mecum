@@ -3,6 +3,7 @@ import Foundation
 
 /// ProviderInvocation builds argv without a shell. Only Mecum's MCP tools are authorized for Claude;
 /// Codex runs read-only with shell tools disabled and only the explicitly supplied MCP configuration.
+/// A turn that allows web search adds each command line's own web search and page reading, nothing else.
 public struct ProviderInvocation: Sendable {
     public let arguments: [String]
     public let standardInput: String
@@ -11,6 +12,7 @@ public struct ProviderInvocation: Sendable {
         // No text of the person's reaches the one Claude turn that runs slash commands.
         standardInput = turn.isCompaction && turn.provider == .claude ? "/compact" : turn.prompt
         let bridgeArguments = ["mcp-bridge", "--connection", turn.connectionFile]
+        let searchesWeb = turn.allowsWebSearch && !turn.isCompaction
         var arguments: [String]
         switch turn.provider {
         case .claude:
@@ -20,7 +22,8 @@ public struct ProviderInvocation: Sendable {
             let encoded = try JSONSerialization.data(withJSONObject: config, options: [.sortedKeys])
             arguments = ["-p", "--output-format", "stream-json", "--verbose",
                          "--strict-mcp-config", "--mcp-config", String(decoding: encoded, as: UTF8.self),
-                         "--tools", "", "--allowedTools", "mcp__mecum__*",
+                         "--tools", searchesWeb ? "WebSearch,WebFetch" : "",
+                         "--allowedTools", searchesWeb ? "mcp__mecum__*,WebSearch,WebFetch" : "mcp__mecum__*",
                          "--permission-mode", "dontAsk", "--setting-sources", ""]
                 + (turn.isCompaction ? [] : ["--disable-slash-commands"])
                 + ["--no-chrome", "--append-system-prompt", turn.instructions]
@@ -38,7 +41,7 @@ public struct ProviderInvocation: Sendable {
                          "-c", "features.apps=false", "-c", "features.plugins=false",
                          "-c", "features.computer_use=false", "-c", "features.browser_use=false",
                          "-c", "features.view_image=false", "-c", "features.image_generation=false",
-                         "-c", "web_search=\"disabled\"",
+                         "-c", "web_search=\(try Self.quote(searchesWeb ? "live" : "disabled"))",
                          "-c", "developer_instructions=\(try Self.quote(turn.instructions))",
                          "-c", "mcp_servers.mecum=\(server)"]
             if let model = turn.model { arguments += ["--model", model] }

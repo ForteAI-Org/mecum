@@ -12,7 +12,9 @@ import Foundation
 /// then its result `← name {json}` or `← name error: reason`. A batch call is
 /// its steps, answered by `← batch step N`. What the worker wrote just before
 /// a call, saying what it was about to do, is a note `» text`: the turn's
-/// recorder keeps it on the line rather than as a reply.
+/// recorder keeps it on the line rather than as a reply. A command line's
+/// own web search or page read is recorded the same way, as `web_search` or
+/// `web_fetch` (`WebToolRecords`).
 ///
 /// A result is matched to the oldest call of the same tool still waiting, so
 /// calls that overlap still pair. A result with no call, as after a capped
@@ -52,6 +54,12 @@ nonisolated struct ToolStep: Sendable, Hashable {
         /// Closes the app the session held, when this turn opened it.
         case close(app: String?)
 
+        /// Searched the web, for `query` when the record names it.
+        case webSearch(query: String?)
+
+        /// Read a web page on `site`, its address's host without `www.`.
+        case webRead(site: String?)
+
         /// What the worker said it was about to do, in its own words.
         case note(String)
 
@@ -72,8 +80,8 @@ nonisolated struct ToolStep: Sendable, Hashable {
     /// True for a step that changes the app, rather than one that only looks.
     var isEffectful: Bool {
         switch action {
-        case .status, .windows, .apps, .observe, .note: false
-        default:                                        true
+        case .status, .windows, .apps, .observe, .webSearch, .webRead, .note: false
+        default:                                                              true
         }
     }
 
@@ -230,6 +238,10 @@ nonisolated struct ToolStep: Sendable, Hashable {
                 target: target,
                 item  : item
             )
+        case "web_search":
+            return .webSearch(query: text("query"))
+        case "web_fetch":
+            return .webRead(site: (arguments["url"] as? String).map(site))
         default:
             return .other(name: name)
         }
@@ -260,6 +272,12 @@ nonisolated struct ToolStep: Sendable, Hashable {
         } catch {
             return nil
         }
+    }
+
+    /// The host a web address names, without `www.`, or the address itself when it names none.
+    private static func site(_ address: String) -> String {
+        guard let host = URL(string: address)?.host(), !host.isEmpty else { return shortened(address) }
+        return host.hasPrefix("www.") ? String(host.dropFirst(4)) : host
     }
 
     /// A value a model chose, cut so a step stays one short line.

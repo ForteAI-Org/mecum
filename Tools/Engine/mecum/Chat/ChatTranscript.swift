@@ -29,7 +29,7 @@ final class ChatTranscript {
             try append(.assistant, text)
         case .activity(let text): print(text)
         case .failure(let text): try append(.error, text)
-        case .usage, .compacted, .completed: break
+        case .usage, .compacted, .web, .completed: break
         }
     }
 

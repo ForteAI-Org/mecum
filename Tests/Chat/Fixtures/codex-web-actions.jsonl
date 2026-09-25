@@ -1,0 +1,14 @@
+{"type": "thread.started", "thread_id": "01a0d9cd-7111-7731-bfdf-c4320fb3de95"}
+{"type": "turn.started"}
+{"type": "item.started", "item": {"id": "exec-4b2becc4-5676-43e8-ad26-d29fdaab5a8b", "type": "web_search", "query": "", "action": {"type": "other"}}}
+{"type": "item.completed", "item": {"id": "exec-4b2becc4-5676-43e8-ad26-d29fdaab5a8b", "type": "web_search", "query": "site:swift.org download latest stable Swift release September 2026", "action": {"type": "search", "query": "site:swift.org download latest stable Swift release September 2026"}}}
+{"type": "item.started", "item": {"id": "exec-0d8fb3d4-0812-4c4d-a955-17b21f5526c7", "type": "web_search", "query": "", "action": {"type": "other"}}}
+{"type": "item.completed", "item": {"id": "exec-0d8fb3d4-0812-4c4d-a955-17b21f5526c7", "type": "web_search", "query": "site:swift.org/install Swift 6.4.0 release latest stable ...", "action": {"type": "search", "queries": ["site:swift.org/install Swift 6.4.0 release latest stable", "site:forums.swift.org/t/announcing-swift-6-4 release 2026"]}}}
+{"type": "item.started", "item": {"id": "exec-c8da80cf-2914-4919-8afb-b36b071f5c37", "type": "web_search", "query": "", "action": {"type": "other"}}}
+{"type": "item.completed", "item": {"id": "exec-c8da80cf-2914-4919-8afb-b36b071f5c37", "type": "web_search", "query": "https://www.swift.org/install/", "action": {"type": "other"}}}
+{"type": "item.started", "item": {"id": "exec-a1c58544-265e-460c-affe-471cb1b8ac7e", "type": "web_search", "query": "", "action": {"type": "other"}}}
+{"type": "item.completed", "item": {"id": "exec-a1c58544-265e-460c-affe-471cb1b8ac7e", "type": "web_search", "query": "", "action": {"type": "other"}}}
+{"type": "item.started", "item": {"id": "exec-f455137a-e5f7-41a7-8439-a4204c6863a1", "type": "web_search", "query": "", "action": {"type": "other"}}}
+{"type": "item.completed", "item": {"id": "exec-f455137a-e5f7-41a7-8439-a4204c6863a1", "type": "web_search", "query": "'6.4.0'", "action": {"type": "other"}}}
+{"type": "item.completed", "item": {"id": "item_5", "type": "agent_message", "text": "The latest stable version is **Swift 6.4.0**. [Source: Swift.org](https://www.swift.org/install/windows/)."}}
+{"type": "turn.completed", "usage": {"input_tokens": 150838, "cached_input_tokens": 112256, "cache_write_input_tokens": 0, "output_tokens": 358, "reasoning_output_tokens": 37}}

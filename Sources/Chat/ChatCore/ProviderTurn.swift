@@ -19,11 +19,14 @@ public struct ProviderTurn: Sendable {
     /// says, on the one turn that allows slash commands; Codex answers `prompt` with an auto-compaction
     /// limit so low that it compacts the session first.
     public let isCompaction: Bool
+    /// Whether the command line may search the web and read pages with its own tools, besides Mecum's.
+    /// A compaction turn never does, whatever this says.
+    public let allowsWebSearch: Bool
 
     public init(provider: ChatProvider, model: String?, sessionID: String?, prompt: String,
                 instructions: String, bridgeExecutable: String, connectionFile: String,
                 workingDirectory: String, effort: String? = nil, environment: [String: String]? = nil,
-                isCompaction: Bool = false) {
+                isCompaction: Bool = false, allowsWebSearch: Bool = false) {
         self.provider = provider
         self.model = model
         self.sessionID = sessionID
@@ -35,5 +38,6 @@ public struct ProviderTurn: Sendable {
         self.effort = effort
         self.environment = environment
         self.isCompaction = isCompaction
+        self.allowsWebSearch = allowsWebSearch
     }
 }

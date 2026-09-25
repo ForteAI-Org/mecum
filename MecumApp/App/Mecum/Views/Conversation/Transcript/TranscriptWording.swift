@@ -209,6 +209,12 @@ nonisolated enum TranscriptWording {
             return forms("Dragged", "drag", "Dragging", label(source) + (destination.map { " to \(label($0))" } ?? ""))
         case .contextMenu(let target, let item):
             return forms("Selected", "select", "Selecting", "\(label(item)) from \(label(target))’s menu")
+        case .webSearch(let query):
+            // The query is said once it is done; while the search runs, the line only says it is searching.
+            let object = query.map { " for “\(label($0))”" } ?? ""
+            return ("Searched the web" + object, "search the web" + object, "Searching the web")
+        case .webRead(let site):
+            return forms("Read", "read", "Reading", site.map(label) ?? "a web page")
         case .note(let text):
             return (text, text, text)
         case .other(let name):

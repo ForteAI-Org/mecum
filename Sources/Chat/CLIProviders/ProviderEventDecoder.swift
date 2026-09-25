@@ -3,12 +3,14 @@ import Foundation
 
 /// ProviderEventDecoder translates documented JSONL events, leaving provider internals outside ChatCore.
 /// One decoder reads one turn: Claude's usage names the model from the turn's `init` and the limits
-/// from its latest `rate_limit_event`.
+/// from its latest `rate_limit_event`, and a Claude web tool's result is paired with its call by id.
 public struct ProviderEventDecoder {
     private let provider: ChatProvider
     private var hasAssistant = false
     private var model: String?
     private var rateLimits: [ProviderUsage.RateLimit] = []
+    /// Claude's web tool calls waiting for their result, by `tool_use` id. Other tools' results are ignored.
+    private var webCalls: [String: (kind: ProviderEvent.WebKind, detail: String?)] = [:]
 
     public init(provider: ChatProvider) { self.provider = provider }
 
@@ -32,11 +34,28 @@ public struct ProviderEventDecoder {
             if object["type"] as? String == "assistant",
                let message = object["message"] as? [String: Any],
                let content = message["content"] as? [[String: Any]] {
-                for block in content where block["type"] as? String == "text" {
-                    if let text = block["text"] as? String, !text.isEmpty {
+                for block in content {
+                    if block["type"] as? String == "text", let text = block["text"] as? String, !text.isEmpty {
                         hasAssistant = true
                         events.append(.assistant(text))
                     }
+                    if block["type"] as? String == "tool_use", let id = block["id"] as? String,
+                       let kind = Self.claudeWebTools[block["name"] as? String ?? ""] {
+                        let input = block["input"] as? [String: Any]
+                        let detail = input?[kind == .search ? "query" : "url"] as? String
+                        webCalls[id] = (kind, detail)
+                        events.append(.web(id: id, kind: kind, detail: detail, phase: .started))
+                    }
+                }
+            }
+            if object["type"] as? String == "user",
+               let message = object["message"] as? [String: Any],
+               let content = message["content"] as? [[String: Any]] {
+                for block in content where block["type"] as? String == "tool_result" {
+                    guard let id = block["tool_use_id"] as? String, let call = webCalls.removeValue(forKey: id)
+                    else { continue }
+                    events.append(.web(id: id, kind: call.kind, detail: call.detail,
+                                       phase: .finished(failed: block["is_error"] as? Bool == true)))
                 }
             }
             if object["type"] as? String == "result" {
@@ -55,10 +74,20 @@ public struct ProviderEventDecoder {
             switch object["type"] as? String {
             case "thread.started":
                 if let session = object["thread_id"] as? String { events.append(.session(session)) }
+            case "item.started":
+                if let item = object["item"] as? [String: Any], item["type"] as? String == "web_search",
+                   let (kind, detail) = Self.codexWeb(item) {
+                    events.append(.web(id: item["id"] as? String, kind: kind, detail: detail, phase: .started))
+                }
             case "item.completed":
                 if let item = object["item"] as? [String: Any],
                    item["type"] as? String == "agent_message", let text = item["text"] as? String {
                     events.append(.assistant(text))
+                }
+                if let item = object["item"] as? [String: Any], item["type"] as? String == "web_search",
+                   let (kind, detail) = Self.codexWeb(item) {
+                    events.append(.web(id: item["id"] as? String, kind: kind, detail: detail,
+                                       phase: .finished(failed: false)))
                 }
             case "turn.completed":
                 // Codex counts the whole session so far, not the turn.
@@ -79,6 +108,24 @@ public struct ProviderEventDecoder {
             }
         }
         return events
+    }
+
+    /// Claude Code's web tools, by the name its `tool_use` blocks give them.
+    private static let claudeWebTools: [String: ProviderEvent.WebKind] = ["WebSearch": .search, "WebFetch": .fetch]
+
+    /// A Codex `web_search` item's kind and query, or nil for a step inside a page already open.
+    /// Its query is empty until it finishes. Its `action` is `search` for a search and `other`
+    /// for the rest, where a query that is an address opens that page and anything else, an empty
+    /// query or a phrase looked for on the page (seen live: `'6.4.0'`), is no search of its own.
+    private static func codexWeb(_ item: [String: Any]) -> (ProviderEvent.WebKind, String?)? {
+        let query     = (item["query"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+        let isAddress = query.map { query in
+            !query.contains(where: \.isWhitespace)
+                && ["http://", "https://"].contains { query.lowercased().hasPrefix($0) }
+        } ?? false
+        if isAddress { return (.fetch, query) }
+        let action = (item["action"] as? [String: Any])?["type"] as? String
+        return action == nil || action == "search" ? (.search, query) : nil
     }
 
     /// The turn's usage from a Claude `result`: `usage` for the turn, its last iteration (one per API

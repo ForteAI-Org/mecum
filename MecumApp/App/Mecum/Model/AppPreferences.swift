@@ -61,11 +61,17 @@ enum AppPreferences {
     static let chatOpensToolSteps        = "chat.opensToolSteps"
     static let chatOpensToolStepsDefault = false
 
-    /// The stored value of a Bool preference, its default when none is stored.
+    /// Whether a Claude Code or Codex worker may search the web and read pages with its own tools.
+    /// A turn reads it as it starts.
+    static let workersSearchWeb        = "chat.workersSearchWeb"
+    static let workersSearchWebDefault = true
+
+    /// The stored value of a Bool preference in `defaults`, its default when none is stored.
     static func bool(
         _ key           : String,
-        default fallback: Bool
+        default fallback: Bool,
+        in defaults     : UserDefaults = .standard
     ) -> Bool {
-        UserDefaults.standard.object(forKey: key) as? Bool ?? fallback
+        defaults.object(forKey: key) as? Bool ?? fallback
     }
 }

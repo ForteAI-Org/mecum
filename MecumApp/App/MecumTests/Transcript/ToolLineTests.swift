@@ -360,4 +360,61 @@ struct ToolLineTests {
         cell.prepareForReuse()
         #expect(overlay.superview == nil, "a reused cell keeps nothing of the fold")
     }
+
+    /// Claude Code's recorded turn: a note, then a page read and a search at once, as `WebToolRecords` writes them.
+    static let web = [
+        "» I'll check the official Swift site.",
+        #"→ web_fetch {"url":"https://www.swift.org/install/"}"#,
+        #"→ web_search {"query":"latest stable Swift version release swift.org 2026"}"#,
+        "← web_fetch done",
+        "← web_search done",
+    ]
+
+    @Test("A web search and a page read only look: named by query and by site, the search's query said once done")
+    func webPhrases() {
+        let steps = ToolStep.steps(from: Self.web)
+        #expect(steps.allSatisfy { !$0.isEffectful })
+        #expect(Self.done(Self.web) == ["Read swift.org", "Searched the web for “latest stable Swift ver…”"])
+        #expect(TranscriptWording.toolSummary(steps, ending: .completed)
+                == "Read swift.org · searched the web for “latest stable Swift ver…”")
+
+        let running = ToolStep.steps(from: Array(Self.web.prefix(3)))
+        #expect(TranscriptWording.toolSteps(running, ending: nil) == ["Reading swift.org…", "Searching the web…"])
+        #expect(TranscriptWording.toolSummary(running, ending: nil) == "Reading swift.org… · searching the web…")
+        #expect(TranscriptWording.toolSteps(running, ending: .stopped)
+                == ["Reading swift.org, stopped", "Searching the web, stopped"])
+
+        // Codex's recorded turn only searched, so its line names the search.
+        let codex = [
+            #"→ web_search {"query":"site:swift.org/download latest stable Swift release September 2026"}"#,
+            "← web_search done",
+        ]
+        #expect(TranscriptWording.toolSummary(ToolStep.steps(from: codex), ending: .completed)
+                == "Searched the web for “site:swift.org/download…”")
+        #expect(Self.done(["→ web_fetch {\"url\":\"http://example.com/a\"}", "← web_fetch done"])
+                == ["Read example.com"])
+        #expect(Self.done(["→ web_search {}", "← web_search done"]) == ["Searched the web"])
+    }
+
+    @Test("A failed search or read says what was tried, and a turn that also acted names only the action")
+    func webFailuresAndActions() {
+        let failed = [
+            #"→ web_search {"query":"swift 7 release date"}"#,
+            "← web_search error: The web tool reported a failure.",
+            #"→ web_fetch {"url":"https://www.swift.org/install/"}"#,
+            "← web_fetch error: The web tool reported a failure.",
+        ]
+        #expect(Self.done(failed) == [
+            "Tried to search the web for “swift 7 release date”",
+            "Tried to read swift.org",
+        ])
+        #expect(TranscriptWording.toolSummary(ToolStep.steps(from: failed), ending: .completed)
+                == "Tried to search the web for “swift 7 release date” · tried to read swift.org")
+
+        let acted = Self.web + [
+            "→ act {\"session\":\"s\",\"target\":\"Send\"}",
+            "← act {\"status\":\"found_acted\"}",
+        ]
+        #expect(TranscriptWording.toolSummary(ToolStep.steps(from: acted), ending: .completed) == "Pressed Send")
+    }
 }

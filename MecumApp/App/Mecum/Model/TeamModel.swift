@@ -133,6 +133,9 @@ final class TeamModel {
     private let agents          : (ModelProvider) throws -> (ChatProvider, URL)
     private let bridgeExecutable: URL
 
+    /// Where a turn reads the app's preferences as it starts (`AppPreferences`).
+    private let preferences: UserDefaults
+
     private static let log = Logger(
         subsystem: "dev.forte.Mecum",
         category : "Context"
@@ -166,19 +169,21 @@ final class TeamModel {
     private var isSending = false
 
     /// `agents` and `bridgeExecutable` are the installed command lines and the
-    /// app's bridge; a test passes stand-ins.
+    /// app's bridge, and `preferences` the defaults Settings edits; a test passes stand-ins.
     init(
         store           : WorkspaceStore,
         connections     : ModelSettingsStore,
         broker          : SeatBroker,
         agents          : @escaping (ModelProvider) throws -> (ChatProvider, URL) = WorkerAgentHost.agent(for:),
-        bridgeExecutable: URL = Bundle.main.bundleURL.appending(path: "Contents/Helpers/mecum-bridge")
+        bridgeExecutable: URL = Bundle.main.bundleURL.appending(path: "Contents/Helpers/mecum-bridge"),
+        preferences     : UserDefaults = .standard
     ) {
         self.store            = store
         self.connections      = connections
         self.broker           = broker
         self.agents           = agents
         self.bridgeExecutable = bridgeExecutable
+        self.preferences      = preferences
     }
 
     // MARK: Reading
@@ -475,20 +480,26 @@ final class TeamModel {
                         )
                     }
                     // A failed read only makes a Codex turn count from its session's start: no reason to fail it.
-                    let lastUsage = try? await store.latestTurnUsage(
+                    let lastUsage   = try? await store.latestTurnUsage(
                         in: conversationID,
                         on: frozen.provider
+                    )
+                    let searchesWeb = AppPreferences.bool(
+                        AppPreferences.workersSearchWeb,
+                        default: AppPreferences.workersSearchWebDefault,
+                        in     : preferences
                     )
                     // The turn gives the seat back as it ends when another entry is waiting for it.
                     try await desktop.turn {
                         try await host.run(
-                            prompt   : message.text,
-                            selection: frozen,
-                            sessionID: session,
-                            role     : worker.instructions,
-                            history  : history,
-                            lastUsage: lastUsage,
-                            onEvent  : emit
+                            prompt         : message.text,
+                            selection      : frozen,
+                            sessionID      : session,
+                            role           : worker.instructions,
+                            history        : history,
+                            lastUsage      : lastUsage,
+                            allowsWebSearch: searchesWeb,
+                            onEvent        : emit
                         )
                     }
                 }

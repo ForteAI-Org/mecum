@@ -241,6 +241,9 @@ final class WorkerTurnRecorder {
             // What is recorded is the host's `.usage`, made from this one, and it says how full the context is
             // after a compaction the command line made by itself during the turn.
             return
+        case .provider(.web):
+            // The host writes web activity as `.tool` records (`WebToolRecords`).
+            return
         }
         await onRecorded()
     }

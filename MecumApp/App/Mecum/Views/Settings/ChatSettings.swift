@@ -7,7 +7,7 @@
 
 import SwiftUI
 
-/// ChatSettings is how a conversation reads and how a message is sent.
+/// ChatSettings is how a conversation reads, how a message is sent, and whether workers may go online.
 struct ChatSettings: View {
 
     @AppStorage(AppPreferences.chatShowsTimes)
@@ -18,6 +18,9 @@ struct ChatSettings: View {
 
     @AppStorage(AppPreferences.chatSendsWithCommandReturn)
     private var sendsWithCommandReturn = AppPreferences.chatSendsWithCommandReturnDefault
+
+    @AppStorage(AppPreferences.workersSearchWeb)
+    private var workersSearchWeb = AppPreferences.workersSearchWebDefault
 
     var body: some View {
         Form {
@@ -46,6 +49,19 @@ struct ChatSettings: View {
                 Text(sendsWithCommandReturn
                     ? "Return inserts a line break."
                     : "Shift-Return or Option-Return inserts a line break.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section {
+                Toggle(
+                    "Workers can search the web",
+                    isOn: $workersSearchWeb
+                )
+            } header: {
+                Text("Web")
+            } footer: {
+                Text("Claude Code and Codex workers can look things up online. Turn this off to keep workers offline.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
