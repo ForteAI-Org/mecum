@@ -88,6 +88,11 @@ final class TeamModel {
     /// derived it from its read markers. A worker absent here has nothing.
     private(set) var unread: [UUID: UnreadState] = [:]
 
+    /// What each worker's turns used and how full its context is, as the store
+    /// last summed it: read when its conversation opens, its model changes or
+    /// a turn ends. A worker absent here has not been read yet.
+    private(set) var usage: [UUID: WorkerUsage] = [:]
+
     /// What the store refused, ready for a specific alert. Nil while nothing is pending.
     var problem: UserFacingIssue?
 
@@ -256,6 +261,7 @@ final class TeamModel {
             draft        = opened.draft
             savedDraft   = opened.draft
             await markReadIfAtEnd()
+            await refreshUsage(of: id)
         } catch {
             guard generation == openingGeneration else { return }
 
@@ -420,7 +426,14 @@ final class TeamModel {
                 workingDirectory: workingFolder(of: conversationID),
                 bridgeExecutable: Bundle.main.bundleURL.appending(path: "Contents/Helpers/mecum-bridge"),
                 session         : { desktop },
-                transports      : { [connections] in $0.transport(settings: connections.providerSettings) }
+                transports      : { [connections] in $0.transport(settings: connections.providerSettings) },
+                contextWindows  : { [connections] selection in
+                    ModelToolLoop.contextWindow(
+                        of       : selection,
+                        settings : connections.providerSettings,
+                        catalogue: connections.catalogues[selection.provider] ?? []
+                    )
+                }
             )
             hosts[conversationID] = host
         }
@@ -453,6 +466,11 @@ final class TeamModel {
                             by    : workerID
                         )
                     }
+                    // A failed read only makes a Codex turn count from its session's start: no reason to fail it.
+                    let lastUsage = try? await store.latestTurnUsage(
+                        in: conversationID,
+                        on: frozen.provider
+                    )
                     // The turn gives the seat back as it ends when another entry is waiting for it.
                     try await desktop.turn {
                         try await host.run(
@@ -461,6 +479,7 @@ final class TeamModel {
                             sessionID: session,
                             role     : worker.instructions,
                             history  : history,
+                            lastUsage: lastUsage,
                             onEvent  : emit
                         )
                     }
@@ -473,6 +492,10 @@ final class TeamModel {
                     error  : error
                 )
             }
+
+            // The limits are the account's, so the worker on screen may share them.
+            await refreshUsage(of: workerID)
+            if let selection, selection != workerID { await refreshUsage(of: selection) }
         }
     }
 
@@ -677,6 +700,23 @@ final class TeamModel {
         await refreshUnread()
     }
 
+    /// Rereads what the worker's turns used, on the provider it answers with now.
+    private func refreshUsage(of workerID: UUID) async {
+        do {
+            usage[workerID] = try await store.usage(
+                of: workerID,
+                on: worker(workerID)?.configuration?.provider,
+                in: Self.workspaceID
+            )
+        } catch {
+            problem = issue(
+                title  : "Couldn’t Update Usage",
+                message: "The token counts shown for \(name(of: workerID)) may be out of date.",
+                error  : error
+            )
+        }
+    }
+
     private func refreshUnread() async {
         do {
             unread = try await store.unreadByWorker()
@@ -792,6 +832,7 @@ final class TeamModel {
         }
 
         connections.refresh([selection.provider])
+        await refreshUsage(of: id)
         await checkModel(of: id)
     }
 
@@ -905,6 +946,7 @@ final class TeamModel {
         }
 
         modelStates[id] = nil
+        usage[id]       = nil
         for conversationID in conversations {
             if let host = hosts.removeValue(forKey: conversationID) {
                 do { try await host.close() }

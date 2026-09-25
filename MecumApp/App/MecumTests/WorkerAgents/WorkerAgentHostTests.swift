@@ -244,10 +244,10 @@ struct WorkerAgentHostTests {
         var sessions: [String] = []
         let receive: @MainActor (WorkerAgentEvent) -> Void = { event in
             switch event {
-            case .tool(let text):                  tools.append(text)
-            case .provider(.assistant(let text)):  replies.append(text)
-            case .provider(.session(let id)):      sessions.append(id)
-            case .provider, .processStarted:       break
+            case .tool(let text):                    tools.append(text)
+            case .provider(.assistant(let text)):    replies.append(text)
+            case .provider(.session(let id)):        sessions.append(id)
+            case .provider, .processStarted, .usage: break
             }
         }
         func turn(_ store: WorkspaceStore, _ host: WorkerAgentHost, _ worker: UUID, _ conversation: UUID,

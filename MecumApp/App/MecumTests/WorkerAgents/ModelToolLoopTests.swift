@@ -319,6 +319,94 @@ struct ModelToolLoopTests {
         #expect(answered.text.contains(#""status":"error""#))
     }
 
+    @Test func theRoundsCostIsAddedUpTheLastRoundIsTheContextAndOllamasWindowIsItsSetting() async throws {
+        let transport = ScriptedTransport(
+            supportsTools: true,
+            rounds       : [
+                [
+                    .toolCall(statusCall),
+                    .completed(ModelUsage(
+                        inputTokens : 1000,
+                        outputTokens: 20,
+                        duration    : .zero
+                    )),
+                ],
+                [
+                    .delta("All good."),
+                    .completed(ModelUsage(
+                        inputTokens     : 100,
+                        outputTokens    : 30,
+                        duration        : .zero,
+                        cacheReadTokens : 900,
+                        cacheWriteTokens: 50
+                    )),
+                ],
+            ]
+        )
+        let host = WorkerAgentHost(
+            workingDirectory: URL.temporaryDirectory.appending(path: "mecum-loop-\(UUID().uuidString)"),
+            bridgeExecutable: URL(fileURLWithPath: "/nonexistent"),
+            session         : { DesktopUnavailableSession() },
+            agents          : { _ in throw AutomationFailure("A loop turn asked for a command line.") },
+            transports      : { _ in transport },
+            contextWindows  : {
+                ModelToolLoop.contextWindow(
+                    of       : $0,
+                    settings : ProviderSettings(ollamaContextTokens: 16_384),
+                    catalogue: []
+                )
+            }
+        )
+        var events = [WorkerAgentEvent]()
+
+        try await host.run(
+            prompt   : "Is all well?",
+            selection: ollama,
+            sessionID: nil,
+            role     : nil
+        ) { events.append($0) }
+
+        guard case .usage(let usage)? = events.last else {
+            Issue.record("The turn's usage did not come last.")
+            return
+        }
+        #expect(events.dropLast().last == .provider(.completed))
+        #expect(usage.turn == ProviderUsage.Tokens(
+            input      : 1000 + 100 + 900 + 50,
+            cacheReads : 900,
+            cacheWrites: 50,
+            output     : 50
+        ))
+        #expect(usage.contextTokens == 100 + 900 + 50 + 30)
+        #expect(usage.contextWindow == 16_384)
+        #expect(usage.provider == .ollama)
+        #expect(usage.model == "qwen3:8b")
+        #expect(usage.session == nil && usage.sessionTotal == nil && usage.rateLimits.isEmpty)
+    }
+
+    @Test func aModelOutsideOllamaTakesItsWindowFromTheCatalogue() {
+        let gemini = ModelSelection(
+            provider: .gemini,
+            model   : "gemini-3-pro",
+            effort  : .high
+        )
+        let listed = [ModelInfo(
+            id           : "gemini-3-pro",
+            efforts      : [.low, .high],
+            contextWindow: 1_048_576
+        )]
+        #expect(ModelToolLoop.contextWindow(
+            of       : gemini,
+            settings : ProviderSettings(),
+            catalogue: listed
+        ) == 1_048_576)
+        #expect(ModelToolLoop.contextWindow(
+            of       : gemini,
+            settings : ProviderSettings(),
+            catalogue: []
+        ) == nil)
+    }
+
     @Test func aStopDuringARoundCancelsTheStreamAndClosesTheSession() async throws {
         let transport = ScriptedTransport(
             supportsTools: true,

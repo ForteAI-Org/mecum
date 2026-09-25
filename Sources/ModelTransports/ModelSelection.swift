@@ -150,11 +150,18 @@ public struct ModelUsage: Sendable, Hashable {
     public let inputTokens: Int?
     public let outputTokens: Int?
     public let duration: Duration
+    /// Input read from and written to the prompt cache, for a provider that counts them apart from
+    /// `inputTokens` (Anthropic). Nil for one that does not report them that way.
+    public let cacheReadTokens: Int?
+    public let cacheWriteTokens: Int?
 
-    public init(inputTokens: Int?, outputTokens: Int?, duration: Duration) {
+    public init(inputTokens: Int?, outputTokens: Int?, duration: Duration,
+                cacheReadTokens: Int? = nil, cacheWriteTokens: Int? = nil) {
         self.inputTokens = inputTokens
         self.outputTokens = outputTokens
         self.duration = duration
+        self.cacheReadTokens = cacheReadTokens
+        self.cacheWriteTokens = cacheWriteTokens
     }
 
     /// Output tokens per second of generation, when both are known.

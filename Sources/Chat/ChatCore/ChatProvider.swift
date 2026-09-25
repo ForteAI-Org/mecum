@@ -14,5 +14,7 @@ public enum ProviderEvent: Sendable, Equatable {
     case assistant(String)
     case activity(String)
     case failure(String)
+    /// What the turn cost, once, just before `completed` or `failure`, when the provider reported it.
+    case usage(ProviderUsage)
     case completed
 }

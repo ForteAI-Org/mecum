@@ -39,6 +39,11 @@ nonisolated enum EventType: Sendable, Hashable {
     /// it; the store does not read it.
     case agentProcessStarted
 
+    /// What one turn cost and how full it left the model's context, once per
+    /// turn that reported it. The payload is a `TurnUsage` as JSON, at
+    /// `TurnUsage.payloadVersion`; a reader skips a row at another version.
+    case turnUsage
+
     /// A type this build does not know, with the raw value it was stored as.
     ///
     /// Readers skip it. It is never terminal here: whether the row ended its
@@ -56,7 +61,7 @@ nonisolated enum EventType: Sendable, Hashable {
         case .executionCompleted, .executionFailed, .executionCancelled: true
         case .workerCreated, .workerConfigured, .workerArchived, .conversationOpened,
              .messageRecorded, .messageDeliveryChanged, .executionStarted, .toolActivity,
-             .agentProcessStarted, .unknown: false
+             .agentProcessStarted, .turnUsage, .unknown: false
         }
     }
 
@@ -64,7 +69,7 @@ nonisolated enum EventType: Sendable, Hashable {
     static let known: [EventType] = [
         .workerCreated, .workerConfigured, .workerArchived, .conversationOpened,
         .messageRecorded, .messageDeliveryChanged, .executionStarted, .executionCompleted, .executionFailed,
-        .executionCancelled, .toolActivity, .agentProcessStarted,
+        .executionCancelled, .toolActivity, .agentProcessStarted, .turnUsage,
     ]
 }
 
@@ -89,6 +94,7 @@ nonisolated extension EventType: RawRepresentable, Codable {
         case .executionCancelled:     "executionCancelled"
         case .toolActivity:           "toolActivity"
         case .agentProcessStarted:    "agentProcessStarted"
+        case .turnUsage:              "turnUsage"
         case .unknown(let value):     value
         }
     }

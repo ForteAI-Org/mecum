@@ -57,20 +57,38 @@ final class ModelToolLoop {
         }
     }
 
+    /// The window a loop turn on `selection` runs in: the `num_ctx` Mecum sends
+    /// Ollama, else what the provider's catalogue states for the model, and nil
+    /// when it states none.
+    static func contextWindow(
+        of selection: ModelSelection,
+        settings    : ProviderSettings,
+        catalogue   : [ModelInfo]
+    ) -> Int? {
+        guard selection.provider != .ollama else { return settings.ollamaContextTokens }
+        return catalogue.first { $0.id == selection.model }?.contextWindow
+    }
+
     /// Runs one turn and reports its events in order: each round's text as one
     /// `.assistant` block, the tools' records as they run them, then
     /// `.completed`. The text a round delivered stays reported even when the
     /// round then fails or is stopped.
     ///
+    /// What the rounds that completed cost comes last, however the turn ends,
+    /// as one `.usage`: their counts added up, the context the last of them
+    /// left (its input and output), and `contextWindow`. A turn whose provider
+    /// reported no count reports none.
+    ///
     /// Throws `CancellationError` after `stop`, once a tool call in flight has
     /// finished; the transport's failure, in the provider's words; or a failure
     /// naming `toolRoundLimit` when the model keeps calling tools.
     func run(
-        transport: any ModelTransport,
-        role     : String?,
-        history  : [TurnMessage],
-        prompt   : String,
-        onEvent  : @escaping @MainActor (WorkerAgentEvent) -> Void
+        transport    : any ModelTransport,
+        role         : String?,
+        history      : [TurnMessage],
+        prompt       : String,
+        contextWindow: Int? = nil,
+        onEvent      : @escaping @MainActor (WorkerAgentEvent) -> Void
     ) async throws {
         let hasTools = try await transport.capabilities().supportsTools
         let tools    = hasTools ? try Self.definitions() : []
@@ -87,6 +105,18 @@ final class ModelToolLoop {
             text: prompt
         ))
 
+        var spent  : ProviderUsage.Tokens?
+        var context: Int?
+        defer {
+            if let spent {
+                onEvent(.provider(.usage(ProviderUsage(
+                    tokens       : spent,
+                    contextTokens: context,
+                    contextWindow: contextWindow
+                ))))
+            }
+        }
+
         var toolRounds = 0
         while true {
             if isStopRequested { throw CancellationError() }
@@ -100,6 +130,12 @@ final class ModelToolLoop {
             round = task
             let reply = await task.value
             round = nil
+
+            if let usage = reply.usage, usage.inputTokens != nil || usage.outputTokens != nil {
+                let counted = Self.tokens(of: usage)
+                spent   = (spent ?? ProviderUsage.Tokens()) + counted
+                context = usage.inputTokens == nil ? nil : counted.input + counted.output
+            }
 
             let text = reply.text.trimmingCharacters(in: .whitespacesAndNewlines)
             if !text.isEmpty { onEvent(.provider(.assistant(text))) }
@@ -138,12 +174,13 @@ final class ModelToolLoop {
 
     // MARK: Rounds
 
-    /// What one round delivered: its text, its calls, the provider's record of it, and the failure
-    /// that ended it early, if any.
+    /// What one round delivered: its text, its calls, the provider's record of it, what it cost when
+    /// it completed, and the failure that ended it early, if any.
     private struct Round: Sendable {
         var text   = ""
         var calls  : [ToolCall] = []
         var record : TurnRecord?
+        var usage  : ModelUsage?
         var failure: (any Error)?
     }
 
@@ -155,13 +192,26 @@ final class ModelToolLoop {
                 case .delta(let text):       round.text += text
                 case .toolCall(let call):    round.calls.append(call)
                 case .record(let record):    round.record = record
-                case .completed:             break
+                case .completed(let usage):  round.usage = usage
                 }
             }
         } catch {
             round.failure = error
         }
         return round
+    }
+
+    /// A round's counts, with the cache reads and writes a provider counts apart from its input
+    /// added to it, so `input` is everything the model read.
+    private static func tokens(of usage: ModelUsage) -> ProviderUsage.Tokens {
+        let reads  = usage.cacheReadTokens ?? 0
+        let writes = usage.cacheWriteTokens ?? 0
+        return ProviderUsage.Tokens(
+            input      : (usage.inputTokens ?? 0) + reads + writes,
+            cacheReads : reads,
+            cacheWrites: writes,
+            output     : usage.outputTokens ?? 0
+        )
     }
 
     /// The tool's answer as the model reads it: the text of the MCP result, and

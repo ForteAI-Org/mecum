@@ -23,4 +23,9 @@ enum WorkerAgentEvent: Sendable, Equatable {
     /// The provider child the turn spawned, before its first event. It is
     /// recorded so a launch after a crash can end a child left running.
     case processStarted(ChildProcessIdentity)
+
+    /// What the turn cost, once, after its other events and however it ended,
+    /// when the provider reported any count. The host makes it from the
+    /// provider's `.usage`, which never reaches the recorder itself.
+    case usage(TurnUsage)
 }

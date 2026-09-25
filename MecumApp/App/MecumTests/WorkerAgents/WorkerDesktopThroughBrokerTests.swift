@@ -65,9 +65,9 @@ struct WorkerDesktopThroughBrokerTests {
         var failure: (any Error)?
         let receive: @MainActor (WorkerAgentEvent) -> Void = { event in
             switch event {
-            case .tool(let text):                 tools.append(text)
-            case .provider(.assistant(let text)): replies.append(text)
-            case .provider, .processStarted:      break
+            case .tool(let text):                    tools.append(text)
+            case .provider(.assistant(let text)):    replies.append(text)
+            case .provider, .processStarted, .usage: break
             }
         }
         do {

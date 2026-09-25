@@ -156,6 +156,8 @@ struct AnthropicClient: ModelTransport {
         case "message_start":
             let usage = (event["message"] as? [String: Any])?["usage"] as? [String: Any]
             progress.inputTokens = usage?["input_tokens"] as? Int
+            progress.cacheReadTokens = usage?["cache_read_input_tokens"] as? Int
+            progress.cacheWriteTokens = usage?["cache_creation_input_tokens"] as? Int
         case "content_block_start":
             guard let index, let block = event["content_block"] as? [String: Any] else { return nil }
             progress.streamingBlocks[index] = StreamingBlock(start: try JSONSerialization.data(withJSONObject: block))

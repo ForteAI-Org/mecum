@@ -151,6 +151,16 @@ struct AnthropicToolTurnTests {
             + #""tool_use_id":"toolu_01B","type":"tool_result"}],"role":"user"}"#)
     }
 
+    @Test func theCacheCountsComeWithTheMessageStartApartFromTheInput() throws {
+        var progress = TurnProgress()
+        let start = #"{"type":"message_start","message":{"usage":{"input_tokens":3,"#
+            + #""cache_read_input_tokens":2000,"cache_creation_input_tokens":40,"output_tokens":1}}}"#
+        _ = try AnthropicClient.decode(Data(start.utf8), progress: &progress)
+        #expect(progress.usage(wallClock: .seconds(1)) == ModelUsage(inputTokens: 3, outputTokens: nil,
+                                                                     duration: .seconds(1), cacheReadTokens: 2000,
+                                                                     cacheWriteTokens: 40))
+    }
+
     @Test func anAssistantTurnWithItsRecordGoesBackAsTheRecordAndAnotherProvidersIsIgnored() throws {
         let blocks = [#"{"signature":"EqQB","thinking":"","type":"thinking"}"#,
                       #"{"id":"toolu_01B","input":{},"name":"status","type":"tool_use"}"#]

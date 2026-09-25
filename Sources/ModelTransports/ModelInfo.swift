@@ -23,16 +23,22 @@ public struct ModelInfo: Sendable, Hashable, Identifiable {
     /// The provider's default level, when it names one the model accepts.
     public let defaultEffort: ReasoningEffort?
 
+    /// The most input tokens the model takes, when the catalogue states it: the Anthropic
+    /// listing's `max_input_tokens`, Gemini's `inputTokenLimit`.
+    public let contextWindow: Int?
+
     public init(
         id           : String,
         title        : String? = nil,
         efforts      : [ReasoningEffort],
-        defaultEffort: ReasoningEffort? = nil
+        defaultEffort: ReasoningEffort? = nil,
+        contextWindow: Int?             = nil
     ) {
         self.id            = id
         self.title         = title ?? id
         self.efforts       = efforts
         self.defaultEffort = defaultEffort.flatMap { efforts.contains($0) ? $0 : nil }
+        self.contextWindow = contextWindow
     }
 
     /// The level a worker starts at on this model: its catalogue's default, else medium, else
@@ -43,14 +49,16 @@ public struct ModelInfo: Sendable, Hashable, Identifiable {
 
     /// A model the catalogue knows only by id, with the efforts the provider takes for it.
     static func known(
-        _ id    : String,
-        provider: ModelProvider,
-        title   : String? = nil
+        _ id         : String,
+        provider     : ModelProvider,
+        title        : String? = nil,
+        contextWindow: Int?    = nil
     ) -> ModelInfo {
         ModelInfo(
-            id     : id,
-            title  : title,
-            efforts: ModelSelection.supportedEfforts(provider: provider, model: id)
+            id           : id,
+            title        : title,
+            efforts      : ModelSelection.supportedEfforts(provider: provider, model: id),
+            contextWindow: contextWindow
         )
     }
 }

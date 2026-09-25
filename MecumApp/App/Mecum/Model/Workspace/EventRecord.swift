@@ -75,9 +75,17 @@ nonisolated struct NewEvent: Sendable, Hashable {
     /// task must mint a new `Execution` rather than reuse the one that ended.
     /// The new attempt's ending would otherwise carry the old attempt's key,
     /// collapse onto it and be lost without a trace.
+    ///
+    /// A `turnUsage` event is identified by itself too, behind `usageKeyPrefix`, so a
+    /// store read can select usage rows by this string column: the type is an enum
+    /// column, which a predicate cannot compare on macOS 26.
     var deduplicationKey: String {
-        type.isTerminal ? Self.terminalKey(of: subjectID) : id.uuidString
+        if type.isTerminal { return Self.terminalKey(of: subjectID) }
+        return type == .turnUsage ? Self.usageKeyPrefix + id.uuidString : id.uuidString
     }
+
+    /// What every `turnUsage` event's key starts with.
+    static let usageKeyPrefix = "usage:"
 
     /// The key every terminal event about `subject` carries, whichever way it ends.
     static func terminalKey(of subject: UUID) -> String {

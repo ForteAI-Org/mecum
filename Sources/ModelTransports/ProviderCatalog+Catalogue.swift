@@ -81,7 +81,14 @@ extension ProviderCatalog {
             let json = try await HTTPTransport.getJSON(request)
             let page = json["data"] as? [[String: Any]] ?? []
             models += page.compactMap { entry in
-                (entry["id"] as? String).map { .known($0, provider: .anthropic, title: entry["display_name"] as? String) }
+                (entry["id"] as? String).map {
+                    .known(
+                        $0,
+                        provider     : .anthropic,
+                        title        : entry["display_name"] as? String,
+                        contextWindow: entry["max_input_tokens"] as? Int
+                    )
+                }
             }
             after = json["has_more"] as? Bool == true ? json["last_id"] as? String : nil
         } while after != nil
@@ -107,7 +114,12 @@ extension ProviderCatalog {
                       let name = entry["name"] as? String
                 else { return nil }
                 let id = name.hasPrefix("models/") ? String(name.dropFirst(7)) : name
-                return .known(id, provider: .gemini, title: entry["displayName"] as? String)
+                return .known(
+                    id,
+                    provider     : .gemini,
+                    title        : entry["displayName"] as? String,
+                    contextWindow: entry["inputTokenLimit"] as? Int
+                )
             }
             token = (json["nextPageToken"] as? String).flatMap { $0.isEmpty ? nil : $0 }
         } while token != nil

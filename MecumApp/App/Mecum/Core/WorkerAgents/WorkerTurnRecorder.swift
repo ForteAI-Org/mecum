@@ -32,7 +32,8 @@ import ModelTransports
 ///
 /// The agent child's identity is recorded as `agentProcessStarted`, so that a
 /// turn a crash cut short can be ended, and its child stopped, at the next
-/// launch (`endTurnsLeftUnfinished`).
+/// launch (`endTurnsLeftUnfinished`). What the turn cost is recorded as
+/// `turnUsage`, before the terminal event.
 @MainActor
 final class WorkerTurnRecorder {
 
@@ -226,9 +227,18 @@ final class WorkerTurnRecorder {
             try await store.update(conversation: conversationID, .providerSession(provider: provider, id: id))
             state.session = id
             return
+        case .usage(let usage):
+            try await append(
+                .turnUsage,
+                subject: execution,
+                text   : String(decoding: try usage.encoded(), as: UTF8.self),
+                version: TurnUsage.payloadVersion
+            )
+            return
         case .provider(.completed):
             try await reply(&state)
-        case .provider(.activity):
+        case .provider(.activity), .provider(.usage):
+            // What is recorded is the host's `.usage`, made from this one.
             return
         }
         await onRecorded()
@@ -264,13 +274,19 @@ final class WorkerTurnRecorder {
         await onRecorded()
     }
 
-    private func append(_ type: EventType, subject: UUID, text: String? = nil) async throws {
+    private func append(
+        _ type : EventType,
+        subject: UUID,
+        text   : String? = nil,
+        version: Int     = 1
+    ) async throws {
         try await store.append(NewEvent(
             workspaceID   : workspaceID,
             subjectID     : subject,
             conversationID: conversationID,
             workerID      : workerID,
             type          : type,
+            payloadVersion: version,
             payload       : text.map { Data($0.utf8) },
             correlationID : messageID
         ))

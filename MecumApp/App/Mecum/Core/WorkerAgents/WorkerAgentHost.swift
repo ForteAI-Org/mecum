@@ -47,6 +47,7 @@ final class WorkerAgentHost {
     private let provider        = CLIProvider()
     private let agents          : (ModelProvider) throws -> (ChatProvider, URL)
     private let transports      : (ModelSelection) -> any ModelTransport
+    private let contextWindows  : (ModelSelection) -> Int?
 
     private var temporary     : URL?
     private var connectionFile: URL?
@@ -66,6 +67,12 @@ final class WorkerAgentHost {
     /// The provider session the running turn reported, if it reported one.
     private var reportedSession: String?
 
+    /// What the running command line turn reported it cost, held until its child has exited.
+    private var reportedUsage: ProviderUsage?
+
+    /// The rollout file of the Codex session last read, so a session is looked for once.
+    private var rollout: (session: String, file: URL)?
+
     /// True while a turn runs.
     var isRunning: Bool { onEvent != nil }
 
@@ -77,19 +84,23 @@ final class WorkerAgentHost {
     /// for the desktop the tools drive; the host closes it after a failed or
     /// stopped turn and in `close`, and never builds a seat of its own (§22.3).
     /// `transports` makes the transport a loop turn talks through, once per
-    /// turn, so it reads the connection settings as they are then.
+    /// turn, so it reads the connection settings as they are then, and
+    /// `contextWindows` names the window that turn's model runs in, nil when
+    /// nothing states it (`ModelToolLoop.contextWindow`).
     convenience init(
         workingDirectory: URL,
         bridgeExecutable: URL,
         session         : () -> any AutomationSessionOperating,
-        transports      : @escaping (ModelSelection) -> any ModelTransport = { $0.transport() }
+        transports      : @escaping (ModelSelection) -> any ModelTransport = { $0.transport() },
+        contextWindows  : @escaping (ModelSelection) -> Int?               = { _ in nil }
     ) {
         self.init(
             workingDirectory: workingDirectory,
             bridgeExecutable: bridgeExecutable,
             session         : session,
             agents          : Self.agent(for:),
-            transports      : transports
+            transports      : transports,
+            contextWindows  : contextWindows
         )
     }
 
@@ -100,12 +111,14 @@ final class WorkerAgentHost {
         bridgeExecutable: URL,
         session         : () -> any AutomationSessionOperating,
         agents          : @escaping (ModelProvider) throws -> (ChatProvider, URL),
-        transports      : @escaping (ModelSelection) -> any ModelTransport = { $0.transport() }
+        transports      : @escaping (ModelSelection) -> any ModelTransport = { $0.transport() },
+        contextWindows  : @escaping (ModelSelection) -> Int?               = { _ in nil }
     ) {
         self.workingDirectory = workingDirectory
         self.bridgeExecutable = bridgeExecutable
         self.agents           = agents
         self.transports       = transports
+        self.contextWindows   = contextWindows
         let tools  = AutomationTools(session: session())
         let router = MCPRouter(tools: AutomationTools.definitions) { name, arguments in
             try await tools.call(name, arguments)
@@ -153,12 +166,17 @@ final class WorkerAgentHost {
     /// `prompt`; a command line turn ignores `history`.
     /// `inheritedEnvironment` is filtered through the Codex allow-list before
     /// it reaches the child, so no API key does (§7.3).
+    ///
+    /// What the turn cost is reported as one `.usage` (`turnUsage`). `lastUsage`
+    /// is the conversation's latest on `selection.provider`: a Codex turn is
+    /// counted from its session total, and without it from the session's start.
     func run(
         prompt              : String,
         selection           : ModelSelection,
         sessionID           : String?,
         role                : String?,
         history             : [TurnMessage] = [],
+        lastUsage           : TurnUsage? = nil,
         inheritedEnvironment: [String: String] = ProcessInfo.processInfo.environment,
         onEvent             : @escaping @MainActor (WorkerAgentEvent) -> Void
     ) async throws {
@@ -180,12 +198,22 @@ final class WorkerAgentHost {
             }
             do {
                 try await loop.run(
-                    transport: transports(selection),
-                    role     : role,
-                    history  : history,
-                    prompt   : prompt,
-                    onEvent  : onEvent
-                )
+                    transport    : transports(selection),
+                    role         : role,
+                    history      : history,
+                    prompt       : prompt,
+                    contextWindow: contextWindows(selection)
+                ) { event in
+                    guard case .provider(.usage(let reported)) = event else { return onEvent(event) }
+
+                    onEvent(.usage(Self.turnUsage(
+                        reported,
+                        selection: selection,
+                        session  : nil,
+                        lastUsage: nil,
+                        rollout  : nil
+                    )))
+                }
             } catch {
                 // The loop ends only after a tool call in flight has finished, so no action is cut short.
                 await tools.session.close()
@@ -208,6 +236,7 @@ final class WorkerAgentHost {
             message = Self.changedInstructions(instructions) + prompt
         }
         reportedSession = nil
+        reportedUsage   = nil
         let turn = Self.turn(
             prompt              : message,
             provider            : chatProvider,
@@ -224,19 +253,105 @@ final class WorkerAgentHost {
             if isStopRequested { throw CancellationError() }
             try await provider.run(turn, executable: executable, onStart: { onEvent(.processStarted($0)) }) { event in
                 if case .session(let id) = event { self.reportedSession = id }
-                onEvent(.provider(event))
+                if case .usage(let usage) = event { self.reportedUsage = usage } else { onEvent(.provider(event)) }
             }
             if chatProvider == .codex, let session = reportedSession ?? sessionID {
                 record(instructions, deliveredTo: session)
             }
+            await reportUsage(
+                of         : chatProvider,
+                selection  : selection,
+                session    : reportedSession ?? sessionID,
+                lastUsage  : lastUsage,
+                environment: inheritedEnvironment,
+                onEvent    : onEvent
+            )
         } catch {
             router.pause()
             await router.drain()
             await tools.session.close()
             await provider.waitUntilStopped()
             router.resume()
+            await reportUsage(
+                of         : chatProvider,
+                selection  : selection,
+                session    : reportedSession ?? sessionID,
+                lastUsage  : lastUsage,
+                environment: inheritedEnvironment,
+                onEvent    : onEvent
+            )
             throw error
         }
+    }
+
+    /// Reports what the command line said the turn cost, once its child has
+    /// exited, which is when a Codex rollout holds the turn's last count.
+    private func reportUsage(
+        of chatProvider: ChatProvider,
+        selection      : ModelSelection,
+        session        : String?,
+        lastUsage      : TurnUsage?,
+        environment    : [String: String],
+        onEvent        : @MainActor (WorkerAgentEvent) -> Void
+    ) async {
+        guard let reported = reportedUsage else { return }
+
+        reportedUsage = nil
+        var reading: CodexRollout.Reading?
+        if chatProvider == .codex, let session {
+            let known    = rollout?.session == session ? rollout?.file : nil
+            let sessions = CodexRollout.sessions(environment: environment)
+            // The walk over an old session's tree stays off the main actor.
+            let found = await Task.detached {
+                let file = known ?? CodexRollout.file(
+                    of: session,
+                    in: sessions
+                )
+                return file.map { (file: $0, reading: CodexRollout.reading(of: $0)) }
+            }.value
+            if let found {
+                rollout = (session, found.file)
+                reading = found.reading
+            }
+        }
+
+        onEvent(.usage(Self.turnUsage(
+            reported,
+            selection: selection,
+            session  : session,
+            lastUsage: lastUsage,
+            rollout  : reading
+        )))
+    }
+
+    /// What a turn cost, from what its provider reported. A session total
+    /// (Codex) is counted from `lastUsage`'s when that was the same session and
+    /// the total has not started again, and from zero otherwise; what the
+    /// provider left out comes from the rollout's reading, when there is one.
+    static func turnUsage(
+        _ reported: ProviderUsage,
+        selection : ModelSelection,
+        session   : String?,
+        lastUsage : TurnUsage?,
+        rollout   : CodexRollout.Reading?
+    ) -> TurnUsage {
+        var turn = reported.tokens
+        if reported.isSessionTotal,
+           let earlier = lastUsage?.session == session ? lastUsage?.sessionTotal : nil,
+           turn.input >= earlier.input {
+            turn = turn - earlier
+        }
+
+        return TurnUsage(
+            provider     : selection.provider,
+            model        : reported.model ?? (selection.model.isEmpty ? nil : selection.model),
+            session      : session,
+            turn         : turn,
+            sessionTotal : reported.isSessionTotal ? reported.tokens : nil,
+            contextTokens: reported.contextTokens ?? rollout?.contextTokens,
+            contextWindow: reported.contextWindow ?? rollout?.contextWindow,
+            rateLimits   : reported.rateLimits.isEmpty ? rollout?.rateLimits ?? [] : reported.rateLimits
+        )
     }
 
     /// What a resumed Codex session is told when it began with other instructions.
