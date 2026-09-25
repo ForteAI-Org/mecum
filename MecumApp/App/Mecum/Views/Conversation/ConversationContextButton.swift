@@ -5,38 +5,63 @@
 //  Created by Eliomar Alejandro Rodriguez Ferrer on 25/09/2026.
 //
 
+import ChatCore
 import SwiftUI
 
-/// ConversationContextButton is the small context ring above the composer's
-/// trailing edge. Its tooltip says how full the context is; it opens and
-/// closes the context popup, which the composer presents above itself
-/// (`ConversationPopupPresenter`), and reports where it is so the popup can
-/// be placed over it.
+/// ConversationContextButton is the context ring on a round button of its own,
+/// left of the composer's pill and as tall as the pill at one line. It is
+/// drawn on the pill's own surface (`ComposerSurface`), the material, or the
+/// solid surface with Reduce Transparency, so the two read as one family; the
+/// pill is never Liquid Glass, so neither is this. Its tooltip says how full
+/// the context is, and it opens a popover of the context and the last message
+/// (`ConversationContextPopover`) above itself.
 struct ConversationContextButton: View {
 
     /// A context whose window is known (`UsageWording.ringContext`).
-    let context: WorkerUsage.Context
+    let context : WorkerUsage.Context
 
-    @Binding var isOpen: Bool
+    let lastTurn: ProviderUsage.Tokens?
 
-    /// Where the button is in the window, for the popup and for telling a click outside.
-    @Binding var frame: CGRect
+    @State private var isShowingDetail = false
+
+    @Environment(\.accessibilityReduceTransparency)
+    private var reducesTransparency
 
     var body: some View {
         let wording = UsageWording()
+        let side    = ComposerBar.restingHeight
 
-        Button { isOpen.toggle() } label: {
+        Button { isShowingDetail.toggle() } label: {
             ConversationContextRing(
                 fraction : context.fraction ?? 0,
-                side     : 18,
+                side     : 20,
                 lineWidth: 2.2
             )
+            .frame(
+                width : side,
+                height: side
+            )
+            .modifier(ComposerSurface(
+                shape: RoundedRectangle(
+                    cornerRadius: side / 2,
+                    style       : .circular
+                ),
+                kind : .resolved(reducesTransparency: reducesTransparency)
+            ))
             .contentShape(Circle())
         }
         .buttonStyle(.plain)
         .help(wording.contextTip(context))
         .accessibilityLabel("Context")
         .accessibilityValue(wording.contextSpoken(context))
-        .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { frame = $0 }
+        .popover(
+            isPresented: $isShowingDetail,
+            arrowEdge  : .top
+        ) {
+            ConversationContextPopover(
+                context : context,
+                lastTurn: lastTurn
+            )
+        }
     }
 }

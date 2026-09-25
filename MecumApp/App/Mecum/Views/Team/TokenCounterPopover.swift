@@ -25,12 +25,9 @@ struct TokenCounterPopover: View {
     private let wording = UsageWording()
 
     var body: some View {
-        VStack(
-            alignment: .leading,
-            spacing  : 12
-        ) {
+        UsagePopover {
             if let last = usage.lastTurn {
-                lastMessage(last.turn)
+                UsageLastMessage(tokens: last.turn)
 
                 Divider()
             }
@@ -43,36 +40,9 @@ struct TokenCounterPopover: View {
                 plan(of: provider)
             }
         }
-        .font(.callout)
-        .padding(16)
-        .frame(
-            width    : 280,
-            alignment: .leading
-        )
     }
 
     // MARK: Sections
-
-    private func lastMessage(_ tokens: ProviderUsage.Tokens) -> some View {
-        VStack(
-            alignment: .leading,
-            spacing  : 6
-        ) {
-            title("Last message")
-
-            HStack {
-                Text("In · cached · out")
-                    .foregroundStyle(.secondary)
-
-                Spacer()
-
-                Text(wording.lastTurn(tokens))
-                    .monospacedDigit()
-            }
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel(wording.lastTurnSpoken(tokens))
-        }
-    }
 
     private var allTime: some View {
         let lifetime = usage.lifetime
@@ -81,7 +51,7 @@ struct TokenCounterPopover: View {
             alignment: .leading,
             spacing  : 6
         ) {
-            title(wording.allTime(
+            UsageSectionTitle(wording.allTime(
                 worker: workerName,
                 turns : usage.turns
             ))
@@ -132,82 +102,41 @@ struct TokenCounterPopover: View {
             alignment: .leading,
             spacing  : 10
         ) {
-            title(UsageWording.plan(provider))
+            UsageSectionTitle(UsageWording.plan(provider))
 
             ForEach(
                 usage.rateLimits,
                 id: \.window
             ) { limit in
-                VStack(
-                    alignment: .leading,
-                    spacing  : 5
-                ) {
-                    HStack {
-                        Text(UsageWording.windowName(limit))
-
-                        Spacer()
-
-                        Text(limitLine(limit))
-                            .foregroundStyle(.secondary)
-                            .monospacedDigit()
-                    }
-
-                    bar(limit.usedFraction)
-                }
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel(wording.limitSpoken(limit))
+                UsageMeter(
+                    label   : UsageWording.windowName(limit),
+                    value   : limitLine(limit),
+                    fraction: limit.usedFraction,
+                    isHigh  : UsageWording.isLimitHigh(limit.usedFraction),
+                    spoken  : wording.limitSpoken(limit)
+                )
             }
         }
     }
 
     // MARK: Parts
 
-    private func title(_ text: String) -> some View {
-        Text(text)
-            .font(.callout.weight(.semibold))
-            .accessibilityAddTraits(.isHeader)
-    }
-
     /// A count of tokens, compact, read as a sentence: "Input: 1.2 million tokens".
     private func row(
         _ label: String,
         count  : Int
     ) -> some View {
-        HStack {
-            Text(label)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-
-            Spacer()
-
-            Text(wording.compact(count))
-                .monospacedDigit()
-        }
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(label): \(wording.spoken(count)) tokens")
+        UsageRow(
+            label : label,
+            value : wording.compact(count),
+            spoken: "\(label): \(wording.spoken(count)) tokens"
+        )
     }
 
     /// "13% · resets 17:30", or the share alone without a reset to come.
     private func limitLine(_ limit: ProviderUsage.RateLimit) -> String {
         let used = wording.percent(limit.usedFraction)
         return limit.resetsAt.flatMap(wording.resets).map { "\(used) · \($0)" } ?? used
-    }
-
-    /// A thin bar of the limit's share, grey, amber once it is high (`UsageWording.isLimitHigh`).
-    private func bar(_ fraction: Double) -> some View {
-        Rectangle()
-            .fill(Color(nsColor: .separatorColor))
-            .overlay(alignment: .leading) {
-                Rectangle()
-                    .fill(UsageWording.isLimitHigh(fraction) ? AnyShapeStyle(.orange) : AnyShapeStyle(.secondary))
-                    .scaleEffect(
-                        x     : min(max(fraction, 0), 1),
-                        y     : 1,
-                        anchor: .leading
-                    )
-            }
-            .frame(height: 3)
-            .clipShape(Capsule())
     }
 
     /// Each model's new tokens, most first.

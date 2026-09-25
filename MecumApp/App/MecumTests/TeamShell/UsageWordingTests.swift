@@ -127,7 +127,7 @@ struct UsageWordingTests {
         #expect(UsageWording.isLimitHigh(0.75))
     }
 
-    @Test("The context reads as a share and as tokens, in the tooltip and to VoiceOver")
+    @Test("The context reads as a share and as tokens, in the popover, the tooltip and to VoiceOver")
     func contextPhrases() {
         let context = WorkerUsage.Context(
             tokens: 142_318,
@@ -136,6 +136,7 @@ struct UsageWordingTests {
 
         #expect(english.contextTitle(context) == "55% of context")
         #expect(english.contextTokens(context) == "142,318 of 258,400 tokens")
+        #expect(english.contextUsed(context) == "55% · 142,318 of 258,400")
         #expect(english.contextTip(context) == "55% of context · 142K of 258K")
         #expect(english.contextSpoken(context) == "55 percent, 142,318 of 258,400 tokens")
     }

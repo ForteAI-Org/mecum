@@ -18,7 +18,9 @@ import SwiftUI
 /// the bar's height as its bottom inset, so the last message scrolls clear of it.
 ///
 /// The caller may put one accessory in the row, before the buttons: the
-/// conversation puts the worker's model and effort there. There is no Add
+/// conversation puts the worker's model and effort there. It may also put a
+/// view outside the pill, before it, which sits on the pill's bottom line:
+/// the conversation's context ring. There is no Add
 /// context or microphone: nothing supplies attachments or voice yet, and a
 /// control that does nothing is not shown (§21.2). A recipient that cannot answer says so
 /// only in the placeholder, with Send disabled; the draft stays editable, as
@@ -55,6 +57,9 @@ struct ComposerBar: View {
 
     /// What sits in the row before the buttons, set with `accessory(_:)`.
     private var accessoryView: AnyView?
+
+    /// What sits outside the pill, before it, set with `leading(_:)`.
+    private var leadingView: AnyView?
 
     /// Whether Return sends, or starts a new line with Command-Return sending; see `sendsOnReturn(_:)`.
     private var returnSends = true
@@ -107,18 +112,34 @@ struct ComposerBar: View {
     }
 
     var body: some View {
-        HStack(alignment: .bottom, spacing: 8) {
-            ComposerField(text: $draft, placeholder: placeholder, onSubmit: canSend ? send : nil, returnSends: returnSends)
-                .padding(.vertical, 2)
-            accessoryView
-            actions
+        // No spacing here: an absent leading view must leave no gap, so it brings its own.
+        HStack(
+            alignment: .bottom,
+            spacing  : 0
+        ) {
+            leadingView
+
+            HStack(alignment: .bottom, spacing: 8) {
+                ComposerField(
+                    text       : $draft,
+                    placeholder: placeholder,
+                    onSubmit   : canSend ? send : nil,
+                    returnSends: returnSends
+                )
+                .padding(
+                    .vertical,
+                    2
+                )
+                accessoryView
+                actions
+            }
+            .padding(.leading, 14)
+            .padding([.vertical, .trailing], Self.padding)
+            .modifier(ComposerSurface(
+                shape: RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous),
+                kind : kind
+            ))
         }
-        .padding(.leading, 14)
-        .padding([.vertical, .trailing], Self.padding)
-        .modifier(ComposerSurface(
-            shape: RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous),
-            kind : kind
-        ))
         .padding(.horizontal, 16)
         .padding(.bottom, 12)
     }
@@ -136,6 +157,17 @@ struct ComposerBar: View {
         bar.accessoryView = AnyView(content())
         return bar
     }
+
+    /// The bar with `content` outside the pill, before it, on its bottom line. The content
+    /// brings its own gap to the pill, so a leading view that is absent leaves none.
+    func leading(@ViewBuilder _ content: () -> some View) -> ComposerBar {
+        var bar = self
+        bar.leadingView = AnyView(content())
+        return bar
+    }
+
+    /// The pill's height with one line of text: the circle and the padding around it.
+    static var restingHeight: CGFloat { circleSide + 2 * padding }
 
     private var isGlass: Bool {
         guard #available(macOS 26, *) else { return false }

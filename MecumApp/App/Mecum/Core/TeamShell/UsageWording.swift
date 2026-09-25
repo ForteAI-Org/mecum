@@ -103,6 +103,11 @@ nonisolated struct UsageWording {
         "\(whole(context.tokens)) of \(whole(context.window ?? 0)) tokens"
     }
 
+    /// The context popover's row: "55% · 142,318 of 258,400".
+    func contextUsed(_ context: WorkerUsage.Context) -> String {
+        "\(percent(context.fraction ?? 0)) · \(whole(context.tokens)) of \(whole(context.window ?? 0))"
+    }
+
     /// The ring's tooltip: "55% of context · 142K of 258K".
     func contextTip(_ context: WorkerUsage.Context) -> String {
         "\(contextTitle(context)) · \(compact(context.tokens)) of \(compact(context.window ?? 0))"

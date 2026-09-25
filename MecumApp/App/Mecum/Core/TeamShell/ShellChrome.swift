@@ -39,7 +39,8 @@ nonisolated enum ShellChrome {
     /// The window's title when no worker is selected: the app's scene name.
     static let untitled = "Mecum"
 
-    /// Everything the toolbar holds, in order. Worker actions live with the
+    /// Everything the toolbar holds, in order. The token counter is a group of
+    /// its own, apart from the two toggles. Worker actions live with the
     /// worker (the composer, the menu bar, the row's context menu), not here.
     static let toolbar: [ToolbarControl] = [
         .tokenCounter,

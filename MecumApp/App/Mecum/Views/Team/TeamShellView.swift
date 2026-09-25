@@ -192,8 +192,8 @@ struct TeamShellView: View {
 
     /// The window's own controls, `ShellChrome.toolbar`: the worker's header at
     /// the leading edge; at the trailing edge the token counter, once the worker
-    /// has recorded a turn, and the screen and inspector toggles. The
-    /// connections are at the foot of the sidebar, and Release the computer is
+    /// has recorded a turn, in a group of its own, and the screen and inspector
+    /// toggles together. The connections are at the foot of the sidebar, and Release the computer is
     /// in the composer beside Send and in the worker's commands.
     @ToolbarContentBuilder
     private var toolbar: some ToolbarContent {
@@ -216,6 +216,11 @@ struct TeamShellView: View {
                     worker: worker,
                     usage : usage
                 )
+            }
+
+            // Its own glass capsule, apart from the screen and inspector toggles.
+            if #available(macOS 26, *) {
+                ToolbarSpacer(.fixed)
             }
         }
 

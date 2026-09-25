@@ -27,9 +27,6 @@ enum WindowSnapshots {
     /// True while a snapshot draws the composer with its model popup open.
     static var opensModelPopup = false
 
-    /// True while a snapshot draws the composer with its context popup open.
-    static var opensContextPopup = false
-
     /// Writes every snapshot, prints each path, and ends the process: 0 when
     /// all were written, 1 with the reason on standard error otherwise.
     static func writeAndQuit() async {
@@ -98,7 +95,7 @@ enum WindowSnapshots {
             )
             opensModelPopup = false
 
-            // The context ring's popup open above the composer, then the ring amber, at 85% of the context.
+            // The context ring amber, at 85% of the context, then beside a pill grown to several lines.
             let high = try await syntheticTeam(
                 in           : store.appending(
                     path         : "High",
@@ -106,40 +103,57 @@ enum WindowSnapshots {
                 ),
                 contextTokens: 219_640
             )
-            let contexts: [(name: String, team: TeamModel, opens: Bool)] = [
-                ("context-popup", team, true),
-                ("context-high", high, false),
-            ]
-            for context in contexts {
-                for (name, dark) in [("light", false), ("dark", true)] {
-                    opensContextPopup = context.opens
-                    try await write(
-                        Root(
-                            team                : context.team,
-                            isInspectorRequested: false
-                        ),
-                        width: 1200,
-                        dark : dark,
-                        to   : output.appending(path: "window-1200-\(name)-\(context.name).png")
-                    )
-                }
-            }
-            opensContextPopup = false
-
-            // The token counter's popover drawn alone, as a popover is a window of its own.
             for (name, dark) in [("light", false), ("dark", true)] {
                 try await write(
-                    TokenCounterPopover(
-                        workerName: "Iris",
-                        provider  : .claudeCode,
-                        usage     : planUsage()
-                    )
-                    .background(Color(nsColor: .windowBackgroundColor)),
-                    width : 280,
-                    height: 420,
-                    dark  : dark,
-                    to    : output.appending(path: "token-counter-popover-\(name).png")
+                    Root(
+                        team                : high,
+                        isInspectorRequested: false
+                    ),
+                    width: 1200,
+                    dark : dark,
+                    to   : output.appending(path: "window-1200-\(name)-context-high.png")
                 )
+            }
+            high.draft = "Rerun the capture suite first.\nThen the layout suite.\nThen send me both logs."
+            try await write(
+                Root(
+                    team                : high,
+                    isInspectorRequested: false
+                ),
+                width: 1200,
+                dark : false,
+                to   : output.appending(path: "window-1200-light-context-grown.png")
+            )
+
+            // The two usage popovers drawn alone, as a popover is a window of its own.
+            let atlas = WorkerUsage(
+                turns     : [atlasUsage(contextTokens: 142_318)],
+                provider  : .codex,
+                rateLimits: []
+            )
+            guard let context = atlas.context else { throw SnapshotFailure("no context in Atlas's usage") }
+
+            let popovers: [(name: String, popover: AnyView, height: Double)] = [
+                ("context-popover", AnyView(ConversationContextPopover(
+                    context : context,
+                    lastTurn: atlas.lastTurn?.turn
+                )), 170),
+                ("token-counter-popover", AnyView(TokenCounterPopover(
+                    workerName: "Iris",
+                    provider  : .claudeCode,
+                    usage     : planUsage()
+                )), 420),
+            ]
+            for popover in popovers {
+                for (name, dark) in [("light", false), ("dark", true)] {
+                    try await write(
+                        popover.popover.background(Color(nsColor: .windowBackgroundColor)),
+                        width : 280,
+                        height: popover.height,
+                        dark  : dark,
+                        to    : output.appending(path: "\(popover.name)-\(name).png")
+                    )
+                }
             }
 
             // The split's sidebar is glass and draws blank offscreen, so its rows are drawn alone too, on the
