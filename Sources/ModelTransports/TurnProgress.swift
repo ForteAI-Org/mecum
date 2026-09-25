@@ -26,6 +26,10 @@ struct TurnProgress: Sendable {
     /// Why the provider says it stopped, in its own spelling. Nil until it says.
     var stopReason: String?
 
+    /// Every tool call the provider completed so far, in order. A decoder
+    /// appends a call only once its arguments are whole.
+    var toolCalls: [ToolCall] = []
+
     /// The stop reason names a whole answer. Only the provider's decoder can
     /// say so, because only it knows the vocabulary; an unknown reason leaves
     /// this false, so a turn that stopped for a reason nobody recognises fails

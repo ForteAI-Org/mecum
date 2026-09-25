@@ -42,9 +42,10 @@ nonisolated struct UserFacingIssue: Sendable, Equatable {
 /// boundary.
 ///
 /// A worker on Claude Code or Codex answers through its agent command line with
-/// Mecum's tools (`WorkerAgents`), and those tools reach the desktop only
-/// through the broker's queue (`BrokeredAutomationSession`, §22.3): a worker
-/// waits for the computer like any other entry and never builds a seat.
+/// Mecum's tools (`WorkerAgents`), and a worker on Ollama through Mecum's own
+/// loop with the same tools. Those tools reach the desktop only through the
+/// broker's queue (`BrokeredAutomationSession`, §22.3): a worker waits for the
+/// computer like any other entry and never builds a seat.
 ///
 /// Connections come from `connections`, the same store the Settings window
 /// edits, so a key entered in either place serves both.
@@ -295,8 +296,9 @@ final class TeamModel {
     }
 
     /// Persists the message, then starts the worker's answer when its provider
-    /// has an agent (`WorkerAnswer`). Otherwise the message stays saved and
-    /// nothing answers, and the composer says why.
+    /// answers, as an agent command line or through Mecum's own loop
+    /// (`WorkerAnswer`). Otherwise the message stays saved and nothing
+    /// answers, and the composer says why.
     ///
     /// The text leaves the draft before the first suspension, and a second
     /// send while this one waits does nothing, so one Return is one message.
@@ -394,16 +396,17 @@ final class TeamModel {
 
     func isAnswering(_ workerID: UUID) -> Bool { answering[workerID] != nil }
 
-    /// Starts the worker's turn when its provider answers as an agent. The
-    /// turn runs apart from `send`, so writing to another worker meanwhile is
-    /// not held up, and a failed turn is reported and never retried.
+    /// Starts the worker's turn when its provider answers. The turn runs apart
+    /// from `send`, so writing to another worker meanwhile is not held up, and
+    /// a failed turn is reported and never retried. A turn through Mecum's own
+    /// loop is sent the conversation before the message (`turnHistory`).
     private func startAnswer(
         to message       : MessageSnapshot,
         in conversationID: UUID,
         by workerID      : UUID
     ) {
         guard let worker = worker(workerID), let selection = worker.configuration,
-              WorkerAnswer(provider: selection.provider) == .agent, answering[workerID] == nil
+              WorkerAnswer(provider: selection.provider).refusal == nil, answering[workerID] == nil
         else { return }
 
         answering[workerID] = conversationID
@@ -417,7 +420,8 @@ final class TeamModel {
             host    = WorkerAgentHost(
                 workingDirectory: workingFolder(of: conversationID),
                 bridgeExecutable: Bundle.main.bundleURL.appending(path: "Contents/Helpers/mecum-bridge"),
-                session         : { desktop }
+                session         : { desktop },
+                transports      : { [connections] in $0.transport(settings: connections.providerSettings) }
             )
             hosts[conversationID] = host
         }
@@ -443,6 +447,13 @@ final class TeamModel {
                 let ending = try await recorder.run { frozen, session, emit in
                     provider = frozen.provider
                     if pendingStops.remove(workerID) != nil { throw CancellationError() }
+                    var history: [TurnMessage] = []
+                    if WorkerAnswer(provider: frozen.provider) == .modelLoop {
+                        history = try await turnHistory(
+                            before: message,
+                            by    : workerID
+                        )
+                    }
                     // The turn gives the seat back as it ends when another entry is waiting for it.
                     try await desktop.turn {
                         try await host.run(
@@ -450,6 +461,7 @@ final class TeamModel {
                             selection: frozen,
                             sessionID: session,
                             role     : worker.instructions,
+                            history  : history,
                             onEvent  : emit
                         )
                     }
@@ -461,6 +473,52 @@ final class TeamModel {
                     message: "Part of \(worker.name)’s response may be missing from this conversation.",
                     error  : error
                 )
+            }
+        }
+    }
+
+    /// The conversation before `message` as a model provider is sent it: the
+    /// person's messages as `user`, the worker's replies as `assistant`, in order.
+    /// Tool calls and their results from earlier turns are not resent.
+    private func turnHistory(
+        before message: MessageSnapshot,
+        by workerID   : UUID
+    ) async throws -> [TurnMessage] {
+        // ponytail: the last 40 messages, not a token budget; count tokens when long chats outgrow the context.
+        let earlier = try await store.messages(
+            in    : message.conversationID,
+            around: message.sequence,
+            before: 40,
+            after : 0
+        )
+        return Self.turnHistory(
+            earlier,
+            by: workerID
+        )
+    }
+
+    /// Maps stored messages to turn messages. An empty message, and one by
+    /// anyone other than the person or `workerID`, is left out.
+    static func turnHistory(
+        _ messages : [MessageSnapshot],
+        by workerID: UUID
+    ) -> [TurnMessage] {
+        messages.compactMap { message -> TurnMessage? in
+            guard !message.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+
+            switch message.authorWorkerID {
+            case nil:
+                return TurnMessage(
+                    role: .user,
+                    text: message.text
+                )
+            case workerID?:
+                return TurnMessage(
+                    role: .assistant,
+                    text: message.text
+                )
+            default:
+                return nil
             }
         }
     }

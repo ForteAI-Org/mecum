@@ -26,10 +26,16 @@ public enum ModelTransportError: LocalizedError, Equatable {
     /// `streamEndedEarly`, where the provider never said it ended at all.
     case stoppedShort(reason: String?, deltas: Int)
 
+    /// The turn was handed tools, and this transport has no turn that carries
+    /// them. Thrown before any request is made.
+    case toolsUnsupported
+
     public var errorDescription: String? {
         switch self {
         case .streamingUnsupported(let reason):
             "This model cannot hold a streamed conversation: \(reason)."
+        case .toolsUnsupported:
+            "This provider cannot call tools in this version."
         case .streamEndedEarly:
             "The provider ended the response before it finished."
         case .stoppedShort(let reason, _):

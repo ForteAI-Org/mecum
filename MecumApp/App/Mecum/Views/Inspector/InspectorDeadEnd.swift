@@ -17,7 +17,7 @@ struct InspectorDeadEnd: View {
     var body: some View {
         Label(
             """
-            \(provider.title) can’t respond to worker messages yet. Choose Codex or Claude.
+            \(provider.title) can’t respond to worker messages yet. Choose Codex, Claude or Ollama.
             """,
             systemImage: "exclamationmark.bubble"
         )

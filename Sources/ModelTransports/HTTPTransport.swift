@@ -48,9 +48,9 @@ enum HTTPTransport {
         return json
     }
 
-    /// One streamed turn: the provider's deltas as they arrive, then the
-    /// terminal element the assembler only gives once the provider has
-    /// declared the turn finished.
+    /// One streamed turn: the provider's deltas and tool calls as they arrive,
+    /// then the terminal element the assembler only gives once the provider
+    /// has declared the turn finished.
     ///
     /// The request is built by the caller, so the body's JSON is serialized
     /// before anything is sent and a malformed one fails at the call rather
@@ -59,18 +59,27 @@ enum HTTPTransport {
     /// provider's own message.
     static func stream(_ request: URLRequest,
                        assembler: TurnAssembler) -> AsyncThrowingStream<TurnEvent, any Error> {
+        stream({ request }, assembler: assembler)
+    }
+
+    /// The same turn over a request built when the stream starts, for a
+    /// provider that must be asked something first. A failure building it
+    /// ends the stream before any delta.
+    static func stream(_ request: @escaping @Sendable () async throws -> URLRequest,
+                       assembler: TurnAssembler) -> AsyncThrowingStream<TurnEvent, any Error> {
         AsyncThrowingStream { continuation in
             let task = Task {
                 var assembler = assembler
                 do {
                     let started = ContinuousClock.now
-                    let (bytes, response) = try await URLSession.shared.bytes(for: request)
+                    let (bytes, response) = try await URLSession.shared.bytes(for: try await request())
                     let status = (response as? HTTPURLResponse)?.statusCode ?? 0
                     guard (200..<300).contains(status) else {
                         throw failure(status: status, body: await head(of: bytes))
                     }
                     for try await byte in bytes {
                         if let text = try assembler.accept(byte) { continuation.yield(.delta(text)) }
+                        for call in assembler.takeToolCalls() { continuation.yield(.toolCall(call)) }
                         if assembler.progress.isFinished { break }
                     }
                     continuation.yield(try assembler.completion(wallClock: started.duration(to: .now)))

@@ -13,23 +13,29 @@ import Foundation
 import LocalMCP
 import ModelTransports
 
-/// WorkerAgentHost answers one conversation through a signed-in agent command
-/// line, with the same agent, tools and instructions as `mecum chat`.
+/// WorkerAgentHost answers one conversation, through a signed-in agent command
+/// line with the same agent, tools and instructions as `mecum chat`, or through
+/// Mecum's own loop over a model provider's transport (`ModelToolLoop`), with
+/// the same tools. `WorkerAnswer` decides which, per turn, from the frozen
+/// selection's provider.
 ///
 /// It owns what `ChatCommand` composes for a terminal: `AutomationTools` over the
 /// session its composer supplies, the router, the loopback MCP host, the connection
 /// file (0600, in a 0700 temporary directory), the working directory and the
-/// provider runner. The loopback host starts with the first turn and lives
-/// until `close`, so each turn's provider child reconnects to the same tools.
+/// provider runner. The loopback host starts with the first command line turn
+/// and lives until `close`, so each turn's provider child reconnects to the same
+/// tools; a loop turn calls the tools directly and starts none of it.
 ///
 /// One turn at a time: a second `run` while one is running is refused. The
 /// host keeps no provider session of its own: the caller passes the one to
-/// resume, and `WorkerTurnRecorder` keeps it on the conversation.
+/// resume, and `WorkerTurnRecorder` keeps it on the conversation. A loop turn
+/// has none, and remembers through the history the caller passes.
 ///
 /// Stopping follows `ChatSignals`: pause the router, interrupt the provider,
 /// then drain the router, close the session and wait for the child to stop,
-/// all before `run` throws `CancellationError`. A failed turn is never run
-/// again by this type.
+/// all before `run` throws `CancellationError`. A loop turn stops the same way:
+/// no new tool call, the model's stream cancelled, a call in flight finished,
+/// then the session closed. A failed turn is never run again by this type.
 @MainActor
 final class WorkerAgentHost {
 
@@ -40,9 +46,16 @@ final class WorkerAgentHost {
     private let host            : LocalMCPHost
     private let provider        = CLIProvider()
     private let agents          : (ModelProvider) throws -> (ChatProvider, URL)
+    private let transports      : (ModelSelection) -> any ModelTransport
 
     private var temporary     : URL?
     private var connectionFile: URL?
+
+    /// The running loop turn's loop. Non-nil exactly while a loop turn runs.
+    private var loop: ModelToolLoop?
+
+    /// `close` calls waiting for the running loop turn to end, resumed as it ends.
+    private var loopEndWaiters: [CheckedContinuation<Void, Never>] = []
 
     /// The running turn's receiver. Non-nil exactly while a turn runs.
     private var onEvent: (@MainActor (WorkerAgentEvent) -> Void)?
@@ -63,25 +76,36 @@ final class WorkerAgentHost {
     /// takes for the same bridge. `session` is called once, here,
     /// for the desktop the tools drive; the host closes it after a failed or
     /// stopped turn and in `close`, and never builds a seat of its own (§22.3).
+    /// `transports` makes the transport a loop turn talks through, once per
+    /// turn, so it reads the connection settings as they are then.
     convenience init(
         workingDirectory: URL,
         bridgeExecutable: URL,
-        session         : () -> any AutomationSessionOperating
+        session         : () -> any AutomationSessionOperating,
+        transports      : @escaping (ModelSelection) -> any ModelTransport = { $0.transport() }
     ) {
-        self.init(workingDirectory: workingDirectory, bridgeExecutable: bridgeExecutable,
-                  session: session, agents: Self.agent(for:))
+        self.init(
+            workingDirectory: workingDirectory,
+            bridgeExecutable: bridgeExecutable,
+            session         : session,
+            agents          : Self.agent(for:),
+            transports      : transports
+        )
     }
 
-    /// `agents` finds the command line for a provider; a test passes a stand-in.
+    /// `agents` finds the command line for a provider; a test passes a stand-in,
+    /// and a stand-in transport through `transports`.
     init(
         workingDirectory: URL,
         bridgeExecutable: URL,
         session         : () -> any AutomationSessionOperating,
-        agents          : @escaping (ModelProvider) throws -> (ChatProvider, URL)
+        agents          : @escaping (ModelProvider) throws -> (ChatProvider, URL),
+        transports      : @escaping (ModelSelection) -> any ModelTransport = { $0.transport() }
     ) {
         self.workingDirectory = workingDirectory
         self.bridgeExecutable = bridgeExecutable
         self.agents           = agents
+        self.transports       = transports
         let tools  = AutomationTools(session: session())
         let router = MCPRouter(tools: AutomationTools.definitions) { name, arguments in
             try await tools.call(name, arguments)
@@ -97,11 +121,19 @@ final class WorkerAgentHost {
     static let appInstructions = "In this app, open_session also opens an installed application that is "
         + "not running yet; you do not need to find it with windows first."
 
+    /// What a model that cannot call tools is told instead of the tools' text.
+    static let textOnlyInstructions = "You are Mecum's assistant. You have no tools in this conversation "
+        + "and cannot see or use apps on this Mac."
+
     /// The instructions a worker's turn runs with: the base text first, then
     /// the app's line, and the worker's own instructions after them, never
-    /// instead of them (§6.2).
-    static func instructions(role: String?) -> String {
-        let base = AutomationTools.instructions + "\n" + appInstructions
+    /// instead of them (§6.2). A model without tools gets `textOnlyInstructions`
+    /// as its base, which names no tool.
+    static func instructions(
+        role    : String?,
+        hasTools: Bool = true
+    ) -> String {
+        let base = hasTools ? AutomationTools.instructions + "\n" + appInstructions : textOnlyInstructions
         guard let role = role?.trimmingCharacters(in: .whitespacesAndNewlines), !role.isEmpty else {
             return base
         }
@@ -114,7 +146,9 @@ final class WorkerAgentHost {
     /// session closed first, and nothing is retried.
     ///
     /// `sessionID` is the provider session to resume, or nil for a new one;
-    /// the caller answers for it belonging to `selection.provider`.
+    /// the caller answers for it belonging to `selection.provider`. A loop turn
+    /// ignores it and is sent `history` instead, the conversation before
+    /// `prompt`; a command line turn ignores `history`.
     /// `inheritedEnvironment` is filtered through the Codex allow-list before
     /// it reaches the child, so no API key does (§7.3).
     func run(
@@ -122,6 +156,7 @@ final class WorkerAgentHost {
         selection           : ModelSelection,
         sessionID           : String?,
         role                : String?,
+        history             : [TurnMessage] = [],
         inheritedEnvironment: [String: String] = ProcessInfo.processInfo.environment,
         onEvent             : @escaping @MainActor (WorkerAgentEvent) -> Void
     ) async throws {
@@ -131,6 +166,31 @@ final class WorkerAgentHost {
         self.onEvent    = onEvent
         isStopRequested = false
         defer { self.onEvent = nil }
+
+        if WorkerAnswer(provider: selection.provider) == .modelLoop {
+            let loop  = ModelToolLoop { [tools] name, arguments in try await tools.call(name, arguments) }
+            self.loop = loop
+            defer {
+                self.loop = nil
+                let waiters    = loopEndWaiters
+                loopEndWaiters = []
+                for waiter in waiters { waiter.resume() }
+            }
+            do {
+                try await loop.run(
+                    transport: transports(selection),
+                    role     : role,
+                    history  : history,
+                    prompt   : prompt,
+                    onEvent  : onEvent
+                )
+            } catch {
+                // The loop ends only after a tool call in flight has finished, so no action is cut short.
+                await tools.session.close()
+                throw error
+            }
+            return
+        }
 
         let (chatProvider, executable) = try agents(selection.provider)
         guard FileManager.default.isExecutableFile(atPath: bridgeExecutable.path) else {
@@ -212,6 +272,12 @@ final class WorkerAgentHost {
     func stop() {
         guard onEvent != nil else { return }
         isStopRequested = true
+        // A loop turn has no router or child to stop, and a paused router would refuse
+        // the next command line turn.
+        if let loop {
+            loop.stop()
+            return
+        }
         router.pause()
         provider.cancel()
     }
@@ -221,8 +287,12 @@ final class WorkerAgentHost {
     /// is not used again afterwards. Throws when that directory could not be
     /// removed, after everything else has been released.
     func close() async throws {
+        loop?.stop()
         router.pause()
         provider.cancel()
+        // A loop turn's call in flight finishes before the session is closed, as the router's does.
+        // The wait ignores cancellation: the stopped turn always ends and resumes it.
+        if loop != nil { await withCheckedContinuation { loopEndWaiters.append($0) } }
         await router.drain()
         await tools.session.close()
         await provider.waitUntilStopped()
@@ -268,6 +338,8 @@ final class WorkerAgentHost {
         switch (provider, WorkerAnswer(provider: provider)) {
         case (_, .notYet(let reason)):
             throw AutomationFailure("\(provider.title) can’t respond in this version. Details: \(reason).")
+        case (_, .modelLoop):
+            throw AutomationFailure("\(provider.title) responds through Mecum’s own loop and has no command line.")
         case (.claudeCode, .agent):
             return (.claude, try ClaudeCLIClient.executableURL())
         case (.codex, .agent):

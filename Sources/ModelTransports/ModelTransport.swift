@@ -45,6 +45,22 @@ public protocol ModelTransport: Sendable {
     /// cancels the request.
     func converse(_ messages: [TurnMessage], timeout: TimeInterval)
         throws -> AsyncThrowingStream<TurnEvent, any Error>
+
+    /// One conversational turn in which the model may call `tools`: text
+    /// deltas and whole `.toolCall`s in the order the model made them, then the
+    /// single terminal `.completed`, with the failures `converse` has.
+    ///
+    /// The turn runs no tool. A caller that saw calls runs them, then starts
+    /// the next turn with the assistant message that made them and one `tool`
+    /// message per call. With no tools this is `converse(_:timeout:)`. A
+    /// transport without a tool turn refuses tools with
+    /// `ModelTransportError.toolsUnsupported` before any request.
+    func converse(_ messages: [TurnMessage], tools: [ToolDefinition], timeout: TimeInterval)
+        throws -> AsyncThrowingStream<TurnEvent, any Error>
+
+    /// What the model can do beyond text, as the provider confirms it now.
+    /// Throws what the provider answered when it could not be asked.
+    func capabilities() async throws -> ModelCapabilities
 }
 
 public extension ModelTransport {
@@ -58,6 +74,18 @@ public extension ModelTransport {
         throws -> AsyncThrowingStream<TurnEvent, any Error> {
         throw ModelTransportError.streamingUnsupported(streaming.declaredReason)
     }
+
+    /// A transport without a tool turn: the text turn when no tool is handed
+    /// over, and the refusal otherwise.
+    func converse(_ messages: [TurnMessage], tools: [ToolDefinition], timeout: TimeInterval)
+        throws -> AsyncThrowingStream<TurnEvent, any Error> {
+        guard tools.isEmpty else { throw ModelTransportError.toolsUnsupported }
+        return try converse(messages, timeout: timeout)
+    }
+
+    /// Nothing confirmed: a transport that has not asked its provider claims
+    /// no capability, so a caller sends it nothing the model may refuse.
+    func capabilities() async throws -> ModelCapabilities { ModelCapabilities() }
 }
 
 /// Whether a transport can carry a conversational turn. An adapter declares

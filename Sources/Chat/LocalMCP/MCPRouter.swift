@@ -62,11 +62,7 @@ public final class MCPRouter {
                     activeCall = task
                     result = try await task.value
                 } catch {
-                    result = Self.toolResult(.object([
-                        "status": .string("error"),
-                        "message": .string(String(describing: error)),
-                        "guidance": .string("Effects may be partial. Observe before deciding the next action; do not replay automatically.")
-                    ]), isError: true)
+                    result = Self.failureResult(error)
                 }
             default: return error(id, -32601, "Method not found: \(method)")
             }
@@ -82,6 +78,16 @@ public final class MCPRouter {
             "content": .array([.object(["type": .string("text"), "text": .string(text)])]),
             "structuredContent": value, "isError": .bool(isError)
         ])
+    }
+
+    /// The result a tool call that threw carries back to the model: the error in its own words, marked
+    /// as an error, with the guidance that its effects may be partial.
+    public static func failureResult(_ error: any Error) -> JSONValue {
+        toolResult(.object([
+            "status": .string("error"),
+            "message": .string(String(describing: error)),
+            "guidance": .string("Effects may be partial. Observe before deciding the next action; do not replay automatically.")
+        ]), isError: true)
     }
 
     private func error(_ id: JSONValue, _ code: Int, _ message: String) -> JSONValue {

@@ -170,6 +170,7 @@ enum WindowSnapshots {
                 ("chat", AnyView(ChatSettings())),
                 ("claude", AnyView(ProviderSettingsPage(store: team.connections, provider: .claudeCode))),
                 ("codex", AnyView(ProviderSettingsPage(store: team.connections, provider: .codex))),
+                ("ollama", AnyView(ProviderSettingsPage(store: team.connections, provider: .ollama))),
             ]
             for page in pages {
                 try await write(

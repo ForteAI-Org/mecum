@@ -7,8 +7,9 @@
 
 import Foundation
 
-/// Assembles one provider's event stream: bytes in, text deltas out, and the
-/// provider's own terminal event before the turn may be called complete.
+/// Assembles one provider's event stream: bytes in, text deltas and whole
+/// tool calls out, and the provider's own terminal event before the turn may
+/// be called complete.
 ///
 /// The network path and the tests drive the same `accept`: a chunk may end
 /// anywhere, including inside a UTF-8 sequence or halfway through an event, so
@@ -23,6 +24,9 @@ struct TurnAssembler: Sendable {
     private let decode: PayloadDecoding
     private(set) var progress = TurnProgress()
     private(set) var deltaCount = 0
+
+    /// How many of `progress.toolCalls` have been taken.
+    private var takenToolCalls = 0
 
     init(format: EventStreamReader.Format, decode: @escaping PayloadDecoding) {
         self.reader = EventStreamReader(format: format)
@@ -40,6 +44,12 @@ struct TurnAssembler: Sendable {
     /// The texts this chunk completed, in the order the provider sent them.
     mutating func accept(_ chunk: Data) throws -> [String] {
         try chunk.compactMap { try accept($0) }
+    }
+
+    /// The tool calls completed since the last take, in the order they arrived.
+    mutating func takeToolCalls() -> [ToolCall] {
+        defer { takenToolCalls = progress.toolCalls.count }
+        return Array(progress.toolCalls[takenToolCalls...])
     }
 
     /// The terminal element, or the refusal owed when the provider never

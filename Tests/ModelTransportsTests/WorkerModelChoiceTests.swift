@@ -67,14 +67,18 @@ struct WorkerModelChoiceTests {
         }
     }
 
-    @Test("the two command lines answer as agents and the rest say why not",
+    @Test("the command lines answer as agents, Ollama through Mecum's loop, and the rest say why not",
           arguments: ModelProvider.allCases)
     func whoAnswersIsOneAuthority(provider: ModelProvider) {
         let answer = WorkerAnswer(provider: provider)
-        if [.codex, .claudeCode].contains(provider) {
+        switch provider {
+        case .codex, .claudeCode:
             #expect(answer == .agent)
             #expect(answer.refusal == nil)
-        } else {
+        case .ollama:
+            #expect(answer == .modelLoop)
+            #expect(answer.refusal == nil)
+        case .anthropic, .gemini:
             #expect(answer == .notYet(reason: "this provider is not available for workers in this version"))
             #expect(answer.refusal == "this provider is not available for workers in this version")
         }

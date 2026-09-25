@@ -12,11 +12,16 @@ import Foundation
 /// it, so no second list of providers that answer can drift from this one.
 ///
 /// An agent is an external command line that runs its own loop with Mecum's
-/// tools (§7.1). The other providers are models this build has no agent for.
+/// tools (§7.1). A model provider has no loop of its own, so Mecum runs one
+/// over its transport, with the same tools when the model can call them. The
+/// other providers are models this build has no tool turn for yet.
 public enum WorkerAnswer: Sendable, Hashable {
 
     /// The provider's command line answers as an agent.
     case agent
+
+    /// The provider's model answers through Mecum's own loop over its transport.
+    case modelLoop
 
     /// Nothing answers yet, for the reason given.
     case notYet(reason: String)
@@ -25,15 +30,17 @@ public enum WorkerAnswer: Sendable, Hashable {
         switch provider {
         case .claudeCode, .codex:
             self = .agent
-        case .anthropic, .gemini, .ollama:
+        case .ollama:
+            self = .modelLoop
+        case .anthropic, .gemini:
             self = .notYet(reason: "this provider is not available for workers in this version")
         }
     }
 
-    /// Why nothing answers, or nil when an agent does.
+    /// Why nothing answers, or nil when something does.
     public var refusal: String? {
         switch self {
-        case .agent:                  nil
+        case .agent, .modelLoop:      nil
         case .notYet(let reason):     reason
         }
     }
