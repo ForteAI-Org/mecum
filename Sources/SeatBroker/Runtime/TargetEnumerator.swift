@@ -191,11 +191,20 @@ enum TargetEnumerator {
     }
 
     private static func installedApplicationURLs() -> [URL] {
-        applicationFolders.flatMap { folder in
+        applicationURLs(in: applicationFolders)
+    }
+
+    /// The applications in `folders`: the ones standing there, and the ones one folder down, where
+    /// a suite installs itself ("DaVinci Resolve/DaVinci Resolve.app") and macOS keeps its
+    /// Utilities. An application's own bundle is never looked into.
+    static func applicationURLs(in folders: [URL]) -> [URL] {
+        func entries(of folder: URL) -> [URL] {
             (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: nil,
                                                           options: [.skipsHiddenFiles])) ?? []
         }
-        .filter { $0.pathExtension == "app" }
+        return folders.flatMap { entries(of: $0) }.flatMap { entry in
+            entry.pathExtension == "app" ? [entry] : entries(of: entry).filter { $0.pathExtension == "app" }
+        }
     }
 
     private static func onScreenWindows(minimumSize: CGFloat) -> [pid_t: [TargetWindow]] {

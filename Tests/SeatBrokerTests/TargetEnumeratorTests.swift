@@ -201,3 +201,21 @@ func theExclusionNeverLeavesNothing() {
     #expect(TargetEnumerator.mainWindow(among: [sheet])?.windowNumber == 1)
     #expect(TargetEnumerator.mainWindow(among: []) == nil)
 }
+
+@Test func anApplicationOneFolderDownIsInstalledAndOneInsideABundleIsNot() throws {
+    let root  = URL.temporaryDirectory.appending(path: "applications-\(UUID().uuidString)")
+    let files = FileManager.default
+    defer { try? files.removeItem(at: root) }
+    for path in [
+        "Notes.app/Contents",
+        "DaVinci Resolve/DaVinci Resolve.app/Contents",
+        "Utilities/Terminal.app/Contents",
+        "Xcode.app/Contents/Applications/Instruments.app",
+        "Suite/Tools/Deep.app",
+    ] {
+        try files.createDirectory(at: root.appending(path: path), withIntermediateDirectories: true)
+    }
+
+    let names = TargetEnumerator.applicationURLs(in: [root]).map(\.lastPathComponent).sorted()
+    #expect(names == ["DaVinci Resolve.app", "Notes.app", "Terminal.app", "Xcode.app"])
+}
