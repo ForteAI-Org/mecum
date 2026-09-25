@@ -544,46 +544,20 @@ final class TeamModel {
     }
 
     /// The alert for a turn that failed because its command line is signed out, nil for any other
-    /// failure. The command lines say so only in their error's words, which are matched here:
-    /// Claude Code's expired OAuth token, as it reached a person on macOS 26, and Codex's refused
-    /// or missing ChatGPT sign-in.
+    /// failure, as `SignInFailure` recognises it.
     static func signInExpired(
         provider: ModelProvider,
         reason  : String
     ) -> UserFacingIssue? {
-        let text    = reason.lowercased()
-        let signals = [
-            "oauth access token has expired",
-            "failed to authenticate",
-            "authentication_error",
-            "please run /login",
-            "invalid api key",
-            "not logged in",
-            "401 unauthorized",
-            "token has expired",
-            "sign in again",
-            "log in again",
-        ]
-        guard signals.contains(where: text.contains) else { return nil }
+        guard SignInFailure.isSignedOut(reason), let steps = SignInFailure.steps(for: provider) else { return nil }
 
-        switch provider {
-        case .claudeCode:
-            return UserFacingIssue(
-                title           : "Sign In to Claude Again",
-                message         : "Claude Code on this Mac is signed out, so workers using it can’t respond. "
-                    + "Open Terminal, run claude, type /login and sign in, then send your message again.",
-                technicalDetails: reason
-            )
-        case .codex:
-            return UserFacingIssue(
-                title           : "Sign In to Codex Again",
-                message         : "Codex on this Mac is signed out, so workers using it can’t respond. "
-                    + "Open ChatGPT or Codex and sign in again, then send your message again.",
-                technicalDetails: reason
-            )
-        case .anthropic, .gemini, .ollama:
-            return nil
-        }
+        let name = SignInFailure.name(of: provider)
+        return UserFacingIssue(
+            title           : "Sign In to \(name) Again",
+            message         : "\(name) on this Mac is signed out, so workers using it can’t respond. "
+                + "\(steps) Then send your message again.",
+            technicalDetails: reason
+        )
     }
 
     /// Stops the worker's running turn, as Stop in the conversation and in

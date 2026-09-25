@@ -33,7 +33,7 @@ struct ConnectionItem: View {
             Group {
                 if let state = connections.states[provider], !state.isReady {
                     VStack(alignment: .leading, spacing: 6) {
-                        Text(state.message)
+                        Text(state.message(for: provider))
                         if let detail = state.technicalDetail {
                             Text("Details: \(detail)")
                                 .font(.caption)

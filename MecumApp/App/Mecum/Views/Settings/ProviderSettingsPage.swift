@@ -31,7 +31,7 @@ struct ProviderSettingsPage: View {
                 Section("Connection") {
                     if let state = store.states[provider], !state.isReady {
                         VStack(alignment: .leading, spacing: 6) {
-                            Text(state.message)
+                            Text(state.message(for: provider))
                             if let detail = state.technicalDetail {
                                 Text("Details: \(detail)")
                                     .font(.caption)

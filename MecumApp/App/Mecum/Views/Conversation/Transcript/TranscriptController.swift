@@ -6,6 +6,7 @@
 //
 
 import AppKit
+import ModelTransports
 import Observation
 
 /// TranscriptController owns one conversation's transcript: the window it
@@ -130,6 +131,7 @@ final class TranscriptController: NSObject {
     @ObservationIgnored private var cache         = LayoutMeasurementCache()
     @ObservationIgnored private var preparedWidth : CGFloat = 0
     @ObservationIgnored private var workerName    = ""
+    @ObservationIgnored private var workerProvider: ModelProvider?
     @ObservationIgnored private var avatar        : NSImage?
     @ObservationIgnored private(set) var textSelection: TranscriptSelection?
     @ObservationIgnored private(set) var bubbleSelection: Set<UUID> = []
@@ -172,6 +174,7 @@ final class TranscriptController: NSObject {
     func open(
         _ conversationID: UUID,
         workerName      : String,
+        workerProvider  : ModelProvider? = nil,
         appearance      : WorkerAppearance,
         readingAnchor   : UUID?,
         readingOffset   : Double
@@ -183,6 +186,7 @@ final class TranscriptController: NSObject {
                                                                 from: self.source)
                 guard self.conversationID == conversationID else { return }
                 self.workerName  = workerName
+                self.workerProvider = workerProvider
                 self.avatar      = MascotImages.image(for: appearance, size: RowGeometry.avatarSide)
                 self.expanded    = []
                 self.textSelection = nil
@@ -320,13 +324,14 @@ final class TranscriptController: NSObject {
         let width    = currentWidth
         let expanded = expanded
         let name     = workerName
+        let provider = workerProvider
         let style    = style
         let cache    = cache
         let pipeline = pipeline
         let now      = Date()
         let items    = await Self.project(window, expanded: expanded, opensToolSteps: style.opensToolSteps, now: now)
-        let result   = await RowPreparation.prepare(items, workerName: name, width: width, style: style,
-                                                    cache: cache, pipeline: pipeline)
+        let result   = await RowPreparation.prepare(items, workerName: name, workerProvider: provider, width: width,
+                                                    style: style, cache: cache, pipeline: pipeline)
         guard window.conversationID == conversationID else { return }
 
         let started = ContinuousClock.now

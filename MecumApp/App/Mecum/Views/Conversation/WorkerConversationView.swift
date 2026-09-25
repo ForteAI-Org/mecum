@@ -5,6 +5,7 @@
 //  Created by Eliomar Alejandro Rodriguez Ferrer on 22/09/2026.
 //
 
+import ModelTransports
 import SwiftUI
 
 /// WorkerConversationView shows one worker's direct conversation.
@@ -111,10 +112,11 @@ struct WorkerConversationView: View {
         }
         controller.open(
             conversationID,
-            workerName   : worker.name,
-            appearance   : worker.appearance,
-            readingAnchor: conversation.readingAnchorMessageID,
-            readingOffset: conversation.readingOffset
+            workerName    : worker.name,
+            workerProvider: worker.configuration?.provider,
+            appearance    : worker.appearance,
+            readingAnchor : conversation.readingAnchorMessageID,
+            readingOffset : conversation.readingOffset
         )
     }
 }

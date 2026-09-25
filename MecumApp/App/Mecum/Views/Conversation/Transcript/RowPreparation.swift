@@ -6,6 +6,7 @@
 //
 
 import AppKit
+import ModelTransports
 import Synchronization
 
 /// RowPreparation builds each row's text and measures it block by block, off
@@ -27,16 +28,22 @@ nonisolated enum RowPreparation {
 
     @concurrent
     static func prepare(
-        _ items   : [TranscriptItem],
-        workerName: String,
-        width     : CGFloat,
-        style     : TranscriptStyle,
-        cache     : LayoutMeasurementCache,
-        pipeline  : any MessageContentPipeline
+        _ items       : [TranscriptItem],
+        workerName    : String,
+        workerProvider: ModelProvider? = nil,
+        width         : CGFloat,
+        style         : TranscriptStyle,
+        cache         : LayoutMeasurementCache,
+        pipeline      : any MessageContentPipeline
     ) async -> Result {
         var measured: [LayoutMeasurementCache.Key: CGSize] = [:]
         let rows = items.map { item in
-            let text  = preparedText(for: item, workerName: workerName, pipeline: pipeline)
+            let text  = preparedText(
+                for           : item,
+                workerName    : workerName,
+                workerProvider: workerProvider,
+                pipeline      : pipeline
+            )
             let sizes = text.blocks.map { block in
                 let limit = RowGeometry.textWidthLimit(for: block.kind, in: item.kind, rowWidth: width, style: style)
                 let key   = LayoutMeasurementCache.Key(content: block, width: limit, style: style)
@@ -92,10 +99,13 @@ nonisolated enum RowPreparation {
 
     // MARK: Text per kind
 
+    /// `workerProvider` is the worker's provider, which a failure card needs to say how to sign in
+    /// again; nil when it has none.
     static func preparedText(
-        for item  : TranscriptItem,
-        workerName: String,
-        pipeline  : any MessageContentPipeline
+        for item      : TranscriptItem,
+        workerName    : String,
+        workerProvider: ModelProvider? = nil,
+        pipeline      : any MessageContentPipeline
     ) -> PreparedText {
         let when = TranscriptWording.time(item.date)
 
@@ -116,6 +126,15 @@ nonisolated enum RowPreparation {
             return PreparedText(label, role: .caption)
 
         case .executionFailed(let reason):
+            // A signed-out command line fails every turn the same way: the card says how to sign in,
+            // where sending the message again would only fail again.
+            if let workerProvider, SignInFailure.isSignedOut(reason),
+               let signIn = TranscriptWording.signedOut(workerProvider, worker: workerName) {
+                var result = PreparedText(signIn.headline, role: .alert)
+                result.append("\n" + signIn.steps, role: .body)
+                result.append("\n" + reason, role: .monospaced)
+                return result
+            }
             var result = PreparedText(TranscriptWording.failed(by: workerName), role: .alert)
             result.append("\n" + reason, role: .monospaced)
             return result

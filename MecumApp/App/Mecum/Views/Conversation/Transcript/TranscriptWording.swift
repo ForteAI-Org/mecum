@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import ModelTransports
 
 /// TranscriptWording is every sentence the transcript shows or speaks, in one
 /// place, so what is drawn and what VoiceOver reads cannot drift apart.
@@ -42,6 +43,20 @@ nonisolated enum TranscriptWording {
 
     static func failed(by worker: String) -> String {
         "\(worker) couldn’t finish the response. Send your message again to retry."
+    }
+
+    /// A failure card for a turn whose command line is signed out: what happened, then how to sign
+    /// in again. Nil for a provider that is not a command line.
+    static func signedOut(
+        _ provider: ModelProvider,
+        worker    : String
+    ) -> (headline: String, steps: String)? {
+        guard let steps = SignInFailure.steps(for: provider) else { return nil }
+
+        return (
+            "\(SignInFailure.name(of: provider)) is signed out, so \(worker) couldn’t respond.",
+            "\(steps) Then send your message again."
+        )
     }
 
     static func time(_ date: Date) -> String {

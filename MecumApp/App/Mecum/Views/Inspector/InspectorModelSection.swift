@@ -161,7 +161,7 @@ struct InspectorModelSection: View {
                     spacing  : 6
                 ) {
                     StatusText(
-                        state.message,
+                        state.message(for: provider),
                         tone: .trouble
                     )
                     Button("Providers…") { team.isShowingConnections = true }
