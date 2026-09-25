@@ -439,7 +439,9 @@ final class TeamModel {
             }
 
             do {
-                _ = try await recorder.run { frozen, session, emit in
+                var provider: ModelProvider?
+                let ending = try await recorder.run { frozen, session, emit in
+                    provider = frozen.provider
                     if pendingStops.remove(workerID) != nil { throw CancellationError() }
                     // The turn gives the seat back as it ends when another entry is waiting for it.
                     try await desktop.turn {
@@ -452,6 +454,7 @@ final class TeamModel {
                         )
                     }
                 }
+                if let provider { settle(provider, after: ending) }
             } catch {
                 problem = issue(
                     title  : "Couldn’t Save Complete Response",
@@ -459,6 +462,70 @@ final class TeamModel {
                     error  : error
                 )
             }
+        }
+    }
+
+    /// What a turn's ending says about its provider's connection. A command line that is no longer
+    /// signed in fails every turn until the person signs in again, and the connection light kept
+    /// reading Connected, so the alert says how and the light turns to Access Rejected; the next
+    /// turn that completes checks the connection again.
+    private func settle(_ provider: ModelProvider, after ending: WorkerTurnRecorder.Ending) {
+        switch ending {
+        case .failed(let reason):
+            guard let expired = Self.signInExpired(provider: provider, reason: reason) else { return }
+            connections.recordCheck(
+                .credentialRejected(detail: reason),
+                for: provider,
+                at : Date()
+            )
+            problem = expired
+        case .completed:
+            if connections.states[provider]?.isReady == false { connections.refresh([provider]) }
+        case .cancelled:
+            return
+        }
+    }
+
+    /// The alert for a turn that failed because its command line is signed out, nil for any other
+    /// failure. The command lines say so only in their error's words, which are matched here:
+    /// Claude Code's expired OAuth token, as it reached a person on macOS 26, and Codex's refused
+    /// or missing ChatGPT sign-in.
+    static func signInExpired(
+        provider: ModelProvider,
+        reason  : String
+    ) -> UserFacingIssue? {
+        let text    = reason.lowercased()
+        let signals = [
+            "oauth access token has expired",
+            "failed to authenticate",
+            "authentication_error",
+            "please run /login",
+            "invalid api key",
+            "not logged in",
+            "401 unauthorized",
+            "token has expired",
+            "sign in again",
+            "log in again",
+        ]
+        guard signals.contains(where: text.contains) else { return nil }
+
+        switch provider {
+        case .claudeCode:
+            return UserFacingIssue(
+                title           : "Sign In to Claude Again",
+                message         : "Claude Code on this Mac is signed out, so workers using it can’t respond. "
+                    + "Open Terminal, run claude, type /login and sign in, then send your message again.",
+                technicalDetails: reason
+            )
+        case .codex:
+            return UserFacingIssue(
+                title           : "Sign In to Codex Again",
+                message         : "Codex on this Mac is signed out, so workers using it can’t respond. "
+                    + "Open ChatGPT or Codex and sign in again, then send your message again.",
+                technicalDetails: reason
+            )
+        case .anthropic, .gemini, .ollama:
+            return nil
         }
     }
 
