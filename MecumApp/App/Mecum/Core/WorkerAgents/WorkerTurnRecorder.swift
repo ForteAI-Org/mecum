@@ -200,13 +200,21 @@ final class WorkerTurnRecorder {
                 try await store.update(message: messageID, delivery: .responding)
             }
         case .provider(.failure(let reason)):
+            // A command line that fails writes its error as a last block too: the failure card says it once.
+            if state.held?.trimmingCharacters(in: .whitespacesAndNewlines)
+                == reason.trimmingCharacters(in: .whitespacesAndNewlines) {
+                state.held = nil
+            }
             try await reply(&state)
             // Kept for the one terminal event; the provider also throws it at the end.
             state.reportedFailure = reason
         case .tool(let text):
-            if let note = state.held {
+            if let note = state.held, Self.isNote(note) {
                 state.held = nil
                 try await append(.toolActivity, subject: execution, text: ToolStep.noteRecord(note))
+            } else {
+                // An answer written before a last tool call, a list or a long block, is a reply.
+                try await reply(&state)
             }
             try await append(.toolActivity, subject: execution, text: text)
         case .processStarted(let identity):
@@ -224,6 +232,13 @@ final class WorkerTurnRecorder {
             return
         }
         await onRecorded()
+    }
+
+    /// A block that introduces a tool call is a note on the tool line when it is one short line, the
+    /// way a model says what it is about to do. Anything longer was written to be read as an answer.
+    static func isNote(_ block: String) -> Bool {
+        let text = block.trimmingCharacters(in: .whitespacesAndNewlines)
+        return !text.contains("\n") && text.count <= 200
     }
 
     /// Writes the waiting block as a reply, when one is waiting.
