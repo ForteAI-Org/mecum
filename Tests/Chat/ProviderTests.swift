@@ -127,6 +127,28 @@ struct ProviderTests {
     }
 
     @Test
+    func anEventArrivesWhileTheProviderIsStillRunning() async throws {
+        // The child writes one message and waits for the test to have received it before it goes on.
+        let seen = URL.temporaryDirectory.appending(path: "provider-seen-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: seen) }
+        let fixture = try script("""
+        cat >/dev/null
+        echo '{"type":"item.completed","item":{"type":"agent_message","text":"First"}}'
+        i=0; while [ ! -f '\(seen.path)' ] && [ $i -lt 50 ]; do sleep 0.1; i=$((i+1)); done
+        if [ -f '\(seen.path)' ]; then word=seen; else word=late; fi
+        echo "{\\"type\\":\\"item.completed\\",\\"item\\":{\\"type\\":\\"agent_message\\",\\"text\\":\\"$word\\"}}"
+        echo '{"type":"turn.completed"}'
+        """)
+        defer { try? FileManager.default.removeItem(at: fixture) }
+        var events: [ProviderEvent] = []
+        try await CLIProvider().run(turn(.codex), executable: fixture) { event in
+            events.append(event)
+            if event == .assistant("First") { FileManager.default.createFile(atPath: seen.path, contents: nil) }
+        }
+        #expect(events == [.assistant("First"), .assistant("seen"), .completed])
+    }
+
+    @Test
     func emptySuccessfulExitIsNotACompletedTurn() async throws {
         let fixture = try script("cat >/dev/null\nexit 0")
         defer { try? FileManager.default.removeItem(at: fixture) }

@@ -123,16 +123,26 @@ public final class CLIProvider {
         }
     }
 
+    /// Each chunk as soon as the pipe has it. `FileHandle.read(upToCount:)` waits for the whole count
+    /// or the end of the stream, which held a Codex turn's small events back until the child exited
+    /// and delivered every message at once; `read(2)` answers with what is already there.
     private nonisolated static func chunks(_ handle: FileHandle) -> AsyncThrowingStream<Data, any Error> {
         AsyncThrowingStream { continuation in
             Task.detached {
                 defer { try? handle.close() }
-                do {
-                    while let chunk = try handle.read(upToCount: 16_384), !chunk.isEmpty {
-                        continuation.yield(chunk)
+                var buffer = [UInt8](repeating: 0, count: 16_384)
+                while true {
+                    let count = buffer.withUnsafeMutableBytes { read(handle.fileDescriptor, $0.baseAddress, $0.count) }
+                    if count > 0 {
+                        continuation.yield(Data(buffer[..<count]))
+                    } else if count == 0 {
+                        continuation.finish()
+                        return
+                    } else if errno != EINTR {
+                        continuation.finish(throwing: POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO))
+                        return
                     }
-                    continuation.finish()
-                } catch { continuation.finish(throwing: error) }
+                }
             }
         }
     }
