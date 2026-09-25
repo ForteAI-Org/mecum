@@ -66,9 +66,9 @@ private func blankImage() -> CGImage {
 
     #expect(observation.elements.map(\.index) == [1, 2])
     #expect(observation.text.contains("2 elements in 1 sections"))
-    #expect(observation.text.contains("▣ sidebar"))
+    #expect(observation.text.contains("section: sidebar"))
     #expect(observation.text.contains("[1] icon · (unlabeled)"))
-    #expect(observation.text.contains("▣ (unsectioned) — 1 elements"))
+    #expect(observation.text.contains("section: unsectioned | 1 elements"))
     #expect(observation.text.contains("[2] text · loose"))
 }
 

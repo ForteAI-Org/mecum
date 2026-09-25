@@ -60,24 +60,24 @@ public enum ActVerification {
     public static func outcome(for verdict: Verdict, label: String, after: SceneSnapshot?) -> ActOutcome {
         switch verdict {
             case .landed(let effect, true):
-                return ActOutcome(.foundActed, "clicked '\(label)' — \(effect.summary)", scene: after)
+                return ActOutcome(.foundActed, "clicked '\(label)': \(effect.summary)", scene: after)
             case .landed(let effect, false):
                 return ActOutcome(
                     .actedUnverified,
-                    "clicked '\(label)' — observed \(effect.summary), not the expected effect; "
+                    "clicked '\(label)': observed \(effect.summary), not the expected effect; "
                         + "re-perceive and re-decide",
                     scene: after
                 )
             case .ghost:
                 return ActOutcome(
                     .actedUnverified,
-                    "clicked '\(label)' — this window did NOT change (identical scene)",
+                    "clicked '\(label)': this window did NOT change (identical scene)",
                     scene: after
                 )
             case .unattributable:
                 return ActOutcome(
                     .actedUnverified,
-                    "clicked '\(label)' — the window's pixels changed but nothing structural did; "
+                    "clicked '\(label)': the window's pixels changed but nothing structural did; "
                         + "likely a repaint, not the action landing",
                     scene: after
                 )

@@ -42,7 +42,7 @@ struct ActVerificationTests {
         let outcome = ActVerification.outcome(for: verdict, label: "Facebook", after: after)
         #expect(outcome.kind == .foundActed)
         #expect(outcome.isSuccess)
-        #expect(outcome.message == "clicked 'Facebook' — toggles")
+        #expect(outcome.message == "clicked 'Facebook': toggles")
         #expect(outcome.scene == after)
     }
 

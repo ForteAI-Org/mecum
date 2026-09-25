@@ -36,8 +36,8 @@ extension SceneSnapshot {
             for element in shown {
                 let state = element.state.map { " [\($0.rawValue)]" } ?? ""
                 let details = Self.liveDetails(element)
-                let does  = element.does.map { " — \($0)" } ?? ""
-                let label = element.isUnlabeled ? "(unlabeled icon — target id '\(element.id)')" : element.label
+                let does  = element.does.map { ": \($0)" } ?? ""
+                let label = element.isUnlabeled ? "(unlabeled icon: target id '\(element.id)')" : element.label
                 out += "    \(label)\(state)\(details)\(does)\n"
             }
             if showable.count > shown.count {
@@ -66,7 +66,7 @@ extension SceneSnapshot {
             }
             let loose = elements.filter { $0.section == nil }
             if !loose.isEmpty {
-                out += "▣ (unsectioned) — \(loose.count) elements\n"
+                out += "Unsectioned: \(loose.count) elements\n"
                 for element in loose { out += Self.elementLine(element, indent: "    ") }
             }
         }
@@ -77,7 +77,7 @@ extension SceneSnapshot {
     }
 
     private func header() -> String {
-        "app: \(appName) (\(bundleID))\(windowTitle.isEmpty ? "" : " — \"\(windowTitle)\"")\n"
+        "app: \(appName) (\(bundleID))\(windowTitle.isEmpty ? "" : ": \"\(windowTitle)\"")\n"
     }
 
     private func sectionLine(_ section: SceneSection, count: Int) -> String {
@@ -85,7 +85,7 @@ extension SceneSnapshot {
         let position = String(format: "%.2f,%.2f %.2f×%.2f", b.x, b.y, b.width, b.height)
         let vertical   = section.verticalScrollNote.map { " · \($0)" } ?? ""
         let horizontal = section.horizontalScrollNote.map { " · \($0)" } ?? ""
-        return "▣ \(section.name)  @ \(position) — \(count) elements\(vertical)\(horizontal)\n"
+        return "Section: \(section.name), position: \(position), \(count) elements\(vertical)\(horizontal)\n"
     }
 
     private static func elementLine(_ element: SceneElement, indent: String) -> String {
@@ -95,7 +95,7 @@ extension SceneSnapshot {
         let identity = element.isUnlabeled ? " id:'\(element.id)'" : ""
         let group    = element.group.map { " (\($0))" } ?? ""
         let recalled = element.isRecalled ? " ~recalled" : ""
-        let does     = element.does.map { " — \($0)" } ?? ""
+        let does     = element.does.map { ": \($0)" } ?? ""
         return "\(indent)[\(tag)] \(element.label)\(identity)\(state)\(liveDetails(element))\(group)\(recalled)\(does)  @ \(position)\n"
     }
 

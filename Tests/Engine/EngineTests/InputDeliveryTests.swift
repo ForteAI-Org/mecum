@@ -105,7 +105,7 @@ struct InputDeliveryTests {
                                    actuator: actuator, controls: controls)
             .deliver(request(.typeText("My Project", into: "Project Name", replacing: true)))
         #expect(outcome.kind == .foundActed, Comment(rawValue: outcome.message))
-        #expect(outcome.message == "typed into 'Project Name' — the field reads 'My Project'")
+        #expect(outcome.message == "typed into 'Project Name': the field reads 'My Project'")
         #expect(actuator.gestures == [.click(at: fieldPoint)] + selectAll + [.type("My Project")])
         #expect(actuator.confirmations == [.observed])
     }
@@ -207,14 +207,14 @@ struct InputDeliveryTests {
                                   actuator: actuator)
             .deliver(request(.pressKey(KeyChord(.return), times: 1)))
         #expect(landed.kind == .foundActed)
-        #expect(landed.message == "pressed return — navigates to Render Queue")
+        #expect(landed.message == "pressed return: navigates to Render Queue")
         #expect(actuator.gestures == [.key(code: Key.return)])
 
         let repeated = RecordingActuator()
         let ghost = await engine(scenes: ScriptedScenes([scene([export])]), actuator: repeated)
             .deliver(request(.pressKey(KeyChord(.down), times: 3)))
         #expect(ghost.kind == .actedUnverified)
-        #expect(ghost.message.hasPrefix("pressed down 3 times — this window did NOT change"))
+        #expect(ghost.message.hasPrefix("pressed down 3 times: this window did NOT change"))
         #expect(repeated.gestures == Array(repeating: .key(code: Key.downArrow), count: 3))
         #expect(repeated.confirmations == [.absent])
     }
@@ -256,7 +256,7 @@ struct InputDeliveryTests {
                                    actuator: actuator)
             .deliver(request(.scroll(lines: -3, over: "Export")))
         #expect(outcome.kind == .foundActed, Comment(rawValue: outcome.message))
-        #expect(outcome.message == "scrolled 3 lines down over 'Export' — reveals elements")
+        #expect(outcome.message == "scrolled 3 lines down over 'Export': reveals elements")
         #expect(actuator.gestures == [.scroll(at: exportPoint, deltaY: -3)])
     }
 

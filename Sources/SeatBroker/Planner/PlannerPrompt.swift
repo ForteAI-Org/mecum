@@ -116,7 +116,7 @@ enum PlannerPrompt {
         Scene lines: [index] kind label [state] @x,y. kind text = words read by OCR (clicking hits the row beneath); icon = small glyph, label guessed or unlabeled, purpose from position (small icon at the right end of the bottom field = send); control = accessibility control. x,y = top-left, normalized, y near 1 = bottom.
         """
         var lines = [rules, "", "Goal: \(goal)"]
-        if observation != nil { lines.append("App: \(app ?? "unknown") — \(windowTitle ?? "")") }
+        if observation != nil { lines.append("App: \(app ?? "unknown") | \(windowTitle ?? "")") }
         lines.append("Installed: \(applications)")
         lines.append(history.isEmpty ? "History: none." : "History: " + history.joined(separator: "; "))
         if let nudge { lines.append("Controller: \(nudge)") }

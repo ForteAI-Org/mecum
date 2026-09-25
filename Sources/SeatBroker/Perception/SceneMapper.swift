@@ -56,21 +56,21 @@ enum SceneMapper {
     /// that cannot be clicked.
     static func text(of scene: SceneSnapshot, elements: [SceneObservation.Element]) -> String {
         let placed = Array(zip(scene.elements.map(\.section), elements))
-        var lines = ["app: \(scene.appName) — \"\(scene.windowTitle)\""]
+        var lines = ["app: \(scene.appName) | \"\(scene.windowTitle)\""]
         lines.append(scene.sections.isEmpty
                      ? "\(elements.count) elements"
                      : "\(elements.count) elements in \(scene.sections.count) sections")
         for section in scene.sections {
             let members = placed.filter { $0.0 == section.name }.map(\.1)
             let bounds = section.bounds
-            lines.append(String(format: "▣ %@  @ %.2f,%.2f %.2f×%.2f — %d elements",
+            lines.append(String(format: "section: %@ @ %.2f,%.2f %.2f×%.2f | %d elements",
                                 section.name, bounds.x, bounds.y, bounds.width, bounds.height,
                                 members.count))
             lines.append(contentsOf: members.map(line))
         }
         let loose = placed.filter { $0.0 == nil }.map(\.1)
         if !loose.isEmpty {
-            if !scene.sections.isEmpty { lines.append("▣ (unsectioned) — \(loose.count) elements") }
+            if !scene.sections.isEmpty { lines.append("section: unsectioned | \(loose.count) elements") }
             lines.append(contentsOf: loose.map(line))
         }
         return lines.joined(separator: "\n")

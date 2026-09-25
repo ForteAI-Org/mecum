@@ -137,7 +137,7 @@ struct SceneComposerTests {
             elements: out, sections: sections
         )
         let text = scene.text()
-        #expect(text.contains("▣ CLIPS"))
+        #expect(text.contains("Section: CLIPS"))
         #expect(text.contains("    [text] 01_Kick.1"))
         #expect(text.contains("in 1 sections"))
     }

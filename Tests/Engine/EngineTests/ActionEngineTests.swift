@@ -208,7 +208,7 @@ struct ActionEngineTests {
         let outcome = await engine(scenes: ScriptedScenes([scene([toggleOff]), scene([toggleOn])]), actuator: actuator, observer: observer)
             .act(request("Facebook"))
         #expect(outcome.kind == .foundActed)
-        #expect(outcome.message == "clicked 'Facebook' — toggles")
+        #expect(outcome.message == "clicked 'Facebook': toggles")
         #expect(actuator.gestures == [.click(at: CGPoint(x: 100 + 0.225 * 1000, y: 100 + 0.21 * 800))])
         let record = try #require(observer.records.first)
         #expect(record.effect == .stateFlip(from: .off, to: .on))
