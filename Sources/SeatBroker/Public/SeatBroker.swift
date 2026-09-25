@@ -145,9 +145,15 @@ public final class SeatBroker {
         TargetEnumerator.targets()
     }
 
+    /// How long a launched application that already shows a window may take to show one the seat
+    /// can take: DaVinci Resolve loads behind its splash screen for longer than the 20 s a first
+    /// window is given.
+    static let startupAllowance: Duration = .seconds(60)
+
     /// Launches an installed application without activating it and waits for
     /// its first on-screen window, so it can be adopted like any other. An app
-    /// that is already running just gets its windows re-read.
+    /// that is already running gets its windows re-read, and is asked for one
+    /// when it has none.
     ///
     /// This is the only place in the kit that starts a process, so it is where
     /// provenance is recorded: an application opened here is the agent's to
@@ -156,15 +162,18 @@ public final class SeatBroker {
     /// ledger answers for it: not the lab's, so not the lab's to quit. An application this call
     /// launched that shows no window in time is quit again before the refusal, since no seat ever
     /// took a window of it; one found running is left alone.
-    /// How long a launched application that already shows a window may take to show one the seat
-    /// can take: DaVinci Resolve loads behind its splash screen for longer than the 20 s a first
-    /// window is given.
-    static let startupAllowance: Duration = .seconds(60)
-
     public func launch(_ app: TargetApp, timeout: Duration = .seconds(20)) async throws -> TargetApp {
         let pid: pid_t
         if let running = app.pid {
             pid = running
+            // A running application with no window is asked for one, the way a click on its Dock icon
+            // asks, and is left behind: Finder opens a window, most applications a new document.
+            // Without it the wait below could only run out, since the seat never brings it forward.
+            if TargetEnumerator.windows(of: running).isEmpty, let url = app.bundleURL {
+                let configuration = NSWorkspace.OpenConfiguration()
+                configuration.activates = false
+                _ = try? await NSWorkspace.shared.openApplication(at: url, configuration: configuration)
+            }
         } else {
             guard let url = app.bundleURL else {
                 throw SeatBrokerError.driver("\(app.name) is not running and has no bundle to launch.")
