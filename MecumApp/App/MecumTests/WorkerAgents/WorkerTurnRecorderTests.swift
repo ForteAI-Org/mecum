@@ -71,6 +71,27 @@ struct WorkerTurnRecorderTests {
         #expect(TranscriptWording.toolSummary(steps, ending: .completed) == "Checked open windows")
     }
 
+    @Test func aReplyBetweenTwoBlocksIsShownBeforeTheTurnEnds() async throws {
+        let fixture = try await Fixture()
+        defer { fixture.discard() }
+        var shown: [[String]] = []
+        let recorder = WorkerTurnRecorder(
+            store         : fixture.store,
+            workspaceID   : UUID(),
+            workerID      : fixture.worker,
+            conversationID: fixture.conversation,
+            messageID     : fixture.message
+        ) {
+            shown.append((try? await fixture.store.messages(in: fixture.conversation).map(\.text)) ?? [])
+        }
+        _ = try await recorder.run { _, _, emit in
+            emit(.provider(.assistant("Finder has one window.")))
+            emit(.provider(.assistant("Nothing else is open.")))
+            emit(.provider(.completed))
+        }
+        #expect(shown.contains(["Which apps have windows?", "Finder has one window."]))
+    }
+
     @Test func aFailureIsRecordedOnceAndNotRetried() async throws {
         let fixture = try await Fixture()
         defer { fixture.discard() }

@@ -192,13 +192,13 @@ final class WorkerTurnRecorder {
     ) async throws {
         switch event {
         case .provider(.assistant(let text)):
-            // A block after a block: the first one answered.
+            // A block after a block: the first one answered, and is shown now rather than with the next event.
             try await reply(&state)
             state.held = text
-            guard !state.hasReply else { return }
-
-            state.hasReply = true
-            try await store.update(message: messageID, delivery: .responding)
+            if !state.hasReply {
+                state.hasReply = true
+                try await store.update(message: messageID, delivery: .responding)
+            }
         case .provider(.failure(let reason)):
             try await reply(&state)
             // Kept for the one terminal event; the provider also throws it at the end.
