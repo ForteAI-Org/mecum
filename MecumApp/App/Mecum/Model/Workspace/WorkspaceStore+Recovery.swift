@@ -74,14 +74,27 @@ extension WorkspaceStore {
     /// message update leaves. A message whose execution has not ended, or was
     /// started by this instance, is left as it is.
     ///
-    /// It reads only the messages in those two states, normally none, so its
-    /// cost does not grow with the history.
+    /// It reads one message per conversation, the latest the person sent: the
+    /// composer sends nothing while a turn runs, so no other can still be
+    /// waiting, and the cost follows the conversations rather than their
+    /// history. The delivery is compared here and not in the predicate: SwiftData
+    /// on some of the macOS versions the app supports refuses an enum value in a
+    /// predicate (`unsupportedPredicate`), while the one it is built on accepts
+    /// it, so no test here can catch it. No enum column is filtered in a predicate.
     private func settleMessagesOfEndedExecutions() throws {
-        let sent       = MessageDelivery.sentToBackend
-        let responding = MessageDelivery.responding
-        let waiting    = try modelContext.fetch(FetchDescriptor<Message>(
-            predicate: #Predicate { $0.delivery == sent || $0.delivery == responding }
-        ))
+        var waiting: [Message] = []
+        for conversation in try modelContext.fetch(FetchDescriptor<Conversation>()) {
+            let id     = conversation.id
+            var latest = FetchDescriptor<Message>(
+                predicate: #Predicate { $0.conversationID == id && $0.authorWorkerID == nil },
+                sortBy   : [SortDescriptor(\.sequence, order: .reverse)]
+            )
+            latest.fetchLimit = 1
+            if let message = try modelContext.fetch(latest).first,
+               message.delivery == .sentToBackend || message.delivery == .responding {
+                waiting.append(message)
+            }
+        }
         for message in waiting {
             let messageID  = message.id
             let correlated = try modelContext.fetch(FetchDescriptor<WorkspaceEvent>(
