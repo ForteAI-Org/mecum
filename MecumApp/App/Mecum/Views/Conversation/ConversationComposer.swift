@@ -91,13 +91,12 @@ struct ConversationComposer: View {
     }
 
     /// Whether this worker can answer: it has a model the catalogue still
-    /// offers, on a provider that answers in this build (`WorkerAnswer`). The
-    /// inspector shows which of these is missing; the composer only says to
-    /// choose a model.
+    /// offers. The inspector shows which of these is missing; the composer
+    /// only says to choose a model.
     private var canAnswer: Bool {
-        guard let selection = worker.configuration else { return false }
+        guard worker.configuration != nil else { return false }
         if case .modelRemoved = team.modelStates[worker.id] { return false }
 
-        return WorkerAnswer(provider: selection.provider).refusal == nil
+        return true
     }
 }

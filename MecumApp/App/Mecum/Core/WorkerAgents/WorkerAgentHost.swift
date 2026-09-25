@@ -336,8 +336,6 @@ final class WorkerAgentHost {
     /// location rather than on `PATH`.
     private static func agent(for provider: ModelProvider) throws -> (ChatProvider, URL) {
         switch (provider, WorkerAnswer(provider: provider)) {
-        case (_, .notYet(let reason)):
-            throw AutomationFailure("\(provider.title) can’t respond in this version. Details: \(reason).")
         case (_, .modelLoop):
             throw AutomationFailure("\(provider.title) responds through Mecum’s own loop and has no command line.")
         case (.claudeCode, .agent):

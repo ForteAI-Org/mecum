@@ -42,7 +42,7 @@ nonisolated struct UserFacingIssue: Sendable, Equatable {
 /// boundary.
 ///
 /// A worker on Claude Code or Codex answers through its agent command line with
-/// Mecum's tools (`WorkerAgents`), and a worker on Anthropic or Ollama through
+/// Mecum's tools (`WorkerAgents`), and a worker on a model provider through
 /// Mecum's own loop with the same tools. Those tools reach the desktop only
 /// through the broker's queue (`BrokeredAutomationSession`, §22.3): a worker
 /// waits for the computer like any other entry and never builds a seat.
@@ -295,9 +295,9 @@ final class TeamModel {
         }
     }
 
-    /// Persists the message, then starts the worker's answer when its provider
-    /// answers, as an agent command line or through Mecum's own loop
-    /// (`WorkerAnswer`). Otherwise the message stays saved and nothing
+    /// Persists the message, then starts the worker's answer, as an agent
+    /// command line or through Mecum's own loop (`WorkerAnswer`), when the
+    /// worker has a provider. Otherwise the message stays saved and nothing
     /// answers, and the composer says why.
     ///
     /// The text leaves the draft before the first suspension, and a second
@@ -396,7 +396,7 @@ final class TeamModel {
 
     func isAnswering(_ workerID: UUID) -> Bool { answering[workerID] != nil }
 
-    /// Starts the worker's turn when its provider answers. The turn runs apart
+    /// Starts the worker's turn when it has a provider. The turn runs apart
     /// from `send`, so writing to another worker meanwhile is not held up, and
     /// a failed turn is reported and never retried. A turn through Mecum's own
     /// loop is sent the conversation before the message (`turnHistory`).
@@ -405,8 +405,7 @@ final class TeamModel {
         in conversationID: UUID,
         by workerID      : UUID
     ) {
-        guard let worker = worker(workerID), let selection = worker.configuration,
-              WorkerAnswer(provider: selection.provider).refusal == nil, answering[workerID] == nil
+        guard let worker = worker(workerID), worker.configuration != nil, answering[workerID] == nil
         else { return }
 
         answering[workerID] = conversationID

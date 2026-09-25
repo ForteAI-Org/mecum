@@ -8,13 +8,12 @@
 import Foundation
 
 /// WorkerAnswer is how a worker on a provider answers a message, and the one
-/// place that says so (§18.2): the picker, the composer and the turn all ask
-/// it, so no second list of providers that answer can drift from this one.
+/// place that says so (§18.2): the host and the turn ask it, so no second list
+/// of which provider runs which loop can drift from this one.
 ///
 /// An agent is an external command line that runs its own loop with Mecum's
 /// tools (§7.1). A model provider has no loop of its own, so Mecum runs one
-/// over its transport, with the same tools when the model can call them. The
-/// other providers are models this build has no tool turn for yet.
+/// over its transport, with the same tools when the model can call them.
 public enum WorkerAnswer: Sendable, Hashable {
 
     /// The provider's command line answers as an agent.
@@ -23,25 +22,12 @@ public enum WorkerAnswer: Sendable, Hashable {
     /// The provider's model answers through Mecum's own loop over its transport.
     case modelLoop
 
-    /// Nothing answers yet, for the reason given.
-    case notYet(reason: String)
-
     public init(provider: ModelProvider) {
         switch provider {
         case .claudeCode, .codex:
             self = .agent
-        case .anthropic, .ollama:
+        case .anthropic, .gemini, .ollama:
             self = .modelLoop
-        case .gemini:
-            self = .notYet(reason: "this provider is not available for workers in this version")
-        }
-    }
-
-    /// Why nothing answers, or nil when something does.
-    public var refusal: String? {
-        switch self {
-        case .agent, .modelLoop:      nil
-        case .notYet(let reason):     reason
         }
     }
 }

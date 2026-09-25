@@ -71,7 +71,7 @@ struct TeamSidebarFooter: View {
     /// yet is not counted, since nothing is checked before the connections or
     /// a worker's profile are opened.
     private var readyConnections: Int {
-        ModelProvider.inApp.count { team.connections.states[$0]?.isReady == true }
+        ModelProvider.allCases.count { team.connections.states[$0]?.isReady == true }
     }
 
     /// A green dot and the count of ready connections, in a quiet capsule; nothing while none is ready.

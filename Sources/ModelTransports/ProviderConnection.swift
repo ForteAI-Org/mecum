@@ -11,8 +11,8 @@ import Foundation
 /// apart: authentication and destination, which is neither the model nor an
 /// agent adapter.
 ///
-/// Whether a worker on the connection answers, and how, is `WorkerAnswer`'s
-/// to say, not this value's.
+/// How a worker on the connection answers is `WorkerAnswer`'s to say, not
+/// this value's.
 ///
 /// The value is derived, not stored: a connection is what a provider and the
 /// current settings already say it is, so there is no second copy of a host or

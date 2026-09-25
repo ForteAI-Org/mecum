@@ -36,7 +36,7 @@ struct TransportCapabilityTests {
     }
 
     @Test("a transport without a tool turn refuses tools and claims nothing",
-          arguments: [ModelProvider.codex, .claudeCode, .gemini])
+          arguments: [ModelProvider.codex, .claudeCode])
     func aTransportWithoutAToolTurnRefusesTools(provider: ModelProvider) async throws {
         let transport = ModelSelection(provider: provider, model: "any-model").transport()
         let tool = ToolDefinition(name: "status", description: "Reads the status.", parameters: Data("{}".utf8))
@@ -47,9 +47,13 @@ struct TransportCapabilityTests {
     }
 
     @Test func withoutToolsTheToolTurnIsTheTextTurn() {
-        let gemini = ModelSelection(provider: .gemini, model: "gemini-3-pro-preview").transport()
-        #expect(throws: ProviderError.self) {
-            _ = try gemini.converse([TurnMessage(role: .user, text: "ciao")], tools: [], timeout: 5)
+        let codex = ModelSelection(provider: .codex, model: "gpt-5.6-luna").transport()
+        guard case .unsupported(let reason) = codex.streaming else {
+            Issue.record("Codex claims a conversational turn it has no path for")
+            return
+        }
+        #expect(throws: ModelTransportError.streamingUnsupported(reason)) {
+            _ = try codex.converse([TurnMessage(role: .user, text: "ciao")], tools: [], timeout: 5)
         }
     }
 

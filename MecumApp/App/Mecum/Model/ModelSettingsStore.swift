@@ -170,7 +170,7 @@ final class ModelSettingsStore {
     func isChecking(_ provider: ModelProvider) -> Bool { checks[provider] != nil }
 
     /// Checks the named connections again, each on its own.
-    func refresh(_ providers: [ModelProvider] = ModelProvider.inApp) {
+    func refresh(_ providers: [ModelProvider] = ModelProvider.allCases) {
         let settings = providerSettings
         for provider in providers {
             checks[provider]?.cancel()

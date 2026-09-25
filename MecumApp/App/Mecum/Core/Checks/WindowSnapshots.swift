@@ -171,6 +171,7 @@ enum WindowSnapshots {
                 ("claude", AnyView(ProviderSettingsPage(store: team.connections, provider: .claudeCode))),
                 ("codex", AnyView(ProviderSettingsPage(store: team.connections, provider: .codex))),
                 ("anthropic", AnyView(ProviderSettingsPage(store: team.connections, provider: .anthropic))),
+                ("gemini", AnyView(ProviderSettingsPage(store: team.connections, provider: .gemini))),
                 ("ollama", AnyView(ProviderSettingsPage(store: team.connections, provider: .ollama))),
             ]
             for page in pages {
