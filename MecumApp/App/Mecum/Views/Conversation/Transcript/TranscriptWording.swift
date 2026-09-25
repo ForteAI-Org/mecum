@@ -69,19 +69,17 @@ nonisolated enum TranscriptWording {
 
     // MARK: Tools
 
-    /// A tool line's summary: what the turn changed, repeats collapsed, a
-    /// failure or a step in progress always named, at most `summaryLimit`
-    /// phrases. Steps that only looked are named only when nothing else was done,
-    /// and the worker's notes only in the expanded line.
+    /// A tool line's summary: what the turn did or is doing, repeats collapsed, at
+    /// most `summaryLimit` phrases. A step that failed is left out, so a problem the
+    /// worker got past leaves no trace here, and a turn that did nothing else names
+    /// what it tried. Steps that only looked are named only when nothing else was
+    /// done, and the worker's notes never.
     static func toolSummary(_ steps: [ToolStep], ending: TranscriptItem.TurnEnding?) -> String {
-        let groups = collapsed(steps).filter { !$0.step.isNote }
-        var shown  = groups.filter { $0.step.isEffectful || $0.step.state != .done }
-        if shown.isEmpty { shown = groups }
-        // What failed is what an issue line is about, so it comes first.
-        func failed(_ group: (step: ToolStep, count: Int)) -> Bool {
-            if case .failed = group.step.state { true } else { false }
-        }
-        shown = shown.filter(failed) + shown.filter { !failed($0) }
+        let groups = collapsed(steps.filter { !$0.isNote })
+        let kept   = groups.filter { !isFailed($0.step) }
+        var shown  = kept.filter { $0.step.isEffectful || $0.step.state == .pending }
+        if shown.isEmpty { shown = groups.filter { $0.step.isEffectful } }
+        if shown.isEmpty { shown = kept + groups.filter { isFailed($0.step) } }
         var parts = shown.prefix(summaryLimit).map { toolStep($0.step, count: $0.count, ending: ending) }
         if shown.count > summaryLimit { parts.append("\(shown.count - summaryLimit) more") }
         guard !parts.isEmpty else { return "Performed actions" }
@@ -91,24 +89,22 @@ nonisolated enum TranscriptWording {
     /// The phrases a collapsed tool line names before "N more", so it stays one short line.
     static let summaryLimit = 2
 
-    /// The expanded line's steps, one short line each, repeats collapsed. A
-    /// failed step says what failed.
-    static func toolSteps(_ steps: [ToolStep], ending: TranscriptItem.TurnEnding?)
-        -> [(text: String, isFailed: Bool, isNote: Bool)] {
-        collapsed(steps).map { group in
-            let isFailed = if case .failed = group.step.state { true } else { false }
-            return (toolStep(group.step, count: group.count, ending: ending, withReason: true), isFailed,
-                    group.step.isNote)
-        }
+    /// The longest a label a model chose is shown in a step, so a step stays one short line.
+    static let labelLimit = 24
+
+    /// The opened line's steps, one short line each, repeats collapsed, without
+    /// the worker's notes. A step that failed says what was tried and not why:
+    /// a turn that failed says so on its own card.
+    static func toolSteps(_ steps: [ToolStep], ending: TranscriptItem.TurnEnding?) -> [String] {
+        collapsed(steps.filter { !$0.isNote }).map { toolStep($0.step, count: $0.count, ending: ending) }
     }
 
-    /// One step, done, failed or in progress. A call left without a result is
+    /// One step, done, tried or in progress. A call left without a result is
     /// in progress only while its turn runs: after it ends, it stopped or did not finish.
     static func toolStep(
-        _ step    : ToolStep,
-        count     : Int = 1,
-        ending    : TranscriptItem.TurnEnding?,
-        withReason: Bool = false
+        _ step: ToolStep,
+        count : Int = 1,
+        ending: TranscriptItem.TurnEnding?
     ) -> String {
         let phrase = phrase(step.action)
         let times  = count == 1 ? "" : count == 2 ? " twice" : " \(count) times"
@@ -116,9 +112,8 @@ nonisolated enum TranscriptWording {
         case .done:
             if count > 1, case .observe = step.action { return "Looked" + times }
             return phrase.past + times
-        case .failed(let reason):
-            let lead = phrase.isKnown ? "Could not \(phrase.base)" : "\(phrase.past) failed"
-            return lead + times + (withReason ? ": \(reason)" : "")
+        case .failed:
+            return "Tried to \(phrase.base)" + times
         case .pending:
             switch ending {
             case nil:                   return phrase.progressive + times + "…"
@@ -128,29 +123,33 @@ nonisolated enum TranscriptWording {
         }
     }
 
-    /// A step's past, base and progressive forms. A tool this build does not
-    /// know is named as it is.
-    private static func phrase(_ action: ToolStep.Action) -> (past: String, base: String, progressive: String,
-                                                              isKnown: Bool) {
-        func forms(_ past: String, _ base: String, _ progressive: String, _ object: String) -> (String, String,
-                                                                                               String, Bool) {
-            ("\(past) \(object)", "\(base) \(object)", "\(progressive) \(object)", true)
+    /// A step's past, base and progressive forms, each label a model chose cut
+    /// to `labelLimit`. A tool this build does not know is named as it is.
+    private static func phrase(_ action: ToolStep.Action) -> (past: String, base: String, progressive: String) {
+        func forms(
+            _ past       : String,
+            _ base       : String,
+            _ progressive: String,
+            _ object     : String
+        ) -> (String, String, String) {
+            ("\(past) \(object)", "\(base) \(object)", "\(progressive) \(object)")
         }
         switch action {
         case .status:
             return forms("Checked", "check", "Checking", "open apps")
         case .windows(let app):
-            return forms("Checked", "check", "Checking", app.map { "\($0)’s open windows" } ?? "open windows")
+            return forms("Checked", "check", "Checking", app.map { "\(label($0))’s open windows" } ?? "open windows")
         case .open(let app):
-            return forms("Opened", "open", "Opening", app)
+            return forms("Opened", "open", "Opening", label(app))
         case .observe:
             return forms("Viewed", "view", "Viewing", "the window")
         case .select(let control, let item):
-            return forms("Selected", "select", "Selecting", "\(item) in \(control)")
+            return forms("Selected", "select", "Selecting", "\(label(item)) in \(label(control))")
         case .close(let app):
-            return forms("Closed", "close", "Closing", app ?? "the app")
+            return forms("Closed", "close", "Closing", app.map(label) ?? "the app")
         case .act(let verb, let target, let section, let value):
-            let object = target + (section.map { " in \($0)" } ?? "")
+            // The element and where it sits are one label, as the perception names it.
+            let object = label(target + (section.map { " in \($0)" } ?? ""))
             switch (verb, value) {
             case ("click", _):          return forms("Pressed", "press", "Pressing", object)
             case ("double_click", _):   return forms("Double-clicked", "double-click", "Double-clicking", object)
@@ -162,8 +161,8 @@ nonisolated enum TranscriptWording {
             }
         case .typeText(let text, let field, let replace):
             return replace
-                ? forms("Typed", "type", "Typing", "“\(text)” into \(field)")
-                : forms("Added", "add", "Adding", "“\(text)” to \(field)")
+                ? forms("Typed", "type", "Typing", "“\(label(text))” into \(label(field))")
+                : forms("Added", "add", "Adding", "“\(label(text))” to \(label(field))")
         case .key(let name, let modifiers, let count):
             let key   = keyName(
                 name,
@@ -172,19 +171,26 @@ nonisolated enum TranscriptWording {
             let times = count > 1 ? " \(count) times" : ""
             return forms("Pressed", "press", "Pressing", key + times)
         case .scroll(let direction, let target):
-            return forms("Scrolled", "scroll", "Scrolling", "\(direction) in \(target ?? "the window")")
+            return forms("Scrolled", "scroll", "Scrolling", "\(direction) in \(target.map(label) ?? "the window")")
         case .drag(let source, let destination):
-            return forms("Dragged", "drag", "Dragging", source + (destination.map { " to \($0)" } ?? ""))
+            return forms("Dragged", "drag", "Dragging", label(source) + (destination.map { " to \(label($0))" } ?? ""))
         case .contextMenu(let target, let item):
-            return ("Selected \(item) from \(target)’s menu",
-                    "select \(item) from \(target)’s menu",
-                    "Selecting \(item) from \(target)’s menu",
-                    true)
+            return forms("Selected", "select", "Selecting", "\(label(item)) from \(label(target))’s menu")
         case .note(let text):
-            return (text, text, text, true)
+            return (text, text, text)
         case .other(let name):
-            return (name, name, name, false)
+            return (name, name, name)
         }
+    }
+
+    /// `text` cut to `labelLimit` characters at most, the last an ellipsis.
+    private static func label(_ text: String) -> String {
+        guard text.count > labelLimit else { return text }
+        return text.prefix(labelLimit - 1).trimmingCharacters(in: .whitespaces) + "…"
+    }
+
+    private static func isFailed(_ step: ToolStep) -> Bool {
+        if case .failed = step.state { true } else { false }
     }
 
     /// A key as a Mac prints it: Return or ↓ alone, ⌘⇧N with modifiers held.
@@ -258,7 +264,7 @@ nonisolated enum TranscriptWording {
             return "\(workerName), \(when): \(content ?? text)" + (isInterrupted ? ". \(interrupted)" : "")
         case .toolRun(let lines, let isExpanded, let ending):
             let steps  = ToolStep.steps(from: lines)
-            let detail = isExpanded ? ": " + toolSteps(steps, ending: ending).map(\.text).joined(separator: "; ") : ""
+            let detail = isExpanded ? ": " + toolSteps(steps, ending: ending).joined(separator: "; ") : ""
             return "\(workerName)’s activity, \(when): \(toolSummary(steps, ending: ending))\(detail)"
         case .thinking:
             return thinking(by: workerName)

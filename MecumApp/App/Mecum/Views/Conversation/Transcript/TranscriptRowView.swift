@@ -167,7 +167,7 @@ final class TranscriptRowView: NSView {
         }
         let icon = chevron ?? makeChevron()
         chevron = icon
-        icon.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: style.captionPointSize * 0.8,
+        icon.symbolConfiguration = NSImage.SymbolConfiguration(pointSize: style.toolPointSize * 0.8,
                                                                weight: .semibold)
         icon.isHidden = false
         // A rotated view's frame is its bounding box, so it is placed upright and turned after.
@@ -199,19 +199,12 @@ final class TranscriptRowView: NSView {
         return icon
     }
 
-    /// A square on the tool line's disclosure slot, the last character of its first line.
+    /// A square at the end of the room the tool line's summary keeps after its text, on its one line,
+    /// so a summary cut short still ends with the chevron.
     private func disclosureSlot(in row: PreparedRow) -> CGRect? {
-        guard let (storage, manager, container) = stacks.first ?? nil, let origin = row.geometry.blockTexts.first?.origin
-        else { return nil }
-        let text = storage.string as NSString
-        let end  = text.range(of: "\n").location == NSNotFound ? text.length : text.range(of: "\n").location
-        guard end > 0 else { return nil }
-        let glyphs = manager.glyphRange(forCharacterRange: NSRange(location: end - 1, length: 1),
-                                        actualCharacterRange: nil)
-        let glyph = manager.boundingRect(forGlyphRange: glyphs, in: container).offsetBy(dx: origin.x, dy: origin.y)
-        let side  = (style.captionPointSize * 0.9).rounded()
-        // Turned down it is wider than the slot's glyph, so it sits a little right of the glyph's centre.
-        return CGRect(x: glyph.midX - side / 2 + 2, y: glyph.midY - side / 2, width: side, height: side).integral
+        guard let summary = row.geometry.blocks.first else { return nil }
+        let side = RowGeometry.disclosureSide(style)
+        return CGRect(x: summary.maxX - side, y: summary.midY - side / 2, width: side, height: side).integral
     }
 
     /// The copy icons of the row's finished code blocks. Another row starts
@@ -341,7 +334,7 @@ final class TranscriptRowView: NSView {
         case .rule:
             NSColor.separatorColor.setFill()
             NSRect(x: frame.minX, y: frame.midY.rounded(), width: frame.width, height: 1).fill()
-        case .toolSteps(let dividers):
+        case .toolSteps:
             // The steps lift off the background as a card, so they read apart from the replies.
             let path   = NSBezierPath(roundedRect: frame, xRadius: 8, yRadius: 8)
             let shadow = NSShadow()
@@ -357,7 +350,12 @@ final class TranscriptRowView: NSView {
             path.lineWidth = 1
             path.stroke()
             if let (storage, manager, _) = stacks[index] {
-                drawDividers(dividers, card: frame, text: text, storage: storage, manager: manager)
+                drawDividers(
+                    card   : frame,
+                    text   : text,
+                    storage: storage,
+                    manager: manager
+                )
             }
         default:
             break
@@ -373,13 +371,12 @@ final class TranscriptRowView: NSView {
         }
     }
 
-    /// A hairline in the gap above each step `dividers` names, across the card inside its padding.
+    /// A hairline in the gap above every step but the first, across the card inside its padding.
     private func drawDividers(
-        _ dividers: [Int],
-        card      : CGRect,
-        text      : CGRect,
-        storage   : NSTextStorage,
-        manager   : NSLayoutManager
+        card   : CGRect,
+        text   : CGRect,
+        storage: NSTextStorage,
+        manager: NSLayoutManager
     ) {
         let source = storage.string as NSString
         var starts: [Int] = []
@@ -391,14 +388,14 @@ final class TranscriptRowView: NSView {
         let scale = window?.backingScaleFactor ?? 2
         let inset = RowGeometry.toolCardPadding.width
         NSColor.separatorColor.setFill()
-        for line in dividers where line > 0 && starts.indices.contains(line) {
-            // Halfway between the last line of the step above and the first of this one.
+        for line in starts.dropFirst() {
+            // Halfway between the step above and this one.
             let above = manager.lineFragmentUsedRect(
-                forGlyphAt    : manager.glyphIndexForCharacter(at: starts[line] - 1),
+                forGlyphAt    : manager.glyphIndexForCharacter(at: line - 1),
                 effectiveRange: nil
             )
             let below = manager.lineFragmentUsedRect(
-                forGlyphAt    : manager.glyphIndexForCharacter(at: starts[line]),
+                forGlyphAt    : manager.glyphIndexForCharacter(at: line),
                 effectiveRange: nil
             )
             let y = ((text.minY + (above.maxY + below.minY) / 2) * scale).rounded() / scale
@@ -766,7 +763,7 @@ final class TranscriptRowView: NSView {
                 element.setAccessibilityRole(.staticText)
                 element.setAccessibilityRoleDescription("table")
                 element.setAccessibilityValue(block.string.replacingOccurrences(of: "\n", with: ", "))
-            case .text, .quote, .toolSteps:
+            case .text, .quote, .toolSummary, .toolSteps:
                 element.setAccessibilityRole(.staticText)
                 element.setAccessibilityValue(block.string)
             }

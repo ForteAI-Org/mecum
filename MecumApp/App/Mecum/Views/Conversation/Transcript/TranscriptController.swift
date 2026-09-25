@@ -363,6 +363,13 @@ final class TranscriptController: NSObject {
 
         case .live, .paging, .relayout, .expansion:
             guard !update.isEmpty || mode == .relayout else { break }
+            var folding: NSImage?
+            if case .expansion(let id) = mode {
+                folding = closingCard(
+                    of: id,
+                    to: result.rows
+                )
+            }
             rows = result.rows
             viewUpdateCount += 1
             setHeights()
@@ -385,7 +392,12 @@ final class TranscriptController: NSObject {
                 playEntrances(update)
             }
             if case .expansion(let id) = mode {
-                slideRows(opening: id, from: drawnFrames, drawnTop: drawnTop)
+                slideRows(
+                    toggled : id,
+                    from    : drawnFrames,
+                    drawnTop: drawnTop,
+                    folding : folding
+                )
                 reveal(id)
             }
         }
@@ -545,7 +557,14 @@ final class TranscriptController: NSObject {
 
     private func setHeights() {
         layout.heights        = rows.map(\.geometry.height)
-        layout.continuesGroup = rows.map(\.item.continuesGroup)
+        layout.continuesGroup = rows.indices.map { index in
+            let row = rows[index].item
+            guard index > 0, !row.continuesGroup, case .toolRun = rows[index - 1].item.kind else {
+                return row.continuesGroup
+            }
+            // A tool line opens its worker's part of a turn, so the worker's next row sits close under it.
+            return row.authorWorkerID != nil && row.authorWorkerID == rows[index - 1].item.authorWorkerID
+        }
     }
 
     private func configure(_ cell: TranscriptCell, at index: Int) {
@@ -577,10 +596,15 @@ final class TranscriptController: NSObject {
         }
     }
 
-    /// Slides each row on screen from where it was drawn to where it now is,
-    /// and opens a tool line that grew downwards from its old height, so an
-    /// expansion moves rather than jumps. Reduce Motion places them at once.
-    private func slideRows(opening id: TranscriptItem.ID, from drawn: [TranscriptItem.ID: CGRect], drawnTop: CGFloat) {
+    /// Slides each row on screen from where it was drawn to where it now is: a line that grew
+    /// opens downwards from its old height as its card fades in, and one that shrank folds
+    /// `folding`, the card it lost, up and out. Reduce Motion places them at once.
+    private func slideRows(
+        toggled id: TranscriptItem.ID,
+        from drawn: [TranscriptItem.ID: CGRect],
+        drawnTop  : CGFloat,
+        folding   : NSImage?
+    ) {
         guard !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else { return }
         let top = scrollView.contentView.bounds.minY
         for indexPath in collectionView.indexPathsForVisibleItems()
@@ -589,7 +613,31 @@ final class TranscriptController: NSObject {
             guard let old = drawn[rowID], let cell = collectionView.item(at: indexPath) as? TranscriptCell else { continue }
             let new = layout.frames[indexPath.item]
             cell.slide(from: (old.minY - drawnTop) - (new.minY - top), openingFrom: rowID == id ? old.height : nil)
+            if rowID == id, let folding { cell.fold(folding) }
         }
+    }
+
+    /// What closing the tool line `id` takes off its row, drawn from the cell still showing it
+    /// open; nil when the line opens, is off screen, or Reduce Motion is on.
+    private func closingCard(
+        of id  : TranscriptItem.ID,
+        to next: [PreparedRow]
+    ) -> NSImage? {
+        guard !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion,
+              let index  = rows.firstIndex(where: { $0.item.id == id }),
+              let height = next.first(where: { $0.item.id == id })?.geometry.height,
+              let view   = (collectionView.item(at: IndexPath(item: index, section: 0)) as? TranscriptCell)?.rowView,
+              view.bounds.height > height
+        else { return nil }
+        let lost = CGRect(x: 0, y: height, width: view.bounds.width, height: view.bounds.height - height)
+        guard let bitmap = view.bitmapImageRepForCachingDisplay(in: lost) else { return nil }
+        view.cacheDisplay(
+            in: lost,
+            to: bitmap
+        )
+        let image = NSImage(size: lost.size)
+        image.addRepresentation(bitmap)
+        return image
     }
 
     /// Scrolls an opened row that now runs under the composer up into view, never past its own top.
@@ -626,11 +674,15 @@ final class TranscriptController: NSObject {
     }
 
     /// Plays the entrance on rows that arrived below every row already shown.
-    /// A row inserted above one that stays is history, not an arrival.
+    /// A row inserted above one that stays is history, not an arrival, except a
+    /// tool line, which arrives above the bubble or reply it opens.
     private func playEntrances(_ update: TranscriptUpdate) {
         let inserted = Set(update.inserted)
         let lastKept = rows.indices.last { !inserted.contains($0) } ?? -1
-        let arrivals = update.inserted.filter { $0 > lastKept }
+        let arrivals = update.inserted.filter { index in
+            if case .toolRun = rows[index].item.kind { return true }
+            return index > lastKept
+        }
         guard !arrivals.isEmpty else { return }
         let reduces = NSWorkspace.shared.accessibilityDisplayShouldReduceMotion
         for index in arrivals {

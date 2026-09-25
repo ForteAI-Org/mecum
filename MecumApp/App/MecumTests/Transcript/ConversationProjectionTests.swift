@@ -25,17 +25,8 @@ struct ConversationProjectionTests {
         return execution
     }
 
-    @Test("Messages and events merge in one deterministic order, the tool line under the reply")
-    func mergedOrder() async throws {
-        let fixture = try await TranscriptFixture()
-        defer { fixture.discard() }
-        _ = try await turn(fixture)
-
-        let first  = try await fixture.items()
-        let second = try await fixture.items()
-        #expect(first == second)
-
-        let kinds = first.map { item -> String in
+    private static func kinds(_ items: [TranscriptItem]) -> [String] {
+        items.map { item -> String in
             switch item.kind {
             case .personMessage:        "person"
             case .workerReply:          "reply"
@@ -47,8 +38,85 @@ struct ConversationProjectionTests {
             case .activityNotShown:     "notice"
             }
         }
-        #expect(kinds == ["day", "person", "reply", "tools"])
-        #expect(first.last?.continuesGroup == true)
+    }
+
+    @Test("Messages and events merge in one deterministic order, the tool line above the reply")
+    func mergedOrder() async throws {
+        let fixture = try await TranscriptFixture()
+        defer { fixture.discard() }
+        _ = try await turn(fixture)
+
+        let first  = try await fixture.items()
+        let second = try await fixture.items()
+        #expect(first == second)
+        #expect(Self.kinds(first) == ["day", "person", "tools", "reply"])
+        #expect(first.map(\.continuesGroup) == [false, false, false, false])
+    }
+
+    @Test("The line opens the worker's part of the turn: above its bubble and first reply while it runs, and after")
+    func lineAboveTheAnswer() async throws {
+        let fixture = try await TranscriptFixture()
+        defer { fixture.discard() }
+        let execution = UUID()
+        try await fixture.say("Open the report", at: 0)
+        try await fixture.record(.executionStarted, subject: execution, at: 1)
+        try await fixture.record(.toolActivity, subject: execution, at: 2, text: "→ open_session {\"app\":\"Preview\"}")
+        #expect(Self.kinds(try await fixture.items()) == ["day", "person", "tools", "thinking"])
+
+        try await fixture.record(.toolActivity, subject: execution, at: 3, text: "← open_session {}")
+        try await fixture.say("It is open.", at: 4, byWorker: true)
+        let between = try await fixture.items()
+        #expect(Self.kinds(between) == ["day", "person", "tools", "reply", "thinking"])
+
+        let streaming = try await fixture.say("Page one says", at: 5, byWorker: true, delivery: .responding)
+        let running   = try await fixture.items()
+        #expect(Self.kinds(running) == ["day", "person", "tools", "reply", "reply"], "the streaming reply hides the bubble")
+
+        try await fixture.store.update(message: streaming.id, delivery: .completed)
+        try await fixture.record(.executionCompleted, subject: execution, at: 6)
+        let ended = try await fixture.items()
+        #expect(ended.map(\.id) == running.map(\.id), "no row moves when the turn ends")
+        #expect(ended.map(\.id) == between.map(\.id).filter { if case .thinking = $0 { false } else { true } }
+            + [.message(streaming.id)])
+    }
+
+    @Test("A turn that replied nothing keeps its line where the reply would have been, after the person's message")
+    func lineWithoutReply() async throws {
+        let fixture = try await TranscriptFixture()
+        defer { fixture.discard() }
+        let (done, failed) = (UUID(), UUID())
+        try await fixture.say("Check the apps", at: 0)
+        try await fixture.record(.executionStarted, subject: done, at: 1)
+        try await fixture.record(.toolActivity, subject: done, at: 2, text: "→ status {}")
+        let running = try await fixture.items()
+        try await fixture.record(.executionCompleted, subject: done, at: 3)
+        let ended = try await fixture.items()
+        #expect(Self.kinds(running) == ["day", "person", "tools", "thinking"])
+        #expect(Self.kinds(ended) == ["day", "person", "tools"])
+        #expect(ended.map(\.id) == Array(running.map(\.id).dropLast()))
+
+        try await fixture.say("Now push", at: 10)
+        try await fixture.record(.executionStarted, subject: failed, at: 11)
+        try await fixture.record(.toolActivity, subject: failed, at: 12, text: "← push error: remote refused")
+        try await fixture.record(.executionFailed, subject: failed, at: 13, text: "exit 1")
+        #expect(Self.kinds(try await fixture.items()) == ["day", "person", "tools", "person", "tools", "failed"])
+    }
+
+    @Test("The person's message ends its group, and the reply under the line keeps its header, name and time")
+    func replyUnderLineKeepsHeader() async throws {
+        let fixture = try await TranscriptFixture()
+        defer { fixture.discard() }
+        _ = try await turn(fixture)
+        let items = TranscriptFixture.withoutDays(try await fixture.items())
+        let rows  = await RowPreparation.prepare(items, workerName: "Atlas", width: 600,
+                                                 style: TranscriptStyle(showsAuthors: true),
+                                                 cache: LayoutMeasurementCache(), pipeline: MarkdownContent()).rows
+        #expect(Self.kinds(items) == ["person", "tools", "reply"])
+        #expect(items[0].endsGroup && rows[0].geometry.tail != nil)
+        #expect(!items[1].continuesGroup, "a tool line starts a group")
+        #expect(!items[2].continuesGroup && items[2].endsGroup)
+        #expect(rows[2].geometry.header != nil && rows[2].geometry.avatar != nil && rows[2].geometry.footer != nil)
+        #expect(TranscriptWording.header(for: items[2], workerName: "Atlas").name == "Atlas")
     }
 
     @Test("A tie between a message and an event puts the message first")
@@ -80,8 +148,7 @@ struct ConversationProjectionTests {
         #expect(lines.count == 3)
         #expect(!isExpanded)
         #expect(ending == .completed)
-        #expect(TranscriptWording.toolSummary(ToolStep.steps(from: lines), ending: ending)
-            == "act failed · opened Preview")
+        #expect(TranscriptWording.toolSummary(ToolStep.steps(from: lines), ending: ending) == "Opened Preview")
     }
 
     @Test("Expanding a run changes that row only and reorders nothing")

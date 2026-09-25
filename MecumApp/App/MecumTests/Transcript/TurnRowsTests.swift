@@ -42,7 +42,7 @@ struct TurnRowsTests {
         #expect(items.count == 4)
     }
 
-    @Test("A running turn with no reply shows a thinking bubble where the reply will land, the tool line under it")
+    @Test("A running turn with no reply shows a thinking bubble where the reply will land, the tool line above it")
     func thinkingWhileRunning() async throws {
         let fixture = try await TranscriptFixture()
         defer { fixture.discard() }
@@ -50,16 +50,16 @@ struct TurnRowsTests {
         let items = TranscriptFixture.withoutDays(try await fixture.items())
 
         #expect(items.count == 3)
-        #expect(items[1].id == .thinking(execution: turn, replies: 0))
-        #expect(items[1].authorWorkerID == fixture.workerID)
-        #expect(!items[1].continuesGroup, "the bubble carries the worker's name and mascot")
-        guard case .toolRun(_, _, let ending) = items[2].kind else {
-            Issue.record("no tool line under the bubble")
+        #expect(items[2].id == .thinking(execution: turn, replies: 0))
+        #expect(items[2].authorWorkerID == fixture.workerID)
+        #expect(!items[2].continuesGroup, "the bubble carries the worker's name and mascot")
+        guard case .toolRun(_, _, let ending) = items[1].kind else {
+            Issue.record("no tool line above the bubble")
             return
         }
         #expect(ending == nil)
-        #expect(items[2].continuesGroup)
-        #expect(TranscriptWording.header(for: items[1], workerName: "Atlas") == ("Atlas", ""))
+        #expect(!items[1].continuesGroup, "the line opens the worker's part of the turn")
+        #expect(TranscriptWording.header(for: items[2], workerName: "Atlas") == ("Atlas", ""))
     }
 
     @Test("The reply replaces the bubble in place: same position, the same row, nothing inserted")
@@ -147,25 +147,26 @@ struct TurnRowsTests {
         let prepared = await RowPreparation.prepare(items, workerName: "Atlas", width: 600, style: TranscriptStyle(),
                                                     cache: LayoutMeasurementCache(), pipeline: MarkdownContent())
         let rows = prepared.rows
-        #expect(rows.map(\.item.endsGroup) == [false, false, true, false, true, false])
-        #expect(rows.map { $0.geometry.tail != nil } == [false, false, true, false, true, false])
+        // The tool line opens the worker's part, so the replies under it are the group that ends last.
+        #expect(rows.map(\.item.endsGroup) == [false, false, true, false, false, true])
+        #expect(rows.map { $0.geometry.tail != nil } == [false, false, true, false, false, true])
 
         let person = try #require(rows[2].geometry.tail)
         #expect(person.minX == rows[2].geometry.surface.maxX && person.maxX <= 600 - RowGeometry.gutter / 2)
-        let worker = try #require(rows[4].geometry.tail)
-        #expect(worker.maxX == rows[4].geometry.surface.minX)
+        let worker = try #require(rows[5].geometry.tail)
+        #expect(worker.maxX == rows[5].geometry.surface.minX)
         #expect(worker.minX >= RowGeometry.gutter / 2, "in a direct conversation the tail stays in the gutter")
-        let authored = RowGeometry(item: rows[4].item, rowWidth: 600, style: TranscriptStyle(showsAuthors: true),
+        let authored = RowGeometry(item: rows[5].item, rowWidth: 600, style: TranscriptStyle(showsAuthors: true),
                                    blocks: [.text], sizes: [CGSize(width: 120, height: 17)])
         #expect(try #require(authored.tail).minX > RowGeometry.gutter + RowGeometry.avatarSide,
                 "with authors shown the tail stays clear of the mascot")
-        #expect(worker.maxY == rows[4].geometry.surface.maxY && rows[4].geometry.height >= worker.maxY)
+        #expect(worker.maxY == rows[5].geometry.surface.maxY && rows[5].geometry.height >= worker.maxY)
 
         // The tail moves no text: the same reply, with and without it. The group's end adds only its time below.
-        var untailed = rows[4].item
+        var untailed = rows[5].item
         untailed.endsGroup = false
         let size = [CGSize(width: 120, height: 17)]
-        let with = RowGeometry(item: rows[4].item, rowWidth: 600, style: TranscriptStyle(), blocks: [.text], sizes: size)
+        let with = RowGeometry(item: rows[5].item, rowWidth: 600, style: TranscriptStyle(), blocks: [.text], sizes: size)
         let without = RowGeometry(item: untailed, rowWidth: 600, style: TranscriptStyle(), blocks: [.text], sizes: size)
         #expect(with.tail != nil && without.tail == nil)
         #expect(with.text == without.text && with.surface == without.surface)

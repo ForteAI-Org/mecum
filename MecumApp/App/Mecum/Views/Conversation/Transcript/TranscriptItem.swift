@@ -52,7 +52,7 @@ nonisolated struct TranscriptItem: Sendable, Hashable, Identifiable {
         /// that failed or was stopped: what arrived stays, marked (§11.5).
         case workerReply(text: String, isInterrupted: Bool)
 
-        /// A turn's tool records folded into one line under its reply.
+        /// A turn's tool records folded into one line above its answer.
         /// Collapsed, it says what was done; expanded, each step. `ending` is
         /// nil while the turn runs.
         case toolRun(lines: [String], isExpanded: Bool, ending: TurnEnding?)
@@ -81,8 +81,8 @@ nonisolated struct TranscriptItem: Sendable, Hashable, Identifiable {
 
     /// True when the row above is a message by the same author, a little
     /// earlier: the name and mascot are drawn once for the group, and the
-    /// accessibility label still carries both. A tool line sets it under its
-    /// worker's bubble, so it sits close to it.
+    /// accessibility label still carries both. A tool line never sets it, and
+    /// the reply under one keeps its header.
     let continuesGroup: Bool
 
     /// True for the last bubble of a group, the one that carries the tail: no

@@ -203,7 +203,7 @@ nonisolated struct RowGeometry: Sendable, Hashable {
             self.height  = surface.maxY.rounded(.up)
 
         case .line:
-            // No surface: a caption under the worker's bubble, at its column.
+            // No surface: a caption above the worker's answer, at its column.
             let x       = Self.leading(style)
             let surface = CGRect(x: x, y: 0, width: min(limit, textSize.width), height: textSize.height + 4)
             self.surface = surface
@@ -266,15 +266,22 @@ nonisolated struct RowGeometry: Sendable, Hashable {
     }
 
     /// Room inside a block around its text: a finished code block's surface
-    /// with the strip that holds Copy, a quote's bar, and a tool line's card of steps.
+    /// with the strip that holds Copy, a quote's bar, the chevron after a tool
+    /// line's summary, and a tool line's card of steps.
     static func blockInsets(_ block: PreparedBlock.Kind, style: TranscriptStyle) -> NSEdgeInsets {
         switch block {
         case .code(_, true): NSEdgeInsets(top: style.captionLineHeight + 6, left: 10, bottom: 8, right: 10)
         case .quote:         NSEdgeInsets(top: 0, left: 14, bottom: 0, right: 0)
+        case .toolSummary:   NSEdgeInsets(top: 0, left: 0, bottom: 0, right: disclosureSide(style) + 4)
         case .toolSteps:     NSEdgeInsets(top: toolCardPadding.height, left: toolCardPadding.width,
                                           bottom: toolCardPadding.height, right: toolCardPadding.width)
         default:             NSEdgeInsets(top: 0, left: 0, bottom: 0, right: 0)
         }
+    }
+
+    /// The side of a tool line's chevron, drawn at the end of the room its summary keeps.
+    static func disclosureSide(_ style: TranscriptStyle) -> CGFloat {
+        (style.toolPointSize * 0.9).rounded()
     }
 
     /// An open fence's provisional lines read as one run; a heading gets more room above.

@@ -42,8 +42,8 @@ nonisolated struct PreparedText: Sendable, Hashable {
         /// A token of a code block, in the monospaced face and its token's colour.
         case syntax(CodeToken.Kind)
 
-        /// A caption that marks a problem, such as a tool step that failed.
-        case captionAlert
+        /// A tool line's summary and steps: a step below the caption, in the secondary colour.
+        case toolCaption
 
         /// A link's own text. A model wrote it, so it looks like any link and
         /// never like a source that was consulted (§11.2).
@@ -51,10 +51,6 @@ nonisolated struct PreparedText: Sendable, Hashable {
 
         /// Where a link or an image points, shown beside it so it is never hidden.
         case destination
-
-        /// The room a tool line keeps for its disclosure chevron: a caption glyph
-        /// drawn clear, which the row's rotating chevron covers.
-        case disclosureSlot
     }
 
     /// Inline emphasis, which changes the face and not the role.
@@ -148,11 +144,9 @@ nonisolated struct PreparedText: Sendable, Hashable {
         case .syntax(let kind):
             attributes = [.font: NSFont.monospacedSystemFont(ofSize: style.codePointSize, weight: .regular),
                           .foregroundColor: TranscriptColors.syntax(kind)]
-        case .disclosureSlot:
-            attributes = [.font: style.textFont(ofSize: style.captionPointSize), .foregroundColor: NSColor.clear]
-        case .captionAlert:
-            attributes = [.font: style.textFont(ofSize: style.captionPointSize, weight: .semibold),
-                          .foregroundColor: NSColor.systemRed]
+        case .toolCaption:
+            attributes = [.font: style.textFont(ofSize: style.toolPointSize),
+                          .foregroundColor: NSColor.secondaryLabelColor]
         case .link:
             attributes = [.font: style.textFont(ofSize: style.bodyPointSize), .foregroundColor: NSColor.linkColor,
                           .underlineStyle: NSUnderlineStyle.single.rawValue]

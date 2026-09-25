@@ -130,36 +130,17 @@ nonisolated enum RowPreparation {
         }
     }
 
-    /// The tool line: a gear, or the error mark when a step failed, the
-    /// summary and a disclosure; expanded, one indented line per step.
+    /// The tool line: its summary, one quiet line the chevron follows; opened, the steps on a card
+    /// under it, one line each. Nothing on it is marked as a problem: a turn that failed has its own card.
     private static func toolLine(_ steps: [ToolStep], isExpanded: Bool, ending: TranscriptItem.TurnEnding?)
         -> PreparedText {
-        let hasFailure = steps.contains { if case .failed = $0.state { true } else { false } }
-        var block = PreparedBlock(kind: .text)
-        block.append(hasFailure ? errorMark : actionMark, role: hasFailure ? .captionAlert : .caption)
-        block.append(TranscriptWording.toolSummary(steps, ending: ending) + " ", role: .caption)
-        block.append(disclosureSlot, role: .disclosureSlot)
-        guard isExpanded else { return PreparedText(blocks: [block]) }
+        var summary = PreparedBlock(kind: .toolSummary)
+        summary.append(TranscriptWording.toolSummary(steps, ending: ending), role: .toolCaption)
+        let lines = isExpanded ? TranscriptWording.toolSteps(steps, ending: ending) : []
+        guard !lines.isEmpty else { return PreparedText(blocks: [summary]) }
 
-        // Opened, the line stays as it is and the steps come in on a card under it, a hairline
-        // between two tools or problems, the worker's note kept with the step it introduces.
-        let lines    = TranscriptWording.toolSteps(steps, ending: ending)
-        let dividers = lines.indices.dropFirst().filter { !lines[$0 - 1].isNote }
-        var card     = PreparedBlock(kind: .toolSteps(dividers: dividers))
-        for (index, line) in lines.enumerated() {
-            if index > 0 { card.append("\n", role: .caption) }
-            if line.isFailed { card.append(errorMark, role: .captionAlert) }
-            card.append(line.text, role: .caption)
-        }
-        return PreparedText(blocks: [block, card])
+        var card = PreparedBlock(kind: .toolSteps)
+        card.append(lines.joined(separator: "\n"), role: .toolCaption)
+        return PreparedText(blocks: [summary, card])
     }
-
-    /// The character a tool line's summary ends with, where its chevron is drawn.
-    static let disclosureSlot = "›"
-
-    /// The mark a tool line or step carries when something failed.
-    private static let actionMark = "Action: "
-
-    /// A plain-language prefix, so the transcript does not rely on an emoji-like glyph.
-    private static let errorMark = "Issue: "
 }

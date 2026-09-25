@@ -21,6 +21,7 @@ final class TranscriptLayout: NSCollectionViewLayout {
     static let verticalInset  : CGFloat = 16
 
     /// One entry per row, in row order. Set together, then invalidate.
+    /// `continuesGroup` is whether a row sits close under the one above.
     var heights       : [CGFloat] = []
     var continuesGroup: [Bool]    = []
 

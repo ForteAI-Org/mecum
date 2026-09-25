@@ -274,6 +274,48 @@ struct TranscriptSnapshotTests {
         try await tool(fourth, "→ close_session {\"session\":\"s\"}")
     }
 
+    @Test("A tool line collapsed and opened: a step that failed then worked, a long label, a turn still running")
+    func toolLineSnapshots() async throws {
+        let fixture = try await TranscriptFixture()
+        defer { fixture.discard() }
+        let (sent, next) = (UUID(), UUID())
+        var records = ToolLineTests.slack
+        records.insert(contentsOf: [
+            "→ act {\"session\":\"s\",\"target\":\"India • (Lista delle chat)\",\"section\":\"content (Chat)\"}",
+            "← act {\"status\":\"found_acted\"}",
+        ], at: 6)
+        try await fixture.say("Scrivi a India su Slack: ci vediamo alle 15?", at: 0)
+        try await fixture.record(.executionStarted, subject: sent, at: 1)
+        for (offset, record) in records.enumerated() {
+            try await fixture.record(.toolActivity, subject: sent, at: 2 + Double(offset) * 0.1, text: record)
+        }
+        try await fixture.say("I sent India your message on Slack.", at: 5, byWorker: true)
+        try await fixture.record(.executionCompleted, subject: sent, at: 6)
+        try await fixture.say("Thanks. Now check my calendar for today.", at: 60)
+        try await fixture.record(.executionStarted, subject: next, at: 61)
+        try await fixture.record(.toolActivity, subject: next, at: 62, text: "→ open_session {\"app\":\"Calendar\"}")
+
+        // The Slack turn's line opened, as a click would.
+        let expanding: @MainActor (TranscriptController) -> Void = { controller in
+            guard let index = controller.rows.firstIndex(where: {
+                      if case .toolRun = $0.item.kind { true } else { false }
+                  }),
+                  let cell = controller.collectionView.item(at: IndexPath(item: index, section: 0)) as? TranscriptCell
+            else { return }
+            cell.rowView.onActivate?()
+        }
+        for (name, appearance) in [("light", NSAppearance.Name.aqua), ("dark", .darkAqua)] {
+            try await write(fixture, width: 600, appearance: appearance,
+                            to: try directory.appending(path: "tool-line-collapsed-600-\(name).png"))
+            try await write(fixture, width: 600, appearance: appearance,
+                            to: try directory.appending(path: "tool-line-expanded-600-\(name).png"), adjust: expanding)
+        }
+        // At the largest text size a summary that would wrap is cut short on its one line.
+        try await write(fixture, width: 480, appearance: .aqua,
+                        to: try directory.appending(path: "tool-line-collapsed-480-24pt-light.png"),
+                        style: TranscriptStyle(bodyPointSize: 24))
+    }
+
     @Test("Three messages selected as bubbles, the person's and two of the worker's, beside one that is not")
     func bubbleSnapshots() async throws {
         let fixture = try await TranscriptFixture()
@@ -307,11 +349,13 @@ struct TranscriptSnapshotTests {
         width     : CGFloat,
         appearance: NSAppearance.Name,
         to file   : URL,
-        adjust    : (@MainActor (TranscriptController) -> Void)? = nil
+        adjust    : (@MainActor (TranscriptController) -> Void)? = nil,
+        style     : TranscriptStyle = TranscriptStyle()
     ) async throws {
-        let measuring = try await render(fixture, width: width, height: 600, appearance: appearance, adjust: adjust)
+        let measuring = try await render(fixture, width: width, height: 600, appearance: appearance, adjust: adjust,
+                                         style: style)
         let backdrop  = try await render(fixture, width: width, height: measuring.contentHeight,
-                                         appearance: appearance, adjust: adjust).backdrop
+                                         appearance: appearance, adjust: adjust, style: style).backdrop
         try Self.png(of: backdrop).write(to: file)
         print("snapshot: \(file.path)")
     }
@@ -321,9 +365,10 @@ struct TranscriptSnapshotTests {
         width     : CGFloat,
         height    : CGFloat,
         appearance: NSAppearance.Name,
-        adjust    : (@MainActor (TranscriptController) -> Void)? = nil
+        adjust    : (@MainActor (TranscriptController) -> Void)? = nil,
+        style     : TranscriptStyle = TranscriptStyle()
     ) async throws -> (backdrop: NSView, contentHeight: CGFloat) {
-        let controller = TranscriptController(source: fixture.store)
+        let controller = TranscriptController(source: fixture.store, style: style)
         let backdrop   = Backdrop(frame: NSRect(x: 0, y: 0, width: width, height: height))
         backdrop.appearance = NSAppearance(named: appearance)
         controller.view.frame = backdrop.bounds

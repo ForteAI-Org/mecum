@@ -28,10 +28,13 @@ nonisolated struct PreparedBlock: Sendable, Hashable {
         case table(Table)
         case rule
 
-        /// An opened tool line's steps, one a line, on a card of their own under the line.
-        /// `dividers` are the lines a hairline goes above: each new tool or problem, and never
-        /// between the worker's note and the step it introduces.
-        case toolSteps(dividers: [Int])
+        /// A tool line's summary: one line, cut with an ellipsis where it would wrap, with room
+        /// after it for the disclosure chevron.
+        case toolSummary
+
+        /// An opened tool line's steps, one a line, on a card of their own under the line, a
+        /// hairline between two steps.
+        case toolSteps
     }
 
     /// The source offset, in UTF-16 units, of the chunk the block came from,
@@ -137,16 +140,29 @@ nonisolated struct PreparedBlock: Sendable, Hashable {
         switch kind {
         case .table(let table): Self.applyTable(table, to: result)
         case .code:             Self.applyHangingIndents(to: result, style: style)
+        case .toolSummary:      Self.applySingleLine(to: result)
         case .toolSteps:        Self.applyStepSpacing(to: result)
         default:                break
         }
         return result
     }
 
+    /// Keeps the text on one line, cut with an ellipsis where it would wrap.
+    private static func applySingleLine(to text: NSMutableAttributedString) {
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.lineBreakMode = .byTruncatingTail
+        text.addAttribute(
+            .paragraphStyle,
+            value: paragraph,
+            range: NSRange(location: 0, length: text.length)
+        )
+    }
+
     /// The room between two steps of a tool card, where its divider runs.
     static let stepSpacing: CGFloat = 12
 
-    /// Opens a gap above every step but the first, and a little room between a long step's lines.
+    /// Opens a gap above every step but the first, and keeps each step on one line, cut with an
+    /// ellipsis where it would wrap.
     private static func applyStepSpacing(to text: NSMutableAttributedString) {
         let source = text.string as NSString
         var start  = 0
@@ -154,7 +170,7 @@ nonisolated struct PreparedBlock: Sendable, Hashable {
             let line      = source.paragraphRange(for: NSRange(location: start, length: 0))
             let paragraph = NSMutableParagraphStyle()
             paragraph.paragraphSpacingBefore = start == 0 ? 0 : stepSpacing
-            paragraph.lineSpacing            = 2
+            paragraph.lineBreakMode          = .byTruncatingTail
             text.addAttribute(.paragraphStyle, value: paragraph, range: line)
             start = NSMaxRange(line)
         }

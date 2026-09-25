@@ -5,18 +5,37 @@
 //  Created by Eliomar Alejandro Rodriguez Ferrer on 23/09/2026.
 //
 
+import AppKit
 import Foundation
 import Testing
 @testable import Mecum
 
 /// The tool line: records as `AutomationTools` writes them, read back as
-/// short human phrases, repeats collapsed, a failure marked and explained.
+/// short human phrases, repeats collapsed, a failure told neutrally and never marked.
 @Suite("Tool line: phrases per tool, repeats, failures, expand and collapse")
 struct ToolLineTests {
 
     private static func done(_ lines: [String]) -> [String] {
-        TranscriptWording.toolSteps(ToolStep.steps(from: lines), ending: .completed).map(\.text)
+        TranscriptWording.toolSteps(ToolStep.steps(from: lines), ending: .completed)
     }
+
+    /// The Slack turn: a look around, Slack opened, a message typed that did not land,
+    /// Annulla missed then pressed, and the message typed again.
+    static let slack = [
+        "→ status {}", "← status {\"session\":null}",
+        "→ windows {}", "← windows {\"applications\":[]}",
+        "→ open_session {\"app\":\"Slack\"}", "← open_session {\"session\":\"s\"}",
+        "» Typing the message now.",
+        "→ type_text {\"session\":\"s\",\"target\":\"Messaggio a India • (Lista delle chat)\","
+            + "\"text\":\"Ci vediamo alle 15?\"}",
+        "← type_text {\"status\":\"acted_unverified\",\"message\":\"the field did NOT change\"}",
+        "→ act {\"session\":\"s\",\"target\":\"Annulla\"}",
+        "← act {\"status\":\"honest_miss\",\"message\":\"No control named Annulla on this screen.\"}",
+        "→ act {\"session\":\"s\",\"target\":\"Annulla\"}", "← act {\"status\":\"found_acted\"}",
+        "→ type_text {\"session\":\"s\",\"target\":\"Messaggio a India • (Lista delle chat)\","
+            + "\"text\":\"Ci vediamo alle 15?\"}",
+        "← type_text {\"status\":\"found_acted\"}",
+    ]
 
     @Test("Every tool of the host reads as a short phrase, and an unknown tool keeps its name")
     func phrasePerTool() {
@@ -78,7 +97,7 @@ struct ToolLineTests {
         ])
     }
 
-    @Test("Every input tool changes the app, and its unverified outcome fails with the engine's reason")
+    @Test("Every input tool changes the app, and its unverified outcome reads as what was tried, without the reason")
     func inputToolOutcomes() {
         let lines = [
             "→ press_key {\"session\":\"s\",\"key\":\"tab\"}",
@@ -89,9 +108,9 @@ struct ToolLineTests {
         ]
         let steps = ToolStep.steps(from: lines)
         #expect(steps.allSatisfy { $0.isEffectful })
-        #expect(TranscriptWording.toolSteps(steps, ending: .completed).map(\.text) == [
-            "Could not press Tab: the window did NOT change",
-            "Could not type “Demo” into Name: no field",
+        #expect(TranscriptWording.toolSteps(steps, ending: .completed) == [
+            "Tried to press Tab",
+            "Tried to type “Demo” into Name",
             "Selecting Copy from Row’s menu, did not finish",
         ])
         let drag = ToolStep.steps(from: ["→ drag {\"session\":\"s\",\"from\":\"Clip\",\"dx\":40}"])
@@ -108,7 +127,7 @@ struct ToolLineTests {
             "← batch step 2 {\"status\":\"honest_miss\",\"message\":\"No control named Size.\"}",
             "← batch {\"status\":\"stopped\"}",
         ]
-        #expect(Self.done(lines) == ["Pressed 8", "Could not select Large in Size: No control named Size."])
+        #expect(Self.done(lines) == ["Pressed 8", "Tried to select Large in Size"])
     }
 
     @Test("Repeats collapse, the summary names what changed, and read-only steps only when nothing else was done")
@@ -119,7 +138,7 @@ struct ToolLineTests {
         let status  = ["→ status {}", "← status {}"]
         let steps   = ToolStep.steps(from: status + open + observe + observe + observe + press + press)
 
-        #expect(TranscriptWording.toolSteps(steps, ending: .completed).map(\.text)
+        #expect(TranscriptWording.toolSteps(steps, ending: .completed)
             == ["Checked open apps", "Opened Calculator", "Looked 3 times", "Pressed 8 twice"])
         #expect(TranscriptWording.toolSummary(steps, ending: .completed) == "Opened Calculator · pressed 8 twice")
         #expect(TranscriptWording.toolSummary(ToolStep.steps(from: observe + observe + observe), ending: .completed)
@@ -130,34 +149,112 @@ struct ToolLineTests {
             == "Pressed 0 · pressed 1 · 4 more")
     }
 
-    @Test("A failed step marks the line and, expanded, says what failed")
-    func failureIsMarked() async throws {
+    @Test("The summary never names a failure or puts one first, and says Issue nowhere")
+    func summaryLeavesFailuresOut() {
         let lines = [
-            "→ open_session {\"app\":\"Calculator\"}", "← open_session {}",
             "→ act {\"session\":\"s\",\"target\":\"8\"}",
             "← act error: The window closed. Observe before any retry.",
+            "→ open_session {\"app\":\"Calculator\"}", "← open_session {}",
+            "← push error: remote refused",
+            "→ act {\"session\":\"s\",\"target\":\"8\"}", "← act {\"status\":\"found_acted\"}",
+        ]
+        let summary = TranscriptWording.toolSummary(ToolStep.steps(from: lines), ending: .completed)
+        #expect(summary == "Opened Calculator · pressed 8")
+        #expect(!summary.contains("Issue") && !summary.contains("Tried") && !summary.contains("push"))
+
+        let slack = TranscriptWording.toolSummary(ToolStep.steps(from: Self.slack), ending: .completed)
+        #expect(slack == "Opened Slack · pressed Annulla · 1 more")
+        #expect(!slack.contains("Issue") && !slack.contains("Tried"))
+    }
+
+    @Test("A turn that only failed is summarised by what it tried, neutrally")
+    func onlyFailuresReadAsTried() {
+        let tried = [
+            "→ status {}", "← status {}",
+            "→ act {\"session\":\"s\",\"target\":\"8\"}", "← act {\"status\":\"honest_miss\",\"message\":\"none\"}",
             "← push error: remote refused",
         ]
+        #expect(TranscriptWording.toolSummary(ToolStep.steps(from: tried), ending: .failed)
+            == "Tried to press 8 · tried to push")
+        let looked = [
+            "→ observe {\"session\":\"s\"}", "← observe error: the window closed",
+            "→ status {}", "← status {}",
+        ]
+        #expect(TranscriptWording.toolSummary(ToolStep.steps(from: looked), ending: .completed)
+            == "Checked open apps · tried to view the window")
+    }
+
+    @Test("A label a model chose is cut to 24 characters, in the summary and on the card")
+    func labelsAreCut() {
+        let lines = [
+            "→ act {\"session\":\"s\",\"target\":\"India • (Lista delle chat)\",\"section\":\"content (Chat)\"}",
+            "← act {\"status\":\"found_acted\"}",
+            "→ type_text {\"session\":\"s\",\"target\":\"Messaggio a India • (Lista delle chat)\","
+                + "\"text\":\"Ci vediamo domani alle quindici?\"}",
+            "← type_text {\"status\":\"found_acted\"}",
+        ]
         let steps = ToolStep.steps(from: lines)
+        #expect(TranscriptWording.toolSteps(steps, ending: .completed) == [
+            "Pressed India • (Lista delle ch…",
+            "Typed “Ci vediamo domani alle…” into Messaggio a India • (Li…",
+        ])
         #expect(TranscriptWording.toolSummary(steps, ending: .completed)
-            == "Could not press 8 · push failed · 1 more")
-        let expanded = TranscriptWording.toolSteps(steps, ending: .completed)
-        #expect(expanded.map(\.isFailed) == [false, true, true])
-        #expect(expanded[1].text == "Could not press 8: The window closed.")
-        #expect(expanded[2].text == "push failed: remote refused")
+            == "Pressed India • (Lista delle ch… · typed “Ci vediamo domani alle…” into Messaggio a India • (Li…")
+        #expect("India • (Lista delle ch…".count == TranscriptWording.labelLimit)
+    }
+
+    @Test("The card has one line per step: no reason, no note, a failed step reads as tried")
+    func cardIsSteps() {
+        let card = TranscriptWording.toolSteps(ToolStep.steps(from: Self.slack), ending: .completed)
+        #expect(card == [
+            "Checked open apps",
+            "Checked open windows",
+            "Opened Slack",
+            "Tried to type “Ci vediamo alle 15?” into Messaggio a India • (Li…",
+            "Tried to press Annulla",
+            "Pressed Annulla",
+            "Typed “Ci vediamo alle 15?” into Messaggio a India • (Li…",
+        ])
+        let hidden = ["NOT change", "No control", "Typing the message"]
+        #expect(!card.contains { line in hidden.contains { line.contains($0) } }, "no reason and no note")
 
         let item = TranscriptItem(id: .toolRun(UUID()),
-                                  kind: .toolRun(lines: lines, isExpanded: false, ending: .completed),
-                                  date: TranscriptFixture.origin, authorWorkerID: UUID(), continuesGroup: true)
-        let text = RowPreparation.preparedText(for: item, workerName: "Atlas", pipeline: MarkdownContent())
-        #expect(text.blocks[0].runs.first?.role == .captionAlert)
+                                  kind: .toolRun(lines: Self.slack, isExpanded: true, ending: .completed),
+                                  date: TranscriptFixture.origin, authorWorkerID: UUID(), continuesGroup: false)
+        let spoken = TranscriptWording.accessibilityLabel(for: item, workerName: "Atlas")
+        #expect(spoken.hasSuffix("Opened Slack · pressed Annulla · 1 more: " + card.joined(separator: "; ")))
+    }
 
-        let quiet = TranscriptItem(id: .toolRun(UUID()),
-                                   kind: .toolRun(lines: Array(lines.prefix(2)), isExpanded: false, ending: .completed),
-                                   date: TranscriptFixture.origin, authorWorkerID: UUID(), continuesGroup: true)
-        let healthy = RowPreparation.preparedText(for: quiet, workerName: "Atlas", pipeline: MarkdownContent())
-        #expect(!healthy.blocks.flatMap(\.runs).contains { $0.role == .captionAlert }, "marks only for problems")
-        #expect(healthy.string == "Action: Opened Calculator ›")
+    @Test("No tool line text uses an alert role or colour, and the summary stays on one line with room for its chevron")
+    func quietStyles() async {
+        let style = TranscriptStyle()
+        let items = [false, true].map { isExpanded in
+            TranscriptItem(id: .toolRun(UUID()),
+                           kind: .toolRun(lines: Self.slack, isExpanded: isExpanded, ending: .failed),
+                           date: TranscriptFixture.origin, authorWorkerID: UUID(), continuesGroup: false)
+        }
+        let rows = await RowPreparation.prepare(items, workerName: "Atlas", width: 200, style: style,
+                                                cache: LayoutMeasurementCache(), pipeline: MarkdownContent()).rows
+        for row in rows {
+            #expect(!row.text.string.contains("Issue") && !row.text.string.contains("Action"))
+            for block in row.text.blocks {
+                #expect(block.runs.allSatisfy { $0.role == .toolCaption })
+                for run in block.runs {
+                    let attributes = PreparedText.attributes(run, style)
+                    #expect(attributes[.foregroundColor] as? NSColor == NSColor.secondaryLabelColor)
+                    #expect((attributes[.font] as? NSFont)?.pointSize == style.toolPointSize)
+                }
+            }
+            // One line however narrow the row, cut short rather than wrapped, the chevron's room after it.
+            let summary = row.text.blocks[0].attributed(style)
+            let cut     = RowPreparation.measure(summary, width: row.geometry.blockTexts[0].width)
+            let whole   = RowPreparation.measure(summary, width: 10_000)
+            #expect(cut.height == whole.height && cut.width < whole.width)
+            #expect(row.geometry.blockTexts[0].height == whole.height)
+            #expect(row.geometry.blocks[0].width == cut.width + RowGeometry.disclosureSide(style) + 4)
+        }
+        #expect(style.toolPointSize == style.captionPointSize - 1)
+        #expect(TranscriptStyle(bodyPointSize: 20).toolPointSize > style.toolPointSize)
     }
 
     @Test("Expanding the line keeps it and puts one line per step on a card under it; collapsing takes the card away")
@@ -176,21 +273,77 @@ struct ToolLineTests {
         try await fixture.record(.executionCompleted, subject: turn, at: 7)
 
         let folded = try await fixture.items()
-        let line   = try #require(folded.last)
+        let line   = try #require(folded.first { if case .toolRun = $0.kind { true } else { false } })
         let open   = try await fixture.items(expanded: [line.id])
         #expect(TranscriptUpdate(from: folded, to: open).changed == [line.id])
 
         let collapsedText = RowPreparation.preparedText(for: line, workerName: "Atlas", pipeline: MarkdownContent())
-        let expandedText  = RowPreparation.preparedText(for: try #require(open.last), workerName: "Atlas",
-                                                        pipeline: MarkdownContent())
-        #expect(collapsedText.string == "Action: Opened Calculator · pressed 8 ›")
-        #expect(expandedText.string == "Action: Opened Calculator · pressed 8 ›\nOpened Calculator\nPressed 8")
-        #expect(expandedText.blocks.map(\.kind) == [.text, .toolSteps(dividers: [1])])
+        let expandedText  = RowPreparation.preparedText(for: try #require(open.first { $0.id == line.id }),
+                                                        workerName: "Atlas", pipeline: MarkdownContent())
+        #expect(collapsedText.string == "Opened Calculator · pressed 8")
+        #expect(expandedText.string == "Opened Calculator · pressed 8\nOpened Calculator\nPressed 8")
+        #expect(expandedText.blocks.map(\.kind) == [.toolSummary, .toolSteps])
         #expect(expandedText.blocks[0].string == collapsedText.string)
 
         let closed = try await fixture.items(expanded: [])
         #expect(closed == folded)
-        #expect(TranscriptWording.accessibilityLabel(for: try #require(open.last), workerName: "Atlas")
+        #expect(TranscriptWording.accessibilityLabel(for: try #require(open.first { $0.id == line.id }), workerName: "Atlas")
             .hasSuffix("Opened Calculator · pressed 8: Opened Calculator; Pressed 8"))
+    }
+
+    @Test("On screen the line sits apart from the person's message and close above the reply it opens")
+    @MainActor
+    func lineSitsWithItsReply() async throws {
+        let fixture = try await TranscriptFixture()
+        defer { fixture.discard() }
+        let turn = UUID()
+        try await fixture.say("Compute 8", at: 0)
+        try await fixture.record(.executionStarted, subject: turn, at: 1)
+        try await fixture.record(.toolActivity, subject: turn, at: 2, text: "→ act {\"session\":\"s\",\"target\":\"8\"}")
+        try await fixture.record(.toolActivity, subject: turn, at: 3, text: "← act {\"status\":\"found_acted\"}")
+        try await fixture.say("8 is on the display.", at: 4, byWorker: true)
+        try await fixture.record(.executionCompleted, subject: turn, at: 5)
+        let controller = TranscriptController(source: fixture.store)
+        controller.view.frame = NSRect(x: 0, y: 0, width: 600, height: 500)
+        controller.view.layoutSubtreeIfNeeded()
+        controller.open(fixture.conversation, workerName: "Atlas", appearance: TranscriptFixture.appearance,
+                        readingAnchor: nil, readingOffset: 0)
+        await controller.settle()
+
+        let items  = controller.rows.map(\.item)
+        let index  = try #require(items.firstIndex { if case .toolRun = $0.kind { true } else { false } })
+        let frames = controller.frameMap()
+        let person = try #require(frames[items[index - 1].id])
+        let line   = try #require(frames[items[index].id])
+        let reply  = try #require(frames[items[index + 1].id])
+        #expect(line.minY - person.maxY == TranscriptLayout.ordinarySpacing)
+        #expect(reply.minY - line.maxY == TranscriptLayout.groupSpacing)
+    }
+
+    @Test("Opening uncovers the card as it fades in; closing folds a picture of it up and out")
+    @MainActor
+    func openAndFoldAnimate() throws {
+        let cell      = TranscriptCell()
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: 300, height: 120))
+        container.addSubview(cell.view)
+        let window = TranscriptFixture.offscreenWindow(for: container, size: container.frame.size)
+        defer { window.close() }
+
+        cell.view.frame = NSRect(x: 0, y: 0, width: 300, height: 80)
+        cell.slide(from: 0, openingFrom: 20)
+        let mask   = try #require(cell.view.layer?.mask)
+        let opened = try #require(mask.sublayers?.last)
+        #expect(mask.sublayers?.count == 2)
+        #expect(opened.frame.height == 60)
+        #expect(opened.animation(forKey: "open") != nil)
+
+        cell.view.frame = NSRect(x: 0, y: 0, width: 300, height: 20)
+        let card = NSImage(size: CGSize(width: 300, height: 60))
+        cell.fold(card)
+        let overlay = try #require(cell.view.subviews.compactMap { $0 as? NSImageView }.first { $0.image === card })
+        #expect(overlay.frame == CGRect(x: 0, y: 20, width: 300, height: 60), "just under the row's new bottom edge")
+        #expect(overlay.layer?.mask?.animation(forKey: "fold") != nil)
+        cell.prepareForReuse()
+        #expect(overlay.superview == nil, "a reused cell keeps nothing of the fold")
     }
 }

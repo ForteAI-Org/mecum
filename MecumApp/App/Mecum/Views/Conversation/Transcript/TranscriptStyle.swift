@@ -67,7 +67,10 @@ nonisolated struct TranscriptStyle: Sendable, Hashable {
     /// Names, times and delivery states.
     var captionPointSize: CGFloat { max(10, bodyPointSize - 3) }
 
-    /// Tool lines and failure reasons.
+    /// Tool lines and their steps, a step below the caption: quieter than the replies they open.
+    var toolPointSize: CGFloat { captionPointSize - 1 }
+
+    /// Failure reasons.
     var monospacedPointSize: CGFloat { max(10, bodyPointSize - 2) }
 
     /// The height of one caption line, rounded up to whole points.

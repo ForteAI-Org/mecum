@@ -23,11 +23,13 @@ import Foundation
 ///
 /// A turn's rows. An execution's start and completion draw nothing. Its tool
 /// records fold into one line identified by its first event, so a line that
-/// grows keeps its identity, and the line sits under the turn's last reply
-/// block, or where the turn ended when it replied nothing. A failed or stopped
-/// turn adds its card after that line. While the newest execution runs, a
-/// thinking bubble sits at the end where its next reply will land, with the
-/// running turn's line under it, unless a reply block is still streaming.
+/// grows keeps its identity. The line opens the worker's part of the turn: it
+/// sits above the turn's first reply block, or where the turn ended when it
+/// replied nothing, and a failed or stopped turn adds its card after its last
+/// row. While the newest execution runs, a thinking bubble sits at the end where
+/// its next reply will land, unless a reply block is still streaming, and the
+/// running turn's line sits above its first reply block, else above the bubble.
+/// Both are the same place, so a line never moves when its turn ends.
 ///
 /// Days. Every day with a message gets a separator above its first message,
 /// the day changing at 00:00 in `calendar`'s time zone. Grouping is decided in
@@ -141,9 +143,10 @@ nonisolated enum ConversationProjection {
     }
 
     /// Each row's grouping in the final order. A message or a thinking bubble
-    /// continues a bubble by its author a little earlier; a tool line
-    /// continues its worker's bubble right above it. A bubble that no bubble
-    /// below continues ends its group and carries the tail.
+    /// continues a bubble by its author a little earlier. A tool line continues
+    /// nothing: it opens its worker's part of a turn, so the reply under it starts
+    /// a group of its own, with its header. A bubble that no bubble below
+    /// continues ends its group and carries the tail.
     private static func grouped(_ rows: [TranscriptItem]) -> [TranscriptItem] {
         var result: [TranscriptItem] = []
         result.reserveCapacity(rows.count)
@@ -153,8 +156,6 @@ nonisolated enum ConversationProjection {
                 switch row.kind {
                 case .personMessage, .workerReply, .thinking:
                     continues = row.date.timeIntervalSince(previous.date) < groupingInterval
-                case .toolRun:
-                    continues = row.authorWorkerID != nil
                 default:
                     continues = false
                 }
@@ -181,7 +182,7 @@ nonisolated enum ConversationProjection {
     /// each execution's tool line, and the turn still open.
     private struct Merge {
 
-        /// A turn's tool records, and the row it goes after once placed.
+        /// A turn's tool records, and the row it goes before once placed.
         struct ToolLine {
             let id    : TranscriptItem.ID
             let date  : Date
@@ -189,7 +190,7 @@ nonisolated enum ConversationProjection {
             var lines : [String]
             var ending: TranscriptItem.TurnEnding?
 
-            /// The row index the line goes after: nil until its turn ends, -1 before every row.
+            /// The row index the line goes before once its turn ended, `rows.count` after every row.
             var anchor: Int?
         }
 
@@ -201,8 +202,9 @@ nonisolated enum ConversationProjection {
         /// The latest started execution with no terminal event yet, and its reply blocks so far.
         private var openTurn: (event: RecordedEvent, replies: Int)?
 
-        /// The current answer's last reply block, since the last start or ending.
-        private var lastReplyIndex: Int?
+        /// The current answer's first and last reply blocks, since the last start or ending.
+        private var firstReplyIndex: Int?
+        private var lastReplyIndex : Int?
         private var isLastReplyStreaming = false
 
         mutating func add(_ message: MessageSnapshot, now: Date) {
@@ -211,6 +213,7 @@ nonisolated enum ConversationProjection {
                 ? .personMessage(text: message.text, delivery: message.delivery, badge: badge)
                 : .workerReply(text: message.text, isInterrupted: false)
             if !message.isFromPerson {
+                firstReplyIndex      = firstReplyIndex ?? rows.count
                 lastReplyIndex       = rows.count
                 isLastReplyStreaming = message.delivery == .responding
                 openTurn?.replies   += 1
@@ -231,8 +234,9 @@ nonisolated enum ConversationProjection {
                 lines[event.subjectID]?.lines.append(text)
 
             case .executionStarted:
-                openTurn       = (event, 0)
-                lastReplyIndex = nil
+                openTurn        = (event, 0)
+                firstReplyIndex = nil
+                lastReplyIndex  = nil
 
             case .executionCompleted:
                 end(event, as: .completed)
@@ -252,18 +256,21 @@ nonisolated enum ConversationProjection {
             }
         }
 
-        /// The rows with each tool line in place: an ended turn's after its
-        /// anchor, any other at the end, below the thinking bubble when there is one.
+        /// The rows with each tool line in place: an ended turn's before its
+        /// anchor, the running turn's above its first reply block or else above
+        /// the thinking bubble, and a line with no turn in the window at the end.
         mutating func finish(expanded: Set<TranscriptItem.ID>, opensToolSteps: Bool, showsThinking: Bool)
             -> [TranscriptItem] {
+            // Where the running turn's line goes is where it stays once the turn ends: see `end`.
+            let running = firstReplyIndex ?? rows.count
             if showsThinking, let open = openTurn, let worker = open.event.workerID,
                !(lastReplyIndex != nil && isLastReplyStreaming) {
                 rows.append(TranscriptItem(id: .thinking(execution: open.event.subjectID, replies: open.replies),
                                            kind: .thinking, date: open.event.timestamp, authorWorkerID: worker,
                                            continuesGroup: false))
             }
-            var after: [Int: [TranscriptItem]] = [:]
-            var tail : [TranscriptItem] = []
+            var before: [Int: [TranscriptItem]] = [:]
+            var tail  : [TranscriptItem] = []
             for subject in lineOrder {
                 guard let line = lines[subject] else { continue }
                 let row = TranscriptItem(
@@ -275,27 +282,32 @@ nonisolated enum ConversationProjection {
                     authorWorkerID: line.worker,
                     continuesGroup: false
                 )
-                if let anchor = line.anchor { after[anchor, default: []].append(row) } else { tail.append(row) }
+                if let anchor = line.anchor ?? (subject == openTurn?.event.subjectID ? running : nil) {
+                    before[anchor, default: []].append(row)
+                } else {
+                    tail.append(row)
+                }
             }
-            guard !after.isEmpty || !tail.isEmpty else { return rows }
-            var ordered = after[-1] ?? []
+            guard !before.isEmpty || !tail.isEmpty else { return rows }
+            var ordered: [TranscriptItem] = []
             ordered.reserveCapacity(rows.count + lineOrder.count)
             for (index, row) in rows.enumerated() {
+                ordered += before[index] ?? []
                 ordered.append(row)
-                ordered += after[index] ?? []
             }
-            return ordered + tail
+            return ordered + (before[rows.count] ?? []) + tail
         }
 
-        /// Records how the turn ended on its tool line, and puts the line under
-        /// the answer's last reply block, or here when it replied nothing.
+        /// Records how the turn ended on its tool line, and puts the line above
+        /// the answer's first reply block, or here when it replied nothing.
         private mutating func end(_ event: RecordedEvent, as ending: TranscriptItem.TurnEnding) {
             if lines[event.subjectID] != nil {
                 lines[event.subjectID]?.ending = ending
-                lines[event.subjectID]?.anchor = lastReplyIndex ?? rows.count - 1
+                lines[event.subjectID]?.anchor = firstReplyIndex ?? rows.count
             }
             if openTurn?.event.subjectID == event.subjectID { openTurn = nil }
-            lastReplyIndex = nil
+            firstReplyIndex = nil
+            lastReplyIndex  = nil
         }
 
         /// Marks the answer's last reply block as interrupted, when it has one.
