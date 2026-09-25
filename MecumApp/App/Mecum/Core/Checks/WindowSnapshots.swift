@@ -27,6 +27,9 @@ enum WindowSnapshots {
     /// True while a snapshot draws the composer with its model popup open.
     static var opensModelPopup = false
 
+    /// True while a snapshot draws the composer with its context popup open.
+    static var opensContextPopup = false
+
     /// Writes every snapshot, prints each path, and ends the process: 0 when
     /// all were written, 1 with the reason on standard error otherwise.
     static func writeAndQuit() async {
@@ -37,7 +40,10 @@ enum WindowSnapshots {
         var status: Int32 = 0
 
         do {
-            let team   = try await syntheticTeam(in: store)
+            let team   = try await syntheticTeam(
+                in           : store,
+                contextTokens: 142_318
+            )
             let output = try directory()
 
             // Codex's catalogue as the composer's popup lists it, without running the command line.
@@ -91,6 +97,50 @@ enum WindowSnapshots {
                 to   : output.appending(path: "window-\(narrowest)-light-model-popup.png")
             )
             opensModelPopup = false
+
+            // The context ring's popup open above the composer, then the ring amber, at 85% of the context.
+            let high = try await syntheticTeam(
+                in           : store.appending(
+                    path         : "High",
+                    directoryHint: .isDirectory
+                ),
+                contextTokens: 219_640
+            )
+            let contexts: [(name: String, team: TeamModel, opens: Bool)] = [
+                ("context-popup", team, true),
+                ("context-high", high, false),
+            ]
+            for context in contexts {
+                for (name, dark) in [("light", false), ("dark", true)] {
+                    opensContextPopup = context.opens
+                    try await write(
+                        Root(
+                            team                : context.team,
+                            isInspectorRequested: false
+                        ),
+                        width: 1200,
+                        dark : dark,
+                        to   : output.appending(path: "window-1200-\(name)-\(context.name).png")
+                    )
+                }
+            }
+            opensContextPopup = false
+
+            // The token counter's popover drawn alone, as a popover is a window of its own.
+            for (name, dark) in [("light", false), ("dark", true)] {
+                try await write(
+                    TokenCounterPopover(
+                        workerName: "Iris",
+                        provider  : .claudeCode,
+                        usage     : planUsage()
+                    )
+                    .background(Color(nsColor: .windowBackgroundColor)),
+                    width : 280,
+                    height: 420,
+                    dark  : dark,
+                    to    : output.appending(path: "token-counter-popover-\(name).png")
+                )
+            }
 
             // The split's sidebar is glass and draws blank offscreen, so its rows are drawn alone too, on the
             // sidebar material, full and compact, with two connections ready for the footer's badge.
@@ -344,8 +394,13 @@ enum WindowSnapshots {
 
     /// Three workers and Atlas's conversation: an earlier exchange, then one
     /// finished turn whose profile was changed afterwards, so the inspector has
-    /// to show the turn's model and not the profile's.
-    static func syntheticTeam(in directory: URL) async throws -> TeamModel {
+    /// to show the turn's model and not the profile's. With `contextTokens` the
+    /// turn records its usage too (`atlasUsage`), so the context ring and the
+    /// token counter are drawn.
+    static func syntheticTeam(
+        in directory : URL,
+        contextTokens: Int? = nil
+    ) async throws -> TeamModel {
         let store = try WorkspaceStore.opening(in: directory)
         let iris  = try await store.createWorker(
             name      : "Iris",
@@ -457,6 +512,17 @@ enum WindowSnapshots {
             at  : 3,
             text: "← read_log 2 bundles failed"
         )
+        if let contextTokens {
+            let usage = try atlasUsage(contextTokens: contextTokens).encoded()
+            try await record(
+                .turnUsage,
+                at  : 20,
+                text: String(
+                    decoding: usage,
+                    as      : UTF8.self
+                )
+            )
+        }
         try await store.appendMessage(
             to      : conversation.id,
             author  : atlas.id,

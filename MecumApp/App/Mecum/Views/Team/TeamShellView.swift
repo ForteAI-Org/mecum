@@ -191,7 +191,8 @@ struct TeamShellView: View {
     // MARK: Toolbar
 
     /// The window's own controls, `ShellChrome.toolbar`: the worker's header at
-    /// the leading edge, and the screen and inspector toggles at the trailing edge. The
+    /// the leading edge; at the trailing edge the token counter, once the worker
+    /// has recorded a turn, and the screen and inspector toggles. The
     /// connections are at the foot of the sidebar, and Release the computer is
     /// in the composer beside Send and in the worker's commands.
     @ToolbarContentBuilder
@@ -205,6 +206,17 @@ struct TeamShellView: View {
             ToolbarSpacer(.flexible)
         } else {
             ToolbarItem(placement: .navigation) { header }
+        }
+
+        if let worker = team.selectedWorker,
+           let usage  = team.usage[worker.id],
+           UsageWording.counter(of: usage) != nil {
+            ToolbarItem {
+                TokenCounterButton(
+                    worker: worker,
+                    usage : usage
+                )
+            }
         }
 
         ToolbarItem {

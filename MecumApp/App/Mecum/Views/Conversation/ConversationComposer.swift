@@ -32,7 +32,61 @@ struct ConversationComposer: View {
     /// The model button's frame in the window, which the popup is centred on.
     @State private var modelButton = CGRect.zero
 
+    @State private var isShowingContext = WindowSnapshots.opensContextPopup
+
+    /// The context ring's frame in the window, which its popup is placed over.
+    @State private var contextButton = CGRect.zero
+
     var body: some View {
+        // The ring sits above the bar's trailing edge, inside the height the transcript keeps clear.
+        VStack(
+            alignment: .trailing,
+            spacing  : 6
+        ) {
+            if let context {
+                ConversationContextButton(
+                    context: context,
+                    isOpen : $isShowingContext,
+                    frame  : $contextButton
+                )
+                .padding(
+                    .trailing,
+                    16
+                )
+            }
+
+            bar
+        }
+        .composerPopup(
+            isPresented: $isShowingContext,
+            button     : contextButton,
+            width      : ConversationContextPopup.width
+        ) {
+            if let context { ConversationContextPopup(context: context) }
+        }
+        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height = $0 }
+        .onChange(of: worker.id) {
+            isChoosingModel  = false
+            isShowingContext = false
+            pending          = nil
+        }
+        .onChange(of: context == nil) {
+            if context == nil { isShowingContext = false }
+        }
+        // The draft reaches the store once typing pauses. A new keystroke
+        // cancels this task and starts it again, so a burst writes once.
+        .task(id: team.draft) {
+            do { try await Task.sleep(for: .milliseconds(500)) } catch { return }
+            await team.flushDraft()
+        }
+    }
+
+    /// The selected worker's context while its conversation is open, nil while its fill or window is unknown.
+    private var context: WorkerUsage.Context? {
+        team.conversation == nil ? nil : UsageWording.ringContext(of: team.usage[worker.id])
+    }
+
+    private var bar: some View {
         ComposerBar(
             draft      : $team.draft,
             recipient  : worker.name,
@@ -64,17 +118,6 @@ struct ConversationComposer: View {
             catalogue  : worker.configuration.flatMap { team.connections.catalogues[$0.provider] },
             onClose    : { Task { await keepChoice() } }
         )
-        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height = $0 }
-        .onChange(of: worker.id) {
-            isChoosingModel = false
-            pending         = nil
-        }
-        // The draft reaches the store once typing pauses. A new keystroke
-        // cancels this task and starts it again, so a burst writes once.
-        .task(id: team.draft) {
-            do { try await Task.sleep(for: .milliseconds(500)) } catch { return }
-            await team.flushDraft()
-        }
     }
 
     /// Makes the popup's choice the worker's, a new version of its profile, when it changed anything.

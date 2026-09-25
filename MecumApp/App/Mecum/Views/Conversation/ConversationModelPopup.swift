@@ -70,28 +70,7 @@ struct ConversationModelPopup: View {
             width    : Self.width,
             alignment: .top
         )
-        .background(
-            .regularMaterial,
-            in: RoundedRectangle(
-                cornerRadius: 16,
-                style       : .continuous
-            )
-        )
-        .overlay(
-            RoundedRectangle(
-                cornerRadius: 16,
-                style       : .continuous
-            )
-            .strokeBorder(
-                Color(nsColor: .separatorColor),
-                lineWidth: 0.5
-            )
-        )
-        .shadow(
-            color : .black.opacity(0.16),
-            radius: 12,
-            y     : 4
-        )
+        .modifier(ConversationPopupSurface())
     }
 
     /// The popup changing between the rail and the list: one transaction, so its size and its
