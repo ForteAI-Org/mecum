@@ -72,3 +72,16 @@ private let installed = [app("Photos"), app("Google Chrome"), app("Preview"), ap
     #expect(message.contains("Photos opened but could not be seated on the background display."))
     #expect(message.contains("does not fit in the 1512×982 pt background display"))
 }
+
+@Test func resolvesAnApplicationByItsFileNameOrItsBundleIdentifier() throws {
+    // Visual Studio Code's bundle calls it "Code"; the Finder and the person call it by its file.
+    let code = TargetApp(pid: nil, bundleID: "com.microsoft.VSCode", name: "Code",
+                         bundleURL: URL(fileURLWithPath: "/Applications/Visual Studio Code.app"), windows: [])
+    let apps = installed + [code]
+    #expect(try ApplicationOpening.resolve("Visual Studio Code", in: apps).bundleID == "com.microsoft.VSCode")
+    #expect(try ApplicationOpening.resolve("com.microsoft.vscode", in: apps).name == "Code")
+    #expect(try ApplicationOpening.resolve("Code", in: apps).name == "Code")
+    // A part of any of its names is enough, as it is for the bundle's own name.
+    #expect(try ApplicationOpening.resolve("Visual Studio", in: apps).bundleID == "com.microsoft.VSCode")
+    #expect(ApplicationOpening.names(of: code).prefix(2) == ["Code", "Visual Studio Code"])
+}

@@ -59,11 +59,15 @@ enum ApplicationOpening {
             throw SeatBrokerError.applicationNotResolved("No application was named to open.")
         }
         let openable = apps.filter(isOpenable)
-        let exact = openable.filter { same($0.name, wanted) }
+        let exact = openable.filter { app in
+            same(app.bundleID, wanted) || names(of: app).contains { same($0, wanted) }
+        }
         if let only = exact.first, exact.count == 1 { return only }
         if exact.count > 1 { throw ambiguity(wanted, exact) }
 
-        let partial = openable.filter { $0.name.range(of: wanted, options: comparison) != nil }
+        let partial = openable.filter { app in
+            names(of: app).contains { $0.range(of: wanted, options: comparison) != nil }
+        }
         if let only = partial.first, partial.count == 1 { return only }
         if partial.count > 1 { throw ambiguity(wanted, partial) }
         throw SeatBrokerError.applicationNotResolved(
@@ -90,6 +94,21 @@ enum ApplicationOpening {
             case (true, false): "\(name) could not be closed again and is still running; quit it yourself."
             case (false, _)   : "\(name) was left running, since it was already open."
         }
+    }
+
+    /// Every name an application answers to: the one its bundle declares, the name of its file and
+    /// the name the Finder shows in the person's language. They differ for many applications: Visual
+    /// Studio Code's bundle calls it "Code", and on an Italian Mac Calculator reads "Calcolatrice".
+    /// Its bundle identifier is matched as well, exactly.
+    static func names(of app: TargetApp) -> [String] {
+        var names = [app.name]
+        if let url = app.bundleURL {
+            names.append(url.deletingPathExtension().lastPathComponent)
+            let shown = FileManager.default.displayName(atPath: url.path)
+            names.append(shown.lowercased().hasSuffix(".app") ? String(shown.dropLast(4)) : shown)
+        }
+        var seen = Set<String>()
+        return names.filter { !$0.isEmpty && seen.insert($0.lowercased()).inserted }
     }
 
     private static let comparison: String.CompareOptions = [.caseInsensitive, .diacriticInsensitive]
