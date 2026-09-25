@@ -3862,6 +3862,16 @@ public final class AgentSeat {
     /// must be staged before containment can be confirmed. Missing transitional
     /// readings do not bypass that step when the thumbnail becomes readable.
     ///
+    /// An application may refuse the raise and still arrive: the move alone
+    /// takes a stashed window out of the strip once it reaches the Virtual
+    /// Display, where Stage Manager does not reach. Measured on 27.0 with
+    /// Calculator, whose window lists `AXRaise` and answers -25205 to it in
+    /// every state, and with Chess as the control: both were at full size on
+    /// the display 75 ms after the move, with no raise and no activation. So a
+    /// refused raise keeps waiting, and is what is thrown only when nothing
+    /// confirms the window by the deadline. A thumbnail cannot be confirmed in
+    /// its place: the strip is on the physical display, outside `bounds`.
+    ///
     /// The budget is an absolute two-second deadline. Four early 20 ms readings
     /// let a cooperative child finish the same two-reading proof without
     /// spending 200 ms in fixed waits after its AX move. A slower window then
@@ -3873,8 +3883,9 @@ public final class AgentSeat {
         within bounds : CGRect
     ) async throws -> WindowReference {
 
-        var previous: WindowReference?
-        var last    : WindowReference?
+        var previous    : WindowReference?
+        var last        : WindowReference?
+        var refusedRaise: DisplayFailure?
         var didAttemptStage = false
         var readings = 0
 
@@ -3910,11 +3921,16 @@ public final class AgentSeat {
                 let requested = window.replacingFrame(
                     CGRect(origin: expectedOrigin, size: window.frame.size)
                 )
-                _ = try await placing.stage(
-                    requested,
-                    expectedSize: window.frame.size,
-                    within      : bounds
-                )
+                do {
+                    _ = try await placing.stage(
+                        requested,
+                        expectedSize: window.frame.size,
+                        within      : bounds
+                    )
+                } catch let failure as DisplayFailure {
+                    guard case .raiseFailed = failure else { throw failure }
+                    refusedRaise = failure
+                }
                 try checkAdoptionMayContinue()
                 previous = nil
                 continue
@@ -3929,7 +3945,7 @@ public final class AgentSeat {
             previous = reading
         }
 
-        throw DisplayFailure.placementNotConfirmed(
+        throw refusedRaise ?? DisplayFailure.placementNotConfirmed(
             windowNumber: window.windowNumber,
             lastFrame   : last?.frame
         )
