@@ -451,11 +451,29 @@ public struct ActionEngine: Sendable {
     /// start, then Command, Shift and Down selecting to the end, which a Qt line edit answers too.
     /// Command and A comes last because DaVinci's Search field answers it itself, as measured, and where
     /// a menu would resolve it instead it does nothing and leaves the selection as it was.
+    ///
+    /// Only a field whose value was read as holding text is sent them: a web application binds the
+    /// same arrows. Slack opens the person's last message for editing on an Up arrow in its empty
+    /// composer, and the text typed next went into that message, twice in a row, on 25 Sep 2026. A
+    /// field read as empty has nothing to select; one whose value cannot be read, which is what a
+    /// Chromium composer is, is selected with a triple click, which sends no key an application can
+    /// bind, and selects the paragraph clicked in a field of several.
     static let selectAll: [Gesture] = [
         .key(code: Key.upArrow, modifiers: .command),
         .key(code: Key.downArrow, modifiers: [.command, .shift]),
         .character("a", modifiers: .command),
     ]
+
+    /// How a field is focused and prepared before the text: at its end to append, and to replace,
+    /// by what its value says it holds (`selectAll`).
+    static func preparing(field value: String?, at point: CGPoint, replacing: Bool) -> [Gesture] {
+        guard replacing else { return [.click(at: point), endOfField] }
+        switch value {
+            case nil:       return [.click(at: point, count: 3)]
+            case ""?:       return [.click(at: point)]
+            case .some:     return [.click(at: point)] + selectAll
+        }
+    }
 
     /// Command and Down, the key binding that moves to the end of a document, and of a field.
     static let endOfField: Gesture = .key(code: Key.downArrow, modifiers: .command)
@@ -490,7 +508,7 @@ public struct ActionEngine: Sendable {
                 + (inserts ? "insert" : "type") + " \(text.count) characters")
         }
         await raiseIfNeeded(pid, isPopupOpen: (await surfaces(pid)).hasOpenPopup)
-        let gestures: [Gesture] = [.click(at: point)] + (replacing ? Self.selectAll : [Self.endOfField])
+        let gestures = Self.preparing(field: element.value, at: point, replacing: replacing)
             + [inserts ? .insert(text) : .type(text)]
         if let error = await send(gestures, to: pid) {
             return ActOutcome(.actedUnverified, "typing into '\(element.label)': delivery failed: \(error)")

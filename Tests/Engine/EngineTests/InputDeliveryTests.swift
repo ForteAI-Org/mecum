@@ -110,6 +110,18 @@ struct InputDeliveryTests {
         #expect(actuator.confirmations == [.observed])
     }
 
+    @Test("an unreadable field is selected with a triple click, and one read as empty is only clicked, with no key")
+    func replaceSendsNoKeyToAFieldItCannotRead() async {
+        for (value, preparation) in [(nil, [Gesture.click(at: fieldPoint, count: 3)]),
+                                     ("",  [Gesture.click(at: fieldPoint)])] as [(String?, [Gesture])] {
+            let actuator = RecordingActuator()
+            _ = await engine(scenes: ScriptedScenes([scene([field(value: value)])]), actuator: actuator)
+                .deliver(request(.typeText("io la sto usando", into: "Project Name", replacing: true)))
+            // Slack's empty composer reads as nothing, and an Up arrow there edits the last message.
+            #expect(actuator.gestures == preparation + [.type("io la sto usando")])
+        }
+    }
+
     @Test("a value that is not the typed text is acted_unverified, and says what the field reads")
     func wrongValueIsUnverified() async {
         let actuator = RecordingActuator()
