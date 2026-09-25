@@ -353,10 +353,17 @@ struct TranscriptBenchmarks {
     @Test("Memory before and after repeated open and close, each open going to the bottom and a distant message")
     func memory() async throws {
         let store  = try await prepared()
+        // One window for every round, as the app has: a closed window that was never shown is kept by
+        // AppKit (its last event, its drag registration and a pending control update point at it), so a
+        // window per round measured AppKit keeping sixteen windows rather than the transcript.
+        let window = NSWindow(contentRect: NSRect(origin: .zero, size: Self.size), styleMask: [.borderless],
+                              backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        defer { window.close() }
         let before = BenchmarkRecord.footprintMB() ?? .nan
         var after: [Double] = []
         for round in 0..<20 {
-            try await openAndClose(store, distant: 101 + round * 450)
+            try await openAndClose(store, in: window, distant: 101 + round * 450)
             after.append(BenchmarkRecord.footprintMB() ?? .nan)
         }
         BenchmarkRecord.row("footprint after each open and close", .init(after), unit: "MB")
@@ -364,14 +371,21 @@ struct TranscriptBenchmarks {
                                     + "cycle 20 %.1f", before, after[0], after[9], after[19]))
     }
 
-    /// One open at the bottom, a jump to `distant`, and a close. The wait lets
-    /// the controller's resting report finish, so nothing keeps it alive.
-    private func openAndClose(_ store: WorkspaceStore, distant: Int) async throws {
-        let (controller, window, _) = await timeOpen(store, Self.dataset.solo, anchor: nil)
+    /// One open at the bottom, a jump to `distant`, and a close, the transcript put in `window` and
+    /// taken out of it as a conversation's is. The wait lets the controller's resting report finish,
+    /// so nothing keeps it alive.
+    private func openAndClose(_ store: WorkspaceStore, in window: NSWindow, distant: Int) async throws {
+        let controller = TranscriptController(source: store)
+        window.contentView = controller.view
+        controller.view.layoutSubtreeIfNeeded()
+        controller.open(Self.dataset.solo, workerName: "Worker", appearance: WorkerAppearance(seed: 1, palette: "tide"),
+                        readingAnchor: nil, readingOffset: 0)
+        await controller.settle()
         controller.reveal(message: Self.dataset.soloMessageID(sequence: distant))
         await controller.settle()
         window.displayIfNeeded()
-        window.close()
+        window.contentView = NSView(frame: NSRect(origin: .zero, size: Self.size))
+        window.displayIfNeeded()
         try await Task.sleep(for: .milliseconds(450))
     }
 
