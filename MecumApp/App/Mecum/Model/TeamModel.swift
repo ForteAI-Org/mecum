@@ -748,14 +748,16 @@ final class TeamModel {
 
     // MARK: Writing the team
 
-    /// Creates a worker with no model attached, which is the only kind this
-    /// increment makes. Creation is always the person's act: nothing else in
-    /// the app calls this.
+    /// Creates a worker and, when `selection` is given, writes it as the
+    /// worker's first configuration version. A worker whose model could not be
+    /// written is still created, with no model. Creation is always the person's
+    /// act: nothing else in the app calls this.
     func createWorker(
         name        : String,
         role        : String?,
         instructions: String?,
-        appearance  : WorkerAppearance
+        appearance  : WorkerAppearance,
+        selection   : ModelSelection? = nil
     ) async {
         do {
             let made = try await store.createWorker(
@@ -764,8 +766,22 @@ final class TeamModel {
                 instructions: instructions,
                 appearance  : appearance
             )
+            if let selection {
+                do {
+                    try await store.configure(
+                        worker   : made.id,
+                        selection: selection
+                    )
+                } catch {
+                    problem = issue(
+                        title  : "Couldn’t Change Model",
+                        message: "\(made.name) was created without a model.",
+                        error  : error
+                    )
+                }
+            }
             await load()
-            selection = made.id
+            self.selection = made.id
             await openSelectedConversation()
         } catch {
             problem = issue(
@@ -816,9 +832,7 @@ final class TeamModel {
         guard let worker = worker(id), worker.configuration?.provider != provider else { return }
 
         let catalogue = (try? await connections.loadCatalogue(for: provider)) ?? []
-        let ids       = catalogue.map(\.id)
-        let preferred = provider.defaultModels.first(where: ids.contains)
-        guard let model = catalogue.first(where: { $0.id == preferred }) ?? catalogue.first else {
+        guard let model = provider.startingModel(in: catalogue) else {
             problem = UserFacingIssue(
                 title  : "No Models Available",
                 message: "\(provider.title) didn’t return any models, so \(worker.name) will keep the current provider."

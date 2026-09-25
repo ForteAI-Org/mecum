@@ -234,14 +234,28 @@ enum WindowSnapshots {
                 )
             }
 
-            for (name, dark) in [("light", false), ("dark", true)] {
-                try await write(
-                    NewWorkerSheet(team: team),
-                    width : 460,
-                    height: 460,
-                    dark  : dark,
-                    to    : output.appending(path: "new-worker-\(name).png")
-                )
+            // The sheet with Codex ready and its recorded catalogue, then with nothing connected.
+            let unconnected = TeamModel(
+                store      : try WorkspaceStore.opening(in: store.appending(
+                    path         : "Unconnected",
+                    directoryHint: .isDirectory
+                )),
+                connections: ModelSettingsStore(),
+                broker     : SeatBroker()
+            )
+            for (state, sheetTeam) in [("", team), ("-unconnected", unconnected)] {
+                for (name, dark) in [("light", false), ("dark", true)] {
+                    try await write(
+                        NewWorkerSheet(
+                            team          : sheetTeam,
+                            loadsCatalogue: false
+                        ),
+                        width : 460,
+                        height: 540,
+                        dark  : dark,
+                        to    : output.appending(path: "new-worker\(state)-\(name).png")
+                    )
+                }
             }
 
             // The composer's model popup, at the bottom, the middle and the top of a Codex model's rail.
