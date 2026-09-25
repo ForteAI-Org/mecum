@@ -46,47 +46,54 @@ public enum ConnectionState: Sendable, Hashable {
     /// A few words for the state line of a connection card.
     public var title: String {
         switch self {
-        case .ready:              "Ready"
-        case .credentialMissing:  "No credential"
-        case .credentialRejected: "Credential refused"
-        case .unreachable:        "Unreachable"
-        case .usageLimited:       "Usage limit"
-        case .modelRemoved:       "Model removed"
-        case .refused:            "Refused"
+        case .ready:              "Connected"
+        case .credentialMissing:  "Setup Required"
+        case .credentialRejected: "Access Rejected"
+        case .unreachable:        "Can’t Connect"
+        case .usageLimited:       "Usage Limit Reached"
+        case .modelRemoved:       "Model Unavailable"
+        case .refused:            "Request Rejected"
         }
     }
 
-    /// The known fact, its impact, and the next action, in that order. What
-    /// the destination said is quoted last so it can be read or ignored.
+    /// A concise explanation and recovery action. Provider output is kept in
+    /// `technicalDetail` so it does not obscure what the person can do next.
     public var message: String {
         switch self {
 
         case .ready:
-            "Ready."
+            "Connected."
 
         case .credentialMissing:
-            "This connection has no credential yet, so nothing can be sent through it. "
-                + "Add one, then check again."
+            "Sign in or add an API key, then check the connection again."
 
-        case .credentialRejected(let detail):
-            "The destination refused the credential, so nothing can be sent through it. "
-                + "Replace it, then check again. It said: \(detail)"
+        case .credentialRejected:
+            "The API key or sign-in was rejected. Update your credentials, then check again."
 
-        case .unreachable(let destination, let detail):
-            "Nothing answered at \(destination), so nothing can be sent through it. "
-                + "Check the address, or install or start what serves it, then check again. "
-                + "The attempt reported: \(detail)"
+        case .unreachable(let destination, _):
+            "Mecum couldn’t reach \(destination). Check the address and make sure the service is running, then try again."
 
-        case .usageLimited(let detail):
-            "The account is over a usage limit, so nothing can be sent through it until the limit "
-                + "resets. Wait, or use another connection. The destination said: \(detail)"
+        case .usageLimited:
+            "This account has reached its usage limit. Wait for it to reset or use another provider."
 
         case .modelRemoved(let model):
-            "\(model) is no longer in this destination's catalogue, so the worker cannot run with it "
-                + "and needs configuring. Choose a model to replace it."
+            "\(model) is no longer available from this provider. Choose another model for the worker."
 
-        case .refused(let detail):
-            "The destination refused the request, so nothing can be sent through it. It said: \(detail)"
+        case .refused:
+            "The provider rejected the request."
+        }
+    }
+
+    /// The provider or transport output, when there is any. This is diagnostic
+    /// material, not the primary explanation shown to the person.
+    public var technicalDetail: String? {
+        switch self {
+        case .credentialRejected(let detail), .usageLimited(let detail), .refused(let detail):
+            detail
+        case .unreachable(_, let detail):
+            detail
+        case .ready, .credentialMissing, .modelRemoved:
+            nil
         }
     }
 }

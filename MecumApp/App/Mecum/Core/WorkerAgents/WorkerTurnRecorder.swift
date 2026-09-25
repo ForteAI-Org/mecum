@@ -44,11 +44,11 @@ final class WorkerTurnRecorder {
     }
 
     /// The note a stopped turn leaves, word for word what `mecum chat` writes.
-    static let interruptedNote = "Interrupted. Inspect the current app state before continuing."
+    static let interruptedNote = "Stopped. Review the app before continuing."
 
     /// The reason a turn that an earlier launch left without an ending fails with.
-    static let closedDuringTurnReason = "Mecum closed during this turn, so it did not finish and was "
-        + "not run again. Inspect the current app state before continuing."
+    static let closedDuringTurnReason = "Mecum closed before this response finished. The response was not "
+        + "retried. Review the app before continuing."
 
     /// What `endTurnsLeftUnfinished` did: the executions it ended and the pids
     /// of the agent children it stopped.

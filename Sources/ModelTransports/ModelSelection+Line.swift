@@ -14,6 +14,6 @@ extension ModelSelection {
         guard efforts.contains(effort) else { return model }
         // Ollama's knob is thinking on or off, which reads as itself and not as an effort.
         let title = effort.title(for: provider)
-        return "\(model), " + (provider == .ollama ? title : "\(title) effort")
+        return "\(model), " + (provider == .ollama ? title : "\(title) Effort")
     }
 }

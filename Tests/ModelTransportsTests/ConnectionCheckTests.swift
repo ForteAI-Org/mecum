@@ -38,34 +38,34 @@ struct ConnectionCheckTests {
             credential: fakeKey
         )
         #expect(state.title == title)
-        if let model, title == "Model removed" { #expect(state == .modelRemoved(model: model)) }
+        if let model, title == "Model Unavailable" { #expect(state == .modelRemoved(model: model)) }
     }
 
     private static let answers: [Answer] = [
         (.anthropic, 401, #"{"type":"error","error":{"type":"authentication_error","message":"invalid x-api-key"}}"#,
-         nil, "Credential refused"),
+         nil, "Access Rejected"),
         (.anthropic, 429, #"{"type":"error","error":{"type":"rate_limit_error","message":"Number of request tokens has exceeded your per-minute rate limit"}}"#,
-         nil, "Usage limit"),
+         nil, "Usage Limit Reached"),
         (.anthropic, 402, #"{"type":"error","error":{"type":"billing_error","message":"Your credit balance is too low"}}"#,
-         nil, "Usage limit"),
+         nil, "Usage Limit Reached"),
         (.anthropic, 404, #"{"type":"error","error":{"type":"not_found_error","message":"model: claude-opus-3"}}"#,
-         "claude-opus-3", "Model removed"),
+         "claude-opus-3", "Model Unavailable"),
         (.anthropic, 403, #"{"type":"error","error":{"type":"permission_error","message":"Your API key does not have permission to use the specified resource."}}"#,
-         nil, "Refused"),
+         nil, "Request Rejected"),
         (.gemini, 400, #"{"error":{"code":400,"message":"API key not valid. Please pass a valid API key.","status":"INVALID_ARGUMENT","details":[{"@type":"type.googleapis.com/google.rpc.ErrorInfo","reason":"API_KEY_INVALID","domain":"googleapis.com"}]}}"#,
-         nil, "Credential refused"),
+         nil, "Access Rejected"),
         (.gemini, 400, #"{"error":{"code":400,"message":"Invalid JSON payload received.","status":"INVALID_ARGUMENT"}}"#,
-         nil, "Refused"),
+         nil, "Request Rejected"),
         (.gemini, 429, #"{"error":{"code":429,"message":"You exceeded your current quota.","status":"RESOURCE_EXHAUSTED"}}"#,
-         nil, "Usage limit"),
+         nil, "Usage Limit Reached"),
         (.gemini, 404, #"{"error":{"code":404,"message":"models/gemini-1.0-pro is not found","status":"NOT_FOUND"}}"#,
-         "gemini-1.0-pro", "Model removed"),
+         "gemini-1.0-pro", "Model Unavailable"),
         (.ollama, 200, #"{"models":[{"name":"qwen3:8b","model":"qwen3:8b"},{"name":"llama3.2:latest"}]}"#,
-         "mistral:7b", "Model removed"),
+         "mistral:7b", "Model Unavailable"),
         (.ollama, 200, #"{"models":[{"name":"qwen3:8b","model":"qwen3:8b"},{"name":"llama3.2:latest"}]}"#,
-         "llama3.2", "Ready"),
+         "llama3.2", "Connected"),
         (.ollama, 500, #"{"error":"model runner has unexpectedly stopped"}"#,
-         nil, "Refused"),
+         nil, "Request Rejected"),
     ]
 
     @Test func nothingAnsweringIsUnreachableAndNamesWhere() {
@@ -85,12 +85,12 @@ struct ConnectionCheckTests {
 
         // An API key sign-in prints part of the key; it is refused and never quoted.
         let keyed = ProviderCatalog.classifyCodexLogin(exitStatus: 0, output: body("Logged in using an API key - \(fakeKey)\n"))
-        #expect(keyed.title == "Refused")
+        #expect(keyed.title == "Request Rejected")
         #expect(!keyed.message.contains(fakeKey))
 
         #expect(ProviderCatalog.classifyClaudeAuth(exitStatus: 0, output: body(#"{"loggedIn":true,"authMethod":"claude.ai"}"#)) == .ready)
         #expect(ProviderCatalog.classifyClaudeAuth(exitStatus: 1, output: body(#"{"loggedIn":false}"#)) == .credentialMissing)
-        #expect(ProviderCatalog.classifyClaudeAuth(exitStatus: 2, output: body("segmentation fault")).title == "Refused")
+        #expect(ProviderCatalog.classifyClaudeAuth(exitStatus: 2, output: body("segmentation fault")).title == "Request Rejected")
     }
 
     /// `status` is the typed check read as a sentence. These paths make no

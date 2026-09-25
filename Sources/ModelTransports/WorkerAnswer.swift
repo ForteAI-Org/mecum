@@ -26,7 +26,7 @@ public enum WorkerAnswer: Sendable, Hashable {
         case .claudeCode, .codex:
             self = .agent
         case .anthropic, .gemini, .ollama:
-            self = .notYet(reason: "this provider has no agent in this build yet")
+            self = .notYet(reason: "this provider is not available for workers in this version")
         }
     }
 

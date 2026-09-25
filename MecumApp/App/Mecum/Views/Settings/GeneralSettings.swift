@@ -27,9 +27,9 @@ struct GeneralSettings: View {
 
     var body: some View {
         Form {
-            Section("Conversation") {
+            Section("Conversation Appearance") {
                 Picker(
-                    "Text size",
+                    "Text Size",
                     selection: $bodyPointSize
                 ) {
                     ForEach(TranscriptStyle.bodyPointSizes, id: \.self) { size in
@@ -50,7 +50,7 @@ struct GeneralSettings: View {
                 }
             }
 
-            Section("Example Font") {
+            Section("Preview") {
                 FontExample(
                     family: fontFamily,
                     size  : CGFloat(bodyPointSize)
@@ -59,11 +59,11 @@ struct GeneralSettings: View {
 
             Section {
                 Toggle(
-                    "Check connections at launch",
+                    "Check providers when Mecum opens",
                     isOn: $checksConnectionsAtLaunch
                 )
             } footer: {
-                Text("Checking runs the codex and claude command lines and reaches each provider.")
+                Text("Mecum checks each provider, including the Codex and Claude command-line tools.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

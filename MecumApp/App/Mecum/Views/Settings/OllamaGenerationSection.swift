@@ -25,14 +25,14 @@ struct OllamaGenerationSection: View {
                 fractions: 2
             )
             slider(
-                "Top P",
+                "Top-p",
                 value    : $store.ollamaTopP,
                 in       : 0.1...1,
                 step     : 0.05,
                 fractions: 2
             )
             number(
-                "Top K",
+                "Top-k",
                 value: $store.ollamaTopK
             )
             slider(
@@ -43,27 +43,27 @@ struct OllamaGenerationSection: View {
                 fractions: 1
             )
             number(
-                "Context tokens",
+                "Context Window",
                 value: $store.ollamaContextTokens
             )
             number(
-                "Max output tokens",
+                "Maximum Output",
                 value: $store.ollamaMaxOutputTokens
             )
-            LabeledContent("Request timeout") {
+            LabeledContent("Timeout") {
                 TextField(
                     "",
                     value : $store.ollamaTimeoutSeconds,
                     format: .number
                 )
                 .frame(width: 70)
-                Text("s")
+                Text("seconds")
                     .foregroundStyle(.secondary)
             }
         } header: {
             Text("Generation")
         } footer: {
-            Text("Thinking tokens count against the output budget, so keep it at 8k or more with thinking on.")
+            Text("Thinking uses the output budget. Set Maximum Output to at least 8,000 tokens when thinking is enabled.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
         }

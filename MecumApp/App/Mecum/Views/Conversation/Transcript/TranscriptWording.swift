@@ -20,15 +20,15 @@ nonisolated enum TranscriptWording {
         case .sentToBackend: "Sent"
         case .responding:    "Responding"
         case .completed:     "Completed"
-        case .interrupted:   "Interrupted"
+        case .interrupted:   "Stopped"
         }
     }
 
-    static let interrupted = "Interrupted"
+    static let interrupted = "Stopped"
 
     static let stopped = "Stopped"
 
-    static let activityNotShown = "Older activity in this span is not shown"
+    static let activityNotShown = "Some earlier activity is hidden"
 
     /// The caption above the first row of a group. The person's carries only
     /// the time: in a direct conversation the bubble's colour says who wrote it.
@@ -38,10 +38,10 @@ nonisolated enum TranscriptWording {
         return (item.authorWorkerID == nil ? nil : workerName, time(item.date))
     }
 
-    static func thinking(by worker: String) -> String { "\(worker) is thinking" }
+    static func thinking(by worker: String) -> String { "\(worker) is preparing a response" }
 
     static func failed(by worker: String) -> String {
-        "\(worker) could not finish this answer. Nothing was retried; send again to try once more."
+        "\(worker) couldn’t finish the response. Send your message again to retry."
     }
 
     static func time(_ date: Date) -> String {
@@ -79,7 +79,7 @@ nonisolated enum TranscriptWording {
         if shown.isEmpty { shown = groups }
         var parts = shown.prefix(summaryLimit).map { toolStep($0.step, count: $0.count, ending: ending) }
         if shown.count > summaryLimit { parts.append("\(shown.count - summaryLimit) more") }
-        guard !parts.isEmpty else { return "Used tools" }
+        guard !parts.isEmpty else { return "Performed actions" }
         return parts.enumerated().map { $0 == 0 ? $1 : lowercasedFirst($1) }.joined(separator: " · ")
     }
 
@@ -132,15 +132,15 @@ nonisolated enum TranscriptWording {
         }
         switch action {
         case .status:
-            return forms("Checked", "check", "Checking", "what is open")
+            return forms("Checked", "check", "Checking", "open apps")
         case .windows(let app):
-            return forms("Listed", "list", "Listing", app.map { "the windows of \($0)" } ?? "the open windows")
+            return forms("Checked", "check", "Checking", app.map { "\($0)’s open windows" } ?? "open windows")
         case .open(let app):
             return forms("Opened", "open", "Opening", app)
         case .observe:
-            return forms("Looked", "look", "Looking", "at the window")
+            return forms("Viewed", "view", "Viewing", "the window")
         case .select(let control, let item):
-            return forms("Chose", "choose", "Choosing", "\(item) in \(control)")
+            return forms("Selected", "select", "Selecting", "\(item) in \(control)")
         case .close(let app):
             return forms("Closed", "close", "Closing", app ?? "the app")
         case .act(let verb, let target, let section, let value):
@@ -170,9 +170,9 @@ nonisolated enum TranscriptWording {
         case .drag(let source, let destination):
             return forms("Dragged", "drag", "Dragging", source + (destination.map { " to \($0)" } ?? ""))
         case .contextMenu(let target, let item):
-            return ("Chose \(item) from the menu of \(target)",
-                    "choose \(item) from the menu of \(target)",
-                    "Choosing \(item) from the menu of \(target)",
+            return ("Selected \(item) from \(target)’s menu",
+                    "select \(item) from \(target)’s menu",
+                    "Selecting \(item) from \(target)’s menu",
                     true)
         case .note(let text):
             return (text, text, text, true)
@@ -253,7 +253,7 @@ nonisolated enum TranscriptWording {
         case .toolRun(let lines, let isExpanded, let ending):
             let steps  = ToolStep.steps(from: lines)
             let detail = isExpanded ? ": " + toolSteps(steps, ending: ending).map(\.text).joined(separator: "; ") : ""
-            return "\(workerName) tools, \(when): \(toolSummary(steps, ending: ending))\(detail)"
+            return "\(workerName)’s activity, \(when): \(toolSummary(steps, ending: ending))\(detail)"
         case .thinking:
             return thinking(by: workerName)
         case .daySeparator(let label):

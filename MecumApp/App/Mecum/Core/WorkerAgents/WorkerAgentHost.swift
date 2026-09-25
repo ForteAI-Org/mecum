@@ -123,7 +123,7 @@ final class WorkerAgentHost {
         onEvent             : @escaping @MainActor (WorkerAgentEvent) -> Void
     ) async throws {
         guard self.onEvent == nil else {
-            throw AutomationFailure("This worker is still answering. Wait for it, or stop it first.")
+            throw AutomationFailure("This worker is still responding. Wait for it to finish or stop the response.")
         }
         self.onEvent    = onEvent
         isStopRequested = false
@@ -131,8 +131,8 @@ final class WorkerAgentHost {
 
         let (chatProvider, executable) = try agents(selection.provider)
         guard FileManager.default.isExecutableFile(atPath: bridgeExecutable.path) else {
-            throw AutomationFailure("Mecum's tool bridge is missing at \(bridgeExecutable.path), so the "
-                                    + "worker would answer without its tools. Nothing was sent.")
+            throw AutomationFailure("Mecum is missing a required support component. The message was not sent. "
+                                    + "Details: \(bridgeExecutable.path)")
         }
         let connection = try await start()
         let turn = Self.turn(
@@ -222,7 +222,7 @@ final class WorkerAgentHost {
     private static func agent(for provider: ModelProvider) throws -> (ChatProvider, URL) {
         switch (provider, WorkerAnswer(provider: provider)) {
         case (_, .notYet(let reason)):
-            throw AutomationFailure("\(provider.title) cannot answer: \(reason).")
+            throw AutomationFailure("\(provider.title) can’t respond in this version. Details: \(reason).")
         case (.claudeCode, .agent):
             return (.claude, try ClaudeCLIClient.executableURL())
         case (.codex, .agent):

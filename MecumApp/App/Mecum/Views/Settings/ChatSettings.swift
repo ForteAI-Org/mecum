@@ -23,29 +23,29 @@ struct ChatSettings: View {
         Form {
             Section("Messages") {
                 Toggle(
-                    "Show the time under messages",
+                    "Show message times",
                     isOn: $showsTimes
                 )
                 Toggle(
-                    "Show tool steps open",
+                    "Expand tool activity by default",
                     isOn: $opensToolSteps
                 )
             }
 
             Section {
                 Picker(
-                    "Send with",
+                    "Send Messages With",
                     selection: $sendsWithCommandReturn
                 ) {
                     Text("Return").tag(false)
                     Text("Command-Return").tag(true)
                 }
             } header: {
-                Text("Composer")
+                Text("Sending")
             } footer: {
                 Text(sendsWithCommandReturn
-                    ? "Return starts a new line."
-                    : "Shift-Return or Option-Return starts a new line.")
+                    ? "Return inserts a line break."
+                    : "Shift-Return or Option-Return inserts a line break.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

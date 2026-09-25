@@ -35,9 +35,9 @@ public struct ProviderConnection: Sendable, Hashable, Identifiable {
 
         public var title: String {
             switch self {
-            case .signedInCommandLine: "Subscription, signed in outside this app"
-            case .apiKey:              "API key, metered"
-            case .localServer:         "Local server"
+            case .signedInCommandLine: "Subscription"
+            case .apiKey:              "API Key"
+            case .localServer:         "Local Server"
             }
         }
     }
@@ -65,22 +65,17 @@ public struct ProviderConnection: Sendable, Hashable, Identifiable {
     /// subscription and a metered key. Two keys, or two subscriptions, do not ask.
     public func consentNeeded(movingFrom previous: ProviderConnection) -> String? {
         guard previous.authentication != authentication else { return nil }
-        let shared = "What you write to the worker, and its instructions, are sent to \(destination)"
-
         switch (previous.authentication, authentication) {
         case (.localServer, .apiKey):
-            return "The worker runs on this Mac today. \(shared), billed per use with the key kept here."
+            return "Messages and worker instructions will be sent to \(destination). Usage may be billed to the API key stored in Keychain."
         case (.localServer, .signedInCommandLine):
-            return "The worker runs on this Mac today. \(shared), and count against that subscription."
+            return "Messages and worker instructions will be sent to \(destination) and will count toward that subscription."
         case (_, .localServer):
-            return "The worker is answered by \(previous.destination) today. It will run on this Mac "
-                + "through \(destination), and nothing more is sent to \(previous.destination)."
+            return "New messages and worker instructions will run locally through \(destination). Mecum will stop sending them to \(previous.destination)."
         case (.signedInCommandLine, .apiKey):
-            return "The worker uses a subscription today. \(shared), billed per use with the key "
-                + "kept here, so every turn from now on has a cost."
+            return "Messages and worker instructions will be sent to \(destination). New turns may be billed to the API key stored in Keychain."
         default:
-            return "The worker is billed per use today. \(shared), and count against the limits of "
-                + "that subscription instead."
+            return "Messages and worker instructions will be sent to \(destination) and will count toward that subscription instead of API usage."
         }
     }
 
@@ -89,12 +84,12 @@ public struct ProviderConnection: Sendable, Hashable, Identifiable {
         switch provider {
         case .codex:
             authentication      = .signedInCommandLine
-            destination         = "the codex command line"
+            destination         = "the Codex command-line tool"
             credentialReference = nil
 
         case .claudeCode:
             authentication      = .signedInCommandLine
-            destination         = "the claude command line"
+            destination         = "the Claude command-line tool"
             credentialReference = nil
 
         case .anthropic:

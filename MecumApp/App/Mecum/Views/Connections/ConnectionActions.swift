@@ -81,12 +81,12 @@ struct ConnectionActions: View {
     @ViewBuilder
     private var keyActions: some View {
         if !connections.hasCredential(provider) || isReplacing {
-            LabeledContent("API key") {
+            LabeledContent("API Key") {
                 HStack(spacing: 8) {
                     SecureField(
                         "API key",
                         text  : $enteredKey,
-                        prompt: Text("Paste the key")
+                        prompt: Text("Paste API key")
                     )
                     .labelsHidden()
                     .textFieldStyle(.roundedBorder)
@@ -108,7 +108,7 @@ struct ConnectionActions: View {
             }
 
             HStack(spacing: 12) {
-                secondary("Kept in your keychain and sent only to \(connection.destination).")
+                secondary("Stored in Keychain and sent only to \(connection.destination).")
 
                 Spacer(minLength: 0)
 
@@ -131,8 +131,7 @@ struct ConnectionActions: View {
                         for: provider
                     )
                 }
-                .help("Removes the key from your keychain. Workers keep their model and cannot answer "
-                    + "until a key is back.")
+                .help("Remove the API key from Keychain. Workers using this provider can’t respond until you add a new key.")
 
                 Button("Replace Key…") { isReplacing = true }
 
@@ -154,10 +153,10 @@ struct ConnectionActions: View {
 
     @ViewBuilder
     private var localServerActions: some View {
-        LabeledContent("Address") {
+        LabeledContent("Server Address") {
             HStack(spacing: 8) {
                 TextField(
-                    "Address",
+                    "Server Address",
                     text  : $address,
                     prompt: Text("http://127.0.0.1:11434")
                 )
@@ -201,7 +200,7 @@ struct ConnectionActions: View {
             )
         }
         .labelStyle(.iconOnly)
-        .help("Check Again")
+        .help("Check connection again.")
         .disabled(connections.isChecking(provider))
     }
 

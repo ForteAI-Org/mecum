@@ -30,12 +30,10 @@ public enum ModelTransportError: LocalizedError, Equatable {
         switch self {
         case .streamingUnsupported(let reason):
             "This model cannot hold a streamed conversation: \(reason)."
-        case .streamEndedEarly(let deltas):
-            "The answer stopped after \(deltas) piece(s) without the provider ending the turn, "
-                + "so it is incomplete."
-        case .stoppedShort(let reason, let deltas):
-            "The provider stopped the answer after \(deltas) piece(s) with the reason "
-                + "\"\(reason ?? "none given")\", so it is incomplete."
+        case .streamEndedEarly:
+            "The provider ended the response before it finished."
+        case .stoppedShort(let reason, _):
+            "The provider ended the response early. Details: \(reason ?? "No reason provided")"
         }
     }
 }

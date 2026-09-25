@@ -20,9 +20,9 @@ struct InspectorTurnSection: View {
     }
 
     private var turnTitle: String {
-        if case .read(let summary) = turn, summary.state == .running { return "Current turn" }
+        if case .read(let summary) = turn, summary.state == .running { return "Current Turn" }
 
-        return "Last turn"
+        return "Last Turn"
     }
 
     @ViewBuilder
@@ -32,30 +32,30 @@ struct InspectorTurnSection: View {
             // Placeholders in the rows' own shape while the turn is read, never a spinning wheel.
             Group {
                 LabeledContent(
-                    "Ran with",
-                    value: "a model, an effort"
+                    "Model",
+                    value: "Model and Effort"
                 )
                 LabeledContent(
                     "Started",
                     value: "a moment ago"
                 )
                 LabeledContent(
-                    "Outcome",
+                    "Result",
                     value: "Completed"
                 )
             }
             .redacted(reason: .placeholder)
             .shimmering()
-            .accessibilityLabel("Reading the turn")
+            .accessibilityLabel("Loading turn details")
 
         case .nothingYet:
-            Text("No turn yet. The model and effort a turn runs with show here once \(worker.name) answers.")
+            Text("Turn details appear after \(worker.name) responds.")
                 .foregroundStyle(.secondary)
 
         case .read(let summary):
             // What the turn ran with, which can differ from the profile above once it changes.
             LabeledContent(
-                "Ran with",
+                "Model",
                 value: summary.modelLine
             )
             LabeledContent("Started") {
@@ -68,11 +68,11 @@ struct InspectorTurnSection: View {
                 date: .abbreviated,
                 time: .shortened
             ))
-            LabeledContent("Outcome") { outcome(summary) }
+            LabeledContent("Result") { outcome(summary) }
 
         case .failed(let reason):
             Label(
-                "The last turn could not be read. \(reason)",
+                "Couldn’t load the last turn. Details: \(reason)",
                 systemImage: "exclamationmark.triangle.fill"
             )
             .foregroundStyle(.red)

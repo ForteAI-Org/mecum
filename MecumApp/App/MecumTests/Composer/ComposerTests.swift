@@ -202,8 +202,8 @@ struct ComposerTests {
         harness.canAnswer = false
         try await harness.settle()
         let textView = try #require(harness.textView)
-        #expect(textView.placeholder == "Choose a model to message Milo")
-        #expect(textView.accessibilityLabel() == "Choose a model to message Milo")
+        #expect(textView.placeholder == "Choose a model before messaging Milo.")
+        #expect(textView.accessibilityLabel() == "Choose a model before messaging Milo.")
         harness.focus()
         harness.type("saved anyway")
         try await harness.settle()

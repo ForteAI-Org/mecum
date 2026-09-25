@@ -60,7 +60,7 @@ struct BrainAppView: View {
                     .tag(Mode.list)
                 }
                 .pickerStyle(.segmented)
-                .help("Show the Brain as a graph or as a list")
+                .help("Show the Brain as a graph or list.")
             }
         }
         .task {

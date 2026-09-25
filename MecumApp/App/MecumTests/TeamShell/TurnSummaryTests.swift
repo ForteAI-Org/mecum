@@ -51,7 +51,7 @@ struct TurnSummaryTests {
         let turn = try #require(try await TurnSummary.latest(of: worker.id, in: store, isRunning: false))
         #expect(turn.executionID == execution.id)
         #expect(turn.selection == Self.first)
-        #expect(turn.modelLine == "claude-opus-5, High effort")
+        #expect(turn.modelLine == "claude-opus-5, High Effort")
         #expect(turn.state == .completed)
         #expect(try await store.worker(worker.id)?.configuration == Self.second)
     }
@@ -72,7 +72,7 @@ struct TurnSummaryTests {
         let running = try #require(try await TurnSummary.latest(of: worker.id, in: store, isRunning: true))
         #expect(running.executionID == newer.id)
         #expect(running.state == .running)
-        #expect(running.modelLine == "gpt-5.4-mini, Low effort")
+        #expect(running.modelLine == "gpt-5.4-mini, Low Effort")
 
         let orphan = try #require(try await TurnSummary.latest(of: worker.id, in: store, isRunning: false))
         #expect(orphan.state == .unfinished)

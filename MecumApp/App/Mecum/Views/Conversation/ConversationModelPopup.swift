@@ -57,7 +57,7 @@ struct ConversationModelPopup: View {
                             effort   : $selection.effort
                         )
                     } else if entry != nil {
-                        Text("This model has no effort levels.")
+                        Text("This model doesn’t offer Effort levels.")
                             .font(.callout)
                             .foregroundStyle(.secondary)
                     }
@@ -131,7 +131,7 @@ struct ConversationModelPopup: View {
             }
             .buttonStyle(.plain)
             .disabled(catalogue.isEmpty)
-            .help("Choose the model")
+            .help("Choose Model")
         } else {
             Text("Loading models…")
                 .font(.callout)

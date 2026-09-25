@@ -30,14 +30,21 @@ struct ProviderSettingsPage: View {
             if hasConnectionRows {
                 Section("Connection") {
                     if let state = store.states[provider], !state.isReady {
-                        Text(state.message)
-                            .font(.callout)
-                            .foregroundStyle(.secondary)
-                            .textSelection(.enabled)
-                            .fixedSize(
-                                horizontal: false,
-                                vertical  : true
-                            )
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(state.message)
+                            if let detail = state.technicalDetail {
+                                Text("Details: \(detail)")
+                                    .font(.caption)
+                                    .foregroundStyle(.tertiary)
+                            }
+                        }
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                        .fixedSize(
+                            horizontal: false,
+                            vertical  : true
+                        )
                     }
 
                     ConnectionActions(
@@ -64,11 +71,11 @@ struct ProviderSettingsPage: View {
                     }
                     .labelStyle(.iconOnly)
                     .buttonStyle(.borderless)
-                    .help("Refresh Models")
+                    .help("Refresh models.")
                     .disabled(isListing || store.states[provider]?.isReady != true)
                 }
             } footer: {
-                Text("The model and the effort a worker answers with are chosen in its composer.")
+                Text("Choose each worker’s model and Effort in the conversation composer.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -101,9 +108,9 @@ struct ProviderSettingsPage: View {
         .accessibilityHint("Checks the connection again")
     }
 
-    /// The state, when it was checked, and that a click checks it again.
+    /// The state, when it was checked, and the available action.
     private var statusHelp: String {
-        [statusWords, lastCheck, "Click to check again"]
+        [statusWords, lastCheck, "Check the connection again"]
             .compactMap { $0 }
             .joined(separator: ". ")
     }
@@ -121,7 +128,7 @@ struct ProviderSettingsPage: View {
     @ViewBuilder
     private var models: some View {
         if isListing {
-            Text("Listing models…")
+            Text("Loading models…")
                 .foregroundStyle(.secondary)
                 .shimmering()
         } else if let catalogue = store.catalogues[provider], !catalogue.isEmpty {
@@ -132,14 +139,14 @@ struct ProviderSettingsPage: View {
                 }
             }
         } else {
-            Text(listingFailed ? "\(provider.title) could not list its models." : "Listed once the connection works.")
+            Text(listingFailed ? "Couldn’t load models from \(provider.title)." : "Models appear after the connection succeeds.")
                 .foregroundStyle(.secondary)
         }
     }
 
     /// The efforts a model takes, as its lowest and highest level.
     private func levels(of model: ModelInfo) -> String {
-        guard let lowest = model.efforts.first, let highest = model.efforts.last else { return "No effort levels" }
+        guard let lowest = model.efforts.first, let highest = model.efforts.last else { return "No Effort Levels" }
 
         return lowest == highest
             ? lowest.title(for: provider)

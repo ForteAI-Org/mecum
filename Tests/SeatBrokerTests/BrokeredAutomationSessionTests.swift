@@ -230,7 +230,8 @@ struct BrokeredAutomationSessionTests {
     @Test("a missing grant is asked for and refused by name, before the queue")
     func aMissingGrantRefusesByNameBeforeTheQueue() async throws {
         let names: [PermissionKind: String] = [
-            .screenRecording: "Screen Recording", .accessibility: "Accessibility", .postEvent: "Post Event"
+            .screenRecording: "Screen Recording", .accessibility: "Accessibility",
+            .postEvent: "Keyboard and Mouse Control"
         ]
         for (kind, name) in names {
             let broker = SeatBroker()

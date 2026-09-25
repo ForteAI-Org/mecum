@@ -148,21 +148,24 @@ struct TeamShellView: View {
             presenting     : team.deletingWorker.flatMap(team.worker)
         ) { worker in
             Button(
-                "Delete",
+                "Delete Worker",
                 role: .destructive
             ) {
                 Task { await team.deleteWorker(worker.id) }
             }
+            Button(
+                "Cancel",
+                role: .cancel
+            ) {}
         } message: { _ in
             Text("""
-                Its conversation, its history and its model settings are removed from this Mac, and its \
-                working folder goes to the Trash. What the Brain learned about applications stays, since \
-                every worker shares it, and what its provider already received stays with the provider. \
-                To only take it off the team, archive it.
+                Its conversation, history, and model settings will be deleted. Its working folder will be \
+                moved to the Trash. Shared Brain knowledge and data already sent to providers will remain. \
+                Archive the worker instead if you want to keep its history.
                 """)
         }
         .alert(
-            "That could not be done",
+            team.problem?.title ?? "Mecum Couldn’t Complete the Action",
             isPresented: Binding(
                 get: { team.problem != nil },
                 set: { if !$0 { team.problem = nil } }
@@ -173,13 +176,13 @@ struct TeamShellView: View {
                 role: .cancel
             ) {}
         } message: {
-            Text(team.problem ?? "")
+            Text(team.problem?.displayMessage ?? "")
         }
     }
 
     private var deletionTitle: String {
         let name = team.deletingWorker.flatMap(team.worker)?.name ?? "this worker"
-        return "Delete \(name) for good?"
+        return "Delete \(name)?"
     }
 
     // MARK: Toolbar
@@ -204,13 +207,13 @@ struct TeamShellView: View {
         ToolbarItem {
             Toggle(isOn: screenOverConversation) {
                 Label(
-                    "Screen Over the Conversation",
+                    "Show Screen in Conversation",
                     systemImage: "display"
                 )
             }
             .toggleStyle(.button)
             .disabled(!hasScreen)
-            .help("Show the worker's screen over the conversation, or put it back in the inspector")
+            .help("Move the worker’s screen between the conversation and inspector.")
         }
 
         ToolbarItem {
@@ -223,7 +226,7 @@ struct TeamShellView: View {
                 "i",
                 modifiers: [.control, .option, .command]
             )
-            .help("Show or hide the inspector (Control-Option-Command-I)")
+            .help("Show or hide the inspector.")
         }
     }
 
@@ -323,9 +326,9 @@ struct TeamShellView: View {
             FirstLaunchView(team: team)
         } else {
             ContentUnavailableView(
-                "No worker selected",
+                "No Worker Selected",
                 systemImage: "person.crop.circle",
-                description: Text("Choose a worker in the team to open its conversation.")
+                description: Text("Select a worker to open its conversation.")
             )
         }
     }
@@ -355,9 +358,9 @@ struct TeamShellView: View {
             )
         } else {
             ContentUnavailableView(
-                "Nothing selected",
+                "No Worker Selected",
                 systemImage: "info.circle",
-                description: Text("Select a worker to see what it is doing and the model its last turn ran with.")
+                description: Text("Select a worker to view current activity and turn details.")
             )
         }
     }

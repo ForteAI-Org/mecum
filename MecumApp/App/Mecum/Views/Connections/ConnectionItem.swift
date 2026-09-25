@@ -32,14 +32,21 @@ struct ConnectionItem: View {
         if isOpen {
             Group {
                 if let state = connections.states[provider], !state.isReady {
-                    Text(state.message)
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                        .textSelection(.enabled)
-                        .fixedSize(
-                            horizontal: false,
-                            vertical  : true
-                        )
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text(state.message)
+                        if let detail = state.technicalDetail {
+                            Text("Details: \(detail)")
+                                .font(.caption)
+                                .foregroundStyle(.tertiary)
+                        }
+                    }
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+                    .fixedSize(
+                        horizontal: false,
+                        vertical  : true
+                    )
                 }
 
                 ConnectionActions(

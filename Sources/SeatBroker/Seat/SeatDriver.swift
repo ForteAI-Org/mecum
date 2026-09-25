@@ -190,7 +190,7 @@ final class SeatDriver {
     static func grants() -> [DesktopGrant] {
         [
             ("Accessibility", PermissionKind.accessibility),
-            ("Post Event", .postEvent),
+            ("Keyboard and Mouse Control", .postEvent),
             ("Screen Recording", .screenRecording),
         ].map { name, kind in
             DesktopGrant(

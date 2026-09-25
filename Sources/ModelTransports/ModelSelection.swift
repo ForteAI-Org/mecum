@@ -45,11 +45,11 @@ public enum ModelProvider: String, Sendable, CaseIterable, Codable, Identifiable
     /// Where the person gets access, shown next to the key field.
     public var accessHint: String {
         switch self {
-        case .codex: "Uses the Codex CLI and your ChatGPT subscription. Sign in with “codex login” in Terminal; no key is stored here."
-        case .claudeCode: "Uses the Claude Code CLI and your claude.ai subscription. Sign in with “claude auth login” in Terminal; no key is stored here."
-        case .anthropic: "Paste an API key from console.anthropic.com. It is kept in your keychain and sent only to api.anthropic.com."
-        case .gemini: "Paste an API key from aistudio.google.com. It is kept in your keychain and sent only to Google's Generative Language API."
-        case .ollama: "Runs models on this Mac through the local Ollama server. Pull models with “ollama pull <name>”."
+        case .codex: "Uses the Codex command-line tool with your ChatGPT subscription. Sign in from Terminal with “codex login”. Mecum does not store an API key."
+        case .claudeCode: "Uses the Claude command-line tool with your Claude subscription. Sign in from Terminal with “claude auth login”. Mecum does not store an API key."
+        case .anthropic: "Add an API key from console.anthropic.com. Mecum stores it in Keychain and sends it only to api.anthropic.com."
+        case .gemini: "Add an API key from aistudio.google.com. Mecum stores it in Keychain and sends it only to Google’s Generative Language API."
+        case .ollama: "Runs models locally through Ollama. Install a model from Terminal with “ollama pull <name>”."
         }
     }
 

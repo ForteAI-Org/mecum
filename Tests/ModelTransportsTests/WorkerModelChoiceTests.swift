@@ -75,8 +75,8 @@ struct WorkerModelChoiceTests {
             #expect(answer == .agent)
             #expect(answer.refusal == nil)
         } else {
-            #expect(answer == .notYet(reason: "this provider has no agent in this build yet"))
-            #expect(answer.refusal == "this provider has no agent in this build yet")
+            #expect(answer == .notYet(reason: "this provider is not available for workers in this version"))
+            #expect(answer.refusal == "this provider is not available for workers in this version")
         }
     }
 

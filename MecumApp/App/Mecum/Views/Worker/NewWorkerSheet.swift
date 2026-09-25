@@ -60,28 +60,25 @@ struct NewWorkerSheet: View {
                     TextField(
                         "Name",
                         text  : $name,
-                        prompt: Text("Required")
+                        prompt: Text("Worker name")
                     )
                     .focused($namesFirst)
 
                     TextField(
                         "Role",
                         text  : $role,
-                        prompt: Text("Optional")
+                        prompt: Text("Example: Researcher")
                     )
 
                     TextField(
-                        "Description",
+                        "Instructions",
                         text  : $instructions,
-                        prompt: Text("Optional"),
+                        prompt: Text("Describe responsibilities or constraints"),
                         axis  : .vertical
                     )
                     .lineLimit(2...5)
                 } footer: {
-                    Text("""
-                        It starts without a model and is listed as “\(TeamRow.toConfigure)” until you choose its \
-                        provider in the inspector. It asks for no permission until it first uses the computer.
-                        """)
+                    Text("Choose a provider after creating the worker. Mecum asks for permission only when this worker first uses your Mac.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -149,7 +146,7 @@ struct NewWorkerSheet: View {
                 }
                 .labelStyle(.iconOnly)
                 .buttonStyle(.borderless)
-                .help("New Shape, in the same colour")
+                .help("Create a new shape and keep this color.")
             }
         }
         .frame(maxWidth: .infinity)

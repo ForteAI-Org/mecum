@@ -20,13 +20,13 @@ struct WorkerCommands: View {
 
     var body: some View {
         if team.isAnswering(worker.id) {
-            Button("Stop answering") { team.stopAnswering(worker.id) }
+            Button("Stop Response") { team.stopAnswering(worker.id) }
             Divider()
         }
 
         // The composer's release button has this command behind it, reachable without a pointer (§3.3).
         if team.holdsComputer(worker.id) {
-            Button("Release the computer") { Task { await team.releaseComputer(worker.id) } }
+            Button("Release Computer") { Task { await team.releaseComputer(worker.id) } }
             Divider()
         }
 
@@ -39,7 +39,7 @@ struct WorkerCommands: View {
         }
 
         if worker.isArchived {
-            Button("Restore to the team") {
+            Button("Restore to Team") {
                 Task {
                     await team.setArchived(
                         false,

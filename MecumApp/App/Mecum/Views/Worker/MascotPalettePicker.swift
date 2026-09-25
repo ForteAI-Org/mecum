@@ -46,7 +46,7 @@ struct MascotPalettePicker: View {
             }
         }
         .accessibilityElement(children: .contain)
-        .accessibilityLabel("Colour")
+        .accessibilityLabel("Color")
     }
 
     private func colour(of palette: MascotPalette) -> Color {

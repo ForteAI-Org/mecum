@@ -196,7 +196,7 @@ final class TranscriptController: NSObject {
                 self.hasShownConversation = true
                 if replaces { self.playOpening() }
             } catch {
-                self.problem = "This conversation could not be read. \(error.localizedDescription)"
+                self.problem = "Couldn’t load this conversation.\n\nDetails: \(error.localizedDescription)"
             }
         }
     }
@@ -226,7 +226,7 @@ final class TranscriptController: NSObject {
                 await self.apply(window, mode: .open(ScrollAnchor(itemID: id, offset: 0)))
                 self.focus(id)
             } catch {
-                self.problem = "That message could not be read. \(error.localizedDescription)"
+                self.problem = "Couldn’t load that message.\n\nDetails: \(error.localizedDescription)"
             }
         }
     }
@@ -259,7 +259,7 @@ final class TranscriptController: NSObject {
             }
             await apply(fresh, mode: .live)
         } catch {
-            problem = "The conversation could not be read again. \(error.localizedDescription)"
+            problem = "Couldn’t refresh the conversation.\n\nDetails: \(error.localizedDescription)"
         }
     }
 
@@ -277,7 +277,7 @@ final class TranscriptController: NSObject {
                 guard self.conversationID == conversationID else { return }
                 await self.apply(window, mode: .open(nil))
             } catch {
-                self.problem = "The end of this conversation could not be read. \(error.localizedDescription)"
+                self.problem = "Couldn’t load the latest messages.\n\nDetails: \(error.localizedDescription)"
             }
         }
     }
@@ -427,14 +427,14 @@ final class TranscriptController: NSObject {
     /// Loads one page above the window. A load already queued absorbs the
     /// call, so a burst of scroll notifications reads one page.
     func loadOlder() {
-        page("Earlier messages could not be read.") { window, source in
+        page("Couldn’t load earlier messages.") { window, source in
             window.isAtOldest ? nil : try await window.loadingOlder(from: source)
         }
     }
 
     /// Loads one page below the window, when it stops short of the newest.
     func loadNewer() {
-        page("Later messages could not be read.") { window, source in
+        page("Couldn’t load later messages.") { window, source in
             window.isAtNewest ? nil : try await window.loadingNewer(from: source)
         }
     }
@@ -453,7 +453,7 @@ final class TranscriptController: NSObject {
                 guard let paged = try await read(window, self.source) else { return }
                 await self.apply(paged, mode: .paging)
             } catch {
-                self.problem = "\(failure) \(error.localizedDescription)"
+                self.problem = "\(failure)\n\nDetails: \(error.localizedDescription)"
             }
         }
     }
@@ -510,7 +510,7 @@ final class TranscriptController: NSObject {
         indicator.isHidden      = true
         indicator.target        = self
         indicator.action        = #selector(indicatorPressed)
-        indicator.toolTip       = "Go to the end (End or Command Down Arrow)"
+        indicator.toolTip       = "Jump to the latest message."
         indicator.translatesAutoresizingMaskIntoConstraints = false
         let shadow = NSShadow()
         shadow.shadowColor      = NSColor.black.withAlphaComponent(0.25)
@@ -754,11 +754,11 @@ final class TranscriptController: NSObject {
             indicator.title      = newMessageCount == 1 ? "1 new message" : "\(max(1, newMessageCount)) new messages"
             indicator.bezelColor = .controlAccentColor
         case .statusChanges, nil:
-            indicator.title      = "Updates"
+            indicator.title      = "New Activity"
             indicator.bezelColor = nil
         }
         indicator.isHidden = newActivity == nil
-        indicator.setAccessibilityLabel("\(indicator.title). Go to the end")
+        indicator.setAccessibilityLabel("\(indicator.title). Jump to latest message")
     }
 
     @objc

@@ -41,9 +41,9 @@ struct ToolLineTests {
             "→ list_branches {}", "← list_branches {}",
         ]
         #expect(Self.done(lines) == [
-            "Checked what is open", "Listed the open windows", "Listed the windows of Notes", "Opened Calculator",
-            "Looked at the window", "Pressed 8", "Double-clicked Row in Files", "Right-clicked Item",
-            "Turned on Wi-Fi", "Turned off Sound", "Chose Large in Size", "Closed Calculator", "list_branches",
+            "Checked open apps", "Checked open windows", "Checked Notes’s open windows", "Opened Calculator",
+            "Viewed the window", "Pressed 8", "Double-clicked Row in Files", "Right-clicked Item",
+            "Turned on Wi-Fi", "Turned off Sound", "Selected Large in Size", "Closed Calculator", "list_branches",
         ])
     }
 
@@ -74,7 +74,7 @@ struct ToolLineTests {
         #expect(Self.done(lines) == [
             "Typed “Demo” into Project Name", "Added “ more” to Notes", "Pressed Return", "Pressed ⇧⌘N",
             "Pressed ↓ 3 times", "Scrolled down in Media Pool", "Scrolled up in the window", "Dragged Clip to Timeline",
-            "Chose Select All from the menu of Search", "Triple-clicked Name",
+            "Selected Select All from Search’s menu", "Triple-clicked Name",
         ])
     }
 
@@ -92,7 +92,7 @@ struct ToolLineTests {
         #expect(TranscriptWording.toolSteps(steps, ending: .completed).map(\.text) == [
             "Could not press Tab: the window did NOT change",
             "Could not type “Demo” into Name: no field",
-            "Choosing Copy from the menu of Row, did not finish",
+            "Selecting Copy from Row’s menu, did not finish",
         ])
         let drag = ToolStep.steps(from: ["→ drag {\"session\":\"s\",\"from\":\"Clip\",\"dx\":40}"])
         #expect(TranscriptWording.toolSummary(drag, ending: nil) == "Dragging Clip…")
@@ -108,7 +108,7 @@ struct ToolLineTests {
             "← batch step 2 {\"status\":\"honest_miss\",\"message\":\"No control named Size.\"}",
             "← batch {\"status\":\"stopped\"}",
         ]
-        #expect(Self.done(lines) == ["Pressed 8", "Could not choose Large in Size: No control named Size."])
+        #expect(Self.done(lines) == ["Pressed 8", "Could not select Large in Size: No control named Size."])
     }
 
     @Test("Repeats collapse, the summary names what changed, and read-only steps only when nothing else was done")
@@ -120,7 +120,7 @@ struct ToolLineTests {
         let steps   = ToolStep.steps(from: status + open + observe + observe + observe + press + press)
 
         #expect(TranscriptWording.toolSteps(steps, ending: .completed).map(\.text)
-            == ["Checked what is open", "Opened Calculator", "Looked 3 times", "Pressed 8 twice"])
+            == ["Checked open apps", "Opened Calculator", "Looked 3 times", "Pressed 8 twice"])
         #expect(TranscriptWording.toolSummary(steps, ending: .completed) == "Opened Calculator · pressed 8 twice")
         #expect(TranscriptWording.toolSummary(ToolStep.steps(from: observe + observe + observe), ending: .completed)
             == "Looked 3 times")
@@ -157,7 +157,7 @@ struct ToolLineTests {
                                    date: TranscriptFixture.origin, authorWorkerID: UUID(), continuesGroup: true)
         let healthy = RowPreparation.preparedText(for: quiet, workerName: "Atlas", pipeline: MarkdownContent())
         #expect(!healthy.blocks.flatMap(\.runs).contains { $0.role == .captionAlert }, "marks only for problems")
-        #expect(healthy.string == "⚙\u{FE0E} Opened Calculator ›")
+        #expect(healthy.string == "Action: Opened Calculator ›")
     }
 
     @Test("Expanding the line keeps it and puts one line per step on a card under it; collapsing takes the card away")
@@ -183,8 +183,8 @@ struct ToolLineTests {
         let collapsedText = RowPreparation.preparedText(for: line, workerName: "Atlas", pipeline: MarkdownContent())
         let expandedText  = RowPreparation.preparedText(for: try #require(open.last), workerName: "Atlas",
                                                         pipeline: MarkdownContent())
-        #expect(collapsedText.string == "⚙\u{FE0E} Opened Calculator · pressed 8 ›")
-        #expect(expandedText.string == "⚙\u{FE0E} Opened Calculator · pressed 8 ›\nOpened Calculator\nPressed 8")
+        #expect(collapsedText.string == "Action: Opened Calculator · pressed 8 ›")
+        #expect(expandedText.string == "Action: Opened Calculator · pressed 8 ›\nOpened Calculator\nPressed 8")
         #expect(expandedText.blocks.map(\.kind) == [.text, .toolSteps])
         #expect(expandedText.blocks[0].string == collapsedText.string)
 

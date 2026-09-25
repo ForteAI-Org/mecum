@@ -207,7 +207,7 @@ struct ConversationProjectionTests {
 
         #expect(DeliveryBadge(rows[1].item.kind) == .interrupted)
         #expect(rows[1].geometry.badge != nil)
-        #expect(TranscriptWording.accessibilityLabel(for: rows[1].item, workerName: "Atlas").hasSuffix("Interrupted"))
+        #expect(TranscriptWording.accessibilityLabel(for: rows[1].item, workerName: "Atlas").hasSuffix("Stopped"))
 
         #expect(DeliveryBadge(rows[2].item.kind) == .notSent)
         #expect(TranscriptWording.accessibilityLabel(for: rows[2].item, workerName: "Atlas").hasSuffix("Saved"))
@@ -276,7 +276,7 @@ struct ConversationProjectionTests {
     @Test("No delivery state says read")
     func noReadState() {
         let labels = MessageDelivery.allCases.map(TranscriptWording.delivery)
-        #expect(labels == ["Saved", "Waiting", "Sent", "Responding", "Completed", "Interrupted"])
+        #expect(labels == ["Saved", "Waiting", "Sent", "Responding", "Completed", "Stopped"])
         #expect(!labels.contains { $0.localizedCaseInsensitiveContains("read") || $0.localizedCaseInsensitiveContains("seen") })
     }
 

@@ -37,7 +37,7 @@ struct InspectorNowSection: View {
     private var computer: some View {
         if team.holdsComputer(worker.id) {
             StatusText(
-                team.activity(of: worker.id) ?? "Using the computer",
+                team.activity(of: worker.id) ?? "Using This Mac",
                 tone: .active
             )
         } else if let activity = team.activity(of: worker.id) {
@@ -46,7 +46,7 @@ struct InspectorNowSection: View {
                 tone: .waiting
             )
         } else {
-            Text("Not in use")
+            Text("Not Using This Mac")
                 .foregroundStyle(.secondary)
         }
     }

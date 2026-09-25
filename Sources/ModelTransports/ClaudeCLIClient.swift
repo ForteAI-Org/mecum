@@ -97,9 +97,9 @@ public enum ClaudeClientError: LocalizedError {
 
     public var errorDescription: String? {
         switch self {
-        case .unavailable: "Claude Code CLI not found. Install it and sign in with “claude auth login”."
-        case .signInRequired: "Claude Code is not signed in. Run “claude auth login” in Terminal."
-        case .failed(let reason): "Claude Code: \(reason)"
+        case .unavailable: "The Claude command-line tool isn’t installed. Install it, then sign in from Terminal with “claude auth login”."
+        case .signInRequired: "Claude isn’t signed in. Run “claude auth login” in Terminal."
+        case .failed(let reason): "Claude couldn’t complete the response. \(reason)"
         }
     }
 }

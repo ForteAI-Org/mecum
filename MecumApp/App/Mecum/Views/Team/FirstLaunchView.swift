@@ -17,21 +17,16 @@ struct FirstLaunchView: View {
     var body: some View {
         ContentUnavailableView {
             Label(
-                "No team yet",
+                "Create Your First Worker",
                 systemImage: "person.2"
             )
         } description: {
-            Text(
-                """
-                Create the first worker, then connect a model. Nothing is created for you, and no desktop \
-                permission is needed to talk to a worker.
-                """
-            )
+            Text("Add a worker, then connect a provider. Mecum asks for Mac permissions only when a worker needs them.")
         } actions: {
-            Button("Create the first worker") { team.isCreatingWorker = true }
+            Button("Create Worker") { team.isCreatingWorker = true }
                 .buttonStyle(.borderedProminent)
 
-            Button("Connect a model") { team.isShowingConnections = true }
+            Button("Connect Provider…") { team.isShowingConnections = true }
         }
     }
 }

@@ -70,7 +70,7 @@ struct TranscriptSnapshotTests {
         try await fixture.record(.toolActivity, subject: stopped, at: 2, text: "→ list_branches {}")
         try await fixture.say("Looking at the branches, the release one is", at: 3, byWorker: true)
         try await fixture.record(.executionCancelled, subject: stopped, at: 4,
-                                 text: "Interrupted. Inspect the current app state before continuing.")
+                                 text: "Stopped. Review the app before continuing.")
         try await fixture.say("Try again, and push it this time.", at: 400, delivery: .interrupted)
         try await fixture.record(.executionStarted, subject: failed, at: 401)
         try await fixture.record(.toolActivity, subject: failed, at: 402, text: "→ push {\"branch\":\"release\"}")
@@ -366,7 +366,7 @@ struct TranscriptSnapshotTests {
         try await fixture.record(.executionStarted, subject: second, at: 401)
         try await fixture.say("Opening the failing assertion in", at: 403, byWorker: true)
         try await fixture.record(.executionCancelled, subject: second, at: 404,
-                                 text: "Interrupted. Inspect the current app state before continuing.")
+                                 text: "Stopped. Review the app before continuing.")
         try await fixture.say("Sorry, stop there. Next time ask first.", at: 460, delivery: .savedLocally)
     }
 

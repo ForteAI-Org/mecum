@@ -23,6 +23,6 @@
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>
 	<key>NSScreenCaptureUsageDescription</key>
-	<string>Mecum captures the adopted target window so the agent runtime can perceive and verify it.</string>
+	<string>Mecum needs Screen Recording access so workers can see and verify the app windows they use.</string>
 </dict>
 </plist>

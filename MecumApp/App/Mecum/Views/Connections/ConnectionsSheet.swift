@@ -50,7 +50,7 @@ struct ConnectionsSheet: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            Text("Connections")
+            Text("Providers")
                 .font(.title2.weight(.semibold))
                 .accessibilityAddTraits(.isHeader)
                 .frame(
@@ -77,10 +77,6 @@ struct ConnectionsSheet: View {
                             toggle(provider)
                         }
                     }
-                } footer: {
-                    Text("No connection reports credits or cost, so neither is shown.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
                 }
             }
             .formStyle(.grouped)
@@ -93,12 +89,12 @@ struct ConnectionsSheet: View {
                     connections.refresh()
                 } label: {
                     Label(
-                        "Check All",
+                        "Check All Connections",
                         systemImage: "arrow.clockwise"
                     )
                 }
                 .labelStyle(.iconOnly)
-                .help("Check All")
+                .help("Check all connections.")
                 .disabled(ModelProvider.allCases.allSatisfy(connections.isChecking))
 
                 Spacer()

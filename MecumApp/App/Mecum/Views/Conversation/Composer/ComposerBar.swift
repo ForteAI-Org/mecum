@@ -99,7 +99,7 @@ struct ComposerBar: View {
 
     /// "Message Milo", or what Milo needs before it can be messaged.
     var placeholder: String {
-        canAnswer ? "Message \(recipient)" : "Choose a model to message \(recipient)"
+        canAnswer ? "Message \(recipient)" : "Choose a model before messaging \(recipient)."
     }
 
     private var kind: ComposerSurface.Kind {
@@ -176,8 +176,8 @@ struct ComposerBar: View {
         }
         .buttonStyle(.plain)
         .modifier(RoundGlass(isGlass: isGlass, tint: nil, id: "release", namespace: glass))
-        .help("Release the computer")
-        .accessibilityLabel("Release the computer")
+        .help("End this worker’s computer session.")
+        .accessibilityLabel("Release Computer")
     }
 
     /// Send, which becomes Stop in the same place while a turn runs. It takes the accent as soon
@@ -202,7 +202,7 @@ struct ComposerBar: View {
         .disabled(!isEnabled)
         .keyboardShortcut(isAnswering ? KeyboardShortcut(".", modifiers: .command)
                                       : KeyboardShortcut(.return, modifiers: .command))
-        .help(isAnswering ? "Stop the answer (Command Period)" : returnSends ? "Send (Return)" : "Send (Command-Return)")
-        .accessibilityLabel(isAnswering ? "Stop \(recipient)'s answer" : "Send")
+        .help(isAnswering ? "Stop response." : "Send message.")
+        .accessibilityLabel(isAnswering ? "Stop response from \(recipient)" : "Send Message")
     }
 }

@@ -136,7 +136,7 @@ nonisolated enum RowPreparation {
         -> PreparedText {
         let hasFailure = steps.contains { if case .failed = $0.state { true } else { false } }
         var block = PreparedBlock(kind: .text)
-        block.append(hasFailure ? errorMark : "⚙\u{FE0E} ", role: hasFailure ? .captionAlert : .caption)
+        block.append(hasFailure ? errorMark : actionMark, role: hasFailure ? .captionAlert : .caption)
         block.append(TranscriptWording.toolSummary(steps, ending: ending) + " ", role: .caption)
         block.append(disclosureSlot, role: .disclosureSlot)
         guard isExpanded else { return PreparedText(blocks: [block]) }
@@ -155,5 +155,8 @@ nonisolated enum RowPreparation {
     static let disclosureSlot = "›"
 
     /// The mark a tool line or step carries when something failed.
-    private static let errorMark = "⚠\u{FE0E} "
+    private static let actionMark = "Action: "
+
+    /// A plain-language prefix, so the transcript does not rely on an emoji-like glyph.
+    private static let errorMark = "Issue: "
 }

@@ -57,8 +57,8 @@ struct ConversationModelButton: View {
         .buttonStyle(.plain)
         .onHover { isHovered = $0 && isEnabled }
         .disabled(!isEnabled)
-        .help("Model and effort")
-        .accessibilityLabel("Model and effort: \(selection.line)")
+        .help("Model and Effort")
+        .accessibilityLabel("Model and Effort: \(selection.line)")
         .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { frame = $0 }
         .onChange(of: isEnabled) {
             if !isEnabled { isOpen = false }

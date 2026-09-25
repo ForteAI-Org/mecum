@@ -128,7 +128,7 @@ struct WorkerAgentHostTests {
         } catch {
             #expect(String(describing: error) == DesktopUnavailableSession.refusal)
         }
-        #expect(records.last?.hasPrefix("← open_session error: Using the desktop from a worker") == true)
+        #expect(records.last?.hasPrefix("← open_session error: Computer access is unavailable") == true)
         let status = try await tools.call("status", .object([:]))
         #expect(status["structuredContent"]["session"] == .null)
     }

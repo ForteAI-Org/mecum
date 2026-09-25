@@ -20,7 +20,7 @@ struct TeamMenuCommands: Commands {
 
     var body: some Commands {
         CommandMenu("Team") {
-            Button("Connections…") { team?.isShowingConnections = true }
+            Button("Providers…") { team?.isShowingConnections = true }
                 .disabled(team == nil)
 
             Divider()
@@ -31,7 +31,7 @@ struct TeamMenuCommands: Commands {
                     team  : team
                 )
             } else {
-                Button("No worker selected") {}
+                Button("No Worker Selected") {}
                     .disabled(true)
             }
         }

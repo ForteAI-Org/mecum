@@ -65,8 +65,8 @@ struct InspectorProviderRow: View {
 
     private var answers: String {
         switch WorkerAnswer(provider: provider) {
-        case .agent:  "Answers as an agent"
-        case .notYet: "Does not answer yet"
+        case .agent:  "Can respond"
+        case .notYet: "Not available yet"
         }
     }
 }

@@ -411,7 +411,7 @@ public final class BrokeredAutomationSession: AutomationSessionOperating {
         let (name, pane) = switch kind {
             case .screenRecording: ("Screen Recording", "Screen & System Audio Recording")
             case .accessibility  : ("Accessibility", "Accessibility")
-            case .postEvent      : ("Post Event", "Accessibility")
+            case .postEvent      : ("Keyboard and Mouse Control", "Accessibility")
         }
         return "Mecum is missing the macOS \(name) permission, so this worker cannot use the computer, "
             + "and nothing was opened. macOS was asked to show its prompt; if none appears, allow Mecum in "

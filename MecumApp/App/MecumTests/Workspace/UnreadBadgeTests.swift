@@ -126,7 +126,7 @@ struct UnreadBadgeTests {
         let row  = try #require(rows.first)
         #expect(row.needsAttention)
         #expect(row.badgeText == nil)
-        #expect(row.accessibilityLabel.contains("Last turn did not finish"))
+        #expect(row.accessibilityLabel.contains("Last response needs attention"))
 
         try await atlas.store.markRead(conversation: atlas.conversation.id)
         #expect(try await atlas.state == .none)
@@ -173,7 +173,7 @@ struct UnreadBadgeTests {
                              unread: [atlas.worker.id: UnreadState(replies: replies, hasUnseenProblem: false)]).first
         }
         #expect(row(0)?.badgeText == nil)
-        #expect(row(1)?.accessibilityLabel == "Atlas, Release engineer, To configure, 1 unread reply")
+        #expect(row(1)?.accessibilityLabel == "Atlas, Release engineer, Needs Setup, 1 unread reply")
         #expect(row(3)?.badgeText == "3")
         #expect(row(99)?.badgeText == "99")
         #expect(row(120)?.badgeText == "99+")

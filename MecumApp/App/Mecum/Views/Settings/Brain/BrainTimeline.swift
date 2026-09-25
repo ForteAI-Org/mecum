@@ -37,10 +37,10 @@ struct BrainTimeline: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.borderless)
-            .help(isPlaying ? "Pause" : "Play the Brain as it grew")
+            .help(isPlaying ? "Pause" : "Play Brain History")
 
             Slider(value: $progress) {
-                Text("Moment")
+                Text("Time")
             }
             .labelsHidden()
             .controlSize(.small)

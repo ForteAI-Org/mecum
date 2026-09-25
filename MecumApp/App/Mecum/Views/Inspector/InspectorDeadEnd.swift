@@ -13,13 +13,11 @@ import SwiftUI
 struct InspectorDeadEnd: View {
 
     let provider: ModelProvider
-    let refusal : String
 
     var body: some View {
         Label(
             """
-            \(provider.title) does not answer here yet: \(refusal). A worker saved with it stays \
-            on the team and will not answer. Choose Claude Code or Codex for a worker that answers.
+            \(provider.title) can’t respond to worker messages yet. Choose Codex or Claude.
             """,
             systemImage: "exclamationmark.bubble"
         )

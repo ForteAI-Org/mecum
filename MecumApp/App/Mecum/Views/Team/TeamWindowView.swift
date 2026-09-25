@@ -81,21 +81,16 @@ struct TeamWindowView: View {
             
             ContentUnavailableView {
                 Label(
-                    "The workspace did not open",
+                    "Couldn’t Open the Workspace",
                     systemImage: "externaldrive.badge.xmark"
                 )
                 
             } description: {
-                Text(
-                    """
-                    The team and its conversations live in a database that could not be opened, \
-                    so nothing is listed rather than an empty team. \(failure)
-                    """
-                )
+                Text("Mecum couldn’t load your team or conversations.\n\nDetails: \(failure)")
             }
             
         } else {
-            Text("Opening the team…")
+            Text("Opening workspace…")
                 .foregroundStyle(.secondary)
                 .shimmering()
         }

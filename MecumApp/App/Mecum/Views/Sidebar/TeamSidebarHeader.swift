@@ -55,7 +55,7 @@ struct TeamSidebarHeader: View {
                 height: 28
             )
             .contentShape(Rectangle())
-            .help("New worker (Command-N)")
+            .help("Create a new worker.")
             .keyboardShortcut(
                 "n",
                 modifiers: .command

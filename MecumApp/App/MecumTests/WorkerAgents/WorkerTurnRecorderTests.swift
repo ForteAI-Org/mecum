@@ -68,7 +68,7 @@ struct WorkerTurnRecorderTests {
         ])
         let steps = ToolStep.steps(from: events.compactMap(WorkerTurnRecorder.text(of:)))
         #expect(steps.first?.action == .note("Checking what is open."))
-        #expect(TranscriptWording.toolSummary(steps, ending: .completed) == "Listed the open windows")
+        #expect(TranscriptWording.toolSummary(steps, ending: .completed) == "Checked open windows")
     }
 
     @Test func aFailureIsRecordedOnceAndNotRetried() async throws {
@@ -108,7 +108,7 @@ struct WorkerTurnRecorderTests {
         let events = try await fixture.events()
         #expect(events.map(\.type) == [.executionStarted, .toolActivity, .executionCancelled])
         #expect(events.last.flatMap(WorkerTurnRecorder.text(of:)) == WorkerTurnRecorder.interruptedNote)
-        #expect(WorkerTurnRecorder.interruptedNote == "Interrupted. Inspect the current app state before continuing.")
+        #expect(WorkerTurnRecorder.interruptedNote == "Stopped. Review the app before continuing.")
         #expect(try await fixture.store.messages(in: fixture.conversation).first?.delivery == .interrupted)
     }
 

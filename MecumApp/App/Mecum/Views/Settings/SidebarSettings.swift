@@ -24,7 +24,7 @@ struct SidebarSettings: View {
         Form {
             Section {
                 Toggle(
-                    "Show the model under the name",
+                    "Show model names",
                     isOn: $showsModel
                 )
                 Toggle(
@@ -32,7 +32,7 @@ struct SidebarSettings: View {
                     isOn: $showsUnreadCount
                 )
             } footer: {
-                Text("What a worker is doing and a failed turn are shown either way.")
+                Text("Current activity and failed turns are always shown.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -43,7 +43,7 @@ struct SidebarSettings: View {
                     isOn: $showsSearch
                 )
             } footer: {
-                Text("The compact sidebar has no search field.")
+                Text("Search is hidden when the sidebar is compact.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

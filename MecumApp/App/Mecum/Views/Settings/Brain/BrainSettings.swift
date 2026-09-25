@@ -24,9 +24,9 @@ struct BrainSettings: View {
             Group {
                 if apps.isEmpty {
                     ContentUnavailableView(
-                        "Nothing Learned Yet",
+                        "No App Knowledge Yet",
                         systemImage: "brain",
-                        description: Text("The Brain learns an application the first time a worker uses it.")
+                        description: Text("The Brain learns how an app works when a worker first uses it.")
                     )
                 } else {
                     Form {
@@ -37,7 +37,7 @@ struct BrainSettings: View {
                         } header: {
                             Text("Applications")
                         } footer: {
-                            Text("Every worker and the mecum command line share what is learned here.")
+                            Text("Workers and the Mecum command-line tool share what the Brain learns.")
                                 .font(.caption)
                                 .foregroundStyle(.secondary)
                         }

@@ -34,17 +34,14 @@ struct VirtualDisplaySettings: View {
                 }
 
                 Picker(
-                    "Refresh rate",
+                    "Refresh Rate",
                     selection: $refreshRate
                 ) {
                     Text("60 Hz").tag(60)
                     Text("120 Hz").tag(120)
                 }
             } footer: {
-                Text("""
-                    Applies from the next time a worker takes the computer. A smaller display gives a \
-                    worker's window less room, so more windows are resized while a worker holds them.
-                    """)
+                Text("Changes apply the next time a worker takes the computer. Smaller displays give app windows less room and may cause more resizing.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

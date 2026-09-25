@@ -189,6 +189,6 @@ struct TurnRowsTests {
                                    blocks: [], sizes: [])
         #expect(authored.avatar != nil && authored.header != nil)
         #expect(row.geometry.text.size == RowGeometry.thinkingSize(TranscriptStyle()))
-        #expect(TranscriptWording.accessibilityLabel(for: row.item, workerName: "Atlas") == "Atlas is thinking")
+        #expect(TranscriptWording.accessibilityLabel(for: row.item, workerName: "Atlas") == "Atlas is preparing a response")
     }
 }

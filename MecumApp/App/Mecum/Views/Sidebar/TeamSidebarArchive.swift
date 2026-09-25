@@ -32,7 +32,7 @@ struct TeamSidebarArchive: View {
                 withAnimation(motion) { showsArchive.toggle() }
             } label: {
                 HStack(spacing: 4) {
-                    Text(isCompact ? "Archive" : "Archive (\(team.archived.count))")
+                    Text(isCompact ? "Archived" : "Archived (\(team.archived.count))")
                     Spacer(minLength: 0)
                     Image(systemName: "chevron.right")
                         .rotationEffect(.degrees(showsArchive ? 90 : 0))

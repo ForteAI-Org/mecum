@@ -19,7 +19,7 @@ nonisolated struct TeamRow: Sendable, Hashable, Identifiable {
     /// What the subtitle says while no model is attached. It is a state, not
     /// an error, and it is what keeps the row from implying the worker can
     /// answer.
-    static let toConfigure = "To configure"
+    static let toConfigure = "Needs Setup"
 
     let worker: WorkerSnapshot
 
@@ -102,7 +102,7 @@ nonisolated struct TeamRow: Sendable, Hashable, Identifiable {
         } else if let selection = worker.configuration {
             parts.append(selection.line)
         }
-        if needsAttention { parts.append("Last turn did not finish") }
+        if needsAttention { parts.append("Last response needs attention") }
         if unread.replies > 0 {
             parts.append(unread.replies == 1 ? "1 unread reply" : "\(unread.replies) unread replies")
         }

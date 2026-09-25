@@ -11,12 +11,12 @@ public enum CodexClientError: LocalizedError {
 
     public var errorDescription: String? {
         switch self {
-        case .unavailable: "Codex CLI not found. Install Codex or the ChatGPT app and sign in with your subscription."
-        case .signInRequired: "Codex is not signed in with ChatGPT. Run “codex login” in Terminal and choose the ChatGPT login."
-        case .timedOut: "Codex did not answer within the limit; the request process was killed."
-        case .outputLimit: "The Codex answer exceeds the lab's output limit."
-        case .inputLimit: "The prompt exceeds 1,000,000 bytes; nothing was truncated."
-        case .failed(let reason): "Codex: \(reason)"
+        case .unavailable: "The Codex command-line tool isn’t installed. Install Codex or the ChatGPT app, then sign in with your subscription."
+        case .signInRequired: "Codex isn’t signed in with ChatGPT. Run “codex login” in Terminal and choose ChatGPT."
+        case .timedOut: "Codex took too long to respond. Try again."
+        case .outputLimit: "The Codex response is too large for Mecum."
+        case .inputLimit: "This request is too large to send to Codex."
+        case .failed(let reason): "Codex couldn’t complete the response. \(reason)"
         }
     }
 }

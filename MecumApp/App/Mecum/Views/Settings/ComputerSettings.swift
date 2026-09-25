@@ -32,12 +32,12 @@ struct ComputerSettings: View {
                     LabeledContent(grant.name) {
                         if grant.isGranted {
                             Label(
-                                "Allowed",
+                                "Granted",
                                 systemImage: "checkmark.circle.fill"
                             )
                             .labelStyle(.iconOnly)
                             .foregroundStyle(.green)
-                            .help("Allowed")
+                            .help("Granted")
                         } else {
                             Button("Allow…", action: allow)
                                 .controlSize(.small)
@@ -46,7 +46,7 @@ struct ComputerSettings: View {
                 }
 
                 if needsRelaunch {
-                    LabeledContent("Screen Recording is allowed after launch") {
+                    LabeledContent("Restart Required") {
                         Button("Quit and Reopen", action: relaunch)
                             .controlSize(.small)
                     }
@@ -54,7 +54,7 @@ struct ComputerSettings: View {
             } header: {
                 Text("Permissions")
             } footer: {
-                Text("A worker asks for these the first time it uses the computer.")
+                Text("Mecum requests each permission when a worker first needs it.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -67,9 +67,9 @@ struct ComputerSettings: View {
                     )
                     LabeledContent("Seat") {
                         if validation.isValidated {
-                            Text("Validated on this build")
+                            Text("Validated")
                         } else {
-                            Text("Not validated on this build")
+                            Text("Not Validated")
                                 .foregroundStyle(.orange)
                         }
                     }
@@ -77,7 +77,7 @@ struct ComputerSettings: View {
                     Text("This Mac")
                 } footer: {
                     if !validation.isValidated {
-                        Text("Workers still use the computer, and every action is recorded as taken on a build nobody validated.")
+                        Text("Workers can still use this Mac, but this macOS build has not been validated. Mecum records that status with each action.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
                     }

@@ -82,9 +82,9 @@ struct WorkerConversationView: View {
         .overlay {
             if transcript?.isEmpty ?? true {
                 ContentUnavailableView(
-                    "Nothing said yet",
+                    "No Messages Yet",
                     systemImage: "bubble.left.and.bubble.right",
-                    description: Text("What you write is saved with this worker and is here after a relaunch.")
+                    description: Text("Messages are saved in this conversation and remain available after you reopen Mecum.")
                 )
             }
         }

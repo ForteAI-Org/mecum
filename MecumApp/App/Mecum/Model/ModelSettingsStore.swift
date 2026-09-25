@@ -258,8 +258,7 @@ final class ModelSettingsStore {
             )
             credentialFailure[provider] = nil
         } catch {
-            credentialFailure[provider] = "The keychain did not keep the change (\(error)), so the key "
-                + "used from now on is the one typed in this session only. Try again."
+            credentialFailure[provider] = "Couldn’t save the API key to Keychain. It will remain available only until you quit Mecum. Try again. Details: \(error)"
         }
         refresh([provider])
     }

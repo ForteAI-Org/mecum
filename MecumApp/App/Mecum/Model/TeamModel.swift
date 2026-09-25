@@ -11,6 +11,29 @@ import ModelTransports
 import Observation
 import SeatBroker
 
+/// A problem in the language an alert needs: a specific title, an actionable
+/// explanation, and optional diagnostic detail kept out of the main message.
+nonisolated struct UserFacingIssue: Sendable, Equatable {
+    let title           : String
+    let message         : String
+    let technicalDetails: String?
+
+    init(
+        title           : String,
+        message         : String,
+        technicalDetails: String? = nil
+    ) {
+        self.title            = title
+        self.message          = message
+        self.technicalDetails = technicalDetails
+    }
+
+    var displayMessage: String {
+        guard let technicalDetails, !technicalDetails.isEmpty else { return message }
+        return "\(message)\n\nDetails: \(technicalDetails)"
+    }
+}
+
 /// TeamModel is the only thing in the app that talks to `WorkspaceStore`.
 ///
 /// The store is an actor holding a SwiftData context; every call here awaits
@@ -61,8 +84,8 @@ final class TeamModel {
     /// derived it from its read markers. A worker absent here has nothing.
     private(set) var unread: [UUID: UnreadState] = [:]
 
-    /// What the store refused, in a sentence. Nil while nothing is pending.
-    var problem: String?
+    /// What the store refused, ready for a specific alert. Nil while nothing is pending.
+    var problem: UserFacingIssue?
 
     private(set) var conversation: ConversationSnapshot?
 
@@ -160,8 +183,11 @@ final class TeamModel {
                 workspaceID: Self.workspaceID
             )
         } catch {
-            problem = "A turn left unfinished when Mecum last closed could not be marked interrupted. "
-                + describe(error)
+            problem = issue(
+                title  : "Couldn’t Update Turn",
+                message: "Mecum couldn’t mark a response from the previous session as stopped.",
+                error  : error
+            )
         }
 
         do {
@@ -169,7 +195,11 @@ final class TeamModel {
             active   = everyone.filter { !$0.isArchived }
             archived = everyone.filter(\.isArchived)
         } catch {
-            problem = "The team could not be read, so the list below may be out of date. \(describe(error))"
+            problem = issue(
+                title  : "Couldn’t Refresh Team",
+                message: "The worker list may be out of date.",
+                error  : error
+            )
         }
 
         await refreshUnread()
@@ -224,7 +254,11 @@ final class TeamModel {
         } catch {
             guard generation == openingGeneration else { return }
 
-            problem = "This worker's conversation could not be opened. \(describe(error))"
+            problem = issue(
+                title  : "Couldn’t Open Conversation",
+                message: "Select the worker again to retry.",
+                error  : error
+            )
         }
     }
 
@@ -248,7 +282,11 @@ final class TeamModel {
             self.conversation = updated
             savedDraft        = text
         } catch {
-            problem = "The draft could not be saved, so it may not survive quitting. \(describe(error))"
+            problem = issue(
+                title  : "Couldn’t Save Draft",
+                message: "Keep Mecum open and try again before quitting.",
+                error  : error
+            )
         }
     }
 
@@ -282,7 +320,11 @@ final class TeamModel {
                 text: text
             )
         } catch {
-            problem = "The message was not saved, so it was not sent either. \(describe(error))"
+            problem = issue(
+                title  : "Couldn’t Send Message",
+                message: "The message wasn’t saved or sent. Mecum will restore it to the draft.",
+                error  : error
+            )
             await restoreDraft(
                 typed,
                 in: conversation.id
@@ -309,10 +351,11 @@ final class TeamModel {
             self.conversation = cleared
             savedDraft        = ""
         } catch {
-            problem = """
-            The message was saved, but its draft could not be cleared, so the same text may \
-            come back as a draft after relaunch. \(describe(error))
-            """
+            problem = issue(
+                title  : "Couldn’t Clear Draft",
+                message: "The message was sent, but the same text may reappear in the draft after you reopen Mecum.",
+                error  : error
+            )
         }
     }
 
@@ -335,10 +378,11 @@ final class TeamModel {
                 .draft(typed)
             )
         } catch {
-            problem = """
-            The message was not saved, and its text could not be put back as a draft either, \
-            so here it is: \(typed)
-            """
+            problem = issue(
+                title  : "Couldn’t Restore Draft",
+                message: "The message wasn’t saved, and Mecum couldn’t restore it to the draft. Copy this text before closing the alert:\n\n\(typed)",
+                error  : error
+            )
         }
     }
 
@@ -405,10 +449,11 @@ final class TeamModel {
                     }
                 }
             } catch {
-                problem = """
-                \(worker.name)'s turn was not recorded completely, so this conversation may be missing \
-                part of it. \(describe(error))
-                """
+                problem = issue(
+                    title  : "Couldn’t Save Complete Response",
+                    message: "Part of \(worker.name)’s response may be missing from this conversation.",
+                    error  : error
+                )
             }
         }
     }
@@ -493,7 +538,13 @@ final class TeamModel {
         desktops.removeAll()
         for host in closing.values {
             do { try await host.close() }
-            catch { problem = "A worker's temporary tool configuration could not be removed. \(describe(error))" }
+            catch {
+                problem = issue(
+                    title  : "Couldn’t Remove Temporary Files",
+                    message: "Some temporary worker files may remain on this Mac.",
+                    error  : error
+                )
+            }
         }
     }
 
@@ -514,7 +565,11 @@ final class TeamModel {
             do {
                 try await store.markRead(conversation: conversation.id)
             } catch {
-                problem = "This conversation could not be marked as read, so its badge may stay. \(describe(error))"
+                problem = issue(
+                    title  : "Couldn’t Mark Conversation as Read",
+                    message: "Its unread badge may remain until the next refresh.",
+                    error  : error
+                )
             }
         }
         await refreshUnread()
@@ -524,7 +579,11 @@ final class TeamModel {
         do {
             unread = try await store.unreadByWorker()
         } catch {
-            problem = "The unread replies could not be counted, so the badges may be out of date. \(describe(error))"
+            problem = issue(
+                title  : "Couldn’t Update Unread Counts",
+                message: "Unread badges may be out of date.",
+                error  : error
+            )
         }
     }
 
@@ -551,7 +610,11 @@ final class TeamModel {
             self.conversation = updated
             if anchor == nil { await markReadIfAtEnd() }
         } catch {
-            problem = "The reading position could not be remembered. \(describe(error))"
+            problem = issue(
+                title  : "Couldn’t Save Reading Position",
+                message: "This conversation may reopen at a different message.",
+                error  : error
+            )
         }
     }
 
@@ -577,7 +640,11 @@ final class TeamModel {
             selection = made.id
             await openSelectedConversation()
         } catch {
-            problem = "The worker was not created. \(describe(error))"
+            problem = issue(
+                title  : "Couldn’t Create Worker",
+                message: "Review the worker details and try again.",
+                error  : error
+            )
         }
     }
 
@@ -598,7 +665,11 @@ final class TeamModel {
             )
             await load()
         } catch {
-            problem = "\(name(of: id))'s model was not changed, so it keeps the one it had. \(describe(error))"
+            problem = issue(
+                title  : "Couldn’t Change Model",
+                message: "\(name(of: id)) will keep the current model.",
+                error  : error
+            )
             return
         }
 
@@ -620,7 +691,10 @@ final class TeamModel {
         let ids       = catalogue.map(\.id)
         let preferred = provider.defaultModels.first(where: ids.contains)
         guard let model = catalogue.first(where: { $0.id == preferred }) ?? catalogue.first else {
-            problem = "\(provider.title) listed no models, so \(worker.name) keeps the provider it had."
+            problem = UserFacingIssue(
+                title  : "No Models Available",
+                message: "\(provider.title) didn’t return any models, so \(worker.name) will keep the current provider."
+            )
             return
         }
 
@@ -669,9 +743,13 @@ final class TeamModel {
             }
             await load()
         } catch {
-            problem = isArchived
-                ? "The worker was not archived and is still on the active team. \(describe(error))"
-                : "The worker was not restored and is still in the archive. \(describe(error))"
+            problem = issue(
+                title  : isArchived ? "Couldn’t Archive Worker" : "Couldn’t Restore Worker",
+                message: isArchived
+                    ? "The worker is still on the active team."
+                    : "The worker is still archived.",
+                error: error
+            )
         }
     }
 
@@ -683,7 +761,10 @@ final class TeamModel {
     func deleteWorker(_ id: UUID) async {
         let name = name(of: id)
         guard !isAnswering(id) else {
-            problem = "\(name) is still answering, so it was not deleted. Stop it, then delete it again."
+            problem = UserFacingIssue(
+                title  : "Worker Is Responding",
+                message: "Stop \(name)’s response, then delete the worker again."
+            )
             return
         }
 
@@ -699,7 +780,11 @@ final class TeamModel {
         do {
             conversations = try await store.deleteWorker(id)
         } catch {
-            problem = "\(name) was not deleted, and everything it had is still there. \(describe(error))"
+            problem = issue(
+                title  : "Couldn’t Delete Worker",
+                message: "\(name) and its data are still available.",
+                error  : error
+            )
             return
         }
 
@@ -707,7 +792,13 @@ final class TeamModel {
         for conversationID in conversations {
             if let host = hosts.removeValue(forKey: conversationID) {
                 do { try await host.close() }
-                catch { problem = "\(name)'s temporary tool configuration could not be removed. \(describe(error))" }
+                catch {
+                    problem = issue(
+                        title  : "Couldn’t Remove Temporary Files",
+                        message: "Some temporary files for \(name) may remain on this Mac.",
+                        error  : error
+                    )
+                }
             }
             trashWorkingFolder(of: conversationID)
         }
@@ -733,37 +824,51 @@ final class TeamModel {
                 resultingItemURL: nil
             )
         } catch {
-            problem = "The deleted worker's folder could not be moved to the Trash, so it is still at "
-                + "\(folder.path(percentEncoded: false)). \(describe(error))"
+            problem = issue(
+                title  : "Couldn’t Move Folder to Trash",
+                message: "The worker was deleted, but its folder remains at \(folder.path(percentEncoded: false)).",
+                error  : error
+            )
         }
     }
 
     // MARK: Refusals
 
-    /// Turns a refusal into a sentence with the fact, the impact and the next
-    /// action, rather than a type name the person cannot act on.
-    private func describe(_ error: any Error) -> String {
+    private func issue(
+        title  : String,
+        message: String,
+        error  : any Error
+    ) -> UserFacingIssue {
+        UserFacingIssue(
+            title           : title,
+            message         : message,
+            technicalDetails: technicalDetail(error)
+        )
+    }
+
+    /// Keeps diagnostic context available without making it the alert's main message.
+    private func technicalDetail(_ error: any Error) -> String {
         guard let refusal = error as? WorkspaceStoreError else { return String(describing: error) }
 
         switch refusal {
         case .workerNotFound:
-            return "That worker is no longer in the workspace. Nothing was changed; reopen the team."
+            return "The worker no longer exists in the workspace."
 
         case .conversationNotFound:
-            return "That conversation is no longer in the workspace. Select the worker again to open a new one."
+            return "The conversation no longer exists in the workspace."
 
         case .messageNotFound:
-            return "That message is no longer in the workspace. Nothing was changed."
+            return "The message no longer exists in the workspace."
 
         case .workerNotConfigured(let id):
-            return "\(name(of: id)) has no model attached, so nothing can run for it. Connect a model first."
+            return "\(name(of: id)) has no provider or model."
 
         case .openFailed(let underlying):
-            return "The workspace database did not open, so nothing was saved. \(underlying)"
+            return "The workspace couldn’t be opened. \(underlying)"
 
         case .migrationFailed(let underlying, let restoreFailure):
-            let restore = restoreFailure.map { " The previous version could not be put back: \($0)" } ?? ""
-            return "The workspace database did not upgrade, so nothing was saved. \(underlying)\(restore)"
+            let restore = restoreFailure.map { " The previous version couldn’t be restored: \($0)" } ?? ""
+            return "The workspace couldn’t be upgraded. \(underlying)\(restore)"
         }
     }
 

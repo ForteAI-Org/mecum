@@ -40,7 +40,7 @@ struct BrainListView: View {
                             members(members(of: group))
                         } label: {
                             LabeledContent {
-                                Text("\(group.memberAnchors.count) \(group.sharedKind.rawValue)s")
+                                Text(count(group.memberAnchors.count, of: group.sharedKind.rawValue))
                             } label: {
                                 Label {
                                     Text(group.name ?? "Unnamed \(group.axis.rawValue)")
@@ -56,11 +56,11 @@ struct BrainListView: View {
             }
 
             if !brain.transitions.isEmpty {
-                Section("Learned effects") {
+                Section("Learned Actions") {
                     ForEach(brain.transitions.indices, id: \.self) { index in
                         let transition = brain.transitions[index]
-                        LabeledContent("\(label(of: transition.anchorKey)), \(transition.trigger.rawValue)") {
-                            Text("\(transition.summary) · seen \(transition.evidence)×")
+                        LabeledContent("\(label(of: transition.anchorKey)), \(triggerTitle(transition.trigger))") {
+                            Text("\(transition.summary). \(evidence(transition.evidence))")
                         }
                     }
                 }
@@ -158,5 +158,21 @@ struct BrainListView: View {
             return "A control"
         }
         return anchor.label
+    }
+
+    private func count(_ value: Int, of noun: String) -> String {
+        "\(value) \(noun)\(value == 1 ? "" : "s")"
+    }
+
+    private func evidence(_ value: Int) -> String {
+        value == 1 ? "Seen once" : "Seen \(value) times"
+    }
+
+    private func triggerTitle(_ trigger: TransitionTrigger) -> String {
+        switch trigger {
+        case .hover:      "Hover"
+        case .click:      "Click"
+        case .rightClick: "Right-click"
+        }
     }
 }

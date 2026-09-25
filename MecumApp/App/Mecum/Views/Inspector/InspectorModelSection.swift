@@ -50,11 +50,8 @@ struct InspectorModelSection: View {
             }
 
             if let selection = worker.configuration {
-                if let refusal = WorkerAnswer(provider: selection.provider).refusal {
-                    InspectorDeadEnd(
-                        provider: selection.provider,
-                        refusal : refusal
-                    )
+                if WorkerAnswer(provider: selection.provider).refusal != nil {
+                    InspectorDeadEnd(provider: selection.provider)
                 }
 
                 LabeledContent(
@@ -68,14 +65,14 @@ struct InspectorModelSection: View {
             }
         }
         .confirmationDialog(
-            "Change where \(worker.name) runs?",
+            "Change \(worker.name)’s Provider?",
             isPresented: Binding(
                 get: { pending != nil },
                 set: { if !$0 { pending = nil } }
             ),
             presenting : pending
         ) { choice in
-            Button("Change provider") { apply(choice.provider) }
+            Button("Change Provider") { apply(choice.provider) }
             Button(
                 "Cancel",
                 role: .cancel
@@ -171,7 +168,7 @@ struct InspectorModelSection: View {
                         state.message,
                         tone: .trouble
                     )
-                    Button("Connections…") { team.isShowingConnections = true }
+                    Button("Providers…") { team.isShowingConnections = true }
                         .controlSize(.small)
                 }
             }
@@ -197,7 +194,7 @@ struct InspectorModelSection: View {
                 }
                 .labelStyle(.iconOnly)
                 .buttonStyle(.borderless)
-                .help("Check")
+                .help("Check connection.")
             }
         }
     }

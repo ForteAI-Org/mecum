@@ -23,11 +23,11 @@ final class DesktopUnavailableSession: AutomationSessionOperating {
     /// Always nil: no session is ever open, so every session ID is stale.
     let id: UUID? = nil
 
-    static let refusal = "Using the desktop from a worker is not available in this build yet. "
-        + "Answer without it, and say so when the request needs it."
+    static let refusal = "Computer access is unavailable in this version. Continue without it and mention "
+        + "the limitation when relevant."
 
     private static let noSession = AutomationFailure(
-        "No application session is open, and a worker cannot open one in this build."
+        "No app is open. This version cannot open apps for workers."
     )
 
     func open(application: String, window: String?) async throws -> SceneSnapshot {

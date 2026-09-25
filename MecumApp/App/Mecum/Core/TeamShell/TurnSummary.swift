@@ -71,7 +71,7 @@ nonisolated struct TurnSummary: Sendable, Hashable {
         case .completed:  "Completed"
         case .failed:     "Failed"
         case .stopped:    "Stopped"
-        case .unfinished: "Ended without a recorded outcome"
+        case .unfinished: "No result recorded"
         }
     }
 

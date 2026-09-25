@@ -31,7 +31,7 @@ struct TeamSidebarFooter: View {
                     .font(isCompact ? .title3 : .body)
 
                 if !isCompact {
-                    Text("Connections")
+                    Text("Providers")
                         .fixedSize()
                         // Leaving at once: a fading copy was drawn at the top of the sidebar during a resize.
                         .transition(reducesMotion ? .identity : .asymmetric(
@@ -62,8 +62,8 @@ struct TeamSidebarFooter: View {
             .vertical,
             10
         )
-        .help("The model connections the team uses")
-        .accessibilityLabel("Connections")
+        .help("Manage model providers.")
+        .accessibilityLabel("Providers")
         .accessibilityValue(readyDescription)
     }
 
@@ -104,8 +104,8 @@ struct TeamSidebarFooter: View {
     private var readyDescription: String {
         switch readyConnections {
         case 0:  ""
-        case 1:  "1 connection ready"
-        default: "\(readyConnections) connections ready"
+        case 1:  "1 provider connected"
+        default: "\(readyConnections) providers connected"
         }
     }
 }
