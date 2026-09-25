@@ -25,7 +25,8 @@ import ModelTransports
 /// instructions that say so.
 ///
 /// Memory across turns is the history the caller passes; within a turn the
-/// loop keeps every call and result. A failure is never retried.
+/// loop keeps every call and result. `summarize` compacts that history into a
+/// summary the caller sends instead. A failure is never retried.
 @MainActor
 final class ModelToolLoop {
 
@@ -162,6 +163,61 @@ final class ModelToolLoop {
                 messages.append(await result(of: toolCall))
             }
         }
+    }
+
+    // MARK: Compaction
+
+    /// What the summary call is told it is for.
+    static let summaryInstructions = "You summarize a conversation between a person and an assistant, so "
+        + "the assistant can go on from the summary alone."
+
+    /// What the summary call asks for, after the history.
+    static let summaryRequest = "Summarize the conversation so far for yourself to continue from: the "
+        + "person's goals, the decisions made, the current state of the work, and the open items. Be "
+        + "concise, a few hundred words at most, and write only the summary."
+
+    /// What a later turn is sent before a summary, in place of the messages it replaced.
+    static let summaryPreface = "Summary of the conversation before this point, which replaces it:\n\n"
+
+    /// Asks the model for a summary of `history`, which a later turn is sent
+    /// in place of it, in one call with no tools, so it needs no desktop.
+    /// Returns the summary and what the call cost when the provider counted it:
+    /// its input is the context before, its output the summary's size.
+    ///
+    /// Throws `CancellationError` after `stop`, the transport's failure, or a
+    /// failure when the model wrote no summary. It is never retried.
+    func summarize(
+        transport: any ModelTransport,
+        history  : [TurnMessage]
+    ) async throws -> (summary: String, tokens: ProviderUsage.Tokens?) {
+        var messages = [TurnMessage(
+            role: .system,
+            text: Self.summaryInstructions
+        )]
+        messages += history
+        messages.append(TurnMessage(
+            role: .user,
+            text: Self.summaryRequest
+        ))
+
+        if isStopRequested { throw CancellationError() }
+        let stream = try transport.converse(
+            messages,
+            tools  : [],
+            timeout: transport.requestTimeout
+        )
+        let task = Task { await Self.collect(stream) }
+        round = task
+        let reply = await task.value
+        round = nil
+
+        if isStopRequested { throw CancellationError() }
+        if let failure = reply.failure { throw failure }
+        let summary = reply.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !summary.isEmpty else { throw AutomationFailure("The model returned an empty summary.") }
+
+        let counted = reply.usage.flatMap { $0.inputTokens != nil || $0.outputTokens != nil ? $0 : nil }
+        return (summary, counted.map(Self.tokens(of:)))
     }
 
     /// Stops the running turn: the round streaming now is cancelled and no

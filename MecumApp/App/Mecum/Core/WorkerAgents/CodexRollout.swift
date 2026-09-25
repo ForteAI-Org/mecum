@@ -10,7 +10,8 @@ import Foundation
 
 /// CodexRollout reads what Codex writes to its session's rollout file and not
 /// to stdout: how much of the context the session fills, the model's window and
-/// the account's limits, from the file's last `token_count` events.
+/// the account's limits, from the file's last `token_count` events, and whether
+/// the session was compacted, from a `compacted` line.
 ///
 /// The rollout is Codex's own record, not an interface it documents, so every
 /// read is best effort: a file that is missing, unreadable or in a shape this
@@ -92,18 +93,43 @@ nonisolated enum CodexRollout {
     }
 
     /// What the last token counts in the file's tail say, nil when it has none to read.
-    // ponytail: reads the last 1 MB, which holds the turn's last token count unless a later line outgrows it.
     static func reading(of file: URL) -> Reading? {
+        tail(of: file).flatMap(reading(from:))
+    }
+
+    /// The file's last lines, nil when it cannot be read. A tail that starts
+    /// inside a line leaves that line unreadable, and readers skip it.
+    // ponytail: reads the last 1 MB, which holds the turn's last token count and a compaction's
+    // line unless one of them outgrows it.
+    static func tail(of file: URL) -> Data? {
         guard let handle = try? FileHandle(forReadingFrom: file) else { return nil }
         defer { try? handle.close() }
 
         let tailBytes: UInt64 = 1_048_576
         guard let size = try? handle.seekToEnd(),
-              (try? handle.seek(toOffset: size > tailBytes ? size - tailBytes : 0)) != nil,
-              let tail = try? handle.readToEnd()
+              (try? handle.seek(toOffset: size > tailBytes ? size - tailBytes : 0)) != nil
         else { return nil }
-        // A tail that starts inside a line leaves that line unreadable, and it is skipped.
-        return reading(from: tail)
+        return try? handle.readToEnd()
+    }
+
+    /// True when `lines` hold a `compacted` line stamped at or after `start`,
+    /// which is how a compaction during a turn begun at `start` shows.
+    static func compacts(
+        in lines   : Data,
+        since start: Date
+    ) -> Bool {
+        let stamps = [
+            Date.ISO8601FormatStyle(includingFractionalSeconds: true),
+            Date.ISO8601FormatStyle(),
+        ]
+        return lines.split(separator: 10).reversed().contains { line in
+            guard let event = try? JSONSerialization.jsonObject(with: Data(line)) as? [String: Any],
+                  event["type"] as? String == "compacted",
+                  let stamp = event["timestamp"] as? String,
+                  let date  = stamps.lazy.compactMap({ try? $0.parse(stamp) }).first
+            else { return false }
+            return date >= start
+        }
     }
 
     /// What the last `token_count` lines say: the context and window from the

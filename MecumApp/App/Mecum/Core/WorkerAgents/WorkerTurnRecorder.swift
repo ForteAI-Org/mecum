@@ -237,8 +237,9 @@ final class WorkerTurnRecorder {
             return
         case .provider(.completed):
             try await reply(&state)
-        case .provider(.activity), .provider(.usage):
-            // What is recorded is the host's `.usage`, made from this one.
+        case .provider(.activity), .provider(.usage), .provider(.compacted):
+            // What is recorded is the host's `.usage`, made from this one, and it says how full the context is
+            // after a compaction the command line made by itself during the turn.
             return
         }
         await onRecorded()

@@ -49,8 +49,18 @@ struct ConversationComposer: View {
         .leading {
             if let context {
                 ConversationContextButton(
-                    context : context,
-                    lastTurn: team.usage[worker.id]?.lastTurn?.turn
+                    context     : context,
+                    lastTurn    : team.usage[worker.id]?.lastTurn?.turn,
+                    worker      : worker.name,
+                    isCompacting: team.isCompacting(worker.id),
+                    waitReason  : team.isAnswering(worker.id)
+                        ? UsageWording.actionsWait(
+                            worker      : worker.name,
+                            isCompacting: team.isCompacting(worker.id)
+                        )
+                        : nil,
+                    compact     : { team.compactContext(of: worker.id) },
+                    startFresh  : { Task { await team.startFreshContext(of: worker.id) } }
                 )
                 .padding(
                     .trailing,

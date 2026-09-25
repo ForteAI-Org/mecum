@@ -270,7 +270,8 @@ final class TranscriptRowView: NSView {
         let widened = bounds.width - row.geometry.rowWidth
         switch row.item.kind {
         case .personMessage:                   return widened
-        case .daySeparator, .activityNotShown: return (widened / 2).rounded()
+        case .daySeparator, .contextSeparator,
+             .activityNotShown:                return (widened / 2).rounded()
         default:                               return 0
         }
     }
@@ -433,7 +434,7 @@ final class TranscriptRowView: NSView {
                 NSColor.labelColor.withAlphaComponent(0.07).setFill()
                 NSBezierPath(roundedRect: line, xRadius: 6, yRadius: 6).fill()
             }
-            if case .daySeparator = row.item.kind { drawRules(beside: geometry.text, drift: drift(of: row)) }
+            if row.item.isSeparator { drawRules(beside: geometry.text, drift: drift(of: row)) }
             if isOutlined { strokeFocus(NSBezierPath(roundedRect: frame, xRadius: 4, yRadius: 4)) }
         }
     }

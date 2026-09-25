@@ -13,7 +13,8 @@ import Foundation
 /// The kinds are distinct on purpose (§11.2). A person's message, a worker's
 /// reply, the bubble of a worker still thinking, a turn's tool line, a day
 /// separator and a failure are drawn differently and none of them borrows
-/// another's shape.
+/// another's shape. A change to the model's context is a separator too, drawn
+/// as a day's is, and never a bubble.
 nonisolated struct TranscriptItem: Sendable, Hashable, Identifiable {
 
     /// Stable across updates. A message is its message id, a failure or stop
@@ -42,6 +43,13 @@ nonisolated struct TranscriptItem: Sendable, Hashable, Identifiable {
         case failed
     }
 
+    /// What happened to the model's context at a context separator.
+    enum ContextChange: Sendable, Hashable {
+        case compacted
+        case compactedAutomatically
+        case freshStart
+    }
+
     enum Kind: Sendable, Hashable {
 
         /// What the person wrote, with how far it got and the badge that
@@ -63,6 +71,9 @@ nonisolated struct TranscriptItem: Sendable, Hashable, Identifiable {
 
         /// The day the messages below it were sent, as the reader's calendar names it.
         case daySeparator(label: String)
+
+        /// Where the model's context was compacted or started again; the messages stay.
+        case contextSeparator(ContextChange)
 
         case executionFailed(reason: String)
         case executionInterrupted(note: String)
@@ -89,6 +100,14 @@ nonisolated struct TranscriptItem: Sendable, Hashable, Identifiable {
     /// bubble below it continues its group. A tool line or a separator below ends it.
     var endsGroup = false
 
+    /// True for a day's line and a context's, headings between rows drawn between two hairlines.
+    var isSeparator: Bool {
+        switch kind {
+        case .daySeparator, .contextSeparator: true
+        default:                               false
+        }
+    }
+
     /// The message id when this row is a message, which is what a reading
     /// position can anchor on.
     var messageID: UUID? {
@@ -101,6 +120,7 @@ nonisolated struct TranscriptItem: Sendable, Hashable, Identifiable {
         case .personMessage(let text, _, _), .workerReply(let text, _): text
         case .toolRun(let lines, _, _):                                  lines.joined(separator: "\n")
         case .daySeparator(let label):                                label
+        case .contextSeparator(let change):                           TranscriptWording.context(change, at: date)
         case .executionFailed(let reason):                            reason
         case .executionInterrupted(let note):                         note
         case .activityNotShown:                                       TranscriptWording.activityNotShown

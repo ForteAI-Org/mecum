@@ -356,4 +356,31 @@ struct WorkerUsageTests {
         #expect(!key(.toolActivity).hasPrefix(NewEvent.usageKeyPrefix))
         #expect(key(.executionCompleted).hasPrefix("terminal:"))
     }
+
+    @Test func aCompactionCountsInTheLifetimeButIsNeitherTheLastMessageNorAMessage() {
+        let message = TurnUsage(
+            provider     : .codex,
+            model        : "gpt-5.6-luna",
+            session      : "thread",
+            turn         : ProviderUsage.Tokens(input: 100, output: 10),
+            sessionTotal : nil,
+            contextTokens: 90,
+            contextWindow: 1_000,
+            rateLimits   : []
+        )
+        var compaction          = message
+        compaction.isCompaction = true
+
+        let usage = WorkerUsage(
+            turns     : [message, compaction],
+            provider  : .codex,
+            rateLimits: []
+        )
+        #expect(usage.lifetime.input == 200)
+        #expect(usage.turns == 1)
+        #expect(usage.lastTurn == message)
+        // An old payload without the field reads as a message.
+        let old = Data(#"{"provider":"codex","turn":{"input":1,"output":1,"cacheReads":0,"cacheWrites":0,"reasoning":0},"rateLimits":[]}"#.utf8)
+        #expect(TurnUsage.decoded(old)?.isCompaction == nil)
+    }
 }

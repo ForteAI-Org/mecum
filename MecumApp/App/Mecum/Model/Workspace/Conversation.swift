@@ -57,9 +57,10 @@ nonisolated final class Conversation {
     var createdAt: Date
 
     /// The provider session a worker's agent resumes, and the provider that
-    /// issued it. Written only together, through `ConversationChange.providerSession`,
-    /// so an id recorded for one provider is never offered to another. Nil in
-    /// a conversation that has not run a turn yet, and in every v1 store.
+    /// issued it. Written only together, through `ConversationChange.providerSession`
+    /// and `.providerSessionCleared`, so an id recorded for one provider is never
+    /// offered to another. Nil in a conversation that has not run a turn yet, after
+    /// a fresh context, and in every v1 store.
     var providerSessionProvider: ModelProvider?
     var providerSessionID      : String?
 

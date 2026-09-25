@@ -13,16 +13,27 @@ import SwiftUI
 /// drawn on the pill's own surface (`ComposerSurface`), the material, or the
 /// solid surface with Reduce Transparency, so the two read as one family; the
 /// pill is never Liquid Glass, so neither is this. Its tooltip says how full
-/// the context is, and it opens a popover of the context and the last message
-/// (`ConversationContextPopover`) above itself.
+/// the context is, or that it is being compacted, and it opens a popover of
+/// the context, the last message and the context's actions
+/// (`ConversationContextPopover`) above itself. Starting a fresh context asks
+/// first, since it forgets.
 struct ConversationContextButton: View {
 
     /// A context whose window is known (`UsageWording.ringContext`).
-    let context : WorkerUsage.Context
+    let context     : WorkerUsage.Context
+    let lastTurn    : ProviderUsage.Tokens?
 
-    let lastTurn: ProviderUsage.Tokens?
+    /// The worker's name, which the confirmation says.
+    let worker      : String
+    let isCompacting: Bool
 
-    @State private var isShowingDetail = false
+    /// Why the actions wait, nil while the worker is free (`ConversationContextPopover.waitReason`).
+    let waitReason  : String?
+    let compact     : () -> Void
+    let startFresh  : () -> Void
+
+    @State private var isShowingDetail   = false
+    @State private var isConfirmingFresh = false
 
     @Environment(\.accessibilityReduceTransparency)
     private var reducesTransparency
@@ -33,9 +44,10 @@ struct ConversationContextButton: View {
 
         Button { isShowingDetail.toggle() } label: {
             ConversationContextRing(
-                fraction : context.fraction ?? 0,
-                side     : 20,
-                lineWidth: 2.2
+                fraction       : context.fraction ?? 0,
+                side           : 20,
+                lineWidth      : 2.2,
+                isIndeterminate: isCompacting
             )
             .frame(
                 width : side,
@@ -51,17 +63,44 @@ struct ConversationContextButton: View {
             .contentShape(Circle())
         }
         .buttonStyle(.plain)
-        .help(wording.contextTip(context))
+        .help(isCompacting ? UsageWording.compacting : wording.contextTip(context))
         .accessibilityLabel("Context")
-        .accessibilityValue(wording.contextSpoken(context))
+        .accessibilityValue(isCompacting ? UsageWording.compacting : wording.contextSpoken(context))
         .popover(
             isPresented: $isShowingDetail,
             arrowEdge  : .top
         ) {
             ConversationContextPopover(
-                context : context,
-                lastTurn: lastTurn
+                context   : context,
+                lastTurn  : lastTurn,
+                waitReason: waitReason,
+                compact   : {
+                    isShowingDetail = false
+                    compact()
+                },
+                startFresh: {
+                    isShowingDetail   = false
+                    isConfirmingFresh = true
+                }
             )
+        }
+        .confirmationDialog(
+            "Start a Fresh Context?",
+            isPresented    : $isConfirmingFresh,
+            titleVisibility: .visible
+        ) {
+            Button(
+                "Start Fresh Context",
+                role: .destructive
+            ) {
+                startFresh()
+            }
+            Button(
+                "Cancel",
+                role: .cancel
+            ) {}
+        } message: {
+            Text("\(worker) forgets everything before now. The chat stays.")
         }
     }
 }

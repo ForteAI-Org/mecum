@@ -18,7 +18,7 @@ struct InspectorNowSection: View {
             LabeledContent("Status") {
                 if team.isAnswering(worker.id) {
                     StatusText(
-                        "Answering",
+                        team.isCompacting(worker.id) ? "Compacting Context" : "Answering",
                         tone: .active
                     )
                 } else {

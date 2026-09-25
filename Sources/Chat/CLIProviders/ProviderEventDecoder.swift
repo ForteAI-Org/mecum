@@ -21,6 +21,11 @@ public struct ProviderEventDecoder {
             if object["type"] as? String == "system", object["subtype"] as? String == "init" {
                 model = object["model"] as? String
             }
+            if object["type"] as? String == "system", object["subtype"] as? String == "compact_boundary" {
+                let metadata = object["compact_metadata"] as? [String: Any]
+                events.append(.compacted(preTokens: metadata?["pre_tokens"] as? Int,
+                                         postTokens: metadata?["post_tokens"] as? Int))
+            }
             if object["type"] as? String == "rate_limit_event", let info = object["rate_limit_info"] as? [String: Any] {
                 rateLimits = Self.claudeLimits(info)
             }

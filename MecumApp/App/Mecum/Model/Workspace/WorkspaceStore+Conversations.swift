@@ -53,6 +53,10 @@ extension WorkspaceStore {
         case .providerSession(let provider, let sessionID):
             row.providerSessionProvider = provider
             row.providerSessionID       = sessionID
+
+        case .providerSessionCleared:
+            row.providerSessionProvider = nil
+            row.providerSessionID       = nil
         }
 
         try saveOrRollBack()

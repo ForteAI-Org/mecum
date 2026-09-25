@@ -8,7 +8,8 @@ public struct ProviderInvocation: Sendable {
     public let standardInput: String
 
     public init(_ turn: ProviderTurn) throws {
-        standardInput = turn.prompt
+        // No text of the person's reaches the one Claude turn that runs slash commands.
+        standardInput = turn.isCompaction && turn.provider == .claude ? "/compact" : turn.prompt
         let bridgeArguments = ["mcp-bridge", "--connection", turn.connectionFile]
         var arguments: [String]
         switch turn.provider {
@@ -20,9 +21,9 @@ public struct ProviderInvocation: Sendable {
             arguments = ["-p", "--output-format", "stream-json", "--verbose",
                          "--strict-mcp-config", "--mcp-config", String(decoding: encoded, as: UTF8.self),
                          "--tools", "", "--allowedTools", "mcp__mecum__*",
-                         "--permission-mode", "dontAsk", "--setting-sources", "",
-                         "--disable-slash-commands", "--no-chrome",
-                         "--append-system-prompt", turn.instructions]
+                         "--permission-mode", "dontAsk", "--setting-sources", ""]
+                + (turn.isCompaction ? [] : ["--disable-slash-commands"])
+                + ["--no-chrome", "--append-system-prompt", turn.instructions]
             if let session = turn.sessionID { arguments += ["--resume", session] }
         case .codex:
             let command = try Self.quote(turn.bridgeExecutable)
@@ -42,6 +43,8 @@ public struct ProviderInvocation: Sendable {
                          "-c", "mcp_servers.mecum=\(server)"]
             if let model = turn.model { arguments += ["--model", model] }
             if let effort = turn.effort { arguments += ["-c", "model_reasoning_effort=\(try Self.quote(effort))"] }
+            // Codex exec has no /compact: a limit below any session's size makes it compact before answering.
+            if turn.isCompaction { arguments += ["-c", "model_auto_compact_token_limit=1000"] }
             if let session = turn.sessionID { arguments += ["resume", session] }
             arguments += ["-"]
         }

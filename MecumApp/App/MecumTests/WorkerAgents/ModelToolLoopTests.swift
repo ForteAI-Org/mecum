@@ -597,6 +597,190 @@ struct ModelToolLoopTests {
         ])
     }
 
+    // MARK: Compaction
+
+    @Test func aCompactionThroughTheLoopIsOneSummaryCallWithNoTools() async throws {
+        let transport = ScriptedTransport(
+            supportsTools: true,
+            rounds       : [[
+                .delta("Goals: ship the build. "),
+                .delta("Open: the width assertion."),
+                .completed(ModelUsage(
+                    inputTokens : 3000,
+                    outputTokens: 200,
+                    duration    : .zero
+                )),
+            ]]
+        )
+        let host      = WorkerAgentHost(
+            workingDirectory: URL.temporaryDirectory.appending(path: "mecum-loop-\(UUID().uuidString)"),
+            bridgeExecutable: URL(fileURLWithPath: "/nonexistent"),
+            session         : { DesktopUnavailableSession() },
+            agents          : { _ in throw AutomationFailure("A loop compaction asked for a command line.") },
+            transports      : { _ in transport },
+            contextWindows  : { _ in 16_384 }
+        )
+        let history   = [
+            TurnMessage(
+                role: .user,
+                text: "Earlier"
+            ),
+            TurnMessage(
+                role: .assistant,
+                text: "Noted"
+            ),
+        ]
+
+        let done = try await host.compact(
+            selection: ollama,
+            sessionID: nil,
+            role     : "Be brief.",
+            trigger  : .automatic,
+            history  : history
+        )
+
+        #expect(done.compaction == ContextCompaction(
+            provider     : .ollama,
+            trigger      : .automatic,
+            preTokens    : 3000,
+            postTokens   : 200,
+            contextWindow: 16_384,
+            summary      : "Goals: ship the build. Open: the width assertion."
+        ))
+        let usage = try #require(done.usage)
+        #expect(usage.turn == ProviderUsage.Tokens(
+            input : 3000,
+            output: 200
+        ))
+        #expect(usage.contextTokens == nil, "the summary call's own size is not the context after it")
+
+        let sent = try #require(transport.sent.first)
+        #expect(transport.sent.count == 1)
+        #expect(sent.tools.isEmpty)
+        #expect(sent.messages.map(\.role) == [.system, .user, .assistant, .user])
+        #expect(sent.messages.first?.text == ModelToolLoop.summaryInstructions)
+        #expect(sent.messages.last?.text == ModelToolLoop.summaryRequest)
+        #expect(!host.isRunning)
+    }
+
+    @Test func aStopDuringTheSummaryEndsTheCompaction() async throws {
+        let transport = ScriptedTransport(
+            supportsTools: false,
+            rounds       : []
+        )
+        let host      = WorkerAgentHost(
+            workingDirectory: URL.temporaryDirectory.appending(path: "mecum-loop-\(UUID().uuidString)"),
+            bridgeExecutable: URL(fileURLWithPath: "/nonexistent"),
+            session         : { DesktopUnavailableSession() },
+            agents          : { _ in throw AutomationFailure("A loop compaction asked for a command line.") },
+            transports      : { _ in transport }
+        )
+        let compaction = Task {
+            try await host.compact(
+                selection: ollama,
+                sessionID: nil,
+                role     : nil,
+                trigger  : .manual
+            )
+        }
+
+        try await Self.wait { transport.sent.count == 1 }
+        host.stop()
+
+        await #expect(throws: CancellationError.self) { _ = try await compaction.value }
+        #expect(transport.wasCancelled)
+        #expect(!host.isRunning)
+    }
+
+    /// Two messages, a compaction through the loop, a message, a fresh context,
+    /// a command line's compaction, and a last message, each a second apart.
+    @Test func theHistoryStartsAtTheLastSummaryOrFreshContext() async throws {
+        let root = URL.temporaryDirectory.appending(path: "mecum-history-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let store        = try WorkspaceStore.opening(in: root)
+        let worker       = UUID()
+        let conversation = try await store.createConversation(participants: [worker]).id
+        let origin       = Date(timeIntervalSinceReferenceDate: 800_000_000)
+
+        func say(
+            _ text   : String,
+            by author: UUID? = nil,
+            at second: Double
+        ) async throws {
+            try await store.appendMessage(
+                to    : conversation,
+                author: author,
+                text  : text,
+                at    : origin.addingTimeInterval(second)
+            )
+        }
+        func record(
+            _ type   : EventType,
+            _ summary: String?,
+            at second: Double
+        ) async throws {
+            let compaction = ContextCompaction(
+                provider     : summary == nil ? .codex : .ollama,
+                trigger      : .manual,
+                preTokens    : nil,
+                postTokens   : nil,
+                contextWindow: nil,
+                summary      : summary
+            )
+            try await store.append(NewEvent(
+                workspaceID   : UUID(),
+                subjectID     : conversation,
+                conversationID: conversation,
+                workerID      : worker,
+                timestamp     : origin.addingTimeInterval(second),
+                type          : type,
+                payloadVersion: ContextCompaction.payloadVersion,
+                payload       : type == .contextCompacted ? try compaction.encoded() : nil
+            ))
+        }
+        func history() async throws -> [TurnMessage] {
+            let start = try await store.contextStart(in: conversation)
+            return TeamModel.turnHistory(
+                try await store.messages(
+                    in    : conversation,
+                    around: .max,
+                    before: 40,
+                    after : 0
+                ),
+                by     : worker,
+                since  : start?.date,
+                summary: start?.summary
+            )
+        }
+
+        try await say("Ship the build.", at: 0)
+        try await say("On it.", by: worker, at: 1)
+        #expect(try await store.contextStart(in: conversation) == nil)
+        try await record(.contextCompacted, "Goals: ship.", at: 2)
+        try await say("And the notes?", at: 3)
+        #expect(try await history() == [
+            TurnMessage(
+                role: .system,
+                text: ModelToolLoop.summaryPreface + "Goals: ship."
+            ),
+            TurnMessage(
+                role: .user,
+                text: "And the notes?"
+            ),
+        ])
+
+        try await record(.contextReset, nil, at: 4)
+        // A command line's compaction keeps its own session and leaves the loop's history alone.
+        try await record(.contextCompacted, nil, at: 5)
+        try await say("Start over.", at: 6)
+        #expect(try await history() == [
+            TurnMessage(
+                role: .user,
+                text: "Start over."
+            ),
+        ])
+    }
+
     /// Waits for `condition`, a few seconds at most.
     private static func wait(for condition: () -> Bool) async throws {
         for _ in 0..<400 where !condition() {

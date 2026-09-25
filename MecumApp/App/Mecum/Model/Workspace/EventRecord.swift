@@ -76,16 +76,19 @@ nonisolated struct NewEvent: Sendable, Hashable {
     /// The new attempt's ending would otherwise carry the old attempt's key,
     /// collapse onto it and be lost without a trace.
     ///
-    /// A `turnUsage` event is identified by itself too, behind `usageKeyPrefix`, so a
-    /// store read can select usage rows by this string column: the type is an enum
-    /// column, which a predicate cannot compare on macOS 26.
+    /// A `turnUsage`, `contextCompacted` or `contextReset` event is identified by
+    /// itself too, behind `usageKeyPrefix`, so a store read can select the rows that
+    /// say what a worker used and how full its context is by this string column:
+    /// the type is an enum column, which a predicate cannot compare on macOS 26.
     var deduplicationKey: String {
         if type.isTerminal { return Self.terminalKey(of: subjectID) }
-        return type == .turnUsage ? Self.usageKeyPrefix + id.uuidString : id.uuidString
+        return Self.usageTypes.contains(type) ? Self.usageKeyPrefix + id.uuidString : id.uuidString
     }
 
-    /// What every `turnUsage` event's key starts with.
+    /// What every usage and context event's key starts with.
     static let usageKeyPrefix = "usage:"
+
+    private static let usageTypes: Set<EventType> = [.turnUsage, .contextCompacted, .contextReset]
 
     /// The key every terminal event about `subject` carries, whichever way it ends.
     static func terminalKey(of subject: UUID) -> String {

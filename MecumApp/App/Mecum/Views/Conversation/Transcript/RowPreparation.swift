@@ -125,6 +125,9 @@ nonisolated enum RowPreparation {
         case .daySeparator(let label):
             return PreparedText(label, role: .caption)
 
+        case .contextSeparator(let change):
+            return PreparedText(TranscriptWording.context(change, at: item.date), role: .caption)
+
         case .executionFailed(let reason):
             // A signed-out command line fails every turn the same way: the card says how to sign in,
             // where sending the message again would only fail again.

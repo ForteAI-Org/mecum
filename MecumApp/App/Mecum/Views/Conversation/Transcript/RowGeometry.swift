@@ -302,7 +302,8 @@ nonisolated struct RowGeometry: Sendable, Hashable {
         case .personMessage, .workerReply, .thinking:  .bubble
         case .executionFailed, .executionInterrupted:  .card
         case .toolRun:                                 .line
-        case .daySeparator, .activityNotShown:         .divider
+        case .daySeparator, .contextSeparator,
+             .activityNotShown:                        .divider
         }
     }
 
@@ -331,7 +332,7 @@ nonisolated struct RowGeometry: Sendable, Hashable {
         case .personMessage:
             // The person's bubble leaves room on the left, so it never spans the row.
             return max(60, min(measure, (rowWidth - 2 * gutter) * 0.8))
-        case .daySeparator, .activityNotShown:
+        case .daySeparator, .contextSeparator, .activityNotShown:
             return max(60, rowWidth - 2 * gutter)
         default:
             return max(60, min(measure, rowWidth - indent - gutter))

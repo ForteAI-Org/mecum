@@ -64,6 +64,24 @@ struct ProviderUsageTests {
     }
 
     @Test
+    func claudesCompactionReportsItsSizeBeforeAndAfterAndSaysNothing() throws {
+        let events = try events(.claude, "claude-compact-plain")
+        let compactions = events.filter { if case .compacted = $0 { true } else { false } }
+        #expect(compactions == [.compacted(preTokens: 3561, postTokens: 1395)])
+        #expect(!events.contains { if case .assistant = $0 { true } else { false } })
+        #expect(events.last == .completed)
+        #expect(try usage(events).contextWindow == 1_000_000)
+    }
+
+    @Test
+    func aCompactThatIsNotAvailableIsNoCompaction() throws {
+        let events = try events(.claude, "claude-compact-disabled")
+        #expect(!events.contains { if case .compacted = $0 { true } else { false } })
+        #expect(events.contains(.assistant("/compact isn't available in this environment.")))
+        #expect(events.last == .completed)
+    }
+
+    @Test
     func aResultWithoutUsageReportsNone() throws {
         var claude = ProviderEventDecoder(provider: .claude)
         #expect(try claude.decode(Data(#"{"type":"result","is_error":false,"result":"Hi"}"#.utf8))

@@ -16,5 +16,7 @@ public enum ProviderEvent: Sendable, Equatable {
     case failure(String)
     /// What the turn cost, once, just before `completed` or `failure`, when the provider reported it.
     case usage(ProviderUsage)
+    /// The provider compacted the session's context, with its size in tokens before and after when it said.
+    case compacted(preTokens: Int?, postTokens: Int?)
     case completed
 }

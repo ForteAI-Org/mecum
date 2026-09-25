@@ -6,9 +6,12 @@
 //
 
 import AppKit
+import AutomationRuntime
+import ChatCore
 import Foundation
 import ModelTransports
 import Observation
+import os
 import SeatBroker
 
 /// A problem in the language an alert needs: a specific title, an actionable
@@ -49,6 +52,10 @@ nonisolated struct UserFacingIssue: Sendable, Equatable {
 ///
 /// Connections come from `connections`, the same store the Settings window
 /// edits, so a key entered in either place serves both.
+///
+/// A worker's context is compacted as a turn of its own, when the person asks
+/// or after a completed turn leaves it at 90% or more, and started again when
+/// the person asks (`compactContext`, `startFreshContext`).
 ///
 /// A refusal from the store becomes `problem`, a sentence naming what was
 /// refused and what to do about it. Nothing here fails silently.
@@ -111,12 +118,25 @@ final class TeamModel {
     /// One turn at a time per worker; the others are unaffected.
     private(set) var answering: [UUID: UUID] = [:]
 
+    /// Workers whose context is being compacted. Each is in `answering` too, so
+    /// the composer waits as it does behind a turn, and Stop ends the compaction.
+    private(set) var compacting: Set<UUID> = []
+
     /// Stops asked for before the worker's agent had started.
     private var pendingStops: Set<UUID> = []
 
     /// One agent host per conversation, kept for the process so its turns share
     /// one loopback host. The provider session lives on the conversation.
     private var hosts: [UUID: WorkerAgentHost] = [:]
+
+    /// The command line that answers for a provider, and the bridge it launches for Mecum's tools.
+    private let agents          : (ModelProvider) throws -> (ChatProvider, URL)
+    private let bridgeExecutable: URL
+
+    private static let log = Logger(
+        subsystem: "dev.forte.Mecum",
+        category : "Context"
+    )
 
     /// The broker every worker's desktop goes through, the app's one. The Mac Access sheet asks it
     /// for the permissions.
@@ -145,14 +165,20 @@ final class TeamModel {
     /// send in that window does nothing, so one Return is one message.
     private var isSending = false
 
+    /// `agents` and `bridgeExecutable` are the installed command lines and the
+    /// app's bridge; a test passes stand-ins.
     init(
-        store      : WorkspaceStore,
-        connections: ModelSettingsStore,
-        broker     : SeatBroker
+        store           : WorkspaceStore,
+        connections     : ModelSettingsStore,
+        broker          : SeatBroker,
+        agents          : @escaping (ModelProvider) throws -> (ChatProvider, URL) = WorkerAgentHost.agent(for:),
+        bridgeExecutable: URL = Bundle.main.bundleURL.appending(path: "Contents/Helpers/mecum-bridge")
     ) {
-        self.store       = store
-        self.connections = connections
-        self.broker      = broker
+        self.store            = store
+        self.connections      = connections
+        self.broker           = broker
+        self.agents           = agents
+        self.bridgeExecutable = bridgeExecutable
     }
 
     // MARK: Reading
@@ -405,7 +431,9 @@ final class TeamModel {
     /// Starts the worker's turn when it has a provider. The turn runs apart
     /// from `send`, so writing to another worker meanwhile is not held up, and
     /// a failed turn is reported and never retried. A turn through Mecum's own
-    /// loop is sent the conversation before the message (`turnHistory`).
+    /// loop is sent the conversation before the message (`turnHistory`). A
+    /// completed turn that leaves the context at 90% or more is followed by a
+    /// compaction, before any next message can start.
     private func startAnswer(
         to message       : MessageSnapshot,
         in conversationID: UUID,
@@ -416,27 +444,10 @@ final class TeamModel {
 
         answering[workerID] = conversationID
 
-        let host   : WorkerAgentHost
-        let desktop: BrokeredAutomationSession
-        if let existing = hosts[conversationID], let held = desktops[workerID] {
-            (host, desktop) = (existing, held)
-        } else {
-            desktop = self.desktop(for: workerID)
-            host    = WorkerAgentHost(
-                workingDirectory: workingFolder(of: conversationID),
-                bridgeExecutable: Bundle.main.bundleURL.appending(path: "Contents/Helpers/mecum-bridge"),
-                session         : { desktop },
-                transports      : { [connections] in $0.transport(settings: connections.providerSettings) },
-                contextWindows  : { [connections] selection in
-                    ModelToolLoop.contextWindow(
-                        of       : selection,
-                        settings : connections.providerSettings,
-                        catalogue: connections.catalogues[selection.provider] ?? []
-                    )
-                }
-            )
-            hosts[conversationID] = host
-        }
+        let (host, desktop) = agentHost(
+            of : conversationID,
+            for: workerID
+        )
 
         let recorder = WorkerTurnRecorder(
             store         : store,
@@ -449,20 +460,17 @@ final class TeamModel {
         }
 
         Task {
-            defer {
-                answering[workerID] = nil
-                pendingStops.remove(workerID)
-            }
-
+            var ending: WorkerTurnRecorder.Ending?
             do {
                 var provider: ModelProvider?
-                let ending = try await recorder.run { frozen, session, emit in
+                let ended = try await recorder.run { frozen, session, emit in
                     provider = frozen.provider
                     if pendingStops.remove(workerID) != nil { throw CancellationError() }
                     var history: [TurnMessage] = []
                     if WorkerAnswer(provider: frozen.provider) == .modelLoop {
                         history = try await turnHistory(
-                            before: message,
+                            in    : conversationID,
+                            before: message.sequence,
                             by    : workerID
                         )
                     }
@@ -484,7 +492,8 @@ final class TeamModel {
                         )
                     }
                 }
-                if let provider { settle(provider, after: ending) }
+                ending = ended
+                if let provider { settle(provider, after: ended) }
             } catch {
                 problem = issue(
                     title  : "Couldn’t Save Complete Response",
@@ -496,37 +505,94 @@ final class TeamModel {
             // The limits are the account's, so the worker on screen may share them.
             await refreshUsage(of: workerID)
             if let selection, selection != workerID { await refreshUsage(of: selection) }
+
+            answering[workerID] = nil
+            pendingStops.remove(workerID)
+            // Started with no suspension after the turn ends, so no message can start a turn first.
+            if ending == .completed,
+               let fraction = usage[workerID]?.context?.fraction,
+               UsageWording.contextLevel(fraction) == .full {
+                startCompaction(
+                    of     : workerID,
+                    in     : conversationID,
+                    trigger: .automatic
+                )
+            }
         }
     }
 
-    /// The conversation before `message` as a model provider is sent it: the
-    /// person's messages as `user`, the worker's replies as `assistant`, in order.
+    /// The conversation's agent host and the worker's desktop, made on first
+    /// use and kept for the process.
+    private func agentHost(
+        of conversationID: UUID,
+        for workerID     : UUID
+    ) -> (host: WorkerAgentHost, desktop: BrokeredAutomationSession) {
+        if let existing = hosts[conversationID], let held = desktops[workerID] { return (existing, held) }
+
+        let desktop = self.desktop(for: workerID)
+        let host    = WorkerAgentHost(
+            workingDirectory: workingFolder(of: conversationID),
+            bridgeExecutable: bridgeExecutable,
+            session         : { desktop },
+            agents          : agents,
+            transports      : { [connections] in $0.transport(settings: connections.providerSettings) },
+            contextWindows  : { [connections] selection in
+                ModelToolLoop.contextWindow(
+                    of       : selection,
+                    settings : connections.providerSettings,
+                    catalogue: connections.catalogues[selection.provider] ?? []
+                )
+            }
+        )
+        hosts[conversationID] = host
+        return (host, desktop)
+    }
+
+    /// The conversation before `sequence` as a model provider is sent it: the
+    /// person's messages as `user`, the worker's replies as `assistant`, in order,
+    /// from where the context last started again (`WorkspaceStore.contextStart`).
     /// Tool calls and their results from earlier turns are not resent.
     private func turnHistory(
-        before message: MessageSnapshot,
-        by workerID   : UUID
+        in conversationID: UUID,
+        before sequence  : Int,
+        by workerID      : UUID
     ) async throws -> [TurnMessage] {
         // ponytail: the last 40 messages, not a token budget; count tokens when long chats outgrow the context.
         let earlier = try await store.messages(
-            in    : message.conversationID,
-            around: message.sequence,
+            in    : conversationID,
+            around: sequence,
             before: 40,
             after : 0
         )
+        let start   = try await store.contextStart(in: conversationID)
         return Self.turnHistory(
             earlier,
-            by: workerID
+            by     : workerID,
+            since  : start?.date,
+            summary: start?.summary
         )
     }
 
-    /// Maps stored messages to turn messages. An empty message, and one by
-    /// anyone other than the person or `workerID`, is left out.
+    /// Maps stored messages to turn messages. An empty message, one by anyone
+    /// other than the person or `workerID`, and one sent before `start`, where
+    /// the context last started again, are left out. `summary`, what a
+    /// compaction there left, comes first, as a system message.
     static func turnHistory(
         _ messages : [MessageSnapshot],
-        by workerID: UUID
+        by workerID: UUID,
+        since start: Date?   = nil,
+        summary    : String? = nil
     ) -> [TurnMessage] {
-        messages.compactMap { message -> TurnMessage? in
-            guard !message.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+        let summarized = summary.map {
+            [TurnMessage(
+                role: .system,
+                text: ModelToolLoop.summaryPreface + $0
+            )]
+        } ?? []
+        return summarized + messages.compactMap { message -> TurnMessage? in
+            guard !message.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                  start.map({ message.createdAt > $0 }) ?? true
+            else { return nil }
 
             switch message.authorWorkerID {
             case nil:
@@ -583,9 +649,197 @@ final class TeamModel {
         )
     }
 
+    // MARK: The context
+
+    func isCompacting(_ workerID: UUID) -> Bool { compacting.contains(workerID) }
+
+    /// Compacts the worker's context in its open conversation, as the context
+    /// popover asks. Nothing starts while the worker answers.
+    func compactContext(of workerID: UUID) {
+        guard let conversation, conversation.participantIDs == [workerID] else { return }
+
+        startCompaction(
+            of     : workerID,
+            in     : conversation.id,
+            trigger: .manual
+        )
+    }
+
+    /// Starts the worker's context over with nothing from before now, once the
+    /// person confirmed: a command line's session is forgotten, so the next turn
+    /// starts a new one, and Mecum's loop is sent only what follows. The chat
+    /// stays as it is. Nothing happens while the worker answers.
+    func startFreshContext(of workerID: UUID) async {
+        guard let conversation, conversation.participantIDs == [workerID], answering[workerID] == nil
+        else { return }
+
+        do {
+            let cleared = try await store.update(
+                conversation: conversation.id,
+                .providerSessionCleared
+            )
+            if self.conversation?.id == cleared.id { self.conversation = cleared }
+            try await appendContextEvent(
+                .contextReset,
+                of: workerID,
+                in: conversation.id
+            )
+            await reloadTranscript(of: conversation.id)
+        } catch {
+            problem = issue(
+                title  : "Couldn’t Start Fresh Context",
+                message: "\(name(of: workerID)) may still remember the conversation before now.",
+                error  : error
+            )
+        }
+        await refreshUsage(of: workerID)
+    }
+
+    /// Compacts the worker's context in `conversationID` as a turn of its own,
+    /// through the conversation's agent host (`WorkerAgentHost.compact`). It
+    /// starts only while the worker is not answering, and a message sent
+    /// meanwhile waits in the composer, as one does behind a running turn. It
+    /// records `contextCompacted`, with a Codex compaction's usage before it, and
+    /// never a message.
+    ///
+    /// A failure leaves the context as it was and is not retried here. The
+    /// person is told of one they asked for, and of a signed-out command line
+    /// whoever asked; an automatic one is logged, and the next completed turn at
+    /// 90% or more tries again.
+    private func startCompaction(
+        of workerID      : UUID,
+        in conversationID: UUID,
+        trigger          : ContextCompaction.Trigger
+    ) {
+        guard let worker = worker(workerID), let selection = worker.configuration, answering[workerID] == nil
+        else { return }
+
+        answering[workerID] = conversationID
+        compacting.insert(workerID)
+        let host = agentHost(
+            of : conversationID,
+            for: workerID
+        ).host
+
+        Task {
+            var compacted: (compaction: ContextCompaction, usage: TurnUsage?)?
+            do {
+                let stored    = try await store.conversation(conversationID)
+                // A failed read only makes a Codex compaction count from its session's start.
+                let lastUsage = try? await store.latestTurnUsage(
+                    in: conversationID,
+                    on: selection.provider
+                )
+                var history: [TurnMessage] = []
+                if WorkerAnswer(provider: selection.provider) == .modelLoop {
+                    history = try await turnHistory(
+                        in    : conversationID,
+                        before: .max,
+                        by    : workerID
+                    )
+                }
+                if pendingStops.remove(workerID) != nil { throw CancellationError() }
+                compacted = try await host.compact(
+                    selection: selection,
+                    sessionID: stored?.resumableSession(for: selection.provider),
+                    role     : worker.instructions,
+                    trigger  : trigger,
+                    history  : history,
+                    lastUsage: lastUsage
+                )
+            } catch is CancellationError {
+                // A stopped compaction leaves the context as it was, and says nothing.
+            } catch {
+                compactionFailed(
+                    error,
+                    of     : worker,
+                    on     : selection.provider,
+                    trigger: trigger
+                )
+            }
+
+            if let compacted {
+                do {
+                    if var usage = compacted.usage {
+                        usage.isCompaction = true
+                        try await appendContextEvent(
+                            .turnUsage,
+                            of     : workerID,
+                            in     : conversationID,
+                            payload: try usage.encoded(),
+                            version: TurnUsage.payloadVersion
+                        )
+                    }
+                    try await appendContextEvent(
+                        .contextCompacted,
+                        of     : workerID,
+                        in     : conversationID,
+                        payload: try compacted.compaction.encoded(),
+                        version: ContextCompaction.payloadVersion
+                    )
+                    await reloadTranscript(of: conversationID)
+                } catch {
+                    problem = issue(
+                        title  : "Couldn’t Record Compaction",
+                        message: "\(worker.name)’s context was compacted, but the context shown may be out of date.",
+                        error  : error
+                    )
+                }
+            }
+
+            await refreshUsage(of: workerID)
+            compacting.remove(workerID)
+            pendingStops.remove(workerID)
+            answering[workerID] = nil
+        }
+    }
+
+    /// Tells the person of a failed compaction they asked for, and of a
+    /// signed-out command line whoever asked, the way a failed turn does;
+    /// logs any other.
+    private func compactionFailed(
+        _ error    : any Error,
+        of worker  : WorkerSnapshot,
+        on provider: ModelProvider,
+        trigger    : ContextCompaction.Trigger
+    ) {
+        let reason = (error as? AutomationFailure)?.description ?? error.localizedDescription
+        if Self.signInExpired(provider: provider, reason: reason) != nil {
+            settle(provider, after: .failed(reason: reason))
+        } else if trigger == .manual {
+            problem = UserFacingIssue(
+                title           : "Couldn’t Compact Context",
+                message         : "\(worker.name)’s context is as it was. Try again, or start a fresh context.",
+                technicalDetails: reason
+            )
+        } else {
+            Self.log.error("An automatic compaction failed and waits for the next turn: \(reason, privacy: .public)")
+        }
+    }
+
+    /// Records a context event with the conversation as its subject: a
+    /// compaction, a fresh context, or what a compaction turn cost.
+    private func appendContextEvent(
+        _ type           : EventType,
+        of workerID      : UUID,
+        in conversationID: UUID,
+        payload          : Data? = nil,
+        version          : Int   = 1
+    ) async throws {
+        try await store.append(NewEvent(
+            workspaceID   : Self.workspaceID,
+            subjectID     : conversationID,
+            conversationID: conversationID,
+            workerID      : workerID,
+            type          : type,
+            payloadVersion: version,
+            payload       : payload
+        ))
+    }
+
     /// Stops the worker's running turn, as Stop in the conversation and in
     /// the menus asks. What already arrived stays, and the turn ends with the
-    /// interruption note.
+    /// interruption note. A compaction stops the same way and leaves the context as it was.
     func stopAnswering(_ workerID: UUID) {
         guard let conversationID = answering[workerID] else { return }
 

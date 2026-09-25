@@ -86,6 +86,39 @@ struct ProviderTests {
         #expect(codex.contains("model_reasoning_effort=\"low\""))
     }
 
+    /// A person's message never runs a slash command; the compaction turn runs only `/compact`.
+    @Test
+    func onlyTheClaudeCompactionTurnAllowsSlashCommandsAndItSendsOnlyCompact() throws {
+        let normal = try ProviderInvocation(turn(.claude, session: "session-123", prompt: "/compact"))
+        #expect(normal.arguments.contains("--disable-slash-commands"))
+        #expect(normal.standardInput == "/compact")
+
+        let compaction = try ProviderInvocation(ProviderTurn(
+            provider: .claude, model: "claude-opus-5", sessionID: "session-123", prompt: "/clear",
+            instructions: "i", bridgeExecutable: "/b", connectionFile: "/c", workingDirectory: "/tmp",
+            isCompaction: true))
+        #expect(!compaction.arguments.contains("--disable-slash-commands"))
+        #expect(compaction.standardInput == "/compact")
+        #expect(compaction.arguments.contains("--strict-mcp-config"))
+        #expect(compaction.arguments.contains("--no-chrome"))
+        let resume = try #require(compaction.arguments.firstIndex(of: "--resume"))
+        #expect(compaction.arguments[resume + 1] == "session-123")
+    }
+
+    @Test
+    func theCodexCompactionTurnLowersTheAutoCompactLimitBeforeItResumes() throws {
+        let compaction = try ProviderInvocation(ProviderTurn(
+            provider: .codex, model: nil, sessionID: "thread-9", prompt: "Reply only: ok", instructions: "i",
+            bridgeExecutable: "/b", connectionFile: "/c", workingDirectory: "/tmp", isCompaction: true))
+        let limit = try #require(compaction.arguments.firstIndex(of: "model_auto_compact_token_limit=1000"))
+        #expect(compaction.arguments[limit - 1] == "-c")
+        #expect(limit < (try #require(compaction.arguments.firstIndex(of: "resume"))))
+        #expect(compaction.arguments.suffix(3) == ["resume", "thread-9", "-"])
+        #expect(compaction.standardInput == "Reply only: ok")
+        #expect(!(try ProviderInvocation(turn(.codex, session: "thread-9")).arguments
+                  .contains(where: { $0.hasPrefix("model_auto_compact_token_limit") })))
+    }
+
     @Test
     func claudeDecoderDoesNotDuplicateResult() throws {
         var decoder = ProviderEventDecoder(provider: .claude)

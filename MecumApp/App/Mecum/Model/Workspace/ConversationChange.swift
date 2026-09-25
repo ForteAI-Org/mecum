@@ -18,4 +18,7 @@ nonisolated enum ConversationChange: Sendable, Equatable {
     /// The session `provider` reported for this conversation. It replaces any
     /// earlier one, including one from another provider.
     case providerSession(provider: ModelProvider, id: String)
+
+    /// No provider session: the next turn starts a new one, whichever provider answers it.
+    case providerSessionCleared
 }

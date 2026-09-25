@@ -15,10 +15,15 @@ public struct ProviderTurn: Sendable {
     public let effort: String?
     /// The child's whole environment, or nil to inherit this process's.
     public let environment: [String: String]?
+    /// A turn that only compacts `sessionID`'s context. Claude is sent `/compact`, whatever `prompt`
+    /// says, on the one turn that allows slash commands; Codex answers `prompt` with an auto-compaction
+    /// limit so low that it compacts the session first.
+    public let isCompaction: Bool
 
     public init(provider: ChatProvider, model: String?, sessionID: String?, prompt: String,
                 instructions: String, bridgeExecutable: String, connectionFile: String,
-                workingDirectory: String, effort: String? = nil, environment: [String: String]? = nil) {
+                workingDirectory: String, effort: String? = nil, environment: [String: String]? = nil,
+                isCompaction: Bool = false) {
         self.provider = provider
         self.model = model
         self.sessionID = sessionID
@@ -29,5 +34,6 @@ public struct ProviderTurn: Sendable {
         self.workingDirectory = workingDirectory
         self.effort = effort
         self.environment = environment
+        self.isCompaction = isCompaction
     }
 }

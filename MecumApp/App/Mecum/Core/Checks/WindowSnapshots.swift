@@ -135,9 +135,12 @@ enum WindowSnapshots {
 
             let popovers: [(name: String, popover: AnyView, height: Double)] = [
                 ("context-popover", AnyView(ConversationContextPopover(
-                    context : context,
-                    lastTurn: atlas.lastTurn?.turn
-                )), 170),
+                    context   : context,
+                    lastTurn  : atlas.lastTurn?.turn,
+                    waitReason: nil,
+                    compact   : {},
+                    startFresh: {}
+                )), 340),
                 ("token-counter-popover", AnyView(TokenCounterPopover(
                     workerName: "Iris",
                     provider  : .claudeCode,
@@ -154,6 +157,48 @@ enum WindowSnapshots {
                         to    : output.appending(path: "\(popover.name)-\(name).png")
                     )
                 }
+            }
+
+            // The ring while the context is compacted, its button drawn alone.
+            for (name, dark) in [("light", false), ("dark", true)] {
+                try await write(
+                    ConversationContextButton(
+                        context     : context,
+                        lastTurn    : nil,
+                        worker      : "Atlas",
+                        isCompacting: true,
+                        waitReason  : nil,
+                        compact     : {},
+                        startFresh  : {}
+                    )
+                    .padding(24)
+                    .background(Color(nsColor: .windowBackgroundColor)),
+                    width : 96,
+                    height: 96,
+                    dark  : dark,
+                    to    : output.appending(path: "context-ring-compacting-\(name).png")
+                )
+            }
+
+            // Atlas's conversation after Mecum compacted its context on its own.
+            let compacted = try await syntheticTeam(
+                in           : store.appending(
+                    path         : "Compacted",
+                    directoryHint: .isDirectory
+                ),
+                contextTokens: 236_900,
+                compaction   : .automatic
+            )
+            for (name, dark) in [("light", false), ("dark", true)] {
+                try await write(
+                    Root(
+                        team                : compacted,
+                        isInspectorRequested: false
+                    ),
+                    width: 1200,
+                    dark : dark,
+                    to   : output.appending(path: "window-1200-\(name)-compacted.png")
+                )
             }
 
             // The split's sidebar is glass and draws blank offscreen, so its rows are drawn alone too, on the
@@ -410,10 +455,12 @@ enum WindowSnapshots {
     /// finished turn whose profile was changed afterwards, so the inspector has
     /// to show the turn's model and not the profile's. With `contextTokens` the
     /// turn records its usage too (`atlasUsage`), so the context ring and the
-    /// token counter are drawn.
+    /// token counter are drawn. With `compaction` the context is compacted
+    /// after the turn, to 38,200 tokens.
     static func syntheticTeam(
         in directory : URL,
-        contextTokens: Int? = nil
+        contextTokens: Int?                       = nil,
+        compaction   : ContextCompaction.Trigger? = nil
     ) async throws -> TeamModel {
         let store = try WorkspaceStore.opening(in: directory)
         let iris  = try await store.createWorker(
@@ -552,6 +599,26 @@ enum WindowSnapshots {
             .executionCompleted,
             at: 21
         )
+        if let compaction {
+            let compacted = ContextCompaction(
+                provider     : .codex,
+                trigger      : compaction,
+                preTokens    : contextTokens,
+                postTokens   : 38_200,
+                contextWindow: 258_400,
+                summary      : nil
+            )
+            try await store.append(NewEvent(
+                workspaceID   : workspaceID,
+                subjectID     : conversation.id,
+                conversationID: conversation.id,
+                workerID      : atlas.id,
+                timestamp     : origin.addingTimeInterval(40),
+                type          : .contextCompacted,
+                payloadVersion: ContextCompaction.payloadVersion,
+                payload       : try compacted.encoded()
+            ))
+        }
         try await store.appendMessage(
             to      : conversation.id,
             text    : "Rerun the capture suite first.",

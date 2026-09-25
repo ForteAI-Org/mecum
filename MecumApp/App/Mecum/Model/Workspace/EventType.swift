@@ -44,6 +44,15 @@ nonisolated enum EventType: Sendable, Hashable {
     /// `TurnUsage.payloadVersion`; a reader skips a row at another version.
     case turnUsage
 
+    /// The conversation's model context was compacted, by the person or by
+    /// Mecum above 90%. The payload is a `ContextCompaction` as JSON, at
+    /// `ContextCompaction.payloadVersion`; its subject is the conversation.
+    case contextCompacted
+
+    /// The conversation's model context started again with nothing from
+    /// before it; the messages stay. No payload; its subject is the conversation.
+    case contextReset
+
     /// A type this build does not know, with the raw value it was stored as.
     ///
     /// Readers skip it. It is never terminal here: whether the row ended its
@@ -61,7 +70,7 @@ nonisolated enum EventType: Sendable, Hashable {
         case .executionCompleted, .executionFailed, .executionCancelled: true
         case .workerCreated, .workerConfigured, .workerArchived, .conversationOpened,
              .messageRecorded, .messageDeliveryChanged, .executionStarted, .toolActivity,
-             .agentProcessStarted, .turnUsage, .unknown: false
+             .agentProcessStarted, .turnUsage, .contextCompacted, .contextReset, .unknown: false
         }
     }
 
@@ -69,7 +78,7 @@ nonisolated enum EventType: Sendable, Hashable {
     static let known: [EventType] = [
         .workerCreated, .workerConfigured, .workerArchived, .conversationOpened,
         .messageRecorded, .messageDeliveryChanged, .executionStarted, .executionCompleted, .executionFailed,
-        .executionCancelled, .toolActivity, .agentProcessStarted, .turnUsage,
+        .executionCancelled, .toolActivity, .agentProcessStarted, .turnUsage, .contextCompacted, .contextReset,
     ]
 }
 
@@ -95,6 +104,8 @@ nonisolated extension EventType: RawRepresentable, Codable {
         case .toolActivity:           "toolActivity"
         case .agentProcessStarted:    "agentProcessStarted"
         case .turnUsage:              "turnUsage"
+        case .contextCompacted:       "contextCompacted"
+        case .contextReset:           "contextReset"
         case .unknown(let value):     value
         }
     }

@@ -82,6 +82,22 @@ nonisolated enum TranscriptWording {
                                                timeZone: calendar.timeZone))
     }
 
+    // MARK: Context
+
+    /// A context separator's line: "Context compacted · 14:32", "Context compacted
+    /// automatically · 14:32" or "Started a fresh context · 14:32".
+    static func context(
+        _ change: TranscriptItem.ContextChange,
+        at date : Date
+    ) -> String {
+        let words = switch change {
+        case .compacted:              "Context compacted"
+        case .compactedAutomatically: "Context compacted automatically"
+        case .freshStart:             "Started a fresh context"
+        }
+        return "\(words) · \(time(date))"
+    }
+
     // MARK: Tools
 
     /// A tool line's summary: what the turn did or is doing, repeats collapsed, at
@@ -287,6 +303,11 @@ nonisolated enum TranscriptWording {
             return thinking(by: workerName)
         case .daySeparator(let label):
             return label
+        case .contextSeparator(let change):
+            return context(
+                change,
+                at: item.date
+            )
         case .executionFailed(let reason):
             return "\(failed(by: workerName)) \(reason), \(when)"
         case .executionInterrupted(let note):

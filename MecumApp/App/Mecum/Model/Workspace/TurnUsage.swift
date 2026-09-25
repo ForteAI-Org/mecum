@@ -39,6 +39,11 @@ nonisolated struct TurnUsage: Sendable, Hashable, Codable {
     let contextWindow: Int?
     let rateLimits   : [ProviderUsage.RateLimit]
 
+    /// True for the turn a compaction ran, whose tokens count in the lifetime but which is no
+    /// message: it is never the last message, nor one of the messages counted. Nil in every
+    /// payload written before compaction existed, and read as false.
+    var isCompaction : Bool? = nil
+
     /// The payload a `turnUsage` event stores.
     func encoded() throws -> Data {
         let encoder = JSONEncoder()

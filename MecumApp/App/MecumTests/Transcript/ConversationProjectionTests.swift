@@ -33,6 +33,7 @@ struct ConversationProjectionTests {
             case .toolRun:              "tools"
             case .thinking:             "thinking"
             case .daySeparator:         "day"
+            case .contextSeparator:     "context"
             case .executionFailed:      "failed"
             case .executionInterrupted: "interrupted"
             case .activityNotShown:     "notice"

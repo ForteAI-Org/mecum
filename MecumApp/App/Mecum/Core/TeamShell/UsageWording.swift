@@ -134,6 +134,17 @@ nonisolated struct UsageWording {
         "\(spokenPercent(context.fraction ?? 0)), \(contextTokens(context))"
     }
 
+    /// The ring's tooltip and accessibility value while the context is compacted.
+    static let compacting = "Compacting context…"
+
+    /// Why the context popover's actions wait, said when one is used while the worker is busy.
+    static func actionsWait(
+        worker      : String,
+        isCompacting: Bool
+    ) -> String {
+        isCompacting ? "Available when compacting finishes." : "Available when \(worker) finishes responding."
+    }
+
     // MARK: Plan
 
     /// "Claude plan".

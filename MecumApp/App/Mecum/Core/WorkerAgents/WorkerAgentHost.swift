@@ -36,6 +36,9 @@ import ModelTransports
 /// all before `run` throws `CancellationError`. A loop turn stops the same way:
 /// no new tool call, the model's stream cancelled, a call in flight finished,
 /// then the session closed. A failed turn is never run again by this type.
+///
+/// `compact` compacts the conversation's context as a turn of its own, under
+/// the same one-at-a-time rule and the same stop.
 @MainActor
 final class WorkerAgentHost {
 
@@ -190,12 +193,7 @@ final class WorkerAgentHost {
         if WorkerAnswer(provider: selection.provider) == .modelLoop {
             let loop  = ModelToolLoop { [tools] name, arguments in try await tools.call(name, arguments) }
             self.loop = loop
-            defer {
-                self.loop = nil
-                let waiters    = loopEndWaiters
-                loopEndWaiters = []
-                for waiter in waiters { waiter.resume() }
-            }
+            defer { endLoop() }
             do {
                 try await loop.run(
                     transport    : transports(selection),
@@ -284,6 +282,202 @@ final class WorkerAgentHost {
         }
     }
 
+    /// Clears the loop turn that ended and resumes the `close` calls waiting for it.
+    private func endLoop() {
+        loop           = nil
+        let waiters    = loopEndWaiters
+        loopEndWaiters = []
+        for waiter in waiters { waiter.resume() }
+    }
+
+    // MARK: Compaction
+
+    /// What Codex is sent on a compaction turn. Its reply is never recorded.
+    static let codexCompactionPrompt = "Mecum compacted this conversation. Reply only: ok"
+
+    /// Compacts the conversation's model context as a turn of its own, and
+    /// returns what it did with what the turn cost, when that is worth
+    /// recording. One turn at a time with `run`, stoppable with `stop`, and no
+    /// message comes of it: nothing is reported while it runs. The loop is
+    /// offered no tool and neither command line is asked to use one, so it runs
+    /// outside the desktop's turn.
+    ///
+    /// Claude Code runs its own `/compact` on `sessionID`, which succeeds only
+    /// when it reports the compaction's boundary. Codex answers a fixed prompt
+    /// with an auto-compaction limit so low that it compacts first, which
+    /// succeeds only when the session's rollout shows a compaction since the
+    /// turn began; its turn is counted as any other is, from `lastUsage`.
+    /// Mecum's loop asks the model for a summary of `history`.
+    ///
+    /// Throws `CancellationError` after `stop`, and otherwise the provider's
+    /// failure or one saying it did not compact. The session is left as the
+    /// provider left it, and nothing is retried.
+    func compact(
+        selection           : ModelSelection,
+        sessionID           : String?,
+        role                : String?,
+        trigger             : ContextCompaction.Trigger,
+        history             : [TurnMessage] = [],
+        lastUsage           : TurnUsage? = nil,
+        inheritedEnvironment: [String: String] = ProcessInfo.processInfo.environment
+    ) async throws -> (compaction: ContextCompaction, usage: TurnUsage?) {
+        guard onEvent == nil else {
+            throw AutomationFailure("This worker is still responding. Wait for it to finish or stop the response.")
+        }
+        // A receiver that drops everything, which also marks the compaction as the running turn.
+        onEvent         = { _ in }
+        isStopRequested = false
+        defer { onEvent = nil }
+
+        if WorkerAnswer(provider: selection.provider) == .modelLoop {
+            let loop  = ModelToolLoop { _, _ in throw AutomationFailure("A summary calls no tool.") }
+            self.loop = loop
+            defer { endLoop() }
+
+            let window  = contextWindows(selection)
+            let written = try await loop.summarize(
+                transport: transports(selection),
+                history  : history
+            )
+            return (
+                ContextCompaction(
+                    provider     : selection.provider,
+                    trigger      : trigger,
+                    preTokens    : written.tokens?.input,
+                    postTokens   : written.tokens?.output,
+                    contextWindow: window,
+                    summary      : written.summary
+                ),
+                written.tokens.map {
+                    Self.turnUsage(
+                        ProviderUsage(
+                            tokens       : $0,
+                            contextWindow: window
+                        ),
+                        selection: selection,
+                        session  : nil,
+                        lastUsage: nil,
+                        rollout  : nil
+                    )
+                }
+            )
+        }
+
+        let (chatProvider, executable) = try agents(selection.provider)
+        guard let sessionID else {
+            throw AutomationFailure("There is nothing to compact yet: this conversation has no "
+                                    + "\(selection.provider.title) session.")
+        }
+        guard FileManager.default.isExecutableFile(atPath: bridgeExecutable.path) else {
+            throw AutomationFailure("Mecum is missing a required support component. Details: \(bridgeExecutable.path)")
+        }
+        let connection = try await start()
+        // Claude is sent `/compact` whatever the prompt says (`ProviderTurn.isCompaction`).
+        let turn = Self.turn(
+            prompt              : Self.codexCompactionPrompt,
+            provider            : chatProvider,
+            selection           : selection,
+            sessionID           : sessionID,
+            role                : role,
+            bridgeExecutable    : bridgeExecutable,
+            connectionFile      : connection,
+            workingDirectory    : workingDirectory,
+            inheritedEnvironment: inheritedEnvironment,
+            isCompaction        : true
+        )
+        let started  = Date()
+        var boundary : (pre: Int?, post: Int?)?
+        var reported : ProviderUsage?
+        var lastWords: String?
+        do {
+            // A stop during `start` found no child to interrupt; it ends the compaction here instead.
+            if isStopRequested { throw CancellationError() }
+            try await provider.run(turn, executable: executable) { event in
+                switch event {
+                case .compacted(let pre, let post): boundary  = (pre, post)
+                case .usage(let usage):             reported  = usage
+                case .assistant(let text):          lastWords = text
+                case .session, .activity, .failure, .completed: break
+                }
+            }
+        } catch {
+            router.pause()
+            await router.drain()
+            await provider.waitUntilStopped()
+            router.resume()
+            throw error
+        }
+
+        switch chatProvider {
+        case .claude:
+            // "/compact isn't available in this environment." is what a refused command says.
+            guard let boundary else {
+                throw AutomationFailure(lastWords ?? "Claude Code finished without compacting the conversation.")
+            }
+            return (
+                ContextCompaction(
+                    provider     : selection.provider,
+                    trigger      : trigger,
+                    preTokens    : boundary.pre,
+                    postTokens   : boundary.post,
+                    contextWindow: reported?.contextWindow,
+                    summary      : nil
+                ),
+                nil
+            )
+        case .codex:
+            let tail = await rolloutTail(
+                of         : sessionID,
+                environment: inheritedEnvironment
+            )
+            guard let tail, CodexRollout.compacts(in: tail, since: started) else {
+                throw AutomationFailure("Codex answered without compacting the conversation.")
+            }
+            let reading = CodexRollout.reading(from: tail)
+            return (
+                ContextCompaction(
+                    provider     : selection.provider,
+                    trigger      : trigger,
+                    preTokens    : lastUsage?.session == sessionID ? lastUsage?.contextTokens : nil,
+                    postTokens   : reading?.contextTokens,
+                    contextWindow: reading?.contextWindow,
+                    summary      : nil
+                ),
+                reported.map {
+                    Self.turnUsage(
+                        $0,
+                        selection: selection,
+                        session  : sessionID,
+                        lastUsage: lastUsage,
+                        rollout  : reading
+                    )
+                }
+            )
+        }
+    }
+
+    /// The tail of `session`'s rollout, read off the main actor, nil when it
+    /// is not found. The file found is kept, so a session is looked for once.
+    private func rolloutTail(
+        of session : String,
+        environment: [String: String]
+    ) async -> Data? {
+        let known    = rollout?.session == session ? rollout?.file : nil
+        let sessions = CodexRollout.sessions(environment: environment)
+        // The walk over an old session's tree stays off the main actor.
+        let found = await Task.detached {
+            let file = known ?? CodexRollout.file(
+                of: session,
+                in: sessions
+            )
+            return file.map { (file: $0, tail: CodexRollout.tail(of: $0)) }
+        }.value
+        guard let found else { return nil }
+
+        rollout = (session, found.file)
+        return found.tail
+    }
+
     /// Reports what the command line said the turn cost, once its child has
     /// exited, which is when a Codex rollout holds the turn's last count.
     private func reportUsage(
@@ -299,20 +493,10 @@ final class WorkerAgentHost {
         reportedUsage = nil
         var reading: CodexRollout.Reading?
         if chatProvider == .codex, let session {
-            let known    = rollout?.session == session ? rollout?.file : nil
-            let sessions = CodexRollout.sessions(environment: environment)
-            // The walk over an old session's tree stays off the main actor.
-            let found = await Task.detached {
-                let file = known ?? CodexRollout.file(
-                    of: session,
-                    in: sessions
-                )
-                return file.map { (file: $0, reading: CodexRollout.reading(of: $0)) }
-            }.value
-            if let found {
-                rollout = (session, found.file)
-                reading = found.reading
-            }
+            reading = await rolloutTail(
+                of         : session,
+                environment: environment
+            ).flatMap(CodexRollout.reading(from:))
         }
 
         onEvent(.usage(Self.turnUsage(
@@ -432,7 +616,8 @@ final class WorkerAgentHost {
         bridgeExecutable    : URL,
         connectionFile      : URL,
         workingDirectory    : URL,
-        inheritedEnvironment: [String: String]
+        inheritedEnvironment: [String: String],
+        isCompaction        : Bool = false
     ) -> ProviderTurn {
         let efforts = ModelSelection.supportedEfforts(provider: selection.provider, model: selection.model)
         return ProviderTurn(
@@ -445,13 +630,14 @@ final class WorkerAgentHost {
             connectionFile  : connectionFile.path,
             workingDirectory: workingDirectory.path,
             effort          : efforts.contains(selection.effort) ? selection.effort.rawValue : nil,
-            environment     : CodexCLIClient.environment(from: inheritedEnvironment)
+            environment     : CodexCLIClient.environment(from: inheritedEnvironment),
+            isCompaction    : isCompaction
         )
     }
 
     /// The command line that answers for `provider`, found at its install
-    /// location rather than on `PATH`.
-    private static func agent(for provider: ModelProvider) throws -> (ChatProvider, URL) {
+    /// location rather than on `PATH`. It reads no state, so any caller may ask.
+    nonisolated static func agent(for provider: ModelProvider) throws -> (ChatProvider, URL) {
         switch (provider, WorkerAnswer(provider: provider)) {
         case (_, .modelLoop):
             throw AutomationFailure("\(provider.title) responds through Mecum’s own loop and has no command line.")

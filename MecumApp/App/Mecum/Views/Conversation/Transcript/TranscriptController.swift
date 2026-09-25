@@ -846,8 +846,8 @@ final class TranscriptController: NSObject {
     private func moveFocus(by step: Int) {
         guard !rows.isEmpty else { return }
         var next = min(max(0, (focusedIndex ?? (step > 0 ? -1 : rows.count)) + step), rows.count - 1)
-        // A day separator is a heading between rows, not a stop for the keyboard.
-        while case .daySeparator = rows[next].item.kind, rows.indices.contains(next + step) { next += step }
+        // A separator is a heading between rows, not a stop for the keyboard.
+        while rows[next].item.isSeparator, rows.indices.contains(next + step) { next += step }
         let path = IndexPath(item: next, section: 0)
         setFocusedAction(nil)
         collectionView.selectionIndexPaths = [path]

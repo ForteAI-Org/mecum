@@ -32,8 +32,9 @@ import Foundation
 /// Both are the same place, so a line never moves when its turn ends.
 ///
 /// Days. Every day with a message gets a separator above its first message,
-/// the day changing at 00:00 in `calendar`'s time zone. Grouping is decided in
-/// the final order, so a separator or a tool line starts a new group.
+/// the day changing at 00:00 in `calendar`'s time zone. A compaction or a fresh
+/// context is a separator where it happened. Grouping is decided in the final
+/// order, so a separator or a tool line starts a new group.
 nonisolated enum ConversationProjection {
 
     /// Rows closer together than this, by one author, share a header.
@@ -98,7 +99,8 @@ nonisolated enum ConversationProjection {
     /// True for the event types the projection reads.
     static func isShown(_ event: RecordedEvent) -> Bool {
         switch event.type {
-        case .toolActivity, .executionStarted, .executionCompleted, .executionFailed, .executionCancelled:
+        case .toolActivity, .executionStarted, .executionCompleted, .executionFailed, .executionCancelled,
+             .contextCompacted, .contextReset:
             true
         default:
             false
@@ -251,6 +253,15 @@ nonisolated enum ConversationProjection {
                 end(event, as: .stopped)
                 rows.append(card(event, .executionInterrupted(note: text)))
 
+            case .contextCompacted:
+                let trigger = event.payloadVersion == ContextCompaction.payloadVersion
+                    ? event.payload.flatMap(ContextCompaction.decoded)?.trigger
+                    : nil
+                rows.append(separator(event, trigger == .automatic ? .compactedAutomatically : .compacted))
+
+            case .contextReset:
+                rows.append(separator(event, .freshStart))
+
             default:
                 break
             }
@@ -319,6 +330,12 @@ nonisolated enum ConversationProjection {
         private func card(_ event: RecordedEvent, _ kind: TranscriptItem.Kind) -> TranscriptItem {
             TranscriptItem(id: .event(event.id), kind: kind, date: event.timestamp, authorWorkerID: event.workerID,
                            continuesGroup: false)
+        }
+
+        /// A context separator speaks for no one, as a day's does.
+        private func separator(_ event: RecordedEvent, _ change: TranscriptItem.ContextChange) -> TranscriptItem {
+            TranscriptItem(id: .event(event.id), kind: .contextSeparator(change), date: event.timestamp,
+                           authorWorkerID: nil, continuesGroup: false)
         }
     }
 }
