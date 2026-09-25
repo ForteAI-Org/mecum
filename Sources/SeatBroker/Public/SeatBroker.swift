@@ -101,14 +101,18 @@ public final class SeatBroker {
         SeatDriver.buildValidation()
     }
 
-    /// Prompts for every grant that is still missing, and answers whether
-    /// they are all there now. Screen Recording is read once per process, so a
-    /// fresh grant needs an app restart. macOS shows each prompt once: after a
-    /// denial nothing appears again and `openPermissionSettings` is the only
-    /// way left.
+    /// Asks for the first grant still missing, one system prompt at a time, and answers whether
+    /// every grant is there. Screen Recording is read once per process, so a fresh grant needs an
+    /// app restart.
     @discardableResult
     public func requestMissingPermissions() -> Bool {
         SeatDriver.requestMissingPermissions()
+    }
+
+    /// Asks for `grant`: its system prompt the first time, its pane of System Settings after that,
+    /// since macOS shows each prompt once per app.
+    public func request(_ grant: DesktopGrant) {
+        SeatDriver.request(grant.kind)
     }
 
     /// Opens the System Settings pane of the first grant the driver is missing.

@@ -6,13 +6,17 @@
 //
 
 import Foundation
+import SeatCore
 
 /// DesktopGrant is one macOS permission a worker's seat needs, and whether
-/// this process holds it now.
+/// this process holds it now. `SeatBroker.request(_:)` asks for it.
 public struct DesktopGrant: Sendable, Hashable, Identifiable {
 
     public let name     : String
     public let isGranted: Bool
+
+    /// Which permission it is, for the one request that asks for it.
+    let kind: PermissionKind
 
     public var id: String { name }
 }

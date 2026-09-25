@@ -128,6 +128,9 @@ struct TeamShellView: View {
         .sheet(isPresented: $team.isShowingConnections) {
             ConnectionsSheet(connections: team.connections)
         }
+        .sheet(isPresented: $team.isShowingPermissions) {
+            PermissionsSheet(broker: team.broker)
+        }
         // The worker's commands open its list of providers, which lives in the inspector.
         .onChange(of: team.choosingProviderFor) {
             if team.choosingProviderFor != nil, !target.isInspectorShown { toggleInspector() }

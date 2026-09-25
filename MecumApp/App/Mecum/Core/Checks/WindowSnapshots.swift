@@ -220,6 +220,17 @@ enum WindowSnapshots {
                 )
             }
 
+            let macAccess = SeatBroker(configuration: .init(allowUnvalidatedBuild: true))
+            for (name, dark) in [("light", false), ("dark", true)] {
+                try await write(
+                    PermissionsSheet(broker: macAccess),
+                    width : 520,
+                    height: 420,
+                    dark  : dark,
+                    to    : output.appending(path: "mac-access-\(name).png")
+                )
+            }
+
             for (name, dark) in [("light", false), ("dark", true)] {
                 try await write(
                     NewWorkerSheet(team: team),

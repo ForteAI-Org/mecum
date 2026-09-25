@@ -69,6 +69,9 @@ final class TeamModel {
     /// The connection cards, reachable from the team (§19.1).
     var isShowingConnections = false
 
+    /// True while the Mac Access sheet is up: the macOS permissions a worker's seat needs.
+    var isShowingPermissions = false
+
     /// The worker whose list of providers is open in the inspector, if any. The worker's
     /// commands set it to open the inspector on that list.
     var choosingProviderFor: UUID?
@@ -109,8 +112,9 @@ final class TeamModel {
     /// one loopback host. The provider session lives on the conversation.
     private var hosts: [UUID: WorkerAgentHost] = [:]
 
-    /// The broker every worker's desktop goes through, the app's one.
-    private let broker: SeatBroker
+    /// The broker every worker's desktop goes through, the app's one. The Mac Access sheet asks it
+    /// for the permissions.
+    let broker: SeatBroker
 
     /// Each worker's desktop session, which its row reads while it waits for
     /// or holds the computer (§4.2).

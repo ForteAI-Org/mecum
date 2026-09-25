@@ -195,7 +195,8 @@ final class SeatDriver {
         ].map { name, kind in
             DesktopGrant(
                 name     : name,
-                isGranted: Permissions.preflight(kind)
+                isGranted: Permissions.preflight(kind),
+                kind     : kind
             )
         }
     }
@@ -211,27 +212,44 @@ final class SeatDriver {
         )
     }
 
-    /// Prompts for every grant that is still missing. macOS shows each of these
-    /// prompts once per app: after a denial `request` answers false and never
-    /// asks again, and the person has to be sent to System Settings instead,
-    /// which is `openPermissionSettings`.
+    /// The grants in the order they are asked for.
+    private static let grantOrder: [PermissionKind] = [.accessibility, .postEvent, .screenRecording]
+
+    /// Asks for the first grant still missing, and only that one, and answers whether every grant
+    /// is there. Asking for all three at once raised three system prompts together and macOS showed
+    /// one of them: the others were lost, and a person was left without Screen Recording and no way
+    /// to tell. The next call asks for the next grant.
     @discardableResult
     static func requestMissingPermissions() -> Bool {
-        var granted = true
-        for kind in [PermissionKind.accessibility, .postEvent, .screenRecording]
-        where !Permissions.preflight(kind) {
-            if !Permissions.request(kind) { granted = false }
+        guard let kind = Permissions.firstMissing(of: grantOrder) else { return true }
+        request(kind)
+        return false
+    }
+
+    /// Asks for one grant: its system prompt the first time, and its pane of System Settings after
+    /// that. macOS shows each prompt once per app, so a request after the first would show nothing,
+    /// and the pane is where the person can still turn it on.
+    static func request(_ kind: PermissionKind) {
+        let key = "mecum.permission.prompted.\(kind.rawValue)"
+        guard !UserDefaults.standard.bool(forKey: key) else {
+            openSettings(for: kind)
+            return
         }
-        return granted
+        UserDefaults.standard.set(true, forKey: key)
+        Permissions.request(kind)
     }
 
     /// Opens the Privacy pane of the first grant the driver is missing. False
     /// when every grant is there, so a caller can leave the button out.
     @discardableResult
     static func openPermissionSettings() -> Bool {
-        guard let kind = Permissions.firstMissing(
-            of: [.accessibility, .postEvent, .screenRecording]
-        ) else { return false }
+        guard let kind = Permissions.firstMissing(of: grantOrder) else { return false }
+        return openSettings(for: kind)
+    }
+
+    /// Opens the Privacy pane of System Settings where `kind` is turned on.
+    @discardableResult
+    static func openSettings(for kind: PermissionKind) -> Bool {
         // Post Event lives in the Accessibility pane, next to the grant that
         // lets an app control the computer.
         let pane = switch kind {
