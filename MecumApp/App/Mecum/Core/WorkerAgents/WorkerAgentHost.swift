@@ -50,6 +50,9 @@ final class WorkerAgentHost {
     /// Set by `stop` so a stop that lands before the provider starts still stops the turn.
     private var isStopRequested = false
 
+    /// The provider session the running turn reported, if it reported one.
+    private var reportedSession: String?
+
     /// True while a turn runs.
     var isRunning: Bool { onEvent != nil }
 
@@ -135,8 +138,16 @@ final class WorkerAgentHost {
                                     + "Details: \(bridgeExecutable.path)")
         }
         let connection = try await start()
+        // Codex keeps the instructions a session began with and ignores new ones when it resumes,
+        // so a session that began with others is given the current ones once, ahead of the message.
+        let instructions = Self.instructions(role: role)
+        var message      = prompt
+        if chatProvider == .codex, let sessionID, deliveredInstructions(to: sessionID) != instructions {
+            message = Self.changedInstructions(instructions) + prompt
+        }
+        reportedSession = nil
         let turn = Self.turn(
-            prompt              : prompt,
+            prompt              : message,
             provider            : chatProvider,
             selection           : selection,
             sessionID           : sessionID,
@@ -150,7 +161,11 @@ final class WorkerAgentHost {
             // A stop during `start` found no child to interrupt; it ends the turn here instead.
             if isStopRequested { throw CancellationError() }
             try await provider.run(turn, executable: executable, onStart: { onEvent(.processStarted($0)) }) { event in
+                if case .session(let id) = event { self.reportedSession = id }
                 onEvent(.provider(event))
+            }
+            if chatProvider == .codex, let session = reportedSession ?? sessionID {
+                record(instructions, deliveredTo: session)
             }
         } catch {
             router.pause()
@@ -160,6 +175,36 @@ final class WorkerAgentHost {
             router.resume()
             throw error
         }
+    }
+
+    /// What a resumed Codex session is told when it began with other instructions.
+    static func changedInstructions(_ instructions: String) -> String {
+        "Your instructions changed since this conversation began. These replace the earlier ones in "
+            + "full:\n\n\(instructions)\n\nThe person's message:\n\n"
+    }
+
+    /// Which instructions the worker's Codex session last received, kept beside its working folder's
+    /// other files: one session per worker, and a record lost costs one more reminder.
+    private struct DeliveredInstructions: Codable {
+        let session     : String
+        let instructions: String
+    }
+
+    private var instructionRecord: URL { workingDirectory.appending(path: "codex-instructions.json") }
+
+    /// The instructions `session` last received, nil when this host never recorded any for it.
+    private func deliveredInstructions(to session: String) -> String? {
+        guard let data   = try? Data(contentsOf: instructionRecord),
+              let record = try? JSONDecoder().decode(DeliveredInstructions.self, from: data),
+              record.session == session
+        else { return nil }
+        return record.instructions
+    }
+
+    /// Records what `session` received. A write that fails only means the next turn reminds it again.
+    private func record(_ instructions: String, deliveredTo session: String) {
+        let record = DeliveredInstructions(session: session, instructions: instructions)
+        try? JSONEncoder().encode(record).write(to: instructionRecord, options: .atomic)
     }
 
     /// Stops the running turn: no further tool call is accepted and the

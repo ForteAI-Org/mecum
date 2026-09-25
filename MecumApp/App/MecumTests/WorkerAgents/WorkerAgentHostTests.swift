@@ -135,6 +135,42 @@ struct WorkerAgentHostTests {
 
     /// Closing the host while its provider child runs, as quitting does. The
     /// stand-in ignores SIGINT and SIGTERM, so only the escalation ends it.
+    @Test func aResumedCodexSessionIsToldChangedInstructionsOnce() async throws {
+        let root = URL.temporaryDirectory.appending(path: "mecum-instructions-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { remove(root) }
+        // A stand-in for Codex: it keeps the message it was given and starts or resumes session s1.
+        let received = root.appending(path: "received")
+        let standIn  = root.appending(path: "agent")
+        try Data("""
+        #!/bin/sh
+        cat > '\(received.path)'
+        echo '{"type":"thread.started","thread_id":"s1"}'
+        echo '{"type":"item.completed","item":{"type":"agent_message","text":"Done"}}'
+        echo '{"type":"turn.completed"}'
+
+        """.utf8).write(to: standIn)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: standIn.path)
+
+        let host = WorkerAgentHost(workingDirectory: root.appending(path: "work"), bridgeExecutable: standIn,
+                                   session: { DesktopUnavailableSession() },
+                                   agents: { _ in (.codex, standIn) })
+        let selection = ModelSelection(provider: .codex, model: "", effort: .medium)
+        func message(session: String?, role: String?) async throws -> String {
+            try await host.run(prompt: "Hello", selection: selection, sessionID: session, role: role) { _ in }
+            return try String(contentsOf: received, encoding: .utf8)
+        }
+        let reminded = WorkerAgentHost.changedInstructions(WorkerAgentHost.instructions(role: "Edit video.")) + "Hello"
+
+        #expect(try await message(session: nil, role: nil) == "Hello", "a new session starts with them")
+        #expect(try await message(session: "s1", role: nil) == "Hello", "and has them")
+        #expect(try await message(session: "s1", role: "Edit video.") == reminded, "a new role is told once")
+        #expect(try await message(session: "s1", role: "Edit video.") == "Hello")
+        #expect(try await message(session: "older", role: "Edit video.").hasPrefix("Your instructions changed"),
+                "a session this host never recorded is told too")
+        try await host.close()
+    }
+
     @Test func closingWithAChildRunningLeavesNoChildAlive() async throws {
         let root = URL.temporaryDirectory.appending(path: "mecum-close-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
