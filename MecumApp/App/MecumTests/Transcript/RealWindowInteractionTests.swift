@@ -161,6 +161,48 @@ struct RealWindowInteractionTests {
         #expect(pasteboard.string(forType: .string) == "Check the **build** and tell me what failed.")
     }
 
+    // MARK: Tool lines
+
+    @Test("A click on a tool line's summary opens its card, a click in the card leaves it open")
+    func toolCardStaysOpenWhenClicked() async throws {
+        let fixture    = try await TranscriptFixture()
+        defer { fixture.discard() }
+        let pasteboard = NSPasteboard(name: .init("mecum.tests.\(UUID())"))
+        defer { pasteboard.releaseGlobally() }
+        let turn = UUID()
+        try await fixture.say("Compute 8", at: 0)
+        try await fixture.record(.executionStarted, subject: turn, at: 1)
+        try await fixture.record(.toolActivity, subject: turn, at: 2, text: "→ open_session {\"app\":\"Calculator\"}")
+        try await fixture.record(.toolActivity, subject: turn, at: 3, text: "← open_session {}")
+        try await fixture.record(.toolActivity, subject: turn, at: 4, text: "→ act {\"session\":\"s\",\"target\":\"8\"}")
+        try await fixture.record(.toolActivity, subject: turn, at: 5, text: "← act {\"status\":\"found_acted\"}")
+        try await fixture.say("8 is on the display.", at: 6, byWorker: true)
+        try await fixture.record(.executionCompleted, subject: turn, at: 7)
+        let stage = await stage(fixture, pasteboard: pasteboard)
+        defer { stage.window.close() }
+        let controller = stage.controller
+
+        func toolRow() throws -> Int {
+            try #require(controller.rows.firstIndex { if case .toolRun = $0.item.kind { true } else { false } })
+        }
+        func isOpen() throws -> Bool {
+            guard case .toolRun(_, let isExpanded, _) = controller.rows[try toolRow()].item.kind else { return false }
+            return isExpanded
+        }
+
+        try click(at: try point(inRow: try toolRow(), x: 10, of: controller), in: stage.window)
+        await controller.settle()
+        #expect(try isOpen(), "the summary opens the card")
+
+        try click(at: try point(inRow: try toolRow(), block: 1, x: 10, of: controller), in: stage.window)
+        await controller.settle()
+        #expect(try isOpen(), "a click in the card leaves it open")
+
+        try click(at: try point(inRow: try toolRow(), x: 10, of: controller), in: stage.window)
+        await controller.settle()
+        #expect(try !isOpen(), "the summary folds it again")
+    }
+
     // MARK: Context menu
 
     @Test("A right click gives the row's menu: Copy Message copies, a link and a code block add their items")
@@ -376,14 +418,14 @@ struct RealWindowInteractionTests {
         #expect(last.maxY <= clip.maxY - 90)
         #expect(controller.indicator.isHidden)
 
-        // A change to a row already seen reads as Updates.
+        // A change to a row already seen reads as New Activity.
         controller.setVisibleTop(600)
         #expect(!controller.isAtBottom)
         try await fixture.store.update(message: try #require(waiting?.id), delivery: .completed)
         controller.refresh()
         await controller.settle()
         #expect(controller.newActivity == .statusChanges)
-        #expect(!controller.indicator.isHidden && controller.indicator.title == "Updates")
+        #expect(!controller.indicator.isHidden && controller.indicator.title == "New Activity")
 
         for index in 0..<3 {
             try await fixture.say("Arrived \(index).", at: 100_000 + Double(index), byWorker: true)

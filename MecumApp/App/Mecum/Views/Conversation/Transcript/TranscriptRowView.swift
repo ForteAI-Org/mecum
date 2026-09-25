@@ -83,6 +83,10 @@ final class TranscriptRowView: NSView {
     /// A tool line's disclosure chevron, which turns to point down while the line is open.
     private var chevron    : NSImageView?
 
+    /// True while the pointer is over a tool line's summary, which then lifts like a button.
+    private var isHoveringLine = false { didSet { if isHoveringLine != oldValue { needsDisplay = true } } }
+    private var hoverArea: NSTrackingArea?
+
     override var isFlipped: Bool { true }
 
     func configure(
@@ -96,6 +100,7 @@ final class TranscriptRowView: NSView {
         let previous    = self.row?.item.id == row.item.id && self.style == style ? self.row : nil
         let previousRow = self.row?.item.id == row.item.id ? self.row : nil
         let oldStacks   = stacks
+        if previousRow == nil { isHoveringLine = false }
         self.row        = row
         self.style      = style
         self.workerName = workerName
@@ -114,6 +119,7 @@ final class TranscriptRowView: NSView {
         showCopyIcons(row, keepsCopied: previous != nil)
         showChevron(row, wasExpanded: Self.isExpanded(previousRow))
         configureAccessibility(row)
+        window?.invalidateCursorRects(for: self)
         needsDisplay = true
     }
 
@@ -323,7 +329,7 @@ final class TranscriptRowView: NSView {
         case .rule:
             NSColor.separatorColor.setFill()
             NSRect(x: frame.minX, y: frame.midY.rounded(), width: frame.width, height: 1).fill()
-        case .toolSteps:
+        case .toolSteps(let dividers):
             // The steps lift off the background as a card, so they read apart from the replies.
             let path   = NSBezierPath(roundedRect: frame, xRadius: 8, yRadius: 8)
             let shadow = NSShadow()
@@ -338,6 +344,9 @@ final class TranscriptRowView: NSView {
             NSColor.separatorColor.setStroke()
             path.lineWidth = 1
             path.stroke()
+            if let (storage, manager, _) = stacks[index] {
+                drawDividers(dividers, card: frame, text: text, storage: storage, manager: manager)
+            }
         default:
             break
         }
@@ -349,6 +358,39 @@ final class TranscriptRowView: NSView {
         manager.drawGlyphs(forGlyphRange: glyphs, at: text.origin)
         if case .openLink(_, index, let range)? = focusedAction {
             strokeFocus(around: range, in: index, origin: text.origin)
+        }
+    }
+
+    /// A hairline in the gap above each step `dividers` names, across the card inside its padding.
+    private func drawDividers(
+        _ dividers: [Int],
+        card      : CGRect,
+        text      : CGRect,
+        storage   : NSTextStorage,
+        manager   : NSLayoutManager
+    ) {
+        let source = storage.string as NSString
+        var starts: [Int] = []
+        var start = 0
+        while start < source.length {
+            starts.append(start)
+            start = NSMaxRange(source.paragraphRange(for: NSRange(location: start, length: 0)))
+        }
+        let scale = window?.backingScaleFactor ?? 2
+        let inset = RowGeometry.toolCardPadding.width
+        NSColor.separatorColor.setFill()
+        for line in dividers where line > 0 && starts.indices.contains(line) {
+            // Halfway between the last line of the step above and the first of this one.
+            let above = manager.lineFragmentUsedRect(
+                forGlyphAt    : manager.glyphIndexForCharacter(at: starts[line] - 1),
+                effectiveRange: nil
+            )
+            let below = manager.lineFragmentUsedRect(
+                forGlyphAt    : manager.glyphIndexForCharacter(at: starts[line]),
+                effectiveRange: nil
+            )
+            let y = ((text.minY + (above.maxY + below.minY) / 2) * scale).rounded() / scale
+            NSRect(x: card.minX + inset, y: y, width: max(0, card.width - 2 * inset), height: 1 / scale).fill()
         }
     }
 
@@ -378,6 +420,10 @@ final class TranscriptRowView: NSView {
         case .line, .divider:
             // A quiet caption with no surface of its own; focus still outlines it.
             let frame = geometry.text.insetBy(dx: -6, dy: -2)
+            if isHoveringLine, let line = Self.lineFrame(of: row) {
+                NSColor.labelColor.withAlphaComponent(0.07).setFill()
+                NSBezierPath(roundedRect: line, xRadius: 6, yRadius: 6).fill()
+            }
             if case .daySeparator = row.item.kind { drawRules(beside: geometry.text, drift: drift(of: row)) }
             if isOutlined { strokeFocus(NSBezierPath(roundedRect: frame, xRadius: 4, yRadius: 4)) }
         }
@@ -514,7 +560,8 @@ final class TranscriptRowView: NSView {
             super.mouseDown(with: event)
             return
         }
-        if Self.isToolRun(row), event.clickCount == 1 {
+        // Only the summary opens and folds the line: a click in the opened card leaves it open.
+        if let line = Self.lineFrame(of: row), line.contains(point), event.clickCount == 1 {
             // A press first, as on any row, so the keyboard comes here and no outline is drawn.
             onPointer?(.press, event.locationInWindow)
             onActivate?()
@@ -614,6 +661,39 @@ final class TranscriptRowView: NSView {
 
     private static func isToolRun(_ row: PreparedRow) -> Bool {
         if case .toolRun = row.item.kind { true } else { false }
+    }
+
+    /// A tool line's summary, where it opens and folds, and what the hover lights.
+    private static func lineFrame(of row: PreparedRow) -> CGRect? {
+        guard isToolRun(row), let summary = row.geometry.blocks.first else { return nil }
+        return summary.insetBy(dx: -6, dy: -2)
+    }
+
+    // MARK: Hover
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        guard hoverArea == nil else { return }
+        let area = NSTrackingArea(
+            rect   : .zero,
+            options: [.mouseEnteredAndExited, .mouseMoved, .activeInKeyWindow, .inVisibleRect],
+            owner  : self
+        )
+        addTrackingArea(area)
+        hoverArea = area
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        let point = convert(event.locationInWindow, from: nil)
+        isHoveringLine = row.flatMap(Self.lineFrame(of:))?.contains(point) ?? false
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        isHoveringLine = false
+    }
+
+    override func resetCursorRects() {
+        if let row, let line = Self.lineFrame(of: row) { addCursorRect(line, cursor: .pointingHand) }
     }
 
     // MARK: Accessibility

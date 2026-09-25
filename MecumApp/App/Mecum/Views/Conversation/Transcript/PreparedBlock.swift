@@ -29,7 +29,9 @@ nonisolated struct PreparedBlock: Sendable, Hashable {
         case rule
 
         /// An opened tool line's steps, one a line, on a card of their own under the line.
-        case toolSteps
+        /// `dividers` are the lines a hairline goes above: each new tool or problem, and never
+        /// between the worker's note and the step it introduces.
+        case toolSteps(dividers: [Int])
     }
 
     /// The source offset, in UTF-16 units, of the chunk the block came from,
@@ -135,9 +137,27 @@ nonisolated struct PreparedBlock: Sendable, Hashable {
         switch kind {
         case .table(let table): Self.applyTable(table, to: result)
         case .code:             Self.applyHangingIndents(to: result, style: style)
+        case .toolSteps:        Self.applyStepSpacing(to: result)
         default:                break
         }
         return result
+    }
+
+    /// The room between two steps of a tool card, where its divider runs.
+    static let stepSpacing: CGFloat = 12
+
+    /// Opens a gap above every step but the first, and a little room between a long step's lines.
+    private static func applyStepSpacing(to text: NSMutableAttributedString) {
+        let source = text.string as NSString
+        var start  = 0
+        while start < source.length {
+            let line      = source.paragraphRange(for: NSRange(location: start, length: 0))
+            let paragraph = NSMutableParagraphStyle()
+            paragraph.paragraphSpacingBefore = start == 0 ? 0 : stepSpacing
+            paragraph.lineSpacing            = 2
+            text.addAttribute(.paragraphStyle, value: paragraph, range: line)
+            start = NSMaxRange(line)
+        }
     }
 
     /// Tabs in code advance to the next multiple of this many columns.

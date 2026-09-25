@@ -81,7 +81,7 @@ struct ConversationProjectionTests {
         #expect(!isExpanded)
         #expect(ending == .completed)
         #expect(TranscriptWording.toolSummary(ToolStep.steps(from: lines), ending: ending)
-            == "Opened Preview · act failed")
+            == "act failed · opened Preview")
     }
 
     @Test("Expanding a run changes that row only and reorders nothing")

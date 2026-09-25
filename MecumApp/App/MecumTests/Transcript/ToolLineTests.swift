@@ -127,7 +127,7 @@ struct ToolLineTests {
 
         let many = (0..<6).flatMap { ["→ act {\"session\":\"s\",\"target\":\"\($0)\"}", "← act {}"] }
         #expect(TranscriptWording.toolSummary(ToolStep.steps(from: many), ending: .completed)
-            == "Pressed 0 · pressed 1 · pressed 2 · 3 more")
+            == "Pressed 0 · pressed 1 · 4 more")
     }
 
     @Test("A failed step marks the line and, expanded, says what failed")
@@ -140,7 +140,7 @@ struct ToolLineTests {
         ]
         let steps = ToolStep.steps(from: lines)
         #expect(TranscriptWording.toolSummary(steps, ending: .completed)
-            == "Opened Calculator · could not press 8 · push failed")
+            == "Could not press 8 · push failed · 1 more")
         let expanded = TranscriptWording.toolSteps(steps, ending: .completed)
         #expect(expanded.map(\.isFailed) == [false, true, true])
         #expect(expanded[1].text == "Could not press 8: The window closed.")
@@ -185,7 +185,7 @@ struct ToolLineTests {
                                                         pipeline: MarkdownContent())
         #expect(collapsedText.string == "Action: Opened Calculator · pressed 8 ›")
         #expect(expandedText.string == "Action: Opened Calculator · pressed 8 ›\nOpened Calculator\nPressed 8")
-        #expect(expandedText.blocks.map(\.kind) == [.text, .toolSteps])
+        #expect(expandedText.blocks.map(\.kind) == [.text, .toolSteps(dividers: [1])])
         #expect(expandedText.blocks[0].string == collapsedText.string)
 
         let closed = try await fixture.items(expanded: [])

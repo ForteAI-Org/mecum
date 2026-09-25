@@ -77,22 +77,28 @@ nonisolated enum TranscriptWording {
         let groups = collapsed(steps).filter { !$0.step.isNote }
         var shown  = groups.filter { $0.step.isEffectful || $0.step.state != .done }
         if shown.isEmpty { shown = groups }
+        // What failed is what an issue line is about, so it comes first.
+        func failed(_ group: (step: ToolStep, count: Int)) -> Bool {
+            if case .failed = group.step.state { true } else { false }
+        }
+        shown = shown.filter(failed) + shown.filter { !failed($0) }
         var parts = shown.prefix(summaryLimit).map { toolStep($0.step, count: $0.count, ending: ending) }
         if shown.count > summaryLimit { parts.append("\(shown.count - summaryLimit) more") }
         guard !parts.isEmpty else { return "Performed actions" }
         return parts.enumerated().map { $0 == 0 ? $1 : lowercasedFirst($1) }.joined(separator: " · ")
     }
 
-    /// The phrases a collapsed tool line names before "N more".
-    static let summaryLimit = 3
+    /// The phrases a collapsed tool line names before "N more", so it stays one short line.
+    static let summaryLimit = 2
 
     /// The expanded line's steps, one short line each, repeats collapsed. A
     /// failed step says what failed.
     static func toolSteps(_ steps: [ToolStep], ending: TranscriptItem.TurnEnding?)
-        -> [(text: String, isFailed: Bool)] {
+        -> [(text: String, isFailed: Bool, isNote: Bool)] {
         collapsed(steps).map { group in
             let isFailed = if case .failed = group.step.state { true } else { false }
-            return (toolStep(group.step, count: group.count, ending: ending, withReason: true), isFailed)
+            return (toolStep(group.step, count: group.count, ending: ending, withReason: true), isFailed,
+                    group.step.isNote)
         }
     }
 

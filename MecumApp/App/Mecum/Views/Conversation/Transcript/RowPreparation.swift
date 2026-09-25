@@ -141,9 +141,12 @@ nonisolated enum RowPreparation {
         block.append(disclosureSlot, role: .disclosureSlot)
         guard isExpanded else { return PreparedText(blocks: [block]) }
 
-        // Opened, the line stays as it is and the steps come in on a card under it.
-        var card = PreparedBlock(kind: .toolSteps)
-        for (index, line) in TranscriptWording.toolSteps(steps, ending: ending).enumerated() {
+        // Opened, the line stays as it is and the steps come in on a card under it, a hairline
+        // between two tools or problems, the worker's note kept with the step it introduces.
+        let lines    = TranscriptWording.toolSteps(steps, ending: ending)
+        let dividers = lines.indices.dropFirst().filter { !lines[$0 - 1].isNote }
+        var card     = PreparedBlock(kind: .toolSteps(dividers: dividers))
+        for (index, line) in lines.enumerated() {
             if index > 0 { card.append("\n", role: .caption) }
             if line.isFailed { card.append(errorMark, role: .captionAlert) }
             card.append(line.text, role: .caption)

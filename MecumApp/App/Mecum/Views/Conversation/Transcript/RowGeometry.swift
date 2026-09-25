@@ -25,6 +25,8 @@ nonisolated struct RowGeometry: Sendable, Hashable {
     static let avatarGap   : CGFloat = 8
     static let bubblePadding      = CGSize(width: 12, height: 8)
     static let cardPadding        = CGSize(width: 12, height: 8)
+    /// A tool line's card of steps, a little roomier than a failure's card so its lines breathe.
+    static let toolCardPadding    = CGSize(width: 14, height: 10)
     static let blockSpacing       : CGFloat = 8
     static let ruleHeight         : CGFloat = 9
 
@@ -212,7 +214,8 @@ nonisolated struct RowGeometry: Sendable, Hashable {
             self.badge   = nil
             self.tail    = nil
             // An opened tool line's card of steps casts a shadow, which needs room below it, inside the row.
-            self.height  = (surface.maxY + (blocks.contains(.toolSteps) ? Self.toolShadowRoom : 0)).rounded(.up)
+            let hasCard  = blocks.contains { if case .toolSteps = $0 { true } else { false } }
+            self.height  = (surface.maxY + (hasCard ? Self.toolShadowRoom : 0)).rounded(.up)
 
         case .divider:
             let surface = CGRect(x: Self.gutter, y: 0, width: max(0, rowWidth - 2 * Self.gutter),
@@ -268,8 +271,8 @@ nonisolated struct RowGeometry: Sendable, Hashable {
         switch block {
         case .code(_, true): NSEdgeInsets(top: style.captionLineHeight + 6, left: 10, bottom: 8, right: 10)
         case .quote:         NSEdgeInsets(top: 0, left: 14, bottom: 0, right: 0)
-        case .toolSteps:     NSEdgeInsets(top: cardPadding.height, left: cardPadding.width,
-                                          bottom: cardPadding.height, right: cardPadding.width)
+        case .toolSteps:     NSEdgeInsets(top: toolCardPadding.height, left: toolCardPadding.width,
+                                          bottom: toolCardPadding.height, right: toolCardPadding.width)
         default:             NSEdgeInsets(top: 0, left: 0, bottom: 0, right: 0)
         }
     }
