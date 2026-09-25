@@ -156,6 +156,11 @@ public final class SeatBroker {
     /// ledger answers for it: not the lab's, so not the lab's to quit. An application this call
     /// launched that shows no window in time is quit again before the refusal, since no seat ever
     /// took a window of it; one found running is left alone.
+    /// How long a launched application that already shows a window may take to show one the seat
+    /// can take: DaVinci Resolve loads behind its splash screen for longer than the 20 s a first
+    /// window is given.
+    static let startupAllowance: Duration = .seconds(60)
+
     public func launch(_ app: TargetApp, timeout: Duration = .seconds(20)) async throws -> TargetApp {
         let pid: pid_t
         if let running = app.pid {
@@ -169,14 +174,30 @@ public final class SeatBroker {
             pid = try await NSWorkspace.shared.openApplication(at: url, configuration: configuration).processIdentifier
             ledger.record(.openedByAgent, for: pid)
         }
+        // A launching application can first show a window accessibility does not name, DaVinci
+        // Resolve's splash screen among them, and the seat can only move a window it names: adopting
+        // the splash failed and quit the application it had just opened. So a launched application
+        // is waited for until it shows one the seat can take, for as long as a slow start takes
+        // once something is on screen. A running application is taken as it is.
+        let launched = app.pid == nil
         let deadline = ContinuousClock.now + timeout
-        while ContinuousClock.now < deadline {
-            let windows = TargetEnumerator.windows(of: pid)
-            if !windows.isEmpty {
+        let startingDeadline = ContinuousClock.now + max(timeout, Self.startupAllowance)
+        var shown: [TargetWindow] = []
+        while ContinuousClock.now < (shown.isEmpty ? deadline : startingDeadline) {
+            shown = TargetEnumerator.windows(of: pid)
+            let adoptable = launched
+                ? TargetEnumerator.adoptable(shown, named: TargetEnumerator.accessibleWindowNumbers(of: pid))
+                : shown
+            if !adoptable.isEmpty {
                 return TargetApp(pid: pid, bundleID: app.bundleID, name: app.name,
-                                 bundleURL: app.bundleURL, windows: windows)
+                                 bundleURL: app.bundleURL, windows: adoptable)
             }
             try await Task.sleep(for: .milliseconds(300))
+        }
+        // Only windows the seat cannot name: they are handed on, so the adoption says why.
+        if !shown.isEmpty {
+            return TargetApp(pid: pid, bundleID: app.bundleID, name: app.name,
+                             bundleURL: app.bundleURL, windows: shown)
         }
         let wasLaunched = app.pid == nil
         throw SeatBrokerError.noWindowShown(

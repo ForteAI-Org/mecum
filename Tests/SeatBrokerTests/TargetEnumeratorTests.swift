@@ -219,3 +219,11 @@ func theExclusionNeverLeavesNothing() {
     let names = TargetEnumerator.applicationURLs(in: [root]).map(\.lastPathComponent).sorted()
     #expect(names == ["DaVinci Resolve.app", "Notes.app", "Terminal.app", "Xcode.app"])
 }
+
+@Test func aSplashScreenNobodyNamesIsNotAWindowToAdopt() {
+    let splash  = TargetWindow(pid: 42, windowNumber: 39136, title: "", frame: CGRect(x: 0, y: 0, width: 700, height: 400))
+    let manager = TargetWindow(pid: 42, windowNumber: 39468, title: "Project Manager",
+                               frame: CGRect(x: 0, y: 0, width: 910, height: 640))
+    #expect(TargetEnumerator.adoptable([splash], named: []).isEmpty)
+    #expect(TargetEnumerator.adoptable([splash, manager], named: [39468]) == [manager])
+}

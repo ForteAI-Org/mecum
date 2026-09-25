@@ -136,6 +136,18 @@ enum TargetEnumerator {
         window.frame.width * window.frame.height
     }
 
+    /// The windows of `pid` that accessibility names, which are the only ones the seat can move.
+    @MainActor
+    static func accessibleWindowNumbers(of pid: pid_t) -> Set<Int> {
+        Set(accessibilityReadings(of: pid).keys)
+    }
+
+    /// The shown windows the seat can take: the ones accessibility names. A splash screen is shown
+    /// and named by nobody.
+    static func adoptable(_ shown: [TargetWindow], named: Set<Int>) -> [TargetWindow] {
+        shown.filter { named.contains($0.windowNumber) }
+    }
+
     /// The application's listed windows with the accessibility reading of each
     /// one folded in, and the windows alone when nothing can be read.
     @MainActor
