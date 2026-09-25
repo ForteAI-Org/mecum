@@ -210,6 +210,7 @@
 			inputPaths = (
 				"$(PROJECT_DIR)/Scripts/embed-helper.sh",
 				"$(BUILT_PRODUCTS_DIR)/mecum-bridge",
+				"$(UNINSTALLED_PRODUCTS_DIR)/$(PLATFORM_NAME)/mecum-bridge",
 			);
 			name = "Embed Helper";
 			outputPaths = (
