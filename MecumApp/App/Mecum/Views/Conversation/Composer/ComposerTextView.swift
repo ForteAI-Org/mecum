@@ -37,6 +37,27 @@ final class ComposerTextView: NSTextView {
     /// the text view, which offers completions.
     var onEscape: (() -> Void)?
 
+    /// The keys a popup over the field answers in its place while it is open.
+    enum PopupKey {
+
+        case up, down
+
+        /// Tab: the selected row goes into the draft.
+        case complete
+
+        /// Return: the selected row runs, or goes into the draft when it needs more.
+        case run
+
+        /// Escape: the popup closes.
+        case close
+    }
+
+    /// Offered ↑ ↓, Tab, Return and Escape before the text view acts on them,
+    /// while nothing is being composed, and answers whether a popup over the
+    /// field took the key. A key it leaves goes on as it always did, and so
+    /// do Shift-Return, Control-Tab and every other key. Nil offers none.
+    var onPopupKey: ((PopupKey) -> Bool)?
+
     /// Drawn while the field is empty and nothing is being composed.
     var placeholder = "" {
         didSet {
@@ -78,8 +99,11 @@ final class ComposerTextView: NSTextView {
     /// Escape arrives as the `cancelOperation(_:)` command, which the text view
     /// has no method of its own for, and so does Command-Period, which stays
     /// Stop's. The Escape key is taken here only while `onEscape` is set; any
-    /// other command goes on as it always did.
+    /// other command goes on as it always did. A popup over the field is
+    /// offered its keys first (`onPopupKey`).
     override func doCommand(by selector: Selector) {
+        if !hasMarkedText(), let key = popupKey(for: selector), onPopupKey?(key) == true { return }
+
         guard selector == #selector(cancelOperation(_:)), interpretedKey?.keyCode == 53,
               let onEscape, !hasMarkedText()
         else { return super.doCommand(by: selector) }
@@ -133,6 +157,19 @@ final class ComposerTextView: NSTextView {
         if let textStorage { undoManager?.removeAllActions(withTarget: textStorage) }
         needsDisplay = true
         textDidChangeShape()
+    }
+
+    /// The popup key `selector` stands for: the arrows' moves, Tab without Control, Return
+    /// without Shift, and Escape itself rather than Command-Period.
+    private func popupKey(for selector: Selector) -> PopupKey? {
+        switch selector {
+        case #selector(moveUp(_:))                                              : .up
+        case #selector(moveDown(_:))                                            : .down
+        case #selector(insertTab(_:)) where !isInterpreting(.control)           : .complete
+        case #selector(insertNewline(_:)) where !isInterpreting(.shift)         : .run
+        case #selector(cancelOperation(_:)) where interpretedKey?.keyCode == 53 : .close
+        default                                                                 : nil
+        }
     }
 
     private func isInterpreting(_ modifier: NSEvent.ModifierFlags) -> Bool {

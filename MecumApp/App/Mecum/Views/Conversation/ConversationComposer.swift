@@ -19,6 +19,11 @@ import SwiftUI
 /// A message sent while the worker answers joins the conversation's queue,
 /// which shows as a strip above the reply's (`ConversationQueueStrip`): the
 /// reply strip stays next to the pill, since it belongs to what is typed.
+///
+/// A draft that starts with `/` opens the command popup above the pill, at its
+/// leading edge (`SlashCommandPopup`). The keyboard stays in the field, which
+/// hands the popup ↑ ↓, Tab, Return and Escape while it is open; a first
+/// Escape closes it, and the next one drops a quote as it always does.
 struct ConversationComposer: View {
 
     @Bindable
@@ -49,6 +54,9 @@ struct ConversationComposer: View {
     /// The model button's frame in the window, which the popup is centred on.
     @State private var modelButton = CGRect.zero
 
+    /// The command popup's selection, and the draft it was closed on.
+    @State private var commands = SlashCommandMenu()
+
     @Environment(\.accessibilityReduceMotion)
     private var reducesMotion
 
@@ -65,6 +73,12 @@ struct ConversationComposer: View {
         .sendsOnReturn(!sendsWithCommandReturn)
         .queuesWhileAnswering(true)
         .onEscape(team.draftQuote == nil ? nil : { team.draftQuote = nil })
+        .popupKeys { key in
+            commands.handle(
+                key,
+                in: team
+            )
+        }
         .focusRequest(focusRequest + editFocus)
         .strip {
             VStack(spacing: 0) {
@@ -130,6 +144,33 @@ struct ConversationComposer: View {
             catalogue  : worker.configuration.flatMap { team.connections.catalogues[$0.provider] },
             onClose    : { Task { await keepChoice() } }
         )
+        .composerPopup(
+            isPresented   : Binding(
+                get: { !commands.rows(of: team).isEmpty },
+                set: { if !$0 { commands.close(on: team.draft) } }
+            ),
+            placement     : .leading,
+            width         : SlashCommandPopup.width,
+            closesOnEscape: false
+        ) {
+            let rows = commands.rows(of: team)
+            SlashCommandPopup(
+                rows    : rows,
+                selected: commands.selected(in: rows)?.id,
+                select  : { row in
+                    commands.select(
+                        row,
+                        in: rows
+                    )
+                },
+                choose  : { row in
+                    commands.choose(
+                        row,
+                        in: team
+                    )
+                }
+            )
+        }
         .animation(reducesMotion ? nil : .spring(duration: 0.35, bounce: 0.15), value: context == nil)
         .animation(
             ComposerBar.stripAnimation,
@@ -146,6 +187,11 @@ struct ConversationComposer: View {
         }
         // `/model` alone opens the popup, as the model button does.
         .onChange(of: team.modelPopupRequest) { isChoosingModel = true }
+        // The model popup takes the command popup's place; a new draft opens the command popup again.
+        .onChange(of: isChoosingModel) {
+            if isChoosingModel { commands.close(on: team.draft) }
+        }
+        .onChange(of: team.draft) { commands.draftChanged(to: team.draft) }
         // The draft reaches the store once typing pauses. A new keystroke
         // cancels this task and starts it again, so a burst writes once.
         .task(id: team.draft) {

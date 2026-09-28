@@ -72,6 +72,9 @@ struct ComposerBar: View {
     /// What Escape in the field does, set with `onEscape(_:)`; nil leaves it to the text view.
     private var escape: (() -> Void)?
 
+    /// What answers the keys of a popup over the field, set with `popupKeys(_:)`.
+    private var popupKeyHandler: ((ComposerTextView.PopupKey) -> Bool)?
+
     /// A count that puts the keyboard in the field each time it moves, set with `focusRequest(_:)`.
     private var focusRequest = 0
 
@@ -156,6 +159,7 @@ struct ComposerBar: View {
                         onSubmit    : canSend || canQueue ? send : nil,
                         returnSends : returnSends,
                         onEscape    : escape,
+                        onPopupKey  : popupKeyHandler,
                         focusRequest: focusRequest
                     )
                     .padding(
@@ -231,6 +235,15 @@ struct ComposerBar: View {
     func onEscape(_ action: (() -> Void)?) -> ComposerBar {
         var bar = self
         bar.escape = action
+        return bar
+    }
+
+    /// The bar whose field offers ↑ ↓, Tab, Return and Escape to `handler`
+    /// first, which answers whether a popup over the field took the key
+    /// (`ComposerTextView.onPopupKey`). The keyboard never leaves the field.
+    func popupKeys(_ handler: ((ComposerTextView.PopupKey) -> Bool)?) -> ComposerBar {
+        var bar = self
+        bar.popupKeyHandler = handler
         return bar
     }
 

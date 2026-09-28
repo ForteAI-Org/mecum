@@ -34,6 +34,9 @@ struct ComposerField: NSViewRepresentable {
     /// What Escape does, nil to leave it to the text view.
     var onEscape: (() -> Void)?
 
+    /// Offered the keys a popup over the field answers; see `ComposerTextView.onPopupKey`.
+    var onPopupKey: ((ComposerTextView.PopupKey) -> Bool)?
+
     /// A count that puts the keyboard in the field each time it moves, as a reply
     /// started from the transcript asks, so the reply can be typed at once.
     var focusRequest = 0
@@ -54,6 +57,7 @@ struct ComposerField: NSViewRepresentable {
         textView.placeholder = placeholder
         textView.onSubmit    = onSubmit
         textView.onEscape    = onEscape
+        textView.onPopupKey  = onPopupKey
         textView.returnSends = returnSends
         textView.setAccessibilityLabel(placeholder)
 
