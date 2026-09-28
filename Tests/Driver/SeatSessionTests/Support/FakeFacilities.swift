@@ -159,6 +159,7 @@ final class FakeSensing: SeatSensing, @unchecked Sendable {
     /// What the window server answers for the target's Window ID. Nil is an
     /// unreadable window, which is a recoverable Issue and not a missing one.
     var geometry: WindowReference? = FakeGeometry.adoptedWindow
+    var windowGeometryOverride: ((Int) -> WindowReference?)?
 
     /// Three-valued, exactly as the live witness: nil is a dead process.
     var targetIsActive: Bool? = false
@@ -183,7 +184,8 @@ final class FakeSensing: SeatSensing, @unchecked Sendable {
     }
 
     func windowGeometry(of windowNumber: Int) -> WindowReference? {
-        windowNumber == FakeGeometry.windowNumber ? geometry : additionalWindows[windowNumber]
+        if let windowGeometryOverride { return windowGeometryOverride(windowNumber) }
+        return windowNumber == FakeGeometry.windowNumber ? geometry : additionalWindows[windowNumber]
     }
 
     /// Every Window ID this fake window server can answer for, in a stable

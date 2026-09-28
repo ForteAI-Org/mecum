@@ -1,0 +1,173 @@
+import Foundation
+
+public enum ModelProvider: String, Sendable, CaseIterable, Codable, Identifiable {
+    case codex, claudeCode, anthropic, gemini, ollama
+    public var id: String { rawValue }
+
+    public var title: String {
+        switch self {
+        case .codex: "Codex"
+        case .claudeCode: "Claude"
+        case .anthropic: "Anthropic"
+        case .gemini: "Gemini"
+        case .ollama: "Ollama"
+        }
+    }
+
+    /// Models offered before the person edits the favorites. Ollama's come
+    /// from the local server instead.
+    public var defaultModels: [String] {
+        switch self {
+        case .codex: ["gpt-5.6-luna", "gpt-5.4-mini"]
+        case .claudeCode, .anthropic: ["claude-opus-5", "claude-sonnet-5", "claude-haiku-4-5"]
+        case .gemini: ["gemini-3-pro-preview", "gemini-3-flash-preview"]
+        case .ollama: []
+        }
+    }
+
+    /// Every model id the provider serves today, for the + menu when the
+    /// provider has no listing endpoint. Claude ids from the official models
+    /// overview (platform.claude.com, September 2026): current line first,
+    /// then the legacy models still available.
+    public var knownModels: [String] {
+        switch self {
+        case .codex: ["gpt-5.6-luna", "gpt-5.4-mini"]
+        case .claudeCode, .anthropic: [
+            "claude-fable-5-1", "claude-opus-5", "claude-sonnet-5", "claude-haiku-4-5",
+            "claude-fable-5", "claude-opus-4-8", "claude-opus-4-7", "claude-opus-4-6", "claude-opus-4-5",
+            "claude-sonnet-4-6", "claude-sonnet-4-5",
+        ]
+        case .gemini: ["gemini-3-pro-preview", "gemini-3-flash-preview", "gemini-2.5-pro", "gemini-2.5-flash"]
+        case .ollama: []
+        }
+    }
+
+    /// Where the person gets access, shown next to the key field.
+    public var accessHint: String {
+        switch self {
+        case .codex: "Uses the Codex command-line tool with your ChatGPT subscription. Sign in from Terminal with “codex login”. Mecum does not store an API key."
+        case .claudeCode: "Uses the Claude command-line tool with your Claude subscription. Sign in from Terminal with “claude auth login”. Mecum does not store an API key."
+        case .anthropic: "Add an API key from console.anthropic.com. Mecum stores it in Keychain and sends it only to api.anthropic.com."
+        case .gemini: "Add an API key from aistudio.google.com. Mecum stores it in Keychain and sends it only to Google’s Generative Language API."
+        case .ollama: "Runs models locally through Ollama. Install a model from Terminal with “ollama pull <name>”."
+        }
+    }
+
+    public var consoleURL: URL? {
+        switch self {
+        case .codex, .claudeCode: nil
+        case .anthropic: URL(string: "https://console.anthropic.com/settings/keys")
+        case .gemini: URL(string: "https://aistudio.google.com/app/apikey")
+        case .ollama: URL(string: "https://ollama.com/library")
+        }
+    }
+}
+
+/// How hard the model may think. Each provider maps this onto its own knob:
+/// Codex and Anthropic take it as reasoning effort, Gemini as thinking level,
+/// Ollama as thinking off (`low`) or on (`high`). `ultra` is Codex's alone,
+/// on the models its catalogue offers it for.
+public enum ReasoningEffort: String, Sendable, CaseIterable, Codable, Identifiable {
+    case low, medium, high, xhigh, max, ultra
+    public var id: String { rawValue }
+    public var title: String { rawValue == "xhigh" ? "XHigh" : rawValue.capitalized }
+
+    /// What the level means for a provider. Ollama only knows thinking on or off.
+    public func title(for provider: ModelProvider) -> String {
+        guard provider == .ollama else { return title }
+        return self == .low ? "No thinking" : "Thinking"
+    }
+}
+
+/// The model a run is planned with.
+public struct ModelSelection: Sendable, Hashable, Codable {
+    public var provider: ModelProvider
+    public var model: String
+    public var effort: ReasoningEffort
+
+    public init(provider: ModelProvider, model: String, effort: ReasoningEffort = .medium) {
+        self.provider = provider
+        self.model = model
+        self.effort = effort
+    }
+
+    /// Efforts a provider/model pair accepts, in order. Empty when the model
+    /// has no effort parameter at all, so no level is offered for it. Codex's
+    /// own catalogue (`ProviderCatalog.catalogue`) narrows its levels per model;
+    /// without it every level passes and the command line has the last word.
+    public static func supportedEfforts(provider: ModelProvider, model: String) -> [ReasoningEffort] {
+        switch provider {
+        case .codex: ReasoningEffort.allCases
+        // Haiku 4.5 has no effort parameter (extended thinking only).
+        case .claudeCode, .anthropic: model.contains("haiku") ? [] : [.low, .medium, .high, .xhigh, .max]
+        case .gemini: [.low, .medium, .high]
+        case .ollama: [.low, .high]
+        }
+    }
+
+    public static let `default` = ModelSelection(provider: .codex, model: "gpt-5.6-luna", effort: .medium)
+}
+
+/// Keys and knobs the HTTP providers need. The app owns persistence; the
+/// kit only reads them for one run.
+public struct ProviderSettings: Sendable, Hashable, Codable {
+    public var anthropicAPIKey: String
+    public var geminiAPIKey: String
+    public var ollamaHost: String
+    public var ollamaTemperature: Double
+    public var ollamaTopP: Double
+    public var ollamaTopK: Int
+    public var ollamaPresencePenalty: Double
+    public var ollamaContextTokens: Int
+    public var ollamaMaxOutputTokens: Int
+    /// How long one Ollama answer may take. Local thinking models are slow:
+    /// a 9B model reasoning over a 12k budget can need several minutes.
+    public var ollamaTimeoutSeconds: Double
+
+    /// Defaults follow Qwen's published recommendation for thinking mode on
+    /// precise tasks (temperature 0.6, top_p 0.95, top_k 20); thinking tokens
+    /// count against the output budget, so it is 8k rather than 1k.
+    public init(anthropicAPIKey: String = "", geminiAPIKey: String = "",
+                ollamaHost: String = "http://127.0.0.1:11434", ollamaTemperature: Double = 0.6,
+                ollamaTopP: Double = 0.95, ollamaTopK: Int = 20, ollamaPresencePenalty: Double = 0,
+                ollamaContextTokens: Int = 32768, ollamaMaxOutputTokens: Int = 8192,
+                ollamaTimeoutSeconds: Double = 600) {
+        self.anthropicAPIKey = anthropicAPIKey
+        self.geminiAPIKey = geminiAPIKey
+        self.ollamaHost = ollamaHost
+        self.ollamaTemperature = ollamaTemperature
+        self.ollamaTopP = ollamaTopP
+        self.ollamaTopK = ollamaTopK
+        self.ollamaPresencePenalty = ollamaPresencePenalty
+        self.ollamaContextTokens = ollamaContextTokens
+        self.ollamaMaxOutputTokens = ollamaMaxOutputTokens
+        self.ollamaTimeoutSeconds = ollamaTimeoutSeconds
+    }
+}
+
+/// What one model call cost, as far as the provider reports it.
+public struct ModelUsage: Sendable, Hashable {
+    public let inputTokens: Int?
+    public let outputTokens: Int?
+    public let duration: Duration
+    /// Input read from and written to the prompt cache, for a provider that counts them apart from
+    /// `inputTokens` (Anthropic). Nil for one that does not report them that way.
+    public let cacheReadTokens: Int?
+    public let cacheWriteTokens: Int?
+
+    public init(inputTokens: Int?, outputTokens: Int?, duration: Duration,
+                cacheReadTokens: Int? = nil, cacheWriteTokens: Int? = nil) {
+        self.inputTokens = inputTokens
+        self.outputTokens = outputTokens
+        self.duration = duration
+        self.cacheReadTokens = cacheReadTokens
+        self.cacheWriteTokens = cacheWriteTokens
+    }
+
+    /// Output tokens per second of generation, when both are known.
+    public var tokensPerSecond: Double? {
+        guard let outputTokens, outputTokens > 0 else { return nil }
+        let seconds = Double(duration.components.seconds) + Double(duration.components.attoseconds) / 1e18
+        return seconds > 0 ? Double(outputTokens) / seconds : nil
+    }
+}

@@ -35,11 +35,13 @@ BENCH_OUT := .build/bench
 REPORTS   := Documentation/Driver/compatibility
 
 # The unit tier runs unfiltered, so every test target in Package.swift reports
-# one summary line: the eleven `driverTests(...)` entries of lines 127 to 140.
+# one summary line, the Driver's, the Engine's and the broker's alike: 27 on
+# 2026-09-24 (`swift package describe --type json`, type "test"), after the
+# app's own modules and their tests moved into the app, where `MecumTests` runs.
 # This is the bundle count, not a test count, because test counts move with every
 # ticket (987 to 1018 in one day) and a number nobody updates stops meaning
 # anything, while a new test target is rare and worth failing over.
-UNIT_BUNDLES := 11
+UNIT_BUNDLES := 27
 
 # The seat cycle, alone in its own process.
 HOST_CYCLE_TESTS := 1
@@ -59,7 +61,13 @@ HOST_REST_TESTS := 29
 # they take a window in and out of fullscreen, which is the person's screen.
 # Verified by `xcrun swift test list | rg LiveTests` on 2026-09-21. This is an
 # assertion over the reported Live bundle, including intentionally skipped rows.
-LIVE_TESTS := 82
+LIVE_TESTS := 99
+QT_LIVE_ROWS := discoverDaVinci adoptAndReturnDaVinci observeDaVinci \
+                clickDaVinciSearch openAndCancelDaVinciProjectDialog insertTextIntoDaVinciSearch \
+                openDaVinciSearchContextMenu
+QT_EDITOR_ROWS := switchEditorPages cancelImportMedia
+QT_FIXTURE_ROWS := widgetCommands contextMenu dropdownMenu nativePopupMenu modalChild switchTargets widgetFileDialog nativeFileDialog
+QT_PYTHON ?= $(shell command -v python3)
 
 # The measurements `make bench` gates on. Narrow it for a quick pass, for
 # example `make bench BENCH="fence-callback send-click"`; `seat-idle` alone
@@ -71,7 +79,7 @@ LIVE_TESTS := 82
 BENCH ?= fence-callback fence-clamp input-trace-overhead send-click display-lifecycle \
          monitor-60 monitor-120 stage seat-idle window-watch focus-refresh recovery
 
-.PHONY: all test host-tests live-tests bench compat-report promote-build clean help
+.PHONY: all test host-tests live-tests qt-live-tests qt-editor-live-tests qt-fixture-live-tests bench compat-report promote-build clean help
 
 all: test
 
@@ -79,6 +87,9 @@ help:
 	@echo 'make test           unit tier: pure, serialized, no permission needed'
 	@echo 'make host-tests     host tier: TCC and a real display, two commands, counts asserted'
 	@echo 'make live-tests     live tier: real windows and a real browser'
+	@echo 'make qt-live-tests  Qt tier: open DaVinci Project Manager, one process per row'
+	@echo 'make qt-editor-live-tests  Qt editor tier: open the disposable New Project 1 project'
+	@echo 'make qt-fixture-live-tests QT_PYTHON=<PySide6 Python>  Qt 6 controlled fixture tier'
 	@echo 'make bench          the measurements of spec section 8, each one a gate'
 	@echo 'make compat-report  runs the tiers and writes Documentation/Driver/compatibility/Build<build>.{md,json}'
 	@echo 'make promote-build BUILD=26A5425a   copies that draft into the ledger'
@@ -116,8 +127,43 @@ host-tests:
 # browser's pid, and the reader's own row disturbed by the matrix's target
 # coming up. Serialized, the matrix passes eight rows out of eight.
 live-tests: require-fixture
-	@AGENTSEAT_LIVE_TESTS=1 AGENTSEAT_FIXTURE_APP="$(AGENTSEAT_FIXTURE_APP)" \
+	@AGENTSEAT_LIVE_TESTS=1 AGENTSEAT_QT_TESTS=0 AGENTSEAT_QT_PYTHON= \
+	    AGENTSEAT_QT_FIXTURE_PID= AGENTSEAT_QT_FIXTURE_STATE= \
+	    AGENTSEAT_FIXTURE_APP="$(AGENTSEAT_FIXTURE_APP)" \
 	    $(TIER) live $(LIVE_TESTS) $(SWIFT) test --filter LiveTests --no-parallel
+
+# Repeated virtual display creation can terminate one test process with a
+# successful exit status but no summary. Each Qt row therefore gets its own
+# process and the same count check as the other tiers. This target does not
+# need the consumer fixture or a browser; DaVinci must already be open.
+qt-live-tests:
+	@for row in $(QT_LIVE_ROWS); do \
+	    AGENTSEAT_LIVE_TESTS=1 AGENTSEAT_QT_TESTS=1 \
+	        $(TIER) "qt-$$row" 1 $(SWIFT) test --filter "QtDriverLiveTests.$$row" --no-parallel \
+	        || exit $$?; \
+	done
+
+# The user's disposable recent project is already open. The rows return to Cut
+# and cancel Import Media, without changing clips or saving the project.
+qt-editor-live-tests:
+	@for row in $(QT_EDITOR_ROWS); do \
+	    AGENTSEAT_LIVE_TESTS=1 AGENTSEAT_QT_EDITOR_TESTS=1 \
+	        $(TIER) "qt-editor-$$row" 1 $(SWIFT) test --filter "QtEditorLiveTests.$$row" --no-parallel \
+	        || exit $$?; \
+	done
+
+# An owned Qt 6 widget target is launched and stopped inside each row. Its
+# Python interpreter must contain PySide6-Essentials; no fixture remains after
+# the tier, and DaVinci is not touched.
+qt-fixture-live-tests:
+	@$(QT_PYTHON) -c 'import PySide6.QtWidgets' || { \
+	    echo 'QT_PYTHON must point to a Python with PySide6-Essentials installed'; exit 1; \
+	}
+	@for row in $(QT_FIXTURE_ROWS); do \
+	    AGENTSEAT_LIVE_TESTS=1 AGENTSEAT_QT_PYTHON="$(QT_PYTHON)" \
+	        $(TIER) "qt6-$$row" 1 $(SWIFT) test --filter "QtFixtureLiveTests.$$row" --no-parallel \
+	        || exit $$?; \
+	done
 
 # MARK: The measurements
 

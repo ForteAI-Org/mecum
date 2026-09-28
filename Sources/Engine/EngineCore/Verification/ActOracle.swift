@@ -149,7 +149,7 @@ extension ActVerification {
     ) -> ActOutcome {
         guard let oracle else { return outcome(for: verdict, label: label, after: after) }
         if oracle.holds(given: evidence) {
-            return ActOutcome(.foundActed, "acted on '\(label)' — \(oracle.confirmation)", scene: after)
+            return ActOutcome(.foundActed, "acted on '\(label)': \(oracle.confirmation)", scene: after)
         }
         let honest = outcome(for: verdict, label: label, after: after)
         let message = honest.kind == .foundActed
@@ -166,11 +166,11 @@ extension ActVerification {
     /// is uncertain, which is not a failure and is never a reason to repeat the gesture.
     public static func interrupted(label: String, oracle: ActOracle?, evidence: OracleEvidence) -> ActOutcome {
         if let oracle, oracle.holds(given: evidence) {
-            return ActOutcome(.foundActed, "acted on '\(label)' — \(oracle.confirmation)")
+            return ActOutcome(.foundActed, "acted on '\(label)': \(oracle.confirmation)")
         }
         return ActOutcome(
             .actedUnverified,
-            "acted on '\(label)' — the scene after it could not be read, so its effect could not be "
+            "acted on '\(label)': the scene after it could not be read, so its effect could not be "
                 + "established: re-perceive, do not repeat it"
         )
     }

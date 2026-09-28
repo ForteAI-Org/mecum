@@ -29,9 +29,12 @@ public final class CLIProvider {
         }
     }
 
+    /// `onStart` receives the child's identity once it is spawned, before any event, so a caller
+    /// can record it and a later launch can end a child the app did not outlive (§18.4).
     public func run(
         _ turn: ProviderTurn,
         executable: URL,
+        onStart: @MainActor (ChildProcessIdentity) -> Void = { _ in },
         onEvent: @escaping @MainActor (ProviderEvent) throws -> Void
     ) async throws {
         guard process == nil else { throw failure("A provider turn is already running.") }
@@ -49,7 +52,7 @@ public final class CLIProvider {
         child.standardOutput = output
         child.standardError = errors
         child.standardInput = input
-        var environment = ProcessInfo.processInfo.environment
+        var environment = turn.environment ?? ProcessInfo.processInfo.environment
         environment.removeValue(forKey: "CLAUDECODE")
         environment.removeValue(forKey: "CLAUDE_CODE_ENTRYPOINT")
         child.environment = environment
@@ -57,6 +60,8 @@ public final class CLIProvider {
         try child.run()
         process = child
         defer { process = nil }
+        // A child that has already exited has no identity to record, and nothing to end later.
+        if let identity = ChildProcessIdentity(running: child.processIdentifier) { onStart(identity) }
 
         let stdout = Self.chunks(output.fileHandleForReading)
         let stderr = Self.chunks(errors.fileHandleForReading)
@@ -118,16 +123,26 @@ public final class CLIProvider {
         }
     }
 
+    /// Each chunk as soon as the pipe has it. `FileHandle.read(upToCount:)` waits for the whole count
+    /// or the end of the stream, which held a Codex turn's small events back until the child exited
+    /// and delivered every message at once; `read(2)` answers with what is already there.
     private nonisolated static func chunks(_ handle: FileHandle) -> AsyncThrowingStream<Data, any Error> {
         AsyncThrowingStream { continuation in
             Task.detached {
                 defer { try? handle.close() }
-                do {
-                    while let chunk = try handle.read(upToCount: 16_384), !chunk.isEmpty {
-                        continuation.yield(chunk)
+                var buffer = [UInt8](repeating: 0, count: 16_384)
+                while true {
+                    let count = buffer.withUnsafeMutableBytes { read(handle.fileDescriptor, $0.baseAddress, $0.count) }
+                    if count > 0 {
+                        continuation.yield(Data(buffer[..<count]))
+                    } else if count == 0 {
+                        continuation.finish()
+                        return
+                    } else if errno != EINTR {
+                        continuation.finish(throwing: POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO))
+                        return
                     }
-                    continuation.finish()
-                } catch { continuation.finish(throwing: error) }
+                }
             }
         }
     }

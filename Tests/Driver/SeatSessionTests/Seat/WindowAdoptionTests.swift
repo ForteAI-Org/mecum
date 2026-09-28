@@ -34,6 +34,53 @@ struct WindowAdoptionTests {
         #expect(FakeGeometry.virtual.contains(adopted.reference.frame))
     }
 
+    @Test("a stashed window whose application refuses the raise is adopted once the move lands")
+    func refusedRaiseStillArrives() async throws {
+        let sensing   = FakeSensing()
+        let placing   = FakePlacing()
+        let original  = FakeGeometry.userSeatWindow
+        let thumbnail = original.replacingFrame(CGRect(x: 16, y: 803, width: 39, height: 108))
+        placing.stageError = DisplayFailure.raiseFailed(
+            windowNumber: original.windowNumber,
+            code        : .actionUnsupported
+        )
+        // Calculator on 27.0: still in the strip at the first reading, on the display 75 ms after the move.
+        sensing.windowGeometryOverride = { windowNumber in
+            guard windowNumber == original.windowNumber else { return nil }
+            return placing.stages == 0 ? thumbnail : FakeGeometry.adoptedWindow
+        }
+        let seat    = makeSeat(sensing: sensing, placing: placing)
+        let adopted = try await seat.adopt(original)
+        #expect(placing.stages == 1)
+        #expect(FakeGeometry.virtual.contains(adopted.reference.frame))
+    }
+
+    @Test("a refused raise on a window that never leaves the strip is the failure, after a rollback")
+    func refusedRaiseNeverArrives() async throws {
+        let sensing   = FakeSensing()
+        let placing   = FakePlacing()
+        let original  = FakeGeometry.userSeatWindow
+        let thumbnail = original.replacingFrame(CGRect(x: 16, y: 803, width: 39, height: 108))
+        sensing.geometry = thumbnail
+        placing.onMove = { origin in
+            if origin == original.frame.origin { sensing.geometry = original }
+        }
+        placing.stageError = DisplayFailure.raiseFailed(
+            windowNumber: original.windowNumber,
+            code        : .actionUnsupported
+        )
+        let seat = makeSeat(sensing: sensing, placing: placing)
+        await #expect {
+            try await seat.adopt(original)
+        } throws: { error in
+            guard case .raiseFailed(_, .actionUnsupported)? = error as? DisplayFailure else { return false }
+            return true
+        }
+        #expect(placing.stages == 1)
+        #expect(placing.moves.last == original.frame.origin)
+        #expect(seat.adoptedWindows.isEmpty)
+    }
+
     @Test("an unconfirmed partial move returns to the original frame")
     func unconfirmedMoveReturns() async throws {
         let sensing = FakeSensing()
@@ -160,6 +207,33 @@ struct WindowAdoptionTests {
         }
         let outcome = await seat.release(adopted)
         #expect(outcome == (bodyReturned ? .returned : .refused))
+    }
+
+    @Test("release waits for a late Stage Manager thumbnail without repeating AXPosition")
+    func lateStashedReturn() async throws {
+        let sensing = FakeSensing()
+        let placing = FakePlacing()
+        let original = FakeGeometry.userSeatWindow
+        let seat = makeSeat(sensing: sensing, placing: placing)
+        let adopted = try await seat.adopt(original)
+        #expect(adopted.originalServerFrame == nil)
+
+        let transition = original.replacingFrame(
+            CGRect(x: 1140, y: 1012, width: original.frame.width, height: original.frame.height)
+        )
+        let thumbnail = original.replacingFrame(CGRect(x: 15, y: 117, width: 100, height: 128))
+        var readings = 0
+        sensing.windowGeometryOverride = { windowNumber in
+            guard windowNumber == original.windowNumber else { return nil }
+            readings += 1
+            return readings <= 4 ? transition : thumbnail
+        }
+        placing.onMove = { _ in placing.bodyFrame = original.frame }
+
+        let outcome = await seat.release(adopted)
+        #expect(outcome == .returned)
+        #expect(readings >= 6)
+        #expect(placing.moves.filter { $0 == original.frame.origin }.count == 1)
     }
 
 }

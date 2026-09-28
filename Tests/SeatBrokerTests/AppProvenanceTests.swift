@@ -1,10 +1,11 @@
 //
 //  AppProvenanceTests.swift
-//  AgentLab
+//  Mecum
 //
 //  Created by Eliomar Alejandro Rodriguez Ferrer on 17/09/2026.
 //
 
+import Foundation
 import Testing
 @testable import SeatBroker
 
@@ -22,6 +23,23 @@ func theLedgerAnswersWithWhatWasRecordedPerProcess() {
     #expect(ledger.provenance(of: 303) == .alreadyRunning)
     ledger.forget(101)
     #expect(ledger.provenance(of: 101) == .alreadyRunning)
+}
+
+@Test @MainActor
+func aLaunchedApplicationThatWasNeverSeatedIsQuitAndOneAlreadyRunningIsNot() {
+    let ledger = LaunchLedger()
+    ledger.record(.openedByAgent, for: 101)
+    var asked: [pid_t] = []
+
+    #expect(ledger.quitUnseated(101) { asked.append($0); return true })
+    #expect(ledger.provenance(of: 101) == .alreadyRunning)
+    #expect(!ledger.quitUnseated(202) { asked.append($0); return true })
+    #expect(asked == [101])
+
+    // A refused quit keeps the record, so the application is still the agent's to finish with.
+    ledger.record(.openedByAgent, for: 303)
+    #expect(!ledger.quitUnseated(303) { _ in false })
+    #expect(ledger.provenance(of: 303) == .openedByAgent)
 }
 
 @Test

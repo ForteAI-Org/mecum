@@ -36,7 +36,10 @@ nonisolated public enum KeyboardLayoutReader {
     private static let cache = Mutex(KeyboardLayoutCache())
 
     /// The layout installed right now, or nil when the current input source
-    /// publishes no Unicode layout data.
+    /// publishes no Unicode layout data. On the main actor because HIToolbox
+    /// asserts that input sources are read on the main thread: a read from a
+    /// seat's actor stops the process.
+    @MainActor
     public static func current() -> KeyboardLayout? {
         cache.withLock { cache in
             guard

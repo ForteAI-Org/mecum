@@ -27,6 +27,7 @@ private final class KeyboardLayoutMenuTarget: NSObject {
 /// This suite is the only thing that reads the layout actually installed, which
 /// is why it says so little about *which* characters it expects: the machine
 /// running it has whatever layout its owner chose.
+@MainActor
 @Suite("Keyboard layout on the running system", .serialized)
 struct KeyboardLayoutHostTests {
 

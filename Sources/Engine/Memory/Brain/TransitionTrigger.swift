@@ -17,8 +17,8 @@ public enum TransitionTrigger: String, Sendable, Codable {
     /// The trigger an action verb produces; a toggle set is a click.
     public init(_ verb: ActionVerb) {
         switch verb {
-            case .click, .doubleClick, .setToggle: self = .click
-            case .rightClick                     : self = .rightClick
+            case .click, .doubleClick, .tripleClick, .setToggle: self = .click
+            case .rightClick                                   : self = .rightClick
         }
     }
 }

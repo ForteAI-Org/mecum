@@ -52,9 +52,13 @@ struct FullScreenTransferTests {
         // the primary Window ID from `geometry`, so a row that wrote anywhere
         // else would confirm a move that never happened.
         sensing.geometry = window
-        placing.onMove = { origin in
-            sensing.geometry = FakeGeometry.reference(
-                frame       : CGRect(origin: origin, size: normalFrame.size),
+        // A move takes the accessibility body with it, as it does on a real window: a return that
+        // reads the body still at its normal frame would take the window as home and not move it.
+        placing.onMove = { [unowned placing] origin in
+            let moved = CGRect(origin: origin, size: normalFrame.size)
+            placing.bodyFrame = moved
+            sensing.geometry  = FakeGeometry.reference(
+                frame       : moved,
                 windowNumber: window.windowNumber
             )
         }

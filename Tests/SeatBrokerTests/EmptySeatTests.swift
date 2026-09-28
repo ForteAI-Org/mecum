@@ -1,6 +1,6 @@
 //
 //  EmptySeatTests.swift
-//  AgentLab
+//  Mecum
 //
 //  Created by Eliomar Alejandro Rodriguez Ferrer on 17/09/2026.
 //
@@ -33,6 +33,14 @@ private func scene(_ count: Int) -> SceneObservation {
 
     await #expect(throws: SeatBrokerError.self) { try await session.observe() }
     await #expect(throws: SeatBrokerError.self) { try await session.execute(.click(element: 1)) }
+}
+
+@Test @MainActor func anEmptySessionLendsNoSeatToTheEngine() {
+    let refusal = #expect(throws: SeatBrokerError.self) { try SeatBroker().openSession().borrowedSeatTarget() }
+    guard case .noAdoptedApplication? = refusal else {
+        Issue.record("an empty session lent a seat, or refused for another reason: \(String(describing: refusal))")
+        return
+    }
 }
 
 @Test func theEmptySeatPromptAsksForAnOpenAndOffersNoSceneToActOn() {

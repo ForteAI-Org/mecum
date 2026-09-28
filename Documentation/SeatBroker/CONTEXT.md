@@ -41,6 +41,21 @@ covered. Scrolling an element into view has no planner any more: `ActionEngine`
 has no scroll verb and this runtime posts a plain scroll through the seat, so a
 scroll role is written when a consumer asks for one.
 
+Talking to a model is not this runtime's job either. The transports live in
+`Sources/ModelTransports` behind `ModelTransport`, which offers one structured
+request (`complete`, returning the provider's raw text and its `ModelUsage`)
+and one streamed conversational turn (`converse`, a stream of text deltas
+closed by a single terminal element). A transport that cannot carry a
+conversation declares so through `streaming` and throws
+`ModelTransportError.streamingUnsupported`, which is what both CLI providers
+do. What stays here is the planner's own vocabulary: `AgentPlanner` builds the
+prompt and the schema, calls `complete`, and decodes the answer itself with
+`PlanSchema.decodePlan`; which schema flavor and which prompt shape a provider
+gets are `PlanSchema.flavor(for:)` and
+`PlannerPrompt.prefersCompactPrompt(_:)`, not properties of the transport. The
+app depends on `ModelTransports` directly, so it can hold a plain conversation
+with a model without acquiring a seat at all.
+
 Brokering a seat is all it does: it names no lease, scheduler, or other
 ownership model of its own. Those responsibilities already have precise owners
 in the driver:
@@ -63,15 +78,56 @@ and view state. It does not duplicate runtime or perception code.
 
 ```mermaid
 flowchart LR
-    Lab[AgentLab SwiftUI] --> Broker[SeatBroker]
+    Lab[Mecum SwiftUI] --> Broker[SeatBroker]
+    Lab -->|conversation, no seat| Transports[ModelTransports]
     Broker -->|ScenePipeline| Perception[MecumPerception]
     Broker --> Driver[MecumDriver]
+    Broker -->|plan| Transports
     Driver --> Seat[SeatHost and AgentSeat]
     Seat -->|frames| Broker
-    Locator[Lab locator targets: unused leftovers, deleted next ticket]
 ```
 
 A semantic click may carry a bounded `count`. The parser accepts `/click N`
 for one click and `/click N C` for `C` complete clicks, where `C` is within
 `InputCommand.maximumClickCount`. The driver remains the sole authority that
 constructs the individual input events and rejects invalid input counts.
+
+## Seat release rule
+
+A worker's `BrokeredAutomationSession` keeps the seat after its turn ends for
+30 seconds without another turn (`BrokeredAutomationSession.idleWindow`), then
+closes on its own. A follow-up inside that window reuses the open session and
+its context with no second `open`, and starting a turn cancels the pending
+close. An entry that starts waiting in `SeatQueue` makes an idle holder close
+at once, and a holder in a turn close as that turn ends. Nothing is released
+inside a turn. Every release is `close()`: the Brain is flushed, the window
+goes back to the person's display, an application the agent launched is quit
+as its provenance says, and the lease is given back, so the worker's row goes
+back to its role. The idle wait is tied to the lease it was started under, so
+one that outlives a close, whether by hand or by the queue, closes nothing.
+
+## After a crash
+
+A process that ends without `applicationShouldTerminate` (a crash, `kill -9`)
+skips every release the app does on Quit. What the next launch reconciles, and
+what it does not, as of 23 September 2026:
+
+- A worker's turn is ended at the next launch, before any turn starts: its
+  execution gets one `executionFailed`, the person's message reads interrupted,
+  the partial reply stays, and nothing is run again
+  (`WorkerTurnRecorder.endTurnsLeftUnfinished`). A turn that ended before its
+  message was updated gets the message its ending implies: completed for
+  `executionCompleted`, interrupted for any other ending.
+- The turn's agent child (`claude -p`, `codex exec`) is reparented to launchd
+  and keeps running until its next write to the pipe the app held, or longer if
+  it ignores `SIGPIPE`. Its pid, start time and executable are recorded when it
+  is spawned, and the next launch sends it `SIGTERM` only when all three still
+  match and its parent is launchd. A child spawned in the instant before that
+  record is written is not known to the next launch.
+- **Known limit.** A window a seat adopted stays where the window server leaves
+  it when the virtual display goes, and the display arrangement `SeatHost`
+  committed for the login session (`.forSession`) is put back only by
+  `SeatHost.stop`. Nothing records the
+  window's original frame or display to disk (`AdoptedWindow.originalFrame` is
+  in memory only), and nothing at launch looks for a window an earlier process
+  took. What the window server does with that window has not been measured.

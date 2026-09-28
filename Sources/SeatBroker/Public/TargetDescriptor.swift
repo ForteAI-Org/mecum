@@ -15,14 +15,27 @@ public struct TargetApp: Sendable, Identifiable, Hashable {
     public let bundleURL: URL?
     public let windows: [TargetWindow]
 
+    /// `CFBundleName`, which `name` hides when the bundle also declares a display name.
+    public let bundleName: String?
+
+    /// `CFBundleShortVersionString`, when the bundle declares one.
+    public let version: String?
+
+    /// When the person last opened it, as Spotlight recorded it; nil when Spotlight has no date.
+    public let lastUsed: Date?
+
     public var isRunning: Bool { pid != nil }
 
-    public init(pid: pid_t?, bundleID: String, name: String, bundleURL: URL?, windows: [TargetWindow]) {
+    public init(pid: pid_t?, bundleID: String, name: String, bundleURL: URL?, windows: [TargetWindow],
+                bundleName: String? = nil, version: String? = nil, lastUsed: Date? = nil) {
         self.pid = pid
         self.bundleID = bundleID
         self.name = name
         self.bundleURL = bundleURL
         self.windows = windows
+        self.bundleName = bundleName
+        self.version = version
+        self.lastUsed = lastUsed
     }
 }
 

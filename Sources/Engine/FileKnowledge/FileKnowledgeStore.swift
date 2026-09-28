@@ -120,7 +120,7 @@ public actor FileKnowledgeStore: KnowledgeStoring {
         flushTask = Task { [flushDelay] in
             try? await Task.sleep(for: flushDelay)
             guard !Task.isCancelled else { return }
-            await self.flushFromTask()
+            self.flushFromTask()
         }
     }
 

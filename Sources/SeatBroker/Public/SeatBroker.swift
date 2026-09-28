@@ -1,6 +1,7 @@
 import AccessibilityFacts
 import AppKit
 import Foundation
+import ModelTransports
 import Perception
 import PixelControlState
 import PixelRegions
@@ -46,7 +47,7 @@ public final class SeatBroker {
         controlState: nil
     )
     private let recorder: RunRecorder
-    private let ledger = LaunchLedger()
+    private let ledger: LaunchLedger
 
     /// The way a consumer gets a seat, and the only way: see `SeatQueue`.
     /// Built here rather than handed in because the queue needs the broker it
@@ -54,8 +55,24 @@ public final class SeatBroker {
     /// consumer that could route around the wait.
     public private(set) lazy var queue = SeatQueue(broker: self, capacity: configuration.seatCapacity)
 
-    public init(configuration: SeatBrokerConfiguration = .init()) {
+    /// The virtual display a new seat is made with. A change closes the parked seats, so the next
+    /// turn that needs the computer gets one of the new size; a seat in use keeps its display until
+    /// it is given back, and is then closed instead of parked for reuse.
+    public var display = SeatDisplay.standard {
+        didSet {
+            guard display != oldValue else { return }
+            Task { await queue.shutdown() }
+        }
+    }
+
+    public convenience init(configuration: SeatBrokerConfiguration = .init()) {
+        self.init(configuration: configuration, ledger: LaunchLedger())
+    }
+
+    /// `ledger` is supplied by the controlled tests, which record provenance and read the quit.
+    init(configuration: SeatBrokerConfiguration, ledger: LaunchLedger) {
         self.configuration = configuration
+        self.ledger        = ledger
         SeatDriver.setResearchOptIn(configuration.allowUnvalidatedBuild)
         self.recorder = RunRecorder(directory: configuration.recordingDirectory)
     }
@@ -74,14 +91,28 @@ public final class SeatBroker {
         SeatDriver.capabilities()
     }
 
-    /// Prompts for every grant that is still missing, and answers whether
-    /// they are all there now. Screen Recording is read once per process, so a
-    /// fresh grant needs an app restart. macOS shows each prompt once: after a
-    /// denial nothing appears again and `openPermissionSettings` is the only
-    /// way left.
+    /// The macOS permissions a worker's seat needs, and which of them this process holds.
+    public func desktopGrants() -> [DesktopGrant] {
+        SeatDriver.grants()
+    }
+
+    /// This Mac's macOS build and whether the ledger lists it.
+    public func buildValidation() -> BuildValidation {
+        SeatDriver.buildValidation()
+    }
+
+    /// Asks for the first grant still missing, one system prompt at a time, and answers whether
+    /// every grant is there. Screen Recording is read once per process, so a fresh grant needs an
+    /// app restart.
     @discardableResult
     public func requestMissingPermissions() -> Bool {
         SeatDriver.requestMissingPermissions()
+    }
+
+    /// Asks for `grant`: its system prompt the first time, its pane of System Settings after that,
+    /// since macOS shows each prompt once per app.
+    public func request(_ grant: DesktopGrant) {
+        SeatDriver.request(grant.kind)
     }
 
     /// Opens the System Settings pane of the first grant the driver is missing.
@@ -99,7 +130,7 @@ public final class SeatBroker {
 
     /// Models the local Ollama server has pulled.
     public nonisolated func ollamaModels(host: String) async throws -> [String] {
-        try await OllamaClient.models(host: host)
+        try await ProviderCatalog.ollamaModels(host: host)
     }
 
     /// nil when the provider is usable now (signed in, key present, server
@@ -118,19 +149,35 @@ public final class SeatBroker {
         TargetEnumerator.targets()
     }
 
+    /// How long a launched application that already shows a window may take to show one the seat
+    /// can take: DaVinci Resolve loads behind its splash screen for longer than the 20 s a first
+    /// window is given.
+    static let startupAllowance: Duration = .seconds(60)
+
     /// Launches an installed application without activating it and waits for
     /// its first on-screen window, so it can be adopted like any other. An app
-    /// that is already running just gets its windows re-read.
+    /// that is already running gets its windows re-read, and is asked for one
+    /// when it has none.
     ///
     /// This is the only place in the kit that starts a process, so it is where
     /// provenance is recorded: an application opened here is the agent's to
     /// quit once it is finished with it. Finding one already running is not
     /// evidence of who started it, so that branch records nothing and the
-    /// ledger answers for it: not the lab's, so not the lab's to quit.
+    /// ledger answers for it: not the lab's, so not the lab's to quit. An application this call
+    /// launched that shows no window in time is quit again before the refusal, since no seat ever
+    /// took a window of it; one found running is left alone.
     public func launch(_ app: TargetApp, timeout: Duration = .seconds(20)) async throws -> TargetApp {
         let pid: pid_t
         if let running = app.pid {
             pid = running
+            // A running application with no window is asked for one, the way a click on its Dock icon
+            // asks, and is left behind: Finder opens a window, most applications a new document.
+            // Without it the wait below could only run out, since the seat never brings it forward.
+            if TargetEnumerator.windows(of: running).isEmpty, let url = app.bundleURL {
+                let configuration = NSWorkspace.OpenConfiguration()
+                configuration.activates = false
+                _ = try? await NSWorkspace.shared.openApplication(at: url, configuration: configuration)
+            }
         } else {
             guard let url = app.bundleURL else {
                 throw SeatBrokerError.driver("\(app.name) is not running and has no bundle to launch.")
@@ -140,16 +187,38 @@ public final class SeatBroker {
             pid = try await NSWorkspace.shared.openApplication(at: url, configuration: configuration).processIdentifier
             ledger.record(.openedByAgent, for: pid)
         }
+        // A launching application can first show a window accessibility does not name, DaVinci
+        // Resolve's splash screen among them, and the seat can only move a window it names: adopting
+        // the splash failed and quit the application it had just opened. So a launched application
+        // is waited for until it shows one the seat can take, for as long as a slow start takes
+        // once something is on screen. A running application is taken as it is.
+        let launched = app.pid == nil
         let deadline = ContinuousClock.now + timeout
-        while ContinuousClock.now < deadline {
-            let windows = TargetEnumerator.windows(of: pid)
-            if !windows.isEmpty {
+        let startingDeadline = ContinuousClock.now + max(timeout, Self.startupAllowance)
+        var shown: [TargetWindow] = []
+        while ContinuousClock.now < (shown.isEmpty ? deadline : startingDeadline) {
+            shown = TargetEnumerator.windows(of: pid)
+            let adoptable = launched
+                ? TargetEnumerator.adoptable(shown, named: TargetEnumerator.accessibleWindowNumbers(of: pid))
+                : shown
+            if !adoptable.isEmpty {
                 return TargetApp(pid: pid, bundleID: app.bundleID, name: app.name,
-                                 bundleURL: app.bundleURL, windows: windows)
+                                 bundleURL: app.bundleURL, windows: adoptable)
             }
             try await Task.sleep(for: .milliseconds(300))
         }
-        throw SeatBrokerError.driver("\(app.name) launched but showed no window within \(timeout.components.seconds) s.")
+        // Only windows the seat cannot name: they are handed on, so the adoption says why.
+        if !shown.isEmpty {
+            return TargetApp(pid: pid, bundleID: app.bundleID, name: app.name,
+                             bundleURL: app.bundleURL, windows: shown)
+        }
+        let wasLaunched = app.pid == nil
+        throw SeatBrokerError.noWindowShown(
+            application: app.name,
+            seconds    : timeout.components.seconds,
+            wasLaunched: wasLaunched,
+            wasQuit    : wasLaunched && ledger.quitUnseated(pid)
+        )
     }
 
     /// A seat with nothing on it, and nothing brought up yet.
@@ -167,7 +236,7 @@ public final class SeatBroker {
     /// on the seat, `open(applicationNamed:)` is the planner's way in, and
     /// `AgentSession.close` takes the display back down.
     func openSession() -> AgentSession {
-        AgentSession(driver: SeatDriver(), ledger: ledger, perception: perception,
+        AgentSession(driver: SeatDriver(display: display), ledger: ledger, perception: perception,
                      recorder: recorder, environment: self)
     }
 }

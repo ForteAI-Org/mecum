@@ -1,4 +1,5 @@
 import Foundation
+import ModelTransports
 
 /// The observe → plan → execute → verify loop. Budgets follow the research
 /// lab: a bounded number of decisions and actions, one driver failure ends
@@ -7,7 +8,11 @@ import Foundation
 @MainActor
 struct AgentPlanner {
     let session: AgentSession
-    let client: any ModelClient
+    /// Which model is answering. The prompt's shape and the schema's flavor
+    /// are the planner's own decisions about a provider, so they are read from
+    /// here rather than asked of the transport.
+    let provider: ModelProvider
+    let transport: any ModelTransport
     var maximumDecisions = 10
     var maximumActions = 24
     var maximumStepsPerPlan = 4
@@ -34,7 +39,7 @@ struct AgentPlanner {
     /// none of it.
     var focusRecoveryWait: Duration = .seconds(2)
     /// The provider knows how slow it is; a local thinking model gets minutes.
-    var requestTimeout: TimeInterval { client.requestTimeout }
+    var requestTimeout: TimeInterval { transport.requestTimeout }
 
     func run(goal: String, emit: @MainActor (AgentRunEvent) -> Void) async throws {
         var history: [String] = []
@@ -52,7 +57,8 @@ struct AgentPlanner {
         var notObserved = 0
         // Applications opened since the last action was executed.
         var opened = 0
-        let schema = try PlanSchema.json(maximumSteps: maximumStepsPerPlan, flavor: client.schemaFlavor)
+        let schema = try PlanSchema.json(maximumSteps: maximumStepsPerPlan,
+                                         flavor: PlanSchema.flavor(for: provider))
         // Read once: every decision's prompt carries it, and an open resolves
         // what is installed again at the moment it opens.
         let applications = ApplicationOpening.catalog(TargetEnumerator.targets())
@@ -208,10 +214,11 @@ struct AgentPlanner {
         let prompt = PlannerPrompt.build(goal: goal, app: session.app?.name, windowTitle: session.target?.title,
                                          observation: observation, history: history, applications: applications,
                                          maximumSteps: min(maximumStepsPerPlan, maximumActions - actions), nudge: nudge,
-                                         compact: client.prefersCompactPrompt)
-        let reply = try await client.plan(prompt: prompt, schema: schema, timeout: requestTimeout)
+                                         compact: PlannerPrompt.prefersCompactPrompt(provider))
+        let reply = try await transport.complete(prompt: prompt, schema: schema, timeout: requestTimeout)
         do {
-            let decision = try PlanSchema.decision(from: reply.plan, observation: observation)
+            let decision = try PlanSchema.decision(from: try PlanSchema.decodePlan(reply.text),
+                                                   observation: observation)
             emit(.planned(decision, usage: reply.usage))
             return decision
         } catch let error as PlanValidationError where nudge == nil {

@@ -473,6 +473,200 @@ struct AppWindowFollowTests {
         #expect(Self.refusals(log).isEmpty, "a menu is somebody else's surface, not a refusal")
     }
 
+    // MARK: A window the application already had open
+
+    /// Where the assigned application's second window stands on the person's
+    /// display when the seat takes the application over. The size is the New
+    /// Project dialog DaVinci Resolve left open after a crash, measured live,
+    /// and it is away from the frame the first window was found at.
+    static let leftOpenFrame = CGRect(x: 300, y: 200, width: 520, height: 197)
+
+    /// A seat handed an application that already had a second window open
+    /// outside the virtual display, with `beside` standing next to it.
+    ///
+    /// Every one of them is readable before the first adoption, so the handover
+    /// reading carries them: the assignment nucleus records the application's
+    /// own window as a pre-existing member, and a following seat has all of
+    /// them in its baseline. That second fact is why the follower, which only
+    /// takes windows that appear later, is not the one that can take it in.
+    static func seatWithWindowLeftOpen(
+        sensing  : FakeSensing,
+        placing  : FakePlacing,
+        following: Bool,
+        marker   : Int64,
+        beside   : [WindowReference] = []
+    ) async throws -> (seat: AgentSeat, adopted: AdoptedWindow, leftOpen: WindowReference) {
+
+        let leftOpen = reference(secondWindowNumber, frame: leftOpenFrame)
+        for window in [leftOpen] + beside {
+            sensing.additionalWindows[window.windowNumber] = window
+            placing.bodyFrames[window.windowNumber]        = window.frame
+        }
+
+        let seat   : AgentSeat
+        let adopted: AdoptedWindow
+        if following {
+            (seat, adopted) = try await followingSeat(
+                sensing : sensing,
+                placing : placing,
+                marker  : marker,
+                baseline: ([leftOpen] + beside).map { surface($0) }
+            )
+        } else {
+            seat    = makeSeat(sensing: sensing, placing: placing, marker: marker)
+            adopted = try await seat.adopt(FakeGeometry.userSeatWindow, platform: AppKitPlatform())
+        }
+
+        // Linked only now, so the first adoption's own move leaves it alone.
+        // The body moves with the window, which is what the return reads first.
+        placing.onMove = { origin in
+            let moved = reference(
+                secondWindowNumber,
+                frame: CGRect(origin: origin, size: leftOpenFrame.size)
+            )
+            sensing.additionalWindows[secondWindowNumber] = moved
+            placing.bodyFrames[secondWindowNumber]        = moved.frame
+            sensing.surfaces = sensing.surfaces?.map { current in
+                current.reference.windowNumber == secondWindowNumber ? surface(moved) : current
+            }
+        }
+        return (seat, adopted, leftOpen)
+    }
+
+    @Test(
+        "a window the application already had open outside the seat is taken in at the first observation",
+        arguments: [true, false]
+    )
+    func aWindowLeftOpenIsTakenInAtTheFirstObservation(following: Bool) async throws {
+        let sensing = FakeSensing()
+        let placing = FakePlacing()
+        let (seat, first, leftOpen) = try await Self.seatWithWindowLeftOpen(
+            sensing  : sensing,
+            placing  : placing,
+            following: following,
+            marker   : following ? 7_040 : 7_041
+        )
+        let log = MultiWindowTests.EventLog(seat)
+        defer { log.stop() }
+
+        let member = try #require(seat.assignmentKit.inventory.surfaces[leftOpen.windowNumber])
+        #expect(member.origin == .preexisting,
+                "the handover reading makes it a window the seat was entrusted with")
+        let movesBefore = placing.moves.count
+
+        let delivery = try await observe(seat)
+
+        #expect(delivery.reference.recipient.windowNumber == first.id)
+        #expect(seat.currentTarget?.id == first.id,
+                "the window taken in is held, and the target stays where it was")
+        let taken = try #require(seat.adoptedWindows.first { $0.id == leftOpen.windowNumber })
+        #expect(sensing.virtualDisplayBounds.contains(taken.reference.frame))
+        #expect(placing.moves.count == movesBefore + 1, "one move, the one that took it in")
+        #expect(taken.originalFrame == leftOpen.frame, "and it still owes the frame it was found at")
+
+        await log.drain()
+        #expect(Self.refusals(log).isEmpty)
+        #expect(Self.heldWithoutTarget(log).map(\.0) == [leftOpen.windowNumber])
+
+        let outcome = await seat.release(taken)
+        #expect(outcome == .returned)
+        #expect(sensing.additionalWindows[leftOpen.windowNumber]?.frame == leftOpen.frame,
+                "a window the person already had open goes back where it was")
+    }
+
+    @Test("a window of another process left open beside it is still left alone")
+    func aStrangersWindowLeftOpenIsLeftAlone() async throws {
+        let sensing = FakeSensing()
+        let placing = FakePlacing()
+
+        // Another process behind the driven PID, and another application.
+        let reused = Self.reference(
+            Self.thirdWindowNumber,
+            frame   : CGRect(x: 40, y: 500, width: 400, height: 300),
+            lifetime: 9
+        )
+        let stranger = Self.reference(
+            780,
+            frame    : CGRect(x: 600, y: 420, width: 400, height: 300),
+            processID: FakeGeometry.userPID
+        )
+        let (seat, first, leftOpen) = try await Self.seatWithWindowLeftOpen(
+            sensing  : sensing,
+            placing  : placing,
+            following: true,
+            marker   : 7_042,
+            beside   : [reused, stranger]
+        )
+        let movesBefore = placing.moves.count
+
+        _ = try await observe(seat)
+
+        #expect(seat.assignmentKit.inventory.surfaces[reused.windowNumber] == nil)
+        #expect(seat.assignmentKit.inventory.surfaces[stranger.windowNumber] == nil)
+        #expect(seat.adoptedWindows.map(\.id).sorted() == [first.id, leftOpen.windowNumber])
+        #expect(placing.moves.count == movesBefore + 1, "only the application's own window is moved")
+        #expect(sensing.additionalWindows[reused.windowNumber] == reused)
+        #expect(sensing.additionalWindows[stranger.windowNumber] == stranger)
+    }
+
+    @Test("a window left open that cannot be moved is refused, and the seat stays suspended")
+    func aWindowLeftOpenThatCannotBeMovedIsRefused() async throws {
+        let sensing = FakeSensing()
+        let placing = FakePlacing()
+        let (seat, _, leftOpen) = try await Self.seatWithWindowLeftOpen(
+            sensing  : sensing,
+            placing  : placing,
+            following: true,
+            marker   : 7_043
+        )
+        let log = MultiWindowTests.EventLog(seat)
+        defer { log.stop() }
+
+        placing.frameError = NoWindowElement.refused
+        let movesBefore = placing.moves.count
+        seat.refreshTargetReadings()
+        let outcome = await seat.observe()
+
+        guard case .failure(.suspended) = outcome else {
+            Issue.record("the observation was not refused: \(outcome)")
+            return
+        }
+        #expect(placing.moves.count == movesBefore, "nothing is written for a surface that cannot take it")
+        #expect(!seat.adoptedWindows.map(\.id).contains(leftOpen.windowNumber))
+        await log.drain()
+        #expect(Self.refusals(log).map(\.0) == [leftOpen.windowNumber])
+        #expect(Self.refusals(log).first?.1 == .notMovable)
+    }
+
+    @Test("a window left open is not moved while the person's own physical intent is recent")
+    func aWindowLeftOpenWaitsForThePerson() async throws {
+        let sensing = FakeSensing()
+        let placing = FakePlacing()
+        let (seat, _, leftOpen) = try await Self.seatWithWindowLeftOpen(
+            sensing  : sensing,
+            placing  : placing,
+            following: true,
+            marker   : 7_044
+        )
+
+        sensing.userMayBeSwitchingApplications = true
+        let movesBefore = placing.moves.count
+        seat.refreshTargetReadings()
+        let outcome = await seat.observe()
+
+        guard case .failure(.suspended) = outcome else {
+            Issue.record("the observation was not refused: \(outcome)")
+            return
+        }
+        #expect(placing.moves.count == movesBefore, "the follower's own stand-down holds this path too")
+        #expect(!seat.adoptedWindows.map(\.id).contains(leftOpen.windowNumber))
+
+        sensing.userMayBeSwitchingApplications = false
+        _ = try await observe(seat)
+        #expect(seat.adoptedWindows.map(\.id).contains(leftOpen.windowNumber),
+                "and it is taken in once the person's intent is no longer recent")
+    }
+
     // MARK: The explicit outcomes
 
     @Test("a surface with no accessibility element is reported as not movable")

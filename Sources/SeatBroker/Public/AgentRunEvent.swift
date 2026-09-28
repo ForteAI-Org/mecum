@@ -1,4 +1,5 @@
 import Foundation
+import ModelTransports
 
 /// One planned step as the model returned it, after local validation.
 public struct PlanStep: Sendable, Hashable {

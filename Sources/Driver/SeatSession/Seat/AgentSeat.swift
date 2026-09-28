@@ -258,6 +258,7 @@ public final class AgentSeat {
     private var windowInventory = AppWindowInventory()
     private var windowFollowTask: Task<Void, Never>?
     private var windowFollowAgain = false
+    private var windowFollowUntil: ContinuousClock.Instant?
     private var windowFollowPassInFlight = false
 
     /// Most recent focus episode, including a failed verification. Readiness
@@ -423,10 +424,11 @@ public final class AgentSeat {
     ) async throws -> InputReceipt {
 
         let needsLayout: Bool = if case .character = shortcut.key { true } else { false }
+        let layout = needsLayout ? await KeyboardLayoutReader.current() : nil
         let resolved = try ShortcutResolution.resolve(
             shortcut,
             phase    : phase,
-            layout   : needsLayout ? KeyboardLayoutReader.current() : nil,
+            layout   : layout,
             owner    : turn.correlationID,
             processID: await keyboardRecipientProcessID(of: observation)
                 ?? observation.recipient.processID
@@ -1958,6 +1960,7 @@ public final class AgentSeat {
             )
         }
         let previous = state
+        var commandPosted = false
         actionInFlight = true
         transition(to: .acting, reason: .requested)
         defer {
@@ -1968,7 +1971,9 @@ public final class AgentSeat {
             focusRecovery?.dropClosureExpectation()
             // A window opened by the Command that has just finished is looked
             // for here, at the boundary, rather than a beat later.
-            requestWindowFollow()
+            requestWindowFollow(
+                through: commandPosted ? resolved.windowArrivalHorizon(after: routed) : .zero
+            )
         }
 
         do {
@@ -2010,6 +2015,7 @@ public final class AgentSeat {
                     }
                 }
             )
+            commandPosted = true
             // The Command is complete, so the observation it was decided on is
             // no longer current. It is not a fault: the reason says so.
             noteObservationConsumed()
@@ -2923,11 +2929,17 @@ public final class AgentSeat {
     /// the longest measured lead on the third pass.
     private static let windowFollowInterval = Duration.milliseconds(120)
 
+    /// A delayed Qt child has already appeared on the physical display by
+    /// the time the ordinary follow pass sees it. The bounded post-click tail
+    /// samples more often without changing the idle or other-family cadence.
+    private static let anticipatedWindowFollowInterval = Duration.milliseconds(60)
+
     /// The longest burst one wake-up may cause: ten passes at 120 ms covers
     /// 1,2 s, which is four times the longest lead measured. The cap is what
     /// makes a wake-up that arrives every beat cost a bounded amount of work
     /// instead of an unbounded one.
     private static let maximumWindowFollowPasses = 10
+    private static let maximumAnticipatedWindowFollowPasses = 20
 
     /// Starts following the windows of the applications this seat drives.
     /// Installed only through a host configured for it; a seat that was never
@@ -2951,6 +2963,7 @@ public final class AgentSeat {
         windowFollowTask?.cancel()
         windowFollowTask  = nil
         windowFollowAgain = false
+        windowFollowUntil = nil
         windowWatch?.stop()
         windowWatch     = nil
         windowInventory = AppWindowInventory()
@@ -2984,9 +2997,15 @@ public final class AgentSeat {
     /// while a burst is running sets a flag the burst reads, so however many
     /// wake-ups arrive there is at most one task, and it ends after a bounded
     /// number of passes whatever keeps arriving.
-    private func requestWindowFollow() {
+    private func requestWindowFollow(through horizon: Duration = .zero) {
 
         guard windowWatch != nil, !isTearingDown, state != .failed else { return }
+        if horizon > .zero {
+            let until = ContinuousClock.now.advanced(by: horizon)
+            if windowFollowUntil.map({ $0 < until }) ?? true {
+                windowFollowUntil = until
+            }
+        }
         guard windowFollowTask == nil else {
             windowFollowAgain = true
             return
@@ -2994,20 +3013,33 @@ public final class AgentSeat {
 
         windowFollowTask = Task { @MainActor [weak self] in
             var passes = 0
+            var maximumPasses = Self.maximumWindowFollowPasses
             while let self, !Task.isCancelled {
                 self.windowFollowAgain = false
                 await self.runWindowFollowPass()
                 passes += 1
 
-                guard passes < Self.maximumWindowFollowPasses, !Task.isCancelled,
+                let anticipating = self.windowFollowUntil.map {
+                    ContinuousClock.now < $0
+                } == true
+                if anticipating {
+                    maximumPasses = Self.maximumAnticipatedWindowFollowPasses
+                }
+
+                guard passes < maximumPasses, !Task.isCancelled,
                       self.windowWatch != nil, !self.isTearingDown,
                       self.windowFollowAgain || self.windowInventory.hasPendingCandidate
+                          || anticipating
                 else { break }
 
-                await EventLoopWait.sleep(Self.windowFollowInterval)
+                await EventLoopWait.sleep(
+                    anticipating ? Self.anticipatedWindowFollowInterval
+                                 : Self.windowFollowInterval
+                )
             }
             guard let self, !Task.isCancelled else { return }
             self.windowFollowTask = nil
+            self.windowFollowUntil = nil
         }
     }
 
@@ -3149,6 +3181,79 @@ public final class AgentSeat {
         else { return }
         await runWindowFollowPass()
         _ = await waitForWindowFollowPass(until: deadlineNanoseconds)
+    }
+
+    /// Takes into the seat the windows the assigned application already had
+    /// open outside it when it was handed over, once the assignment nucleus
+    /// has planned their containment and its unqualified effector refused it.
+    ///
+    /// ## Why the follower is not the one
+    ///
+    /// An explicitly assigned application is entrusted whole, so the handover
+    /// reading records every window it had as a pre-existing member and plans
+    /// to move each one that stands outside. The follower was built for the
+    /// opposite reading of the same moment: a window already there is in its
+    /// baseline and it never takes it. Between the two nobody moved the window,
+    /// its containment deadline ran out, and the first observation suspended
+    /// the seat. Measured on DaVinci Resolve with a New Project dialog left
+    /// open after a crash, the same dialog the follower adopts without a word
+    /// when it opens during a session.
+    ///
+    /// ## What it takes, and through what
+    ///
+    /// A member of the assigned instance itself, recorded at the handover, that
+    /// two agreeing readings put outside the seat, whose move the nucleus
+    /// refused as `adapterNotQualified`, that is not drawn inside a host and
+    /// that the seat does not hold yet. Nothing else: a window of another
+    /// process or of a helper and a surface the nucleus does not count as a
+    /// member are left where they are, and a window born during the
+    /// assignment is the follower's.
+    ///
+    /// It moves nothing the follower would not move at this moment: the pass's
+    /// own scope has to be full, so the person's recent physical intent, a
+    /// focus restore in flight or a transfer already running hold it back the
+    /// same way. The one difference is that it runs without a window watch,
+    /// because the assignment reader found these members either way and the
+    /// seat cannot be observed until they are contained.
+    ///
+    /// It goes through `transferDetectedWindow`, the follower's own entry to
+    /// the detected-window transaction, so every refusal of that path stands:
+    /// fullscreen, not movable, too large to shrink, attempts exhausted. The
+    /// record it makes owes the frame the window was found at, which is what
+    /// the release gives back to a window the person already had open.
+    func takeInRefusedPreexistingMembers(until deadlineNanoseconds: UInt64) async {
+
+        guard let assignment = assignmentKit.lifecycle.current,
+              let blocks     = selectionKit.lastAssignmentStatus?.blocks
+        else { return }
+
+        let refused = blocks.compactMap { block -> Int? in
+            guard case .effectRefused(let number, .adapterNotQualified) = block else { return nil }
+            return number
+        }
+        for number in refused {
+            // Read again before each one: a transfer awaits, and the person
+            // may have acted in the meantime.
+            guard !Task.isCancelled,
+                  DispatchTime.now().uptimeNanoseconds < deadlineNanoseconds,
+                  case .full = windowFollowScope(requiringWatch: false),
+                  state.acceptsCommands || containmentOnlyFollowWait
+            else { return }
+            guard let member = assignmentKit.inventory.surfaces[number],
+                  member.identity.process == assignment.instance,
+                  member.origin == .preexisting,
+                  member.presence == .outsideSeat,
+                  member.isVerified,
+                  !member.isAttachedToHost,
+                  session[number] == nil
+            else { continue }
+
+            Self.log.info("""
+                window \(number, privacy: .public) was already open outside the seat when the \
+                application was handed over and its direct move was refused: taking it in
+                """)
+            await transferDetectedWindow(member.reference, level: nil)
+        }
     }
 
     /// Waits for the one notification or observation pass that owns the
@@ -3757,27 +3862,42 @@ public final class AgentSeat {
     /// must be staged before containment can be confirmed. Missing transitional
     /// readings do not bypass that step when the thumbnail becomes readable.
     ///
-    /// The budget is the two seconds twenty readings at the 100 ms cadence were
-    /// meant to be, written as the absolute deadline it always was. Twenty laps
-    /// are two seconds only while every wait costs what it asks for: on a
-    /// delayed main actor they are however long the actor took, and the limit
-    /// the failure quotes has to be the one the caller waited.
+    /// An application may refuse the raise and still arrive: the move alone
+    /// takes a stashed window out of the strip once it reaches the Virtual
+    /// Display, where Stage Manager does not reach. Measured on 27.0 with
+    /// Calculator, whose window lists `AXRaise` and answers -25205 to it in
+    /// every state, and with Chess as the control: both were at full size on
+    /// the display 75 ms after the move, with no raise and no activation. So a
+    /// refused raise keeps waiting, and is what is thrown only when nothing
+    /// confirms the window by the deadline. A thumbnail cannot be confirmed in
+    /// its place: the strip is on the physical display, outside `bounds`.
+    ///
+    /// The budget is an absolute two-second deadline. Four early 20 ms readings
+    /// let a cooperative child finish the same two-reading proof without
+    /// spending 200 ms in fixed waits after its AX move. A slower window then
+    /// uses the original 100 ms cadence until the same deadline; the shorter
+    /// opening does not weaken the identity, geometry or stability checks.
     private func confirmPlacement(
         of window     : WindowReference,
         expectedOrigin: CGPoint,
         within bounds : CGRect
     ) async throws -> WindowReference {
 
-        var previous: WindowReference?
-        var last    : WindowReference?
+        var previous    : WindowReference?
+        var last        : WindowReference?
+        var refusedRaise: DisplayFailure?
         var didAttemptStage = false
+        var readings = 0
 
         let deadline = DispatchTime.now().uptimeNanoseconds
             + Self.placementConfirmationNanoseconds
 
         while DispatchTime.now().uptimeNanoseconds < deadline {
             try checkAdoptionMayContinue()
-            await EventLoopWait.step(.milliseconds(100))
+            await EventLoopWait.step(
+                readings < 4 ? .milliseconds(20) : .milliseconds(100)
+            )
+            readings += 1
             try checkAdoptionMayContinue()
 
             guard let reading = sensing.windowGeometry(of: window.windowNumber) else {
@@ -3801,11 +3921,16 @@ public final class AgentSeat {
                 let requested = window.replacingFrame(
                     CGRect(origin: expectedOrigin, size: window.frame.size)
                 )
-                _ = try await placing.stage(
-                    requested,
-                    expectedSize: window.frame.size,
-                    within      : bounds
-                )
+                do {
+                    _ = try await placing.stage(
+                        requested,
+                        expectedSize: window.frame.size,
+                        within      : bounds
+                    )
+                } catch let failure as DisplayFailure {
+                    guard case .raiseFailed = failure else { throw failure }
+                    refusedRaise = failure
+                }
                 try checkAdoptionMayContinue()
                 previous = nil
                 continue
@@ -3820,7 +3945,7 @@ public final class AgentSeat {
             previous = reading
         }
 
-        throw DisplayFailure.placementNotConfirmed(
+        throw refusedRaise ?? DisplayFailure.placementNotConfirmed(
             windowNumber: window.windowNumber,
             lastFrame   : last?.frame
         )
@@ -3977,11 +4102,23 @@ public final class AgentSeat {
         let bounds = sensing.virtualDisplayBounds
 
         var previousMatched = false
-        for _ in 0..<3 {
+        // Stage Manager can keep publishing a full-size transition surface
+        // after AX has already put a stashed window's body home. Give that
+        // transition time to become the physical thumbnail, without writing
+        // AXPosition again and restarting the animation on every reading.
+        let attempts = window.originalServerFrame == nil ? 8 : 3
+        for _ in 0..<attempts {
             guard Self.mayContinue(until: limit) else { return .refused }
             guard sensing.physicalTopologyIsUnchanged else { return .refused }
             do {
-                if !previousMatched { try restoreOriginalGeometry(of: window) }
+                if !previousMatched {
+                    let body = (try? placing.frame(of: window.reference)) ?? nil
+                    if body.map({ VirtualWindowPlacementCheck.framesMatch(
+                        $0, window.originalFrame
+                    ) }) != true {
+                        try restoreOriginalGeometry(of: window)
+                    }
+                }
             } catch {
                 // The Window ID is momentarily not associable with an element,
                 // which happens while a display transition is in flight. It is
@@ -4193,8 +4330,11 @@ public final class AgentSeat {
         }
     }
 
-    private func windowFollowScope() -> WindowFollowScope {
-        if windowWatch == nil                     { return .standDown(reason: "there is no window watch") }
+    /// `requiringWatch` is false only for `takeInRefusedPreexistingMembers`,
+    /// whose members the assignment reader found whether or not the seat
+    /// follows: every other stand-down still holds it back.
+    private func windowFollowScope(requiringWatch: Bool = true) -> WindowFollowScope {
+        if requiringWatch, windowWatch == nil     { return .standDown(reason: "there is no window watch") }
         if isTearingDown                          { return .standDown(reason: "the seat is tearing down") }
         if actionInFlight                         { return .standDown(reason: "a Command is in flight") }
         if adoptionInFlight                       { return .standDown(reason: "an adoption is in flight") }

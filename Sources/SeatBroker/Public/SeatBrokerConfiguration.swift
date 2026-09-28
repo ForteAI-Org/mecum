@@ -21,7 +21,7 @@ public struct SeatBrokerConfiguration: Sendable {
     public init(allowUnvalidatedBuild: Bool = false, perceptionStoreDirectory: URL? = nil,
                 recordingDirectory: URL? = nil, seatCapacity: Int = 1) {
         let support = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("AgentLab", isDirectory: true)
+            .appendingPathComponent("Mecum", isDirectory: true)
         self.allowUnvalidatedBuild = allowUnvalidatedBuild
         self.perceptionStoreDirectory = perceptionStoreDirectory
             ?? support.appendingPathComponent("Perception", isDirectory: true)

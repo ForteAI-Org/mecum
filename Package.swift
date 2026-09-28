@@ -21,7 +21,7 @@
 // pure types are nonisolated by default, facilities are main actor by default.
 import PackageDescription
 
-let deployment: SupportedPlatform = .macOS(.v26)
+let deployment: SupportedPlatform = .macOS(.v15)
 
 // Pure types and role protocols: nonisolated by default.
 let pure: [SwiftSetting] = [
@@ -199,6 +199,10 @@ let package = Package(
                       "Memory", "FileKnowledge", "LiveScenes"]
         ),
         .library(name: "SeatBroker", targets: ["SeatBroker"]),
+        .library(name: "ModelTransports", targets: ["ModelTransports"]),
+        .executable(name: "mecum", targets: ["mecum"]),
+        // The tool bridge a worker's agent launches, which the app bundles in place of the whole command line.
+        .executable(name: "mecum-bridge", targets: ["mecum-bridge"]),
     ],
     targets: [
         
@@ -234,13 +238,20 @@ let package = Package(
         // Read-only reader of another application's window.
         driver("TargetReader", ["SeatCore", "WindowPlacement"]),
 
+        // MARK: ModelTransports
+        // How a model is talked to: one structured request, one streamed
+        // conversation, and the providers behind both. No seat, no scene.
+        broker("ModelTransports", []),
+
         // MARK: SeatBroker
         broker(
             "SeatBroker",
             ["SeatCore", "PrivateSymbols", "VirtualScreens", "WindowPlacement", "SeatInput",
              "CursorGuard", "SeatCapture", "SeatSession", "TargetReader", "PerceptionCore",
              "Perception", "VisionText", "PixelRegions", "PixelSections", "PixelControlState",
-             "AccessibilityFacts", "EngineCore", "IncrementalText"]
+             "AccessibilityFacts", "EngineCore", "IncrementalText", "ModelTransports", "SeatDriving",
+             // A worker's tools reach the desktop through the broker's own conformer of their session role.
+             "AutomationRuntime", "Engine", "Memory"]
         ),
 
         // MARK: Driver tools
@@ -264,15 +275,17 @@ let package = Package(
         driverTests("SeatInput", ["SeatInput", "SeatCore", "PrivateSymbols"]),
         driverTests("CursorGuard", ["CursorGuard", "SeatCore"]),
         driverTests("SeatCapture", ["SeatCapture", "SeatCore"]),
-        driverTests("SeatSession", ["SeatSession", "SeatCore", "CursorGuard", "SeatInput"]),
+        driverTests("SeatSession", ["SeatSession", "SeatCore", "CursorGuard", "SeatInput", "SeatDriving", "EngineCore"]),
         driverTests("TargetReader", ["TargetReader"]),
 
         // MARK: Broker tests
         brokerTests(
             "SeatBroker",
             ["SeatBroker", "PerceptionCore", "SeatCore", "SeatCapture",
-             "SeatSession", "SeatInput", "TargetReader", "EngineCore"]
+             "SeatSession", "SeatInput", "TargetReader", "EngineCore", "ModelTransports",
+             "SeatDriving", "AutomationRuntime", "Engine", "AutomationMCP", "LocalMCP"]
         ),
+        brokerTests("ModelTransports", ["ModelTransports"]),
 
         // Host (TCC, real display) and Live (fixture and reader) tiers, gated by
         // AGENTSEAT_HOST_TESTS=1 and AGENTSEAT_LIVE_TESTS=1 and run serialized.
@@ -367,6 +380,13 @@ let package = Package(
             path: "Tools/Engine/mecum",
             swiftSettings: facility
         ),
+        // `mecum mcp-bridge` alone, for the app: it forwards an agent's MCP messages to the app's host.
+        .executableTarget(
+            name: "mecum-bridge",
+            dependencies: [.target(name: "LocalMCP")],
+            path: "Tools/Engine/mecum-bridge",
+            swiftSettings: facility
+        ),
 
         // MARK: Perception tests
         perceptionTests("PerceptionCore", ["PerceptionCore"]),
@@ -386,7 +406,7 @@ let package = Package(
         // MARK: Engine tests
         .testTarget(name: "ChatTests", dependencies: ["ChatCore", "CLIProviders", "FileConversations", "LocalMCP",
                                                     "AutomationMCP", "AutomationRuntime", "EngineCore", "PerceptionCore"],
-                    path: "Tests/Chat", swiftSettings: facility),
+                    path: "Tests/Chat", resources: [.copy("Fixtures")], swiftSettings: facility),
         .testTarget(
             name: "MecumCLITests",
             dependencies: ["mecum", "EngineCore", "PerceptionCore", "ChatCore", "AutomationRuntime", "Perception"],

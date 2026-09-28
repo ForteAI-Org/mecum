@@ -193,27 +193,3 @@ func readsAnEmptyCountOnANonClickStepAsNoCount(count: Int?) throws {
                           application: "Photos")
     #expect(try PlanSchema.decision(from: planned, observation: scene).application == nil)
 }
-
-@Test func decodesCodexEventStream() throws {
-    let plan = #"{"status":"plan","reason":"r","steps":[{"target":"1:click","text":null,"reason":"s"}]}"#
-    let lines = [
-        #"{"type":"turn.started"}"#,
-        #"{"type":"item.completed","item":{"type":"reasoning","text":"..."}}"#,
-        #"{"type":"item.completed","item":{"type":"agent_message","text":\#(String(reflecting: plan))}}"#,
-        #"{"type":"turn.completed"}"#,
-    ].joined(separator: "\n")
-    let data = try CodexCLIClient.decodeStructuredOutput(output: Data(lines.utf8), exitStatus: 0)
-    let raw = try JSONDecoder().decode(RawPlan.self, from: data)
-    #expect(raw.steps.first?.target == "1:click")
-}
-
-@Test func refusesToolUseInCodexStream() {
-    let lines = [
-        #"{"type":"turn.started"}"#,
-        #"{"type":"item.completed","item":{"type":"command_execution","command":"ls"}}"#,
-        #"{"type":"turn.completed"}"#,
-    ].joined(separator: "\n")
-    #expect(throws: CodexClientError.self) {
-        try CodexCLIClient.decodeStructuredOutput(output: Data(lines.utf8), exitStatus: 0)
-    }
-}

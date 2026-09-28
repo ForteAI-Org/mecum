@@ -25,9 +25,9 @@ import SeatCore
 ///   arrives faster than a hand could produce it;
 /// - **one escape hatch**, `decorate`, for a family nobody has measured yet.
 ///
-/// It is public so a consumer can add Flutter, Qt or a game engine without
-/// touching the kit. The two implementations the kit ships are the two that
-/// were measured; a platform a consumer writes has no live test here.
+/// It is public so a consumer can add Flutter or a game engine without
+/// touching the kit. The shipped Qt policy uses the same route and has a
+/// target-specific Live suite; its qualification scope is in the Qt guide.
 nonisolated public protocol InputPlatform: Sendable {
 
     /// Whether this Command needs the target's own AppKit state prepared
@@ -63,8 +63,13 @@ nonisolated public protocol InputPlatform: Sendable {
     /// repeat, and a target that accelerates while a key is held reads it.
     var keyRepeatPacing: KeyRepeatPacing { get }
 
+    /// How long a window follower should keep checking after a posted Command.
+    /// Some targets create a native child after the Command and its first
+    /// window-server scan have already completed.
+    func windowArrivalHorizon(after command: InputCommand) -> Duration
+
     /// A last field on an event, for a target family that needs one. The
-    /// default does nothing, and both platforms the kit ships keep it that way:
+    /// default does nothing, and all shipped platforms keep it that way:
     /// the Chromium stamping this hook was kept for turned out to change no
     /// outcome.
     func decorate(_ event: CGEvent, for command: InputCommand)
@@ -72,14 +77,15 @@ nonisolated public protocol InputPlatform: Sendable {
 
 nonisolated extension InputPlatform {
 
-    /// Both target families applied the preparation within 20 ms in every
+    /// AppKit and Chromium applied the preparation within 20 ms in every
     /// measured case, at 20, 40 and 80 ms; the default is the smallest that
-    /// worked plus half again.
+    /// worked plus half again. Qt inherits this conservative default.
     public func preparationSettle(for command: InputCommand) -> Duration {
         .milliseconds(30)
     }
 
-    /// The pacing measured on the fixture and on Chromium renderers.
+    /// The pacing measured on the fixture and on Chromium renderers. Qt uses
+    /// it for the measured text-selection drag.
     public var dragPacing: DragPacing { .realistic }
 
     /// Stamped on the events and nothing else, which is what both shipped
@@ -90,6 +96,10 @@ nonisolated extension InputPlatform {
     /// measurement of either target family: no row has driven a held key yet,
     /// and ticket A3's sweep is what replaces it with one.
     public var keyRepeatPacing: KeyRepeatPacing { .systemDefault }
+
+    /// An immediate pass at the Command boundary is enough unless a family
+    /// has measured a delayed child window.
+    public func windowArrivalHorizon(after command: InputCommand) -> Duration { .zero }
 
     /// Nothing, which is what both shipped platforms need.
     public func decorate(_ event: CGEvent, for command: InputCommand) {}

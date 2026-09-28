@@ -5,6 +5,7 @@
 //  Created by Ronaldo Zefi on 18/09/2026.
 //
 
+import Carbon.HIToolbox
 import CoreGraphics
 import EngineCore
 import Foundation
@@ -18,6 +19,8 @@ import Foundation
 /// the application reads two selections. Typed text goes one character per down and up pair with
 /// empty modifier flags, because a synthetic event inherits the system's modifier state and a
 /// chord left held turns "routing" into shortcuts. Every chord releases its modifiers on the way out.
+/// An insertion is the whole string on one pair; a letter's chord asks the installed layout for its
+/// key; a drag follows the path the Driver measured.
 public struct HIDActuator: Actuating {
 
     public init() {}
@@ -52,24 +55,87 @@ public struct HIDActuator: Actuating {
                 event.post(tap: .cghidEventTap)
             case .key(let code, let modifiers):
                 try pressKey(code, modifiers: modifiers, source: source)
+            case .character(let character, let modifiers):
+                guard let code = await Self.virtualKey(producing: character, holdingCommand: modifiers.contains(.command))
+                else { throw HIDActuationFailure.noKeyProduces(character) }
+                try pressKey(code, modifiers: modifiers, source: source)
             case .type(let text):
                 for character in text {
-                    let units = Array(String(character).utf16)
-                    for isDown in [true, false] {
-                        guard let event = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: isDown) else {
-                            throw HIDActuationFailure.eventCreationFailed
-                        }
-                        event.flags = []
-                        units.withUnsafeBufferPointer { buffer in
-                            event.keyboardSetUnicodeString(
-                                stringLength: buffer.count, unicodeString: buffer.baseAddress
-                            )
-                        }
-                        event.post(tap: .cghidEventTap)
-                    }
+                    try postText(String(character), source: source)
                     try await Task.sleep(for: .milliseconds(9))
                 }
+            case .insert(let text):
+                try postText(text, source: source)
+            case .drag(let start, let end):
+                try drag(from: start, to: end, source: source)
         }
+    }
+
+    /// One key down and up whose Unicode payload is `text`, with empty flags.
+    private func postText(_ text: String, source: CGEventSource) throws {
+        let units = Array(text.utf16)
+        for isDown in [true, false] {
+            guard let event = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: isDown) else {
+                throw HIDActuationFailure.eventCreationFailed
+            }
+            event.flags = []
+            units.withUnsafeBufferPointer { buffer in
+                event.keyboardSetUnicodeString(stringLength: buffer.count, unicodeString: buffer.baseAddress)
+            }
+            event.post(tap: .cghidEventTap)
+        }
+    }
+
+    /// The path the Driver measured a drag to need: a move to the start, the press, eight dragged steps, the
+    /// end held for one more step, the release, paced 24 ms, 16 ms and 12 ms a step. Paced by blocking, like a
+    /// chord, so no cancellation can land between the press and the release.
+    private func drag(from start: CGPoint, to end: CGPoint, source: CGEventSource) throws {
+        func post(_ type: CGEventType, at point: CGPoint) throws {
+            guard let event = CGEvent(
+                mouseEventSource: source, mouseType: type, mouseCursorPosition: point, mouseButton: .left
+            ) else { throw HIDActuationFailure.eventCreationFailed }
+            event.post(tap: .cghidEventTap)
+        }
+        try post(.mouseMoved, at: start)
+        usleep(24_000)
+        try post(.leftMouseDown, at: start)
+        // Once the press is out, the release follows whatever fails after it, so no button is left held.
+        defer { try? post(.leftMouseUp, at: end) }
+        usleep(16_000)
+        for step in 1...8 {
+            let progress = CGFloat(step) / 8
+            try post(.leftMouseDragged, at: CGPoint(x: start.x + (end.x - start.x) * progress,
+                                                    y: start.y + (end.y - start.y) * progress))
+            usleep(12_000)
+        }
+        try post(.leftMouseDragged, at: end)
+        usleep(12_000)
+    }
+
+    /// The virtual key the installed layout produces `character` from, asked of the layout the way a menu
+    /// matches a key equivalent and never assumed from US positions: Command can select another
+    /// arrangement, so it is asked with Command held when the chord holds it. On the main actor because
+    /// HIToolbox asserts that input sources are read on the main thread.
+    @MainActor
+    private static func virtualKey(producing character: Character, holdingCommand: Bool) -> UInt16? {
+        guard let source = TISCopyCurrentKeyboardLayoutInputSource()?.takeRetainedValue(),
+              let raw = TISGetInputSourceProperty(source, kTISPropertyUnicodeKeyLayoutData) else { return nil }
+        let data = Unmanaged<CFData>.fromOpaque(raw).takeUnretainedValue()
+        guard let bytes = CFDataGetBytePtr(data) else { return nil }
+        let wanted = Array(String(character).lowercased().utf16)
+        let layout = UnsafeRawPointer(bytes).assumingMemoryBound(to: UCKeyboardLayout.self)
+        for code in UInt16(0)..<128 {
+            var deadKeyState: UInt32 = 0
+            var length = 0
+            var produced = [UniChar](repeating: 0, count: 8)
+            let status = UCKeyTranslate(
+                layout, code, UInt16(kUCKeyActionDown), holdingCommand ? UInt32(cmdKey >> 8) : 0,
+                UInt32(LMGetKbdType()), OptionBits(kUCKeyTranslateNoDeadKeysMask), &deadKeyState,
+                produced.count, &length, &produced
+            )
+            if status == noErr, Array(produced.prefix(length)) == wanted { return code }
+        }
+        return nil
     }
 
     private func pressKey(_ code: UInt16, modifiers: KeyModifiers, source: CGEventSource) throws {
@@ -107,8 +173,10 @@ public struct HIDActuator: Actuating {
     }
 }
 
-/// HIDActuationFailure is the two ways the HID system can refuse a synthetic event.
+/// HIDActuationFailure is the ways a synthetic event can fail to be made: the HID system refuses a
+/// source or an event, or the installed layout has no key for a character.
 public enum HIDActuationFailure: Error, Sendable, Equatable {
     case noEventSource
     case eventCreationFailed
+    case noKeyProduces(Character)
 }

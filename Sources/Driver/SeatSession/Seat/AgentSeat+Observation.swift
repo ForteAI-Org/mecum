@@ -976,6 +976,9 @@ extension AgentSeat {
         // inventory still reaches the ordinary fail-closed gate.
         if selectionNeedsConfirmingReading() || selectedSurfaceNeedsOwnership() {
             await settleWindowFollowingForObservation(until: deadlineNanoseconds)
+            // A window already open at the handover is in the follower's
+            // baseline, so the seat takes that one in through the same path.
+            await takeInRefusedPreexistingMembers(until: deadlineNanoseconds)
             await Task.yield()
             guard !Task.isCancelled else {
                 return .failure(.captureFailed(reason: String(describing: CancellationError())))
@@ -1105,9 +1108,12 @@ extension AgentSeat {
     }
 
     /// True when one more reading can establish evidence that deliberately
-    /// requires two agreeing observations, or when the owned follower can
-    /// replace the assignment nucleus's refused direct move. Other permanent
-    /// qualification gaps and spent budgets reach the caller's normal refusal.
+    /// requires two agreeing observations, or when the seat's own detected
+    /// window transaction can replace the assignment nucleus's refused direct
+    /// move: the follower's for a window that appeared later, and
+    /// `takeInRefusedPreexistingMembers` for one already open at the
+    /// handover. Other permanent qualification gaps and spent budgets reach the
+    /// caller's normal refusal.
     private func selectionNeedsConfirmingReading() -> Bool {
 
         guard case .suspended(_, let causes) = selectionKit.operability() else { return false }

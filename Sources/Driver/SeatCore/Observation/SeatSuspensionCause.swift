@@ -85,7 +85,7 @@ nonisolated public enum SeatSuspensionCause: Sendable, Equatable {
             case .selectedSurfaceNotVerified(let surface):
                 self = .selectedSurfaceNotVerified(surface)
             case .containmentNotVerified(let blocks):
-                self = .containmentNotVerified(blocks: blocks.map { String(describing: $0) })
+                self = .containmentNotVerified(blocks: blocks.map(\.clause))
             case .observationMissing:
                 self = .observationMissing
             case .observationSuperseded(let observed, let current):
@@ -94,6 +94,79 @@ nonisolated public enum SeatSuspensionCause: Sendable, Equatable {
                 self = .observationIdentityMismatch(observed: observed, selected: selected)
             case .observationGeometryStale(let surface):
                 self = .observationGeometryStale(surface)
+        }
+    }
+}
+
+nonisolated private extension ContainmentBlock {
+
+    /// The block as a clause a person can act on. It used to be the case and
+    /// its payload as Swift prints them, which reached the agent as
+    /// "surfaceOutsideSeat(windowNumber: 38030)" for a dialog left open on the
+    /// person's screen, and the agent read that as a missing capability.
+    var clause: String {
+        switch self {
+            case .notAssigned:
+                "no application is assigned"
+            case .readingUnavailable(let reason):
+                "the application's windows could not be read (\(reason))"
+            case .inventoryNotQualified(let reason):
+                "the reading may not list every window of the application (\(reason))"
+            case .attributionUncertain(let number, let doubt):
+                "window \(number) may belong to the application and could not be attributed: "
+                    + doubt.clause
+            case .surfaceUnverified(let number):
+                "window \(number) was seen once and no second reading confirmed it yet"
+            case .surfaceOutsideSeat(let number):
+                "window \(number) of the application is open on the person's screen, outside the "
+                    + "seat, and closing it there clears this"
+            case .surfaceAbsent(let number):
+                "window \(number) was not in the last reading"
+            case .attemptSpent(let number):
+                "the one attempt to move window \(number) into the seat has been used"
+            case .effectRefused(let number, let refusal):
+                "window \(number) could not be moved into the seat: " + refusal.clause
+            case .destinationUnusable(let number):
+                "there is no place inside the seat for window \(number)"
+            case .surfaceDeadlineExpired(let number, let elapsed):
+                "window \(number) was not contained within \(Self.seconds(elapsed)) s"
+            case .handoverDeadlineExpired(let elapsed):
+                "the application's windows were not all contained within \(Self.seconds(elapsed)) s "
+                    + "of the handover"
+            case .surfaceStalled(let number, let total, let qualified):
+                "window \(number) has waited \(Self.seconds(total)) s, of which only "
+                    + "\(Self.seconds(qualified)) s could be read"
+            case .handoverStalled(let total, let qualified):
+                "the handover has waited \(Self.seconds(total)) s, of which only "
+                    + "\(Self.seconds(qualified)) s could be read"
+        }
+    }
+
+    /// Nanoseconds as seconds to one decimal.
+    static func seconds(_ nanoseconds: UInt64) -> Double {
+        (Double(nanoseconds) / 100_000_000).rounded() / 10
+    }
+}
+
+nonisolated private extension AttributionDoubt {
+
+    var clause: String {
+        switch self {
+            case .identityNotAttested          : "it has no attested window identity"
+            case .relationNotVerifiable        : "its relation rests on evidence that cannot carry it"
+            case .sharedServiceSurfaceNotNamed : "it belongs to a shared service that did not name it"
+        }
+    }
+}
+
+nonisolated private extension EffectRefusal {
+
+    var clause: String {
+        switch self {
+            case .adapterNotQualified          : "no way to move it is qualified on this build"
+            case .surfaceNotAttributed         : "it is not attributed to the application"
+            case .destinationUnusable(let why) : "there is no place for it (\(why))"
+            case .identityNotAttested          : "its identity is not attested"
         }
     }
 }

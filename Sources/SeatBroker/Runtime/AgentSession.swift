@@ -1,11 +1,13 @@
 import AppKit
 import EngineCore
 import Foundation
+import ModelTransports
 import os
 import Perception
 import PerceptionCore
 import SeatCapture
 import SeatCore
+import SeatDriving
 import SeatSession
 
 /// One background display and one seat, used by one application at a time.
@@ -40,6 +42,9 @@ public final class AgentSession {
     public var isUsingApp: Bool { held != nil }
 
     private let driver: SeatDriver
+
+    /// The virtual display the session's seat is made with.
+    var display: SeatDisplay { driver.display }
     private let ledger: LaunchLedger
     /// The runtime that made this session. It is here for one reason: opening
     /// an application is launching one, and `SeatBroker.launch` is the
@@ -124,8 +129,14 @@ public final class AgentSession {
     /// `use` is reached the previous application has been finished with, and a
     /// failure there leaves the seat empty on purpose: nothing is put back
     /// silently.
+    ///
+    /// `title` names the window to take instead of the application's main
+    /// one, compared without case; a title that names no window of it, or
+    /// several, refuses before anything is released. An application this call
+    /// launched and could not hand to `use` is quit again before the refusal,
+    /// and the refusal says so; one that was already running is left alone.
     @discardableResult
-    public func open(applicationNamed name: String) async throws -> TargetApp {
+    public func open(applicationNamed name: String, windowTitled title: String? = nil) async throws -> TargetApp {
         guard isOpen else { throw SeatBrokerError.sessionClosed }
         let wanted = try ApplicationOpening.resolve(name, in: TargetEnumerator.targets())
         // Re-opening the held application would finish with it first, which
@@ -136,11 +147,24 @@ public final class AgentSession {
                     + "act on the scene you were given instead of opening it again.")
         }
         let opened = try await environment.launch(wanted)
-        // The application's own window and not the first one listed: a sheet
-        // is listed like any other window, and taking the first adopted one.
-        guard let window = TargetEnumerator.mainWindow(among: TargetEnumerator.candidates(of: opened))
-        else {
-            throw SeatBrokerError.driver("\(opened.name) is open but has no window to adopt.")
+        let window: TargetWindow
+        if let title {
+            let named = opened.windows.filter { $0.title.caseInsensitiveCompare(title) == .orderedSame }
+            guard named.count == 1, let only = named.first else {
+                throw SeatBrokerError.driver("Expected one window of \(opened.name) named '\(title)'. Open: "
+                    + opened.windows.map { $0.title.isEmpty ? "untitled" : $0.title }.joined(separator: ", ")
+                    + ". " + unseated(opened, wasLaunched: wanted.pid == nil))
+            }
+            window = only
+        } else {
+            // The application's own window and not the first one listed: a sheet
+            // is listed like any other window, and taking the first adopted one.
+            guard let main = TargetEnumerator.mainWindow(among: TargetEnumerator.candidates(of: opened))
+            else {
+                throw SeatBrokerError.driver("\(opened.name) is open but has no window to adopt. "
+                    + unseated(opened, wasLaunched: wanted.pid == nil))
+            }
+            window = main
         }
         do {
             try await use(window, of: opened)
@@ -148,6 +172,27 @@ public final class AgentSession {
             throw ApplicationOpening.notSeated(opened, cause: error)
         }
         return opened
+    }
+
+    /// Quits `app` when this open launched it, since no seat took a window of it, and says what
+    /// became of it. An application found running is never quit here, whatever its provenance.
+    private func unseated(_ app: TargetApp, wasLaunched: Bool) -> String {
+        let wasQuit = wasLaunched && app.pid.map { ledger.quitUnseated($0) } == true
+        return ApplicationOpening.unseated(app.name, wasLaunched: wasLaunched, wasQuit: wasQuit)
+    }
+
+    /// Records `pid` as the held application with the ledger's provenance, as `use` does before its
+    /// adoption, but adopts nothing. Only for the controlled tests, which have no display to adopt on.
+    func holdWithoutAdopting(_ pid: pid_t, name: String) {
+        held = HeldApp(pid: pid, name: name, provenance: ledger.provenance(of: pid))
+    }
+
+    /// Finishes with the held application as its provenance says and keeps
+    /// the seat and its display, so a session given back to the queue is
+    /// parked warm for the next entry. The sentence is `finishWithHeldApp`'s.
+    func finishUsingApp() async -> String? {
+        guard isOpen else { return nil }
+        return await finishWithHeldApp()
     }
 
     /// Gives the held window back and, when the agent opened the application
@@ -162,7 +207,8 @@ public final class AgentSession {
     /// adoption. `driver.release` returning is not enough on its own: it
     /// answers with an outcome, and two of the four say the window is still on
     /// the background display, so `hasUnrestoredWindow` is what is read here.
-    /// This is the only place that terminates anything.
+    /// It is the only place that terminates an application a seat held; one
+    /// that never reached a seat is quit by `LaunchLedger.quitUnseated`.
     ///
     /// Between the two comes the handback of the assigned application, which is
     /// the same rule one step out: the kit binds the assignment to the first
@@ -180,7 +226,7 @@ public final class AgentSession {
         let finish = Self.finishing(held.provenance.finish(windowRestored: !driver.hasUnrestoredWindow),
                                     handback: handback, app: held.name)
         if finish.quits {
-            NSRunningApplication(processIdentifier: held.pid)?.terminate()
+            ledger.terminate(held.pid)
             ledger.forget(held.pid)
         }
         return finish.sentence
@@ -215,6 +261,21 @@ public final class AgentSession {
         }
         return (quits: outcome == .quit && handback == nil,
                 sentence: sentences.isEmpty ? nil : sentences.joined(separator: " "))
+    }
+
+    /// A `SeatTarget` over this session's seat, so the Engine's roles perceive and act on the
+    /// window adopted here while this session stays its owner.
+    ///
+    /// The target borrows: it never starts or stops the display and never releases a window, so
+    /// `use`, `open` and `close` stay this session's. It is valid until the next `use`, `open` or
+    /// `close`: the driver revokes it before releasing or adopting anything, and a revoked target
+    /// refuses as `notAdopted` instead of observing the next window. Observations are not shared: one taken
+    /// by `observe` or `execute` supersedes the target's, and the reverse holds too, so each side
+    /// observes again before acting. Throws `sessionClosed` or `noAdoptedApplication`.
+    package func borrowedSeatTarget() throws -> SeatTarget {
+        guard isOpen else { throw SeatBrokerError.sessionClosed }
+        guard isUsingApp else { throw SeatBrokerError.noAdoptedApplication }
+        return try driver.borrowedTarget()
     }
 
     /// The adopted window's frame on the background display, and the empty
@@ -450,8 +511,9 @@ public final class AgentSession {
                 var reason = ""
                 var usage = RunUsage()
                 do {
-                    let client = Self.makeClient(selection, settings: settings)
-                    try await AgentPlanner(session: self, client: client).run(goal: goal) { event in
+                    let transport = selection.transport(settings: settings)
+                    try await AgentPlanner(session: self, provider: selection.provider,
+                                           transport: transport).run(goal: goal) { event in
                         switch event {
                         case .thinking(let decision, _): decisions = decision
                         case .executed(let report): reports.append(report)
@@ -524,16 +586,6 @@ public final class AgentSession {
         record.outputTokens = usage.output
         record.modelSeconds = usage.seconds > 0 ? usage.seconds : nil
         recorder.append(record)
-    }
-
-    private static func makeClient(_ selection: ModelSelection, settings: ProviderSettings) -> any ModelClient {
-        switch selection.provider {
-        case .codex: CodexCLIClient(model: selection.model, effort: selection.effort)
-        case .claudeCode: ClaudeCLIClient(model: selection.model, effort: selection.effort)
-        case .anthropic: AnthropicClient(model: selection.model, effort: selection.effort, apiKey: settings.anthropicAPIKey)
-        case .gemini: GeminiClient(model: selection.model, effort: selection.effort, apiKey: settings.geminiAPIKey)
-        case .ollama: OllamaClient(model: selection.model, effort: selection.effort, settings: settings)
-        }
     }
 
     /// Closes the seat's input gate at once, which is the first thing a panic

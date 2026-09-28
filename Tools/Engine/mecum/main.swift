@@ -16,8 +16,8 @@ import LocalMCP
 //
 //   mecum windows <app>
 //   mecum scene   <app> [--json]
-//   mecum act     <app> <target> [--verb click|double_click|right_click|set_toggle] [--value on|off]
-//                                [--section <name>] [--dry-run] [--allow-destructive]
+//   mecum act     <app> <target> [--verb click|double_click|triple_click|right_click|set_toggle]
+//                                [--value on|off] [--section <name>] [--dry-run] [--allow-destructive]
 //   mecum memory  <app>
 //
 // <app> is a bundle id or an application name; --knowledge <dir> overrides where memory lives;

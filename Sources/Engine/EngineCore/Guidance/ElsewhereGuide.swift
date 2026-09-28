@@ -38,18 +38,18 @@ public enum ElsewhereGuide {
         let has = Set(after.map(\.row.number))
         if let new = after.first(where: { !had.contains($0.row.number) }) {
             if isPopup(new) {
-                return Elsewhere(changed: true, sentence: "Elsewhere a pop-up menu opened — the click did land; read "
+                return Elsewhere(changed: true, sentence: "Elsewhere a pop-up menu opened: the click did land; read "
                     + "the menu in the scene below (or Escape it).")
             }
-            return Elsewhere(changed: true, sentence: "Elsewhere a NEW window \(name(new)) appeared — the effect "
+            return Elsewhere(changed: true, sentence: "Elsewhere a NEW window \(name(new)) appeared: the effect "
                 + "landed THERE; describe_scene reads it.")
         }
         if let gone = before.first(where: { !has.contains($0.row.number) }) {
             if isPopup(gone) {
-                return Elsewhere(changed: true, sentence: "Elsewhere a pop-up menu closed — the click dismissed it "
+                return Elsewhere(changed: true, sentence: "Elsewhere a pop-up menu closed: the click dismissed it "
                     + "rather than selecting in this window.")
             }
-            return Elsewhere(changed: true, sentence: "Elsewhere the window \(name(gone)) closed — that was the "
+            return Elsewhere(changed: true, sentence: "Elsewhere the window \(name(gone)) closed: that was the "
                 + "effect.")
         }
         for previous in before {
@@ -57,13 +57,13 @@ public enum ElsewhereGuide {
             let was = (previous.row.title ?? "").trimmingCharacters(in: .whitespaces)
             let now = (current.row.title ?? "").trimmingCharacters(in: .whitespaces)
             if was != now, !now.isEmpty {
-                return Elsewhere(changed: true, sentence: "Elsewhere the window is now titled \"\(now)\" — that was "
+                return Elsewhere(changed: true, sentence: "Elsewhere the window is now titled \"\(now)\": that was "
                     + "the effect.")
             }
         }
         return Elsewhere(
             changed : false,
-            sentence: "Nothing else in \(app) changed either — no window of it opened, closed or retitled; "
+            sentence: "Nothing else in \(app) changed either: no window of it opened, closed or retitled; "
                 + "if the effect was meant for ANOTHER app verify there, otherwise this was a dead click, not a slow "
                     + "one."
         )

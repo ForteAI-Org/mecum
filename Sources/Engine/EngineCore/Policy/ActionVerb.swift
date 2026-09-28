@@ -13,6 +13,8 @@ public enum ActionVerb: String, Sendable, Codable, CaseIterable {
 
     case click
     case doubleClick = "double_click"
+    /// Three presses as one train: selects a line or a paragraph of text.
+    case tripleClick = "triple_click"
     case rightClick  = "right_click"
     /// Reach a desired state on a stateful control, idempotently: no click when already there.
     case setToggle   = "set_toggle"
@@ -22,6 +24,7 @@ public enum ActionVerb: String, Sendable, Codable, CaseIterable {
         switch self {
             case .click      : "clicked"
             case .doubleClick: "double-clicked"
+            case .tripleClick: "triple-clicked"
             case .rightClick : "right-clicked"
             case .setToggle  : "set"
         }

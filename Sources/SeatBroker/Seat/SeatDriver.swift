@@ -6,9 +6,11 @@ import PrivateSymbols
 import ScreenCaptureKit
 import SeatCapture
 import SeatCore
+import SeatDriving
 import SeatInput
 import SeatSession
 import TargetReader
+import VirtualScreens
 import WindowPlacement
 
 /// The one wrapper around the seat driver: virtual display, adopted window,
@@ -29,13 +31,31 @@ final class SeatDriver {
     /// from so far.
     private static let log = Logger(subsystem: "dev.forte.AgentSeatKit", category: "Lab")
 
-    private let host = SeatHost(configuration: SeatHostConfiguration(
-        followsNewWindows: true,
-        restoresUserFocus: true
-    ))
+    /// The virtual display this driver's seat is made with, fixed for its life.
+    let display: SeatDisplay
+
+    private let host: SeatHost
+
+    init(display: SeatDisplay = .standard) {
+        self.display = display
+        host = SeatHost(configuration: SeatHostConfiguration(
+            display          : VirtualDisplayConfiguration(
+                pixelWidth : UInt32(display.pixelWidth),
+                pixelHeight: UInt32(display.pixelHeight),
+                refreshRate: display.refreshRate == 120 ? .high : .standard
+            ),
+            followsNewWindows: true,
+            restoresUserFocus: true
+        ))
+    }
     private var seat: AgentSeat?
     private(set) var window: AdoptedWindow?
     private let preview = PreviewStreamController()
+
+    /// Every target `borrowedTarget` lent since the last revocation. They are
+    /// revoked before this driver adopts or releases anything, so no borrower
+    /// can observe a window it was not lent: see `revokeBorrows`.
+    private var lent: [SeatTarget] = []
 
     /// The two subscriptions to the event channel, one per stream, for as long
     /// as the host is up.
@@ -166,27 +186,70 @@ final class SeatDriver {
         return CapabilityReport(entries: entries)
     }
 
-    /// Prompts for every grant that is still missing. macOS shows each of these
-    /// prompts once per app: after a denial `request` answers false and never
-    /// asks again, and the person has to be sent to System Settings instead,
-    /// which is `openPermissionSettings`.
+    /// Each grant the seat needs, in the order System Settings lists them, and whether it is held.
+    static func grants() -> [DesktopGrant] {
+        [
+            ("Accessibility", PermissionKind.accessibility),
+            ("Keyboard and Mouse Control", .postEvent),
+            ("Screen Recording", .screenRecording),
+        ].map { name, kind in
+            DesktopGrant(
+                name     : name,
+                isGranted: Permissions.preflight(kind),
+                kind     : kind
+            )
+        }
+    }
+
+    /// This Mac's build, validated when the bundled ledger has an entry for it.
+    static func buildValidation() -> BuildValidation {
+        let identity = BuildIdentity.current
+        let ledger   = try? Ledger.bundled()
+        return BuildValidation(
+            build         : identity.osVersion,
+            productVersion: identity.productVersion,
+            isValidated   : ledger?.entry(for: identity) != nil
+        )
+    }
+
+    /// The grants in the order they are asked for.
+    private static let grantOrder: [PermissionKind] = [.accessibility, .postEvent, .screenRecording]
+
+    /// Asks for the first grant still missing, and only that one, and answers whether every grant
+    /// is there. Asking for all three at once raised three system prompts together and macOS showed
+    /// one of them: the others were lost, and a person was left without Screen Recording and no way
+    /// to tell. The next call asks for the next grant.
     @discardableResult
     static func requestMissingPermissions() -> Bool {
-        var granted = true
-        for kind in [PermissionKind.accessibility, .postEvent, .screenRecording]
-        where !Permissions.preflight(kind) {
-            if !Permissions.request(kind) { granted = false }
+        guard let kind = Permissions.firstMissing(of: grantOrder) else { return true }
+        request(kind)
+        return false
+    }
+
+    /// Asks for one grant: its system prompt the first time, and its pane of System Settings after
+    /// that. macOS shows each prompt once per app, so a request after the first would show nothing,
+    /// and the pane is where the person can still turn it on.
+    static func request(_ kind: PermissionKind) {
+        let key = "mecum.permission.prompted.\(kind.rawValue)"
+        guard !UserDefaults.standard.bool(forKey: key) else {
+            openSettings(for: kind)
+            return
         }
-        return granted
+        UserDefaults.standard.set(true, forKey: key)
+        Permissions.request(kind)
     }
 
     /// Opens the Privacy pane of the first grant the driver is missing. False
     /// when every grant is there, so a caller can leave the button out.
     @discardableResult
     static func openPermissionSettings() -> Bool {
-        guard let kind = Permissions.firstMissing(
-            of: [.accessibility, .postEvent, .screenRecording]
-        ) else { return false }
+        guard let kind = Permissions.firstMissing(of: grantOrder) else { return false }
+        return openSettings(for: kind)
+    }
+
+    /// Opens the Privacy pane of System Settings where `kind` is turned on.
+    @discardableResult
+    static func openSettings(for kind: PermissionKind) -> Bool {
         // Post Event lives in the Accessibility pane, next to the grant that
         // lets an app control the computer.
         let pane = switch kind {
@@ -239,6 +302,7 @@ final class SeatDriver {
             throw SeatBrokerError.driver(
                 "The seat is still holding a window; release it before adopting another.")
         }
+        await revokeBorrows()
         guard let server = WindowServerProbe.geometry(of: target.windowNumber),
               server.identity != nil, server.processID == target.pid
         else { throw SeatBrokerError.windowNotAttested(windowNumber: target.windowNumber) }
@@ -466,6 +530,38 @@ final class SeatDriver {
         }
     }
 
+    /// A `SeatTarget` that borrows this driver's host and seat, so the Engine's roles act on the
+    /// window adopted here. This driver stays the owner: the target never starts or stops the host
+    /// and never releases a window, and it is valid only while the current adoption lasts: the
+    /// next `adopt`, `release` or `stop` revokes it.
+    ///
+    /// Each call makes a new target with an observation of its own. The seat keeps one outstanding
+    /// observation, so `observe` here or on another borrow supersedes it and its next Command is
+    /// refused before any event. Every observation the borrow takes moves the preview, as one taken
+    /// by `observe` does, so the monitor shows the dialog the engine reads. Throws `sessionClosed`
+    /// while there is no seat or no window.
+    func borrowedTarget() throws -> SeatTarget {
+        guard let seat, window != nil else { throw SeatBrokerError.sessionClosed }
+        let target = SeatTarget(
+            borrowing: host,
+            seat     : seat
+        ) { [weak self] delivery in
+            self?.preview.follow(delivery)
+        }
+        lent.append(target)
+        return target
+    }
+
+    /// Ends every borrow lent since the last revocation. A revoked target has
+    /// no seat, so it refuses as `notAdopted` rather than observing: a session
+    /// parked warm and handed to the next worker must not let an earlier
+    /// borrower read that worker's window as its own. Idempotent.
+    private func revokeBorrows() async {
+        let revoked = lent
+        lent = []
+        for target in revoked { await target.stop() }
+    }
+
     func attach(_ layer: MonitorLayer) { preview.attach(layer) }
     func detach(_ layer: MonitorLayer) { preview.detach(layer) }
 
@@ -531,7 +627,8 @@ final class SeatDriver {
         let outcome = try await mapped {
             try await seat.withContextMenu(openedAt: location, observation: observation, turn: turn) { interaction in
                 note = await Self.choose(item, in: interaction, openedFrom: parent)
-                Self.log.info("contextual menu, chose: \(note, privacy: .public)")
+                // The note quotes the menu's own titles, which are the app's content (§15.5).
+                Self.log.info("contextual menu, chose: \(note, privacy: .private)")
             }
         }
         return MenuChoice(
@@ -825,6 +922,7 @@ final class SeatDriver {
     /// single leftover window kept the assignment bound and stopped the person
     /// moving on to a second application.
     func release() async {
+        await revokeBorrows()
         await preview.stop()
         self.window = nil
         // Kept, not discarded, and one per window: "release returned" and "the

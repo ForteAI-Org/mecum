@@ -349,4 +349,4 @@ pending singletons, replaced by the store actor's own state.
 | `LocatorCore/KnowledgeStore.swift` (+ `KnowledgeMemo`, `KnowledgePending`, `AllowlistStore`) | `Memory/Storage/KnowledgeStoring.swift` (the role), `FileKnowledge/{FileKnowledgeStore,FileAllowlistStore}.swift` |
 | `LocatorCore/DescriptorStore.make{Encoder,Decoder}` | `Memory/Knowledge/KnowledgeCoding.swift` |
 | `locator-mcp/Server.swift` transition recording after an act | `Memory/Seams/BrainMemory.swift` |
-| AgentLab `SeatInputBackend`, `AgentSession.captureForLocator` (the Lab's join) | `Integration/SeatDriving/*` |
+| Mecum `SeatInputBackend`, `AgentSession.captureForLocator` (the Lab's join) | `Integration/SeatDriving/*` |

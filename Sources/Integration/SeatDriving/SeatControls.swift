@@ -32,4 +32,9 @@ public struct SeatControls: ControlPressing {
     public func toggleState(at point: CGPoint, in processID: pid_t) async -> ControlState? {
         nil
     }
+
+    /// Focus is the application's own answer and names no place, so it holds wherever the window is.
+    public func focusedFieldValue(in processID: pid_t) async -> String? {
+        await accessibility.focusedFieldValue(in: processID)
+    }
 }

@@ -1,6 +1,6 @@
 //
 //  SeatQueue.swift
-//  AgentLab
+//  Mecum
 //
 //  Created by Eliomar Alejandro Rodriguez Ferrer on 22/09/2026.
 //
@@ -59,7 +59,8 @@ public final class SeatQueue {
     /// an entry that has finished is gone from here.
     public struct Entry: Identifiable, Sendable, Equatable {
         public let id: UUID
-        /// The worker's name, as the consumer calls it.
+        /// The consumer's name for the entry, which is not always for a person to read: a worker
+        /// waits under its id, and the lab under "Mecum".
         public let label: String
         public internal(set) var state: State
         /// When it joined the queue, so a list can say how long it has waited.
@@ -153,8 +154,18 @@ public final class SeatQueue {
 
         // `admitNext` marks the entry acting before it resumes, so reaching here
         // means the slot is already this entry's.
-        let session = warm.popLast() ?? broker.openSession()
+        let session = await takeWarm() ?? broker.openSession()
         return SeatLease(id: id, session: session, queue: self)
+    }
+
+    /// A parked seat made with the display the broker makes now. One made with another display,
+    /// parked before the display was changed or given back after, is closed rather than handed on.
+    private func takeWarm() async -> AgentSession? {
+        while let session = warm.popLast() {
+            if session.display == broker.display { return session }
+            _ = await session.close()
+        }
+        return nil
     }
 
     /// Gives up a place in the queue. It affects a waiting entry, which leaves

@@ -27,6 +27,10 @@ public final class SeatTarget {
     private let host: SeatHost
     private var seat: AgentSeat?
     private var adopted: AdoptedWindow?
+    /// True when another owner started `host` and `seat` and keeps their lifecycle.
+    private let isBorrowed: Bool
+    /// Told of every observation taken through a borrow, so the owner can follow the window read here.
+    private let observed: (@MainActor (SeatObservationDelivery) -> Void)?
 
     /// The observation the last Frame was delivered with, and whether a Command already consumed it.
     private var delivery: SeatObservationDelivery?
@@ -39,10 +43,35 @@ public final class SeatTarget {
 
     public init(configuration: SeatHostConfiguration = SeatHostConfiguration(restoresUserFocus: true)) {
         host = SeatHost(configuration: configuration)
+        isBorrowed = false
+        observed   = nil
+    }
+
+    /// Wraps a host and a seat another owner started, so the Engine's roles act on that owner's seat.
+    ///
+    /// The target borrows both and owns neither. `start()` refuses, because the host is already up
+    /// and bringing it up is the owner's; `stop()` ends the borrow and touches neither, because
+    /// releasing a window or taking the display down here would leave the owner holding a seat it
+    /// no longer has. The owner keeps adoption, release and teardown, and must outlive every use.
+    ///
+    /// The observation kept here is this target's own, and the seat keeps one outstanding
+    /// observation: one the owner takes afterwards supersedes it, so the next Command from here is
+    /// refused before any event and never redirected. `observed` hears every observation taken
+    /// here, so the owner's live picture shows the window the engine reads and not the one it adopted.
+    package init(
+        borrowing host: SeatHost,
+        seat          : AgentSeat,
+        observed      : (@MainActor (SeatObservationDelivery) -> Void)? = nil
+    ) {
+        self.host     = host
+        self.seat     = seat
+        self.observed = observed
+        isBorrowed    = true
     }
 
     /// Brings up the virtual display and the fence, atomically, and makes the seat.
     public func start() async throws {
+        guard !isBorrowed else { throw SeatDrivingFailure.borrowedLifecycle }
         try await host.start()
         seat = try host.makeSeat()
     }
@@ -85,7 +114,7 @@ public final class SeatTarget {
     /// admitted under, kept here so the gesture that follows a scene is posted under the very
     /// picture that scene was read from. ScreenCaptureKit sometimes answers a one-shot with no
     /// buffer right after a window moved, so an unavailable observation is retried before it is an
-    /// error.
+    /// error. The error is the seat's own `ObservationUnavailable`, so the consumer can word it.
     ///
     /// Which window is observed is the seat's own choice and no longer this layer's: the seat
     /// follows the application through a dialog's closure and selects the surviving surface, which
@@ -97,7 +126,7 @@ public final class SeatTarget {
         let delivered = try await Self.retrying {
             switch await seat.observe() {
                 case .success(let delivery): return delivery
-                case .failure(let reason)  : throw SeatDrivingFailure.notObservable(String(describing: reason))
+                case .failure(let reason)  : throw reason
             }
         }
         delivery           = delivered
@@ -106,6 +135,7 @@ public final class SeatTarget {
         lastCapturedWindow = seat.adoptedWindows.first {
             $0.reference.identity == delivered.reference.recipient
         }
+        observed?(delivered)
         return delivered
     }
 
@@ -134,7 +164,8 @@ public final class SeatTarget {
     /// One still of the whole virtual display: the only capture that holds both the window and a
     /// pop-up floating beside it, because a window filter captures exactly one window.
     public func displayStill() async throws -> SeatFrame {
-        guard let displayID = host.displayID else { throw SeatDrivingFailure.notAdopted }
+        // A stopped borrow has no seat and must not read the owner's display, which may show another window.
+        guard seat != nil, let displayID = host.displayID else { throw SeatDrivingFailure.notAdopted }
         return try await Self.retrying {
             try await SeatCaptureStream.still(of: .display(displayID), timeout: .seconds(5))
         }
@@ -146,9 +177,10 @@ public final class SeatTarget {
         return WindowServerProbe.geometry(of: window.id)?.frame ?? window.reference.frame
     }
 
-    /// Returns the window to the person's displays and takes the virtual display down.
+    /// Returns the window to the person's displays and takes the virtual display down. A borrowed
+    /// target only forgets its seat and its observation: the host and the seat are left as they are.
     public func stop() async {
-        if let seat, let adopted {
+        if !isBorrowed, let seat, let adopted {
             for companion in seat.adoptedWindows where companion.id != adopted.id {
                 _ = await seat.release(companion, .returnToUserSeat)
             }
@@ -160,7 +192,7 @@ public final class SeatTarget {
         deliverySpent = false
         lastCapturedWindow = nil
         lastWindowGeometry = nil
-        _ = await host.stop()
+        if !isBorrowed { _ = await host.stop() }
     }
 
     private static func retrying<T>(_ body: () async throws -> T) async throws -> T {
