@@ -53,6 +53,9 @@ struct ComposerPopupPresenter<Popup: View>: ViewModifier {
 
     @State private var monitor: Any?
 
+    /// A view in the composer's background, whose window is the one a click must land in to close the popup.
+    @State private var marker = NSView()
+
     @Environment(\.accessibilityReduceMotion)
     private var reducesMotion
 
@@ -63,6 +66,7 @@ struct ComposerPopupPresenter<Popup: View>: ViewModifier {
     func body(content: Content) -> some View {
         content
             .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { composer = $0 }
+            .background(Marker(view: marker))
             .overlay(alignment: .top) {
                 // A frame with no height on the composer's top edge, the popup on its bottom: the
                 // popup grows upward from above the bar, and its size changes are laid out, so animated.
@@ -137,12 +141,12 @@ struct ComposerPopupPresenter<Popup: View>: ViewModifier {
 
     // MARK: Closing
 
-    /// Closes on Escape, when it may, and on a click in the window that lands outside both the
-    /// anchor and the popup; the click still reaches what it landed on.
+    /// Closes on Escape, when it may, and on a click in the composer's window that lands outside
+    /// both the anchor and the popup; the click still reaches what it landed on. The window is the
+    /// marker's at the time of the click, as the composer's window need not be key when the popup opens.
     private func watchOutside() {
         guard monitor == nil else { return }
 
-        let window = NSApp.keyWindow
         monitor = NSEvent.addLocalMonitorForEvents(matching: [.leftMouseDown, .rightMouseDown, .keyDown]) { event in
             if event.type == .keyDown {
                 guard closesOnEscape, event.keyCode == 53 else { return event }
@@ -150,7 +154,8 @@ struct ComposerPopupPresenter<Popup: View>: ViewModifier {
                 return nil
             }
 
-            guard event.window === window, let height = window?.contentView?.bounds.height else { return event }
+            guard let window = marker.window, event.window === window,
+                  let height = window.contentView?.bounds.height else { return event }
             // The window's point from its bottom-left corner, as SwiftUI's global frames measure from the top.
             let point = CGPoint(
                 x: event.locationInWindow.x,
@@ -164,6 +169,27 @@ struct ComposerPopupPresenter<Popup: View>: ViewModifier {
     private func stopWatching() {
         if let monitor { NSEvent.removeMonitor(monitor) }
         monitor = nil
+    }
+
+    /// Puts `view` in the composer's background, where it takes no space.
+    private struct Marker: NSViewRepresentable {
+
+        let view: NSView
+
+        func makeNSView(context: Context) -> NSView { view }
+
+        func updateNSView(
+            _ view : NSView,
+            context: Context
+        ) {}
+
+        func sizeThatFits(
+            _ proposal: ProposedViewSize,
+            nsView    : NSView,
+            context   : Context
+        ) -> CGSize? {
+            .zero
+        }
     }
 }
 

@@ -561,6 +561,7 @@ struct SlashCommandWindowTests {
         try await escapeThenQuote()
         try await clicks()
         try await modelPopup()
+        try await popupOpenedWhileAnotherWindowIsKey()
     }
 
     /// `/co` opens the popup at the composer's leading edge with its two
@@ -760,6 +761,40 @@ struct SlashCommandWindowTests {
         try await harness.settleAnimation()
         #expect(try harness.drawnPopup() == nil)
         #expect(harness.isFieldFocused)
+        await harness.discard()
+    }
+
+    /// A popup opened while another window is key, as one can open when a
+    /// conversation is reopened, still closes on a click outside it in the composer's window.
+    private func popupOpenedWhileAnotherWindowIsKey() async throws {
+        let harness = try await Harness.keyWindow()
+        defer { harness.close() }
+        let other   = TestInputWindow(
+            contentRect: NSRect(
+                x     : 900,
+                y     : 200,
+                width : 200,
+                height: 200
+            ),
+            styleMask  : [.titled],
+            backing    : .buffered,
+            defer      : false
+        )
+        other.isReleasedWhenClosed = false
+        defer { other.close() }
+
+        other.makeKeyAndOrderFront(nil)
+        try await harness.wait { !harness.window.isKeyWindow }
+        harness.team.modelPopupRequest += 1
+        try await harness.settleAnimation()
+        let popup = try #require(try harness.drawnPopup())
+
+        try harness.click(at: NSPoint(
+            x: 40,
+            y: popup.maxY + 20
+        ))
+        try await harness.settleAnimation()
+        #expect(try harness.drawnPopup() == nil)
         await harness.discard()
     }
 }
