@@ -198,6 +198,7 @@ let package = Package(
             targets: ["EngineCore", "Engine", "HIDActuation", "AccessibilityActions", "WorkspaceActivation",
                       "Memory", "FileKnowledge", "LiveScenes"]
         ),
+        .library(name: "UserInteractions", targets: ["InteractionListener", "InteractionObservation"]),
         .library(name: "SeatBroker", targets: ["SeatBroker"]),
         .library(name: "ModelTransports", targets: ["ModelTransports"]),
         .executable(name: "mecum", targets: ["mecum"]),
@@ -348,6 +349,14 @@ let package = Package(
         // `SceneProviding` for a window on the real screen: census, capture, pipeline.
         engine("LiveScenes", ["EngineCore", "PerceptionCore", "Perception", "ScreenCapture"], settings: pure),
 
+        // Passive user input and diagnostic observation, independent of Brain, memory and the app.
+        .target(name: "InteractionListener", path: "Sources/InteractionListener", swiftSettings: pure),
+        .target(name: "InteractionObservation",
+                dependencies: ["InteractionListener", "PerceptionCore", "Perception", "ScreenCapture"],
+                path: "Sources/InteractionObservation", swiftSettings: pure),
+        .testTarget(name: "InteractionTests", dependencies: ["InteractionListener", "InteractionObservation", "PerceptionCore"],
+                    path: "Tests/Interactions", swiftSettings: pure),
+
         // MARK: Integration
         // Where two layers meet. SeatDriving fills the Engine's roles from the Driver's seat: stills of the
         // adopted window, routed commands inside a Turn, no activation.
@@ -376,7 +385,7 @@ let package = Package(
                            "ScreenCapture", "Engine", "EngineCore", "HIDActuation", "AccessibilityActions",
                            "WorkspaceActivation", "Memory", "FileKnowledge", "LiveScenes",
                            "SeatDriving", "SeatCore", "SeatSession", "PrivateSymbols", "AutomationRuntime",
-                           "ChatCore", "CLIProviders", "FileConversations", "LocalMCP", "AutomationMCP", "SceneOverlay"].map { .target(name: $0) },
+                           "ChatCore", "CLIProviders", "FileConversations", "LocalMCP", "AutomationMCP", "SceneOverlay", "InteractionListener", "InteractionObservation"].map { .target(name: $0) },
             path: "Tools/Engine/mecum",
             swiftSettings: facility
         ),
