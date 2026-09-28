@@ -534,46 +534,6 @@ private final class Harness {
     }
 }
 
-/// TestInputWindow is a key window that takes only the input its test sends:
-/// the keys given to `send(_:)`, and the clicks posted with `clickNumber`.
-/// Once the test app activates itself, the keys and the pointer of the person
-/// using the Mac reach the window through the event loop, and they would type
-/// into the field or move the popup's selection; every other key or pointer
-/// event is dropped. Events of other kinds pass.
-@MainActor
-final class TestInputWindow: NSWindow {
-
-    /// The event number of a test's clicks, which no event from the pointer carries.
-    static let clickNumber = 0x7E57
-
-    private var isSending = false
-
-    /// Hands `event`, a key the test pressed, to the window as the event loop would.
-    func send(_ event: NSEvent) {
-        isSending = true
-        defer { isSending = false }
-        sendEvent(event)
-    }
-
-    override func sendEvent(_ event: NSEvent) {
-        switch event.type {
-        case .keyDown, .keyUp, .flagsChanged:
-            guard isSending else { return }
-
-        case .leftMouseDown, .leftMouseUp, .leftMouseDragged, .rightMouseDown, .rightMouseUp,
-             .rightMouseDragged, .otherMouseDown, .otherMouseUp, .otherMouseDragged, .mouseMoved:
-            guard event.eventNumber == Self.clickNumber else { return }
-
-        case .mouseEntered, .mouseExited, .scrollWheel:
-            return
-
-        default:
-            break
-        }
-        super.sendEvent(event)
-    }
-}
-
 /// Runs at exit, on no actor: a closure written inside the harness would be
 /// main actor isolated, and its isolation check traps while the process ends.
 private func failIfCutShort() {

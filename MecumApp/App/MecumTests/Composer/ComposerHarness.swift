@@ -9,6 +9,7 @@ import AppKit
 import Observation
 import Synchronization
 import SwiftUI
+import Testing
 @testable import Mecum
 
 /// ComposerHarness hosts a `ComposerBar` in SwiftUI, floating over the bottom
@@ -20,7 +21,9 @@ import SwiftUI
 /// `NSEvent` key downs through the text view's `keyDown(with:)`. On screen, the
 /// window is a titled window made key, keys go through `NSWindow.sendEvent(_:)`
 /// as the event loop delivers them, and a second field after the composer gives
-/// the key view loop somewhere to go.
+/// the key view loop somewhere to go. The window takes only the input the test
+/// sends it (`TestInputWindow`), so a person typing or moving the pointer while
+/// the tests hold the focus changes nothing in it.
 @Observable
 @MainActor
 final class ComposerHarness {
@@ -63,7 +66,7 @@ final class ComposerHarness {
     var onSend: (@MainActor (ComposerHarness) async -> Void)?
 
     @ObservationIgnored
-    private(set) var window: NSWindow?
+    private(set) var window: TestInputWindow?
 
     let recipient: String
     let surface  : ComposerSurface.Kind?
@@ -93,9 +96,12 @@ final class ComposerHarness {
         self.showsTranscript = transcript ?? !onScreen
         let hosting = NSHostingView(rootView: Root(harness: self))
         let frame   = NSRect(x: 200, y: 200, width: width, height: height)
-        let window  = onScreen
-            ? NSWindow(contentRect: frame, styleMask: [.titled, .closable], backing: .buffered, defer: false)
-            : NSWindow(contentRect: frame, styleMask: [.borderless], backing: .buffered, defer: false)
+        let window  = TestInputWindow(
+            contentRect: frame,
+            styleMask  : onScreen ? [.titled, .closable] : [.borderless],
+            backing    : .buffered,
+            defer      : false
+        )
         window.isReleasedWhenClosed = false
         window.appearance  = NSAppearance(named: appearance)
         window.contentView = hosting
@@ -134,6 +140,72 @@ final class ComposerHarness {
     /// Settles past the circle's 0.2 s change of colour, before its pixels are read.
     func settleAnimation() async throws {
         for _ in 0..<5 { try await settle() }
+    }
+
+    /// Waits until `condition` holds, five seconds at most, laying the window out between tries.
+    func wait(
+        sourceLocation: SourceLocation = #_sourceLocation,
+        for condition : () throws -> Bool
+    ) async throws {
+        for _ in 0..<250 {
+            if try condition() { return }
+            try await Task.sleep(for: .milliseconds(20))
+            hosting?.layoutSubtreeIfNeeded()
+        }
+        try #require(
+            try condition(),
+            "draft \(draft.debugDescription), field \((textView?.string ?? "").debugDescription)",
+            sourceLocation: sourceLocation
+        )
+    }
+
+    /// Waits until the circle is drawn at its full side, its pixels as they were on the try before,
+    /// so no change of colour or glyph is under way, and `condition` holds for it; then returns it.
+    func waitForCircle(
+        sourceLocation : SourceLocation = #_sourceLocation,
+        where condition: ((frame: NSRect, glyphPixels: Int)) -> Bool = { _ in true }
+    ) async throws -> (frame: NSRect, glyphPixels: Int) {
+        var found : (frame: NSRect, glyphPixels: Int)?
+        var pixels: Data?
+        try await wait(sourceLocation: sourceLocation) {
+            let last = pixels
+            found    = drawnCircle()
+            pixels   = found.flatMap { drawnPixels(in: $0.frame.insetBy(dx: -2, dy: -2)) }
+            guard let circle = found, pixels != nil, pixels == last else { return false }
+
+            return abs(circle.frame.width - ComposerBar.circleSide) <= 1
+                && abs(circle.frame.height - ComposerBar.circleSide) <= 1
+                && condition(circle)
+        }
+        return try #require(found)
+    }
+
+    /// The bytes drawn inside `rect`, in window coordinates, row by row, to tell whether a region still changes.
+    private func drawnPixels(in rect: NSRect) -> Data? {
+        guard let hosting,
+              let bitmap = hosting.bitmapImageRepForCachingDisplay(in: hosting.bounds)
+        else { return nil }
+
+        hosting.cacheDisplay(
+            in: hosting.bounds,
+            to: bitmap
+        )
+        guard let data = bitmap.bitmapData else { return nil }
+
+        let scale  = CGFloat(bitmap.pixelsWide) / hosting.bounds.width
+        let span   = hosting.convert(rect, from: nil)
+        let top    = hosting.isFlipped ? span.minY : hosting.bounds.height - span.maxY
+        let rows   = max(Int(top * scale), 0)..<min(Int((top + span.height) * scale), bitmap.pixelsHigh)
+        let offset = max(Int(span.minX * scale), 0) * bitmap.bitsPerPixel / 8
+        let length = min(Int(span.width * scale), bitmap.pixelsWide) * bitmap.bitsPerPixel / 8
+        var bytes  = Data()
+        for row in rows {
+            bytes.append(
+                data + row * bitmap.bytesPerRow + offset,
+                count: min(length, bitmap.bytesPerRow - offset)
+            )
+        }
+        return bytes
     }
 
     /// Asks for activation until the window is key, for at most five seconds.
@@ -185,19 +257,59 @@ final class ComposerHarness {
 
     func press(_ characters: String, keyCode: UInt16, modifiers: NSEvent.ModifierFlags = []) {
         guard let textView, let window,
-              let event = NSEvent.keyEvent(with: .keyDown, location: .zero, modifierFlags: modifiers,
-                                           timestamp: ProcessInfo.processInfo.systemUptime,
-                                           windowNumber: window.windowNumber, context: nil,
-                                           characters: characters, charactersIgnoringModifiers: characters,
-                                           isARepeat: false, keyCode: keyCode)
+              let event = keyEvent(
+                  characters,
+                  keyCode  : keyCode,
+                  modifiers: modifiers
+              )
         else { return }
         guard isOnScreen else { return textView.keyDown(with: event) }
 
         // Each key is one undo group, as the event loop of an app makes it; the loop running the tests
         // closes none, so the window's undo manager groups by hand (see `init`).
         window.undoManager?.beginUndoGrouping()
-        window.sendEvent(event)
+        window.send(event)
         window.undoManager?.endUndoGrouping()
+    }
+
+    /// Presses a key through the application, which offers it to the buttons' shortcuts before
+    /// the field, as it does a person's. The application hands keys only to its key window, so
+    /// the window is made key again first, should another app have taken the focus meanwhile.
+    func pressThroughApplication(
+        _ characters: String,
+        keyCode     : UInt16,
+        modifiers   : NSEvent.ModifierFlags
+    ) throws {
+        becomeKey()
+        let window = try #require(window)
+        try #require(
+            window.isKeyWindow,
+            "another app holds the focus"
+        )
+        window.sendThroughApplication(try #require(keyEvent(
+            characters,
+            keyCode  : keyCode,
+            modifiers: modifiers
+        )))
+    }
+
+    private func keyEvent(
+        _ characters: String,
+        keyCode     : UInt16,
+        modifiers   : NSEvent.ModifierFlags
+    ) -> NSEvent? {
+        NSEvent.keyEvent(
+            with                       : .keyDown,
+            location                   : .zero,
+            modifierFlags              : modifiers,
+            timestamp                  : ProcessInfo.processInfo.systemUptime,
+            windowNumber               : window?.windowNumber ?? 0,
+            context                    : nil,
+            characters                 : characters,
+            charactersIgnoringModifiers: characters,
+            isARepeat                  : false,
+            keyCode                    : keyCode
+        )
     }
 
     /// The circle as it is drawn: the box of accent-coloured pixels trailing the
