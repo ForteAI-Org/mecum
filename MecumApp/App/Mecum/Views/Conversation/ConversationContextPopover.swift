@@ -11,11 +11,11 @@ import SwiftUI
 /// ConversationContextPopover is what the context ring opens, laid out as the
 /// token counter's popover is: how full the model's context is, as a share and
 /// in tokens against the window with a bar, then the last message's tokens,
-/// then what acts on the context, below a hairline: compacting it, starting it
-/// again, and a quiet line saying Mecum compacts it on its own.
+/// then what acts on the context, below a hairline: compacting it and starting it
+/// again, as icons side by side at the trailing edge.
 ///
 /// The actions stay enabled while the worker is busy. Used then, they do
-/// nothing and the quiet line says why (`waitReason`), until the worker is free.
+/// nothing, and their tooltip says why (`waitReason`) until the worker is free.
 struct ConversationContextPopover: View {
 
     /// A context whose window is known (`UsageWording.ringContext`).
@@ -30,9 +30,6 @@ struct ConversationContextPopover: View {
     /// Each closes the popover first; the caller then acts.
     let compact   : () -> Void
     let startFresh: () -> Void
-
-    /// True once an action was used while `waitReason` held.
-    @State private var isTellingWhy = false
 
     var body: some View {
         UsagePopover {
@@ -71,60 +68,45 @@ struct ConversationContextPopover: View {
     }
 
     private var actions: some View {
-        VStack(
-            alignment: .leading,
-            spacing  : 10
-        ) {
+        HStack(spacing: 8) {
             action(
                 "Compact context",
-                detail: "Summarizes the conversation so far and keeps going.",
-                run   : compact
+                systemImage: "arrow.down.right.and.arrow.up.left",
+                detail     : "Summarizes the conversation so far and keeps going. Mecum does it on its own above 90%.",
+                run        : compact
             )
 
             action(
                 "Start fresh context",
-                detail: "Forgets everything before now. The chat stays.",
-                run   : startFresh
+                systemImage: "arrow.counterclockwise",
+                detail     : "Forgets everything before now. The chat stays.",
+                run        : startFresh
             )
-
-            Text(isTellingWhy ? waitReason ?? Self.automatic : Self.automatic)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .fixedSize(
-                    horizontal: false,
-                    vertical  : true
-                )
         }
+        .frame(
+            maxWidth : .infinity,
+            alignment: .trailing
+        )
     }
 
-    private static let automatic = "Mecum compacts it on its own above 90%."
-
+    /// An icon alone; what it does, or why it waits, is its tooltip and its VoiceOver hint.
     private func action(
-        _ title: String,
-        detail : String,
-        run    : @escaping () -> Void
+        _ title    : String,
+        systemImage: String,
+        detail     : String,
+        run        : @escaping () -> Void
     ) -> some View {
-        VStack(
-            alignment: .leading,
-            spacing  : 4
-        ) {
-            Button(title) {
-                guard waitReason == nil else {
-                    isTellingWhy = true
-                    return
-                }
-                run()
-            }
-            .accessibilityHint(detail)
-
-            Text(detail)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .fixedSize(
-                    horizontal: false,
-                    vertical  : true
-                )
-                .accessibilityHidden(true)
+        Button {
+            guard waitReason == nil else { return }
+            run()
+        } label: {
+            Label(
+                title,
+                systemImage: systemImage
+            )
+            .labelStyle(.iconOnly)
         }
+        .help(waitReason ?? "\(title): \(detail)")
+        .accessibilityHint(waitReason ?? detail)
     }
 }
