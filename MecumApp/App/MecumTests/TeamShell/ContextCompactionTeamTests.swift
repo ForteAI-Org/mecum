@@ -19,6 +19,9 @@ import Testing
 /// `compaction` file says: compacted to 120, refused, signed out, or hanging.
 /// A `turn` file makes a turn fail or hang after it answered. The team reads
 /// its preferences from `preferences`, a suite of the harness's own.
+///
+/// A call's record is written beside the log and moved into it whole, so a
+/// test polling the log while the stand-in runs never reads a half written one.
 @MainActor
 private final class Harness {
 
@@ -78,8 +81,11 @@ private final class Harness {
         root = '\(root.path)'
         received = sys.stdin.read()
         log = os.path.join(root, 'log')
-        with open(os.path.join(log, '%03d.json' % len(os.listdir(log))), 'w') as file:
+        call = len(os.listdir(log))
+        record = os.path.join(root, 'record-%d' % os.getpid())
+        with open(record, 'w') as file:
             json.dump({'arguments': sys.argv[1:], 'received': received}, file)
+        os.replace(record, os.path.join(log, '%03d.json' % call))
         def setting(name, default):
             try:
                 return open(os.path.join(root, name)).read().strip()

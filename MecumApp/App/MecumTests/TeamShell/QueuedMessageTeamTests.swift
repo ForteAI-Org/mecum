@@ -18,6 +18,9 @@ import Testing
 /// when it was sent `/compact`. A turn answers with the context in the
 /// `context` file against a 1,000 token window, and fails when the `turn`
 /// file says `fails`. So a test decides when each turn ends, and how.
+///
+/// A call's record is written beside the log and moved into it whole, so a
+/// test polling the log while the stand-in runs never reads a half written one.
 @MainActor
 private final class Harness {
 
@@ -111,8 +114,10 @@ private final class Harness {
         received = sys.stdin.read()
         log = os.path.join(root, 'log')
         call = len(os.listdir(log))
-        with open(os.path.join(log, '%03d.json' % call), 'w') as file:
+        record = os.path.join(root, 'record-%d' % os.getpid())
+        with open(record, 'w') as file:
             json.dump({'received': received}, file)
+        os.replace(record, os.path.join(log, '%03d.json' % call))
         def setting(name, default):
             try:
                 return open(os.path.join(root, name)).read().strip()
