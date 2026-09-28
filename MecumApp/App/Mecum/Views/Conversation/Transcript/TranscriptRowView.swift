@@ -46,6 +46,13 @@ final class TranscriptRowView: NSView {
     /// block and the row offset of the character under the pointer, if any.
     var onMenu: ((_ block: Int?, _ offset: Int?) -> NSMenu?)?
 
+    /// Called when VoiceOver's Reply runs on a message row.
+    var onReply: (() -> Void)?
+
+    /// How strongly the bubble is tinted, from 1 as a quote leads to it down to
+    /// 0, where it rests; `flash()` animates it through the view's animator.
+    @objc dynamic var flashAmount: CGFloat = 0 { didSet { needsDisplay = true } }
+
     var isFocusedRow = false { didSet { needsDisplay = true } }
 
     /// Whether a focused row draws its outline: the keyboard's focus is outlined, a click's is not.
@@ -75,6 +82,9 @@ final class TranscriptRowView: NSView {
     private(set) var stacks: [TextStack?] = []
     private var ranges     : [NSRange] = []
     private var thinkingDots: ThinkingDotsView?
+
+    /// The quote's name and excerpt, laid out as `RowPreparation` measured them.
+    private var quoteStacks: (name: TextStack?, text: TextStack?) = (nil, nil)
 
     /// Each finished code block's copy icon, by block, which turns into a check once its code is copied.
     private var copyIcons  : [Int: NSImageView] = [:]
@@ -112,6 +122,8 @@ final class TranscriptRowView: NSView {
         let oldStacks   = stacks
         if previousRow == nil { isHoveringLine = false }
         let oldLine     = self.row.flatMap(Self.lineFrame(of:))
+        let oldQuote    = self.row?.geometry.quote
+        if previousRow == nil { flashAmount = 0 }
         self.row        = row
         self.style      = style
         self.workerName = workerName
@@ -126,12 +138,19 @@ final class TranscriptRowView: NSView {
             }
             return block.kind == .rule ? nil : RowPreparation.textStack(block.attributed(style), width: frame.width)
         }
+        quoteStacks     = Self.quoteStacks(
+            of        : row,
+            workerName: workerName,
+            style     : style
+        )
         showThinking(row)
         showCopyIcons(row, keepsCopied: previous != nil)
         showChevron(row, wasExpanded: Self.isExpanded(previousRow))
         configureAccessibility(row)
-        // Only when the summary moved or came and went: every other update keeps the same cursor.
-        if Self.lineFrame(of: row) != oldLine { window?.invalidateCursorRects(for: self) }
+        // Only when the summary or the quote moved or came and went: every other update keeps the same cursor.
+        if Self.lineFrame(of: row) != oldLine || row.geometry.quote != oldQuote {
+            window?.invalidateCursorRects(for: self)
+        }
         needsDisplay = true
     }
 
@@ -260,6 +279,60 @@ final class TranscriptRowView: NSView {
     private static func copySymbol(copied: Bool) -> NSImage {
         let name = copied ? "checkmark" : "doc.on.doc"
         return NSImage(systemSymbolName: name, accessibilityDescription: nil) ?? NSImage()
+    }
+
+    /// Tints the bubble for a moment and fades the tint out, so the message a
+    /// quote led to is found at a glance. Nothing moves, so Reduce Motion keeps it.
+    func flash() {
+        guard let row, RowGeometry.shape(of: row.item.kind) == .bubble else { return }
+
+        flashAmount = 1
+        NSAnimationContext.runAnimationGroup { context in
+            context.duration       = 0.6
+            context.timingFunction = CAMediaTimingFunction(name: .easeIn)
+            animator().flashAmount = 0
+        }
+    }
+
+    override static func defaultAnimation(forKey key: NSAnimatablePropertyKey) -> Any? {
+        key == "flashAmount" ? CABasicAnimation() : super.defaultAnimation(forKey: key)
+    }
+
+    /// The quote's name and excerpt laid out at the width they were measured
+    /// at, in the colours of the bubble they sit on: white on the accent.
+    private static func quoteStacks(
+        of row    : PreparedRow,
+        workerName: String,
+        style     : TranscriptStyle
+    ) -> (name: TextStack?, text: TextStack?) {
+        guard let quote = row.item.quote, let frame = row.geometry.quoteText else { return (nil, nil) }
+
+        let isOnAccent = isPersonMessage(row)
+        let name       = row.geometry.quoteName.map { _ in
+            RowPreparation.textStack(
+                RowPreparation.quoteName(
+                    workerName,
+                    style: style,
+                    color: isOnAccent ? .white : .labelColor
+                ),
+                width       : frame.width,
+                maximumLines: 1
+            )
+        }
+        let text       = RowPreparation.textStack(
+            RowPreparation.quoteExcerpt(
+                quote,
+                style: style,
+                color: isOnAccent ? .white.withAlphaComponent(0.85) : .secondaryLabelColor
+            ),
+            width       : frame.width,
+            maximumLines: RowGeometry.quoteLines
+        )
+        return (name, text)
+    }
+
+    private static func isPersonMessage(_ row: PreparedRow) -> Bool {
+        if case .personMessage = row.item.kind { true } else { false }
     }
 
     /// How far a row's parts move from where they were placed: a live resize
@@ -413,6 +486,10 @@ final class TranscriptRowView: NSView {
             bubbleFill(fill, isPerson: isPerson).setFill()
             path.fill()
             if isOutlined, !isBubbleSelected { strokeFocus(path) }
+            drawQuote(
+                of      : row,
+                isPerson: isPerson
+            )
 
         case .card:
             let path = NSBezierPath(roundedRect: surface, xRadius: 8, yRadius: 8)
@@ -458,10 +535,60 @@ final class TranscriptRowView: NSView {
 
     /// A selected bubble is its own fill made lighter, with no border: toward
     /// white on the accent, a step up on the neutral surface in either theme.
+    /// A flashed one is tinted as far as `flashAmount` says: toward white on
+    /// the accent, toward the accent on the neutral surface.
     private func bubbleFill(_ fill: NSColor, isPerson: Bool) -> NSColor {
-        guard isBubbleSelected else { return fill }
-        let isDark = effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-        return fill.blended(withFraction: isPerson ? 0.28 : isDark ? 0.14 : 0.6, of: .white) ?? fill
+        guard !isBubbleSelected else {
+            let isDark = effectiveAppearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+            return fill.blended(withFraction: isPerson ? 0.28 : isDark ? 0.14 : 0.6, of: .white) ?? fill
+        }
+        guard flashAmount > 0 else { return fill }
+
+        return fill.blended(
+            withFraction: 0.35 * flashAmount,
+            of          : isPerson ? .white : .controlAccentColor
+        ) ?? fill
+    }
+
+    /// The quote at the bubble's top: a rounded block a shade darker than the
+    /// bubble, its bar in the colour of whoever wrote the quoted message, the
+    /// worker's name when it was theirs, and at most two lines of the excerpt.
+    private func drawQuote(
+        of row  : PreparedRow,
+        isPerson: Bool
+    ) {
+        guard let quote = row.item.quote, let block = row.geometry.quote else { return }
+
+        let path = NSBezierPath(
+            roundedRect: block,
+            xRadius    : RowGeometry.quoteCornerRadius,
+            yRadius    : RowGeometry.quoteCornerRadius
+        )
+        TranscriptColors.quoteSurface(isOnAccent: isPerson).setFill()
+        path.fill()
+        NSGraphicsContext.saveGraphicsState()
+        path.addClip()
+        TranscriptColors.quoteBar(
+            quotesPerson: quote.isFromPerson,
+            isOnAccent  : isPerson
+        ).setFill()
+        NSRect(
+            x     : block.minX,
+            y     : block.minY,
+            width : RowGeometry.quoteBar,
+            height: block.height
+        ).fill()
+        NSGraphicsContext.restoreGraphicsState()
+
+        let placed = [(quoteStacks.name, row.geometry.quoteName), (quoteStacks.text, row.geometry.quoteText)]
+        for case let ((_, manager, container)?, frame?) in placed {
+            let glyphs = manager.glyphRange(for: container)
+            manager.drawGlyphs(
+                forGlyphRange: glyphs,
+                at           : frame.origin
+            )
+        }
+        if focusedAction == .openQuote { strokeFocus(path) }
     }
 
     /// Focus is an outline, so it reads without colour (§3.3).
@@ -572,6 +699,12 @@ final class TranscriptRowView: NSView {
         let point = convert(event.locationInWindow, from: nil)
         if let row, let block = copyControl(at: point, in: row) {
             onAction?(.copyBlock(index: block))
+            return
+        }
+        // The quote goes to its message; the press first takes the keyboard, as on any row.
+        if let quote = row?.geometry.quote, quote.contains(point) {
+            onPointer?(.press, event.locationInWindow)
+            onAction?(.openQuote)
             return
         }
         guard let row, blockCharacter(at: point, boundary: true) != nil || row.geometry.surface.contains(point)
@@ -713,13 +846,15 @@ final class TranscriptRowView: NSView {
 
     override func resetCursorRects() {
         if let row, let line = Self.lineFrame(of: row) { addCursorRect(line, cursor: .pointingHand) }
+        if let quote = row?.geometry.quote { addCursorRect(quote, cursor: .pointingHand) }
     }
 
     // MARK: Accessibility
 
     /// The row reads as a whole; a reply with structure also lists its blocks,
     /// so headings are headings and code is named as code (§3.3). The row's
-    /// actions are VoiceOver actions. Nothing is announced when a row changes.
+    /// actions are VoiceOver actions, and a message also offers Reply. Nothing
+    /// is announced when a row changes.
     private func configureAccessibility(_ row: PreparedRow) {
         let isMessage = row.item.messageID != nil
         setAccessibilityElement(true)
@@ -731,13 +866,18 @@ final class TranscriptRowView: NSView {
         let isStructured = isMessage && row.text.blocks.contains { $0.kind != .text }
         setAccessibilityChildren(isStructured ? blockElements(row) : nil)
 
-        let text = row.text
-        setAccessibilityCustomActions(RowAction.actions(in: text).map { action in
+        let text    = row.text
+        let actions = RowAction.actions(in: row).map { action in
             NSAccessibilityCustomAction(name: TranscriptWording.action(action, in: text)) { [weak self] in
                 self?.onAction?(action)
                 return true
             }
-        })
+        }
+        let reply   = NSAccessibilityCustomAction(name: "Reply") { [weak self] in
+            self?.onReply?()
+            return true
+        }
+        setAccessibilityCustomActions(isMessage ? [reply] + actions : actions)
     }
 
     private func blockElements(_ row: PreparedRow) -> [NSAccessibilityElement] {

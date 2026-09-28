@@ -222,9 +222,9 @@ struct RealWindowInteractionTests {
         // On the person's bubble: the message's own items, and a right click takes the keyboard.
         let onQuestion = try point(inRow: try messageRow(0, of: controller), x: 10, of: controller)
         let plain = try #require(try rightClick(at: onQuestion, in: window))
-        #expect(plain.items.map(\.title) == ["Copy Message", "Select Message"])
+        #expect(plain.items.map(\.title) == ["Reply", "Copy Message", "Select Message"])
         #expect(window.firstResponder === controller.collectionView)
-        plain.performActionForItem(at: 0)
+        plain.performActionForItem(at: 1)
         #expect(pasteboard.string(forType: .string) == "Where are the notes?")
 
         // Inside a selection, the selection stays and Copy leads.
@@ -234,20 +234,21 @@ struct RealWindowInteractionTests {
         let chosen = controller.textSelection
         let onLink = try point(inRow: try messageRow(1, of: controller), x: 40, of: controller)
         let linked = try #require(try rightClick(at: onLink, in: window))
-        #expect(linked.items.map(\.title) == ["Copy", "Copy Message", "Select Message", "Open Link", "Copy Link"])
+        #expect(linked.items.map(\.title) == ["Copy", "Reply", "Copy Message", "Select Message", "Open Link",
+                                               "Copy Link"])
         #expect(controller.textSelection == chosen)
-        linked.performActionForItem(at: 4)
+        linked.performActionForItem(at: 5)
         #expect(pasteboard.string(forType: .string) == "https://example.com/notes")
 
         // On the code block, outside the selection: the selection goes, Copy Code comes.
         let code = try #require(row.text.blocks.firstIndex { $0.isCompleteCode })
         let onCode = try point(inRow: try messageRow(1, of: controller), block: code, x: 12, of: controller)
         let coded = try #require(try rightClick(at: onCode, in: window))
-        #expect(coded.items.map(\.title) == ["Copy Message", "Select Message", "Copy Code"])
+        #expect(coded.items.map(\.title) == ["Reply", "Copy Message", "Select Message", "Copy Code"])
         #expect(controller.textSelection == nil)
-        coded.performActionForItem(at: 2)
+        coded.performActionForItem(at: 3)
         #expect(pasteboard.string(forType: .string) == "make test")
-        coded.performActionForItem(at: 1)
+        coded.performActionForItem(at: 2)
         #expect(controller.bubbleSelection == [try #require(row.item.messageID)])
 
         // From the keyboard: Shift F10 and the context menu key open the focused row's menu under it.
@@ -256,7 +257,7 @@ struct RealWindowInteractionTests {
         window.sendEvent(try key(109, "\u{F70D}", [.shift, .function], in: window))
         window.sendEvent(try key(110, "", [], in: window))
         #expect(presented.count == 2)
-        #expect(presented.first?.menu.items.map(\.title) == ["Copy Message", "Select Message"])
+        #expect(presented.first?.menu.items.map(\.title) == ["Reply", "Copy Message", "Select Message"])
         #expect(presented.first?.view === controller.collectionView.item(at: IndexPath(item: try messageRow(1, of: controller), section: 0))?.view)
     }
 
@@ -302,7 +303,7 @@ struct RealWindowInteractionTests {
             "Message \($0), with a little more text to give it a line or two."
         }.joined(separator: "\n\n"))
         let menu = try #require(try rightClick(at: try at(57), in: window))
-        #expect(menu.items.first?.title == "Copy 3 Messages")
+        #expect(menu.items.map(\.title).prefix(2) == ["Reply", "Copy 3 Messages"])
         #expect(controller.bubbleSelection.count == 3)
 
         // Command adds or removes one, and the selected bubble says so to VoiceOver.
@@ -485,6 +486,246 @@ struct RealWindowInteractionTests {
             #expect(!inView.isEmpty)
             #expect(inView.isSubset(of: drawn), "rows in view without a cell: \(inView.subtracting(drawn).sorted())")
         }
+    }
+
+    // MARK: Replies
+
+    @Test("Reply from the menu, Command R and VoiceOver quote the whole message, or the text selected in it")
+    func replyQuotes() async throws {
+        let fixture    = try await TranscriptFixture()
+        defer { fixture.discard() }
+        let pasteboard = NSPasteboard(name: .init("mecum.tests.\(UUID())"))
+        defer { pasteboard.releaseGlobally() }
+        let question   = try await fixture.say(
+            "Where are the notes?",
+            at: 0
+        )
+        let answer     = try await fixture.say(
+            "The notes are in the release folder, beside the build log.",
+            at      : 10,
+            byWorker: true
+        )
+        let stage      = await stage(
+            fixture,
+            pasteboard: pasteboard
+        )
+        defer { stage.window.close() }
+        let controller = stage.controller
+        let window     = stage.window
+        let answerRow  = try messageRow(
+            1,
+            of: controller
+        )
+        var quotes: [MessageQuote] = []
+        controller.onReply = { quotes.append($0) }
+
+        func at(
+            _ row: Int,
+            x    : CGFloat
+        ) throws -> CGPoint {
+            try point(
+                inRow: row,
+                x    : x,
+                of   : controller
+            )
+        }
+
+        // With nothing selected, the menu's Reply quotes the whole message, and says who wrote it.
+        let whole = try #require(try rightClick(
+            at: try at(answerRow, x: 10),
+            in: window
+        ))
+        #expect(whole.items.first?.title == "Reply")
+        whole.performActionForItem(at: 0)
+        #expect(quotes.last == MessageQuote(
+            messageID     : answer.id,
+            authorWorkerID: fixture.workerID,
+            text          : answer.text
+        ))
+
+        // A selection inside the message: the menu's Reply, opened inside it, quotes the selection.
+        let id = controller.rows[answerRow].item.id
+        controller.select(TranscriptSelection(
+            anchor: .init(itemID: id, offset: 4),
+            focus : .init(itemID: id, offset: 9)
+        ))
+        let part = try #require(try rightClick(
+            at: try at(answerRow, x: 40),
+            in: window
+        ))
+        #expect(part.items.map(\.title).prefix(2) == ["Copy", "Reply"])
+        part.performActionForItem(at: 1)
+        #expect(quotes.last?.text == "notes")
+        #expect(quotes.last?.messageID == answer.id)
+
+        // Command R on the focused message: the person's own, whole, with no author.
+        try click(
+            at: try at(try messageRow(0, of: controller), x: 10),
+            in: window
+        )
+        #expect(window.firstResponder === controller.collectionView)
+        window.sendEvent(try key(15, "r", .command, in: window))
+        #expect(quotes.last == MessageQuote(
+            messageID     : question.id,
+            authorWorkerID: nil,
+            text          : question.text
+        ))
+
+        // Command R after a drag inside the worker's message quotes what the drag selected.
+        try drag(
+            from: try at(answerRow, x: 0),
+            to  : try at(answerRow, x: 70),
+            in  : window
+        )
+        let selected = try #require(controller.textSelection?.span(in: controller.rows)?.text(in: controller.rows))
+        window.sendEvent(try key(15, "r", .command, in: window))
+        #expect(quotes.last?.text == selected.trimmingCharacters(in: .whitespacesAndNewlines))
+        #expect(quotes.last?.text.isEmpty == false)
+        #expect(quotes.last?.text != answer.text)
+
+        // VoiceOver's Reply on the row.
+        controller.select(nil)
+        let cell  = try #require(controller.collectionView.item(at: IndexPath(item: answerRow, section: 0))
+            as? TranscriptCell)
+        let reply = try #require(cell.rowView.accessibilityCustomActions()?.first { $0.name == "Reply" })
+        #expect(reply.handler?() == true)
+        #expect(quotes.last?.text == answer.text)
+        #expect(quotes.count == 5)
+    }
+
+    @Test("A quoted bubble is taller than the same bubble without its quote, and says what it replies to")
+    func quotedBubbleGeometry() async throws {
+        let fixture = try await TranscriptFixture()
+        defer { fixture.discard() }
+        let answer  = try await fixture.say(
+            "Two bundles failed: capture and layout.",
+            at      : 0,
+            byWorker: true
+        )
+        try await fixture.say(
+            "Same words.",
+            at: 400
+        )
+        try await fixture.store.appendMessage(
+            to      : fixture.conversation,
+            text    : "Same words.",
+            at      : TranscriptFixture.at(800),
+            delivery: .completed,
+            quote   : MessageQuote(
+                messageID     : answer.id,
+                authorWorkerID: fixture.workerID,
+                text          : answer.text
+            )
+        )
+        let stage      = await stage(
+            fixture,
+            pasteboard: NSPasteboard(name: .init("mecum.tests.\(UUID())"))
+        )
+        defer { stage.window.close() }
+        let controller = stage.controller
+        let quotedRow  = try messageRow(
+            2,
+            of: controller
+        )
+        let plain      = controller.rows[try messageRow(1, of: controller)]
+        let quoted     = controller.rows[quotedRow]
+        let frames     = controller.frameMap()
+
+        #expect(quoted.item.quote?.messageID == answer.id)
+        #expect(plain.item.quote == nil)
+        let quotedHeight = try #require(frames[quoted.item.id]?.height)
+        let plainHeight  = try #require(frames[plain.item.id]?.height)
+        #expect(quotedHeight > plainHeight)
+        #expect(quoted.geometry.height == quotedHeight, "the layout places the height preparation measured")
+        let block = try #require(quoted.geometry.quote)
+        #expect(quoted.geometry.surface.contains(block))
+        #expect(block.maxY < quoted.geometry.text.minY, "the quote sits above the message's own text")
+        #expect(quoted.geometry.quoteName != nil, "a quote of the worker's message names the worker")
+        #expect(quoted.text.string == "Same words.", "the quote is not part of the row's text")
+        #expect(quoted.item.copyText == "Same words.")
+
+        let cell  = try #require(controller.collectionView.item(at: IndexPath(item: quotedRow, section: 0))
+            as? TranscriptCell)
+        let label = try #require(cell.rowView.accessibilityLabel())
+        #expect(label.hasPrefix("In reply to Atlas: Two bundles failed: capture and layout. You, "))
+    }
+
+    @Test("A click on a quote reveals its message, loading it from outside the window, and so do Right and Return")
+    func quoteRevealsOriginal() async throws {
+        let fixture = try await TranscriptFixture()
+        defer { fixture.discard() }
+        var original: MessageSnapshot?
+        for index in 0..<80 {
+            let message = try await fixture.say(
+                "Message \(index), with a little more text to give it a line or two.",
+                at      : Double(index) * 400,
+                byWorker: index % 2 == 1
+            )
+            if index == 1 { original = message }
+        }
+        let quoted = try #require(original)
+        try await fixture.store.appendMessage(
+            to      : fixture.conversation,
+            text    : "About that one.",
+            at      : TranscriptFixture.at(80 * 400),
+            delivery: .completed,
+            quote   : MessageQuote(
+                messageID     : quoted.id,
+                authorWorkerID: fixture.workerID,
+                text          : quoted.text
+            )
+        )
+        let stage      = await stage(
+            fixture,
+            pasteboard: NSPasteboard(name: .init("mecum.tests.\(UUID())"))
+        )
+        defer { stage.window.close() }
+        let controller = stage.controller
+        let window     = stage.window
+        let target     = TranscriptItem.ID.message(quoted.id)
+        #expect(!controller.rows.contains { $0.item.id == target }, "the quoted message starts outside the window")
+
+        func clickQuote() throws {
+            let index = try #require(controller.rows.lastIndex { $0.item.quote != nil })
+            let row   = controller.rows[index]
+            let frame = try #require(controller.frameMap()[row.item.id])
+            let block = try #require(row.geometry.quote)
+            let point = CGPoint(
+                x: frame.minX + block.midX,
+                y: frame.minY + block.midY
+            )
+            try click(
+                at: controller.collectionView.convert(point, to: nil),
+                in: window
+            )
+        }
+        func isRevealed() throws -> Bool {
+            let index = try #require(controller.rows.firstIndex { $0.item.id == target })
+            let frame = try #require(controller.frameMap()[target])
+            return controller.collectionView.selectionIndexPaths.first?.item == index
+                && abs(frame.minY - controller.visibleTop) < 1
+        }
+
+        try clickQuote()
+        await controller.settle()
+        #expect(try isRevealed())
+        let index = try #require(controller.rows.firstIndex { $0.item.id == target })
+        let cell  = try #require(controller.collectionView.item(at: IndexPath(item: index, section: 0))
+            as? TranscriptCell)
+        #expect(cell.rowView.flashAmount > 0, "the revealed bubble is tinted")
+        try await Task.sleep(for: .milliseconds(900))
+        #expect(cell.rowView.flashAmount == 0, "and the tint has faded")
+
+        // From the keyboard: the quote is the reply row's first action.
+        controller.scrollToBottom()
+        await controller.settle()
+        let reply = try #require(controller.rows.lastIndex { $0.item.quote != nil })
+        controller.collectionView.selectionIndexPaths = [IndexPath(item: reply, section: 0)]
+        window.makeFirstResponder(controller.collectionView)
+        window.sendEvent(try key(124, "\u{F703}", [.function], in: window))
+        window.sendEvent(try key(36, "\r", [], in: window))
+        await controller.settle()
+        #expect(try isRevealed())
     }
 }
 

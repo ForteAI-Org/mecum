@@ -49,6 +49,10 @@ import Observation
 /// The window pages at both ends as the reader nears one, and drops what is
 /// far past the other (`TranscriptWindow.messageLimit`). `reveal(message:)`
 /// opens a window around any message without reading the pages between.
+///
+/// Any message can be replied to, from its menu, Command R or VoiceOver: the
+/// reply's quote goes to `onReply`, and the host puts it on the composer. A
+/// quote drawn in a bubble goes back to its message (`revealQuoted`).
 @MainActor
 @Observable
 final class TranscriptController: NSObject {
@@ -96,6 +100,11 @@ final class TranscriptController: NSObject {
     /// and the offset in points from its top to the viewport's top.
     @ObservationIgnored
     var onReadingPositionChange: ((UUID?, Double) -> Void)?
+
+    /// Called when the reader replies to a message, with what the reply quotes:
+    /// the text selected inside that message, or else the whole of it.
+    @ObservationIgnored
+    var onReply: ((MessageQuote) -> Void)?
 
     var style: TranscriptStyle {
         didSet { if style != oldValue { enqueue { await self.relayout() } } }
@@ -233,6 +242,21 @@ final class TranscriptController: NSObject {
                 self.problem = "Couldn’t load that message.\n\nDetails: \(error.localizedDescription)"
             }
         }
+    }
+
+    /// Shows `messageID` as `reveal(message:)` does, then tints its bubble for
+    /// a moment, so the eye finds the message a quote came from.
+    func revealQuoted(_ messageID: UUID) {
+        reveal(message: messageID)
+        enqueue { self.flash(.message(messageID)) }
+    }
+
+    private func flash(_ id: TranscriptItem.ID) {
+        guard let index = rows.firstIndex(where: { $0.item.id == id }) else { return }
+
+        // The reveal has just moved the viewport; its cells exist only after a layout.
+        collectionView.layoutSubtreeIfNeeded()
+        (collectionView.item(at: IndexPath(item: index, section: 0)) as? TranscriptCell)?.rowView.flash()
     }
 
     /// Reads the live tail again after the store recorded something, at the
@@ -512,6 +536,7 @@ final class TranscriptController: NSObject {
         collectionView.onSelectMessage = { [weak self] in self?.selectFocusedMessage() }
         collectionView.onContextMenu   = { [weak self] in self?.showMenuForFocusedRow() }
         collectionView.onScrollToEnd   = { [weak self] in self?.scrollToBottom() }
+        collectionView.onReply         = { [weak self] in self?.replyToFocused() }
 
         scrollView.documentView          = collectionView
         scrollView.hasVerticalScroller   = true
@@ -589,6 +614,7 @@ final class TranscriptController: NSObject {
         cell.rowView.onActivate = { [weak self] in self?.toggle(id) }
         cell.rowView.onAction   = { [weak self] action in self?.perform(action, in: id) }
         cell.rowView.onMenu     = { [weak self] block, offset in self?.menu(for: id, block: block, offset: offset) }
+        cell.rowView.onReply    = { [weak self] in self?.reply(to: id) }
     }
 
     private func reconfigureVisible(_ ids: Set<TranscriptItem.ID>) {
@@ -864,7 +890,7 @@ final class TranscriptController: NSObject {
     private func moveActionFocus(by step: Int) {
         guard let index = focusedIndex, rows.indices.contains(index) else { return }
         let row     = rows[index]
-        let actions = RowAction.actions(in: row.text)
+        let actions = RowAction.actions(in: row)
         guard !actions.isEmpty else { return }
         let current = focusedAction?.id == row.item.id
             ? focusedAction.flatMap { focused in actions.firstIndex(of: focused.action) }
@@ -904,6 +930,11 @@ final class TranscriptController: NSObject {
         case .openLink(let destination, _, _):
             guard let url = RowAction.openableURL(destination) else { return }
             NSWorkspace.shared.open(url)
+        case .openQuote:
+            guard let quote = row.item.quote else { return }
+            // The keyboard follows the reader to the quoted message, so this row keeps no action outlined.
+            setFocusedAction(nil)
+            revealQuoted(quote.messageID)
         }
     }
 
@@ -1141,12 +1172,12 @@ final class TranscriptController: NSObject {
 
     // MARK: Context menu
 
-    /// The menu for the row `id`: Copy when text is selected, the message's
-    /// own items, and Copy Code or the link's items for what lies under the
-    /// pointer. A press inside the selection keeps it; one outside drops it.
-    /// On a selected bubble the copy takes the whole bubble selection; on any
-    /// other row the bubble selection goes. `block` and `offset` are nil when
-    /// the keyboard opens the menu.
+    /// The menu for the row `id`: Copy when text is selected, Reply and the
+    /// message's own items, and Copy Code or the link's items for what lies
+    /// under the pointer. A press inside the selection keeps it; one outside
+    /// drops it. On a selected bubble the copy takes the whole bubble
+    /// selection; on any other row the bubble selection goes. `block` and
+    /// `offset` are nil when the keyboard opens the menu.
     func menu(for id: TranscriptItem.ID, block: Int?, offset: Int?) -> NSMenu? {
         guard let index = rows.firstIndex(where: { $0.item.id == id }) else { return nil }
         let row = rows[index]
@@ -1170,6 +1201,9 @@ final class TranscriptController: NSObject {
         }
         if textSelection?.isEmpty == false {
             add("Copy") { [weak self] in self?.copySelection() }
+        }
+        if let quote = quote(ofRow: index) {
+            add("Reply") { [weak self] in self?.onReply?(quote) }
         }
         if bubbles.count > 1 {
             add("Copy \(bubbles.count) Messages") { [weak self] in self?.copySelection() }
@@ -1195,6 +1229,43 @@ final class TranscriptController: NSObject {
             add("Copy Link") { [weak self] in self?.put(destination) }
         }
         return menu.items.isEmpty ? nil : menu
+    }
+
+    // MARK: Replying
+
+    /// What a reply to the row at `index` quotes: the selected text when the
+    /// selection lies inside that message and holds more than blank space, else
+    /// the message's whole text. Nil for a row that is not a message.
+    func quote(ofRow index: Int) -> MessageQuote? {
+        guard rows.indices.contains(index), let messageID = rows[index].item.messageID else { return nil }
+
+        let row      = rows[index]
+        var selected = ""
+        if let selection = textSelection, !selection.isEmpty,
+           selection.anchor.itemID == row.item.id, selection.focus.itemID == row.item.id,
+           let span = selection.span(in: rows) {
+            selected = span.text(in: rows).trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return MessageQuote(
+            messageID     : messageID,
+            authorWorkerID: row.item.authorWorkerID,
+            text          : selected.isEmpty ? row.item.copyText : selected
+        )
+    }
+
+    /// Replies to the row `id`, as VoiceOver's Reply asks.
+    private func reply(to id: TranscriptItem.ID) {
+        guard let index = rows.firstIndex(where: { $0.item.id == id }), let quote = quote(ofRow: index)
+        else { return }
+
+        onReply?(quote)
+    }
+
+    /// Command R: replies to the focused message.
+    private func replyToFocused() {
+        guard let index = focusedIndex, let quote = quote(ofRow: index) else { return }
+
+        onReply?(quote)
     }
 
     /// Shift F10 or the context menu key: the focused row's menu, under its surface.

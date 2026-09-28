@@ -13,8 +13,8 @@ import AppKit
 /// toggles the focused bubble and Escape clears the selection. Command C
 /// copies. Shift with Up or Down extends the selection, Shift Command A
 /// selects the focused message's text and Command A the loaded messages.
-/// Shift F10 or the context menu key opens the focused row's menu, and End or
-/// Command Down goes to the end. Every one of them is a key, never a hover
+/// Command R replies to the focused message. Shift F10 or the context menu
+/// key opens the focused row's menu, and End or Command Down goes to the end. Every one of them is a key, never a hover
 /// (§3.3, §12.5).
 ///
 /// It decides nothing itself; each key calls the controller's closure.
@@ -32,6 +32,7 @@ final class TranscriptCollectionView: NSCollectionView {
     var onScrollToEnd  : (() -> Void)?
     var onToggle       : (() -> Void)?
     var onClear        : (() -> Void)?
+    var onReply        : (() -> Void)?
 
     /// Called before any key is handled, so the focus outline shows for the keyboard and not after a click.
     var onKeyboard     : (() -> Void)?
@@ -50,6 +51,11 @@ final class TranscriptCollectionView: NSCollectionView {
         if modifiers.subtracting([.numericPad, .function]) == .command,
            event.charactersIgnoringModifiers?.lowercased() == "c" {
             onCopy?()
+            return
+        }
+        if modifiers.subtracting([.numericPad, .function]) == .command,
+           event.charactersIgnoringModifiers?.lowercased() == "r" {
+            onReply?()
             return
         }
         switch event.keyCode {

@@ -7,8 +7,9 @@
 
 import Foundation
 
-/// RowAction is something a row does only when asked: copy one of its code
-/// blocks or open one of its links (§12.4, §12.5).
+/// RowAction is something a row does only when asked: go to the message its
+/// quote came from, copy one of its code blocks or open one of its links
+/// (§12.4, §12.5).
 ///
 /// Every action is reachable from the keyboard: Left and Right move through a
 /// focused row's actions in reading order, Return or Space runs the focused
@@ -20,6 +21,14 @@ nonisolated enum RowAction: Sendable, Hashable {
 
     /// Opens `destination`, whose text is `range` in the block at `block`.
     case openLink(destination: String, block: Int, range: NSRange)
+
+    /// Goes to the message the row's quote came from.
+    case openQuote
+
+    /// The row's actions, in reading order: its quote first, at the bubble's top, then its text's.
+    static func actions(in row: PreparedRow) -> [RowAction] {
+        (row.item.quote == nil ? [] : [.openQuote]) + actions(in: row.text)
+    }
 
     /// The row's actions, in reading order: a finished code block's Copy
     /// sits at its top, and a link's runs, destination included, are one action.

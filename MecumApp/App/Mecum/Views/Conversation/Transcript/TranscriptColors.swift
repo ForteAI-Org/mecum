@@ -111,6 +111,32 @@ nonisolated enum TranscriptColors {
             : NSColor(white: 0.97, alpha: 1)
     }
 
+    // MARK: Quotes
+
+    /// A reply's quote block, a shade darker than the bubble it sits in.
+    static func quoteSurface(isOnAccent: Bool) -> NSColor {
+        isOnAccent ? .black.withAlphaComponent(0.14) : .labelColor.withAlphaComponent(0.06)
+    }
+
+    /// A quote block's leading bar, which says who wrote the quoted message
+    /// without a label: the person's accent for their own, lightened on the
+    /// accent bubble so it reads there, and a quiet white or grey for the worker's.
+    static func quoteBar(
+        quotesPerson: Bool,
+        isOnAccent  : Bool
+    ) -> NSColor {
+        let lightened = personBubble.blended(
+            withFraction: 0.55,
+            of          : .white
+        )
+        switch (quotesPerson, isOnAccent) {
+        case (true, true):   return lightened ?? .white
+        case (true, false):  return personBubble
+        case (false, true):  return .white.withAlphaComponent(0.9)
+        case (false, false): return .secondaryLabelColor
+        }
+    }
+
     /// A code block's own surface, inside the reply's bubble.
     static let codeSurface = NSColor(name: "TranscriptCodeSurface") { appearance in
         appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua

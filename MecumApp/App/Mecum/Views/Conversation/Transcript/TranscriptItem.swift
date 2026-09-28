@@ -100,6 +100,10 @@ nonisolated struct TranscriptItem: Sendable, Hashable, Identifiable {
     /// bubble below it continues its group. A tool line or a separator below ends it.
     var endsGroup = false
 
+    /// What a message replies to, drawn at the top of its bubble. It is not
+    /// part of the row's text: selecting and copying the message leave it out.
+    var quote: MessageQuote?
+
     /// True for a day's line and a context's, headings between rows drawn between two hairlines.
     var isSeparator: Bool {
         switch kind {
@@ -136,7 +140,8 @@ nonisolated struct TranscriptItem: Sendable, Hashable, Identifiable {
             date          : date,
             authorWorkerID: authorWorkerID,
             continuesGroup: continuesGroup ?? self.continuesGroup,
-            endsGroup     : endsGroup
+            endsGroup     : endsGroup,
+            quote         : quote
         )
     }
 }

@@ -285,7 +285,20 @@ nonisolated enum TranscriptWording {
         case .openLink(let destination, _, _):
             let shown = URL(string: destination).map(MarkdownRendering.shownDestination) ?? destination
             return "Open link to \(shown)"
+        case .openQuote:
+            return "Go to quoted message"
         }
+    }
+
+    /// What starts the label of a row that replies to a message: who wrote the
+    /// quoted message, by name or as yourself, and its excerpt, as a sentence.
+    static func inReplyTo(
+        _ quote   : MessageQuote,
+        workerName: String
+    ) -> String {
+        let excerpt = quote.excerpt
+        let ending  = excerpt.last.map { ".!?…".contains($0) } == true ? "" : "."
+        return "In reply to \(quote.isFromPerson ? "yourself" : workerName): \(excerpt)\(ending)"
     }
 
     /// The whole row as VoiceOver reads it: author, time, content, state.
@@ -294,6 +307,24 @@ nonisolated enum TranscriptWording {
         for item  : TranscriptItem,
         workerName: String,
         content   : String? = nil
+    ) -> String {
+        let label = rowLabel(
+            for       : item,
+            workerName: workerName,
+            content   : content
+        )
+        guard let quote = item.quote else { return label }
+
+        return inReplyTo(
+            quote,
+            workerName: workerName
+        ) + " " + label
+    }
+
+    private static func rowLabel(
+        for item  : TranscriptItem,
+        workerName: String,
+        content   : String?
     ) -> String {
         let when = time(item.date)
         switch item.kind {

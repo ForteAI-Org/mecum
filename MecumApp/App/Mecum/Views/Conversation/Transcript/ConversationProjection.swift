@@ -220,8 +220,14 @@ nonisolated enum ConversationProjection {
                 isLastReplyStreaming = message.delivery == .responding
                 openTurn?.replies   += 1
             }
-            rows.append(TranscriptItem(id: .message(message.id), kind: kind, date: message.createdAt,
-                                       authorWorkerID: message.authorWorkerID, continuesGroup: false))
+            rows.append(TranscriptItem(
+                id            : .message(message.id),
+                kind          : kind,
+                date          : message.createdAt,
+                authorWorkerID: message.authorWorkerID,
+                continuesGroup: false,
+                quote         : message.quote
+            ))
         }
 
         mutating func add(_ event: RecordedEvent) {

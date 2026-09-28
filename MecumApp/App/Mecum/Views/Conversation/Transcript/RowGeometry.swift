@@ -59,7 +59,42 @@ nonisolated struct RowGeometry: Sendable, Hashable {
     /// clear of the mascot, and moves no text; the bubble is surface and tail.
     let tail      : CGRect?
 
+    /// A bubble's quote of the message it replies to, at its top inside it:
+    /// the inset block, the name line in it when the quoted message is the
+    /// worker's, and where the excerpt is laid out. Nil on every other row.
+    let quote    : CGRect?
+    let quoteName: CGRect?
+    let quoteText: CGRect?
+
     static let tailSize = CGSize(width: 6, height: 11)
+
+    /// What a bubble's quote measured, before it is placed.
+    struct QuoteSize: Sendable, Hashable {
+
+        /// The excerpt's size, at most `quoteLines` lines, and the width it was laid out at.
+        let text : CGSize
+        let width: CGFloat
+
+        /// The name line's width, nil when the quote has none.
+        let name: CGFloat?
+    }
+
+    /// Room from the bubble's edge to its quote's block, on every side.
+    static let quoteInset: CGFloat = 6
+
+    /// The block's leading bar, which says who wrote the quoted message by its colour.
+    static let quoteBar: CGFloat = 3
+
+    /// Room inside the block around its name and excerpt, past the bar on the leading side.
+    static let quotePadding = NSEdgeInsets(
+        top   : 5,
+        left  : quoteBar + 8,
+        bottom: 5,
+        right : 8
+    )
+
+    static let quoteLines         = 2
+    static let quoteCornerRadius: CGFloat = 8
 
     static let toolShadowRoom: CGFloat = 4
 
@@ -113,6 +148,22 @@ nonisolated struct RowGeometry: Sendable, Hashable {
         return max(40, column - insets.left - insets.right).rounded(.down)
     }
 
+    /// The widest a quote's excerpt and name may be laid out at: inside its
+    /// block, when the bubble takes its widest short measure.
+    static func quoteWidthLimit(
+        for kind: TranscriptItem.Kind,
+        rowWidth: CGFloat,
+        style   : TranscriptStyle
+    ) -> CGFloat {
+        let block = surfaceLimit(
+            for     : kind,
+            rowWidth: rowWidth,
+            style   : style,
+            isWide  : false
+        ) - 2 * quoteInset
+        return max(40, block - quotePadding.left - quotePadding.right).rounded(.down)
+    }
+
     /// The Copy block control, in a finished code block's top strip.
     static func copyControl(in block: CGRect, style: TranscriptStyle) -> CGRect {
         let size = CGSize(width: style.captionLineHeight, height: style.captionLineHeight)
@@ -124,7 +175,8 @@ nonisolated struct RowGeometry: Sendable, Hashable {
         rowWidth: CGFloat,
         style   : TranscriptStyle,
         blocks  : [PreparedBlock.Kind],
-        sizes   : [CGSize]
+        sizes   : [CGSize],
+        quote   : QuoteSize? = nil
     ) {
         self.rowWidth = rowWidth
         // Blocks stack from the text's origin; the row is placed around their total size.
@@ -150,22 +202,66 @@ nonisolated struct RowGeometry: Sendable, Hashable {
         let isPerson: Bool
         if case .personMessage = item.kind { isPerson = true } else { isPerson = false }
 
+        // Only a bubble quotes, so the other shapes leave this nil.
+        var placedQuote: (block: CGRect, name: CGRect?, text: CGRect)?
+
         switch Self.shape(of: item.kind) {
         case .bubble:
             let hasHeader = !item.continuesGroup
             let hasName   = hasHeader && !isPerson && style.showsAuthors
             let top       = hasName ? caption + 2 : 0
             let long      = Self.isLong(item.kind) && !isWide
-            let width     = long ? limit : min(limit, textSize.width + 2 * Self.bubblePadding.width)
+            // A quote opens the bubble: its block, then the text an inset below it, and it may widen the bubble.
+            let padding   = Self.quotePadding
+            let measured  = quote.map { quote in
+                (
+                    width : max(quote.text.width, quote.name ?? 0) + padding.left + padding.right,
+                    height: padding.top + (quote.name == nil ? 0 : caption + 1) + quote.text.height + padding.bottom
+                )
+            }
+            let room      = measured.map { $0.height + 2 * Self.quoteInset - Self.bubblePadding.height } ?? 0
+            let content   = max(
+                textSize.width + 2 * Self.bubblePadding.width,
+                (measured?.width ?? 0) + 2 * Self.quoteInset
+            )
+            let width     = long ? limit : min(limit, content)
             let bubbleX   = isPerson
                 ? rowWidth - Self.gutter - width
                 : Self.leading(style)
             let surface   = CGRect(x: bubbleX, y: top, width: width,
-                                   height: textSize.height + 2 * Self.bubblePadding.height)
+                                   height: textSize.height + 2 * Self.bubblePadding.height + room)
             let hasBadge  = DeliveryBadge(item.kind) != nil
 
             self.surface = surface
-            self.text    = surface.insetBy(dx: Self.bubblePadding.width, dy: Self.bubblePadding.height)
+            self.text    = CGRect(
+                x     : surface.minX + Self.bubblePadding.width,
+                y     : surface.minY + Self.bubblePadding.height + room,
+                width : surface.width - 2 * Self.bubblePadding.width,
+                height: textSize.height
+            )
+            if let quote, let measured {
+                let block = CGRect(
+                    x     : surface.minX + Self.quoteInset,
+                    y     : surface.minY + Self.quoteInset,
+                    width : surface.width - 2 * Self.quoteInset,
+                    height: measured.height
+                )
+                let name  = quote.name.map { _ in
+                    CGRect(
+                        x     : block.minX + padding.left,
+                        y     : block.minY + padding.top,
+                        width : max(0, block.width - padding.left - padding.right),
+                        height: caption
+                    )
+                }
+                let text  = CGRect(
+                    x     : block.minX + padding.left,
+                    y     : name.map { $0.maxY + 1 } ?? block.minY + padding.top,
+                    width : quote.width,
+                    height: quote.text.height
+                )
+                placedQuote = (block, name, text)
+            }
             self.header  = hasName ? CGRect(x: bubbleX, y: 0, width: width, height: caption) : nil
             let footer   = (style.showsTimes && item.endsGroup && item.kind != .thinking) || hasBadge
                 ? CGRect(x: bubbleX, y: surface.maxY + 2, width: width, height: caption)
@@ -232,6 +328,10 @@ nonisolated struct RowGeometry: Sendable, Hashable {
             self.tail    = nil
             self.height  = surface.maxY.rounded(.up)
         }
+
+        self.quote     = placedQuote?.block
+        self.quoteName = placedQuote?.name
+        self.quoteText = placedQuote?.text
 
         // Code, tables and rules span the text column; the rest keep their measured width.
         let origin = self.text.origin

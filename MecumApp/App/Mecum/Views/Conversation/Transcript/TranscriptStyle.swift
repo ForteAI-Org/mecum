@@ -73,6 +73,9 @@ nonisolated struct TranscriptStyle: Sendable, Hashable {
     /// Failure reasons.
     var monospacedPointSize: CGFloat { max(10, bodyPointSize - 2) }
 
+    /// A reply's quote of the message it answers, inside its bubble: a step below the body.
+    var quotePointSize: CGFloat { max(10, bodyPointSize - 2) }
+
     /// The height of one caption line, rounded up to whole points.
     var captionLineHeight: CGFloat { (captionPointSize * 1.35).rounded(.up) }
 

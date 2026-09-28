@@ -23,19 +23,28 @@ import CoreGraphics
 /// back what it measured, so no instance is ever shared between threads.
 nonisolated struct LayoutMeasurementCache: Sendable {
 
+    /// `lines` is the most lines the text was laid out in, zero for no cap.
+    /// Only a reply's quote sets it, so a quote's size never answers for a block's.
     struct Key: Sendable, Hashable {
         let kind  : PreparedBlock.Kind
         let string: String
         let runs  : [PreparedText.Run]
         let width : Int
         let style : TranscriptStyle
+        let lines : Int
 
-        init(content: PreparedBlock, width: CGFloat, style: TranscriptStyle) {
+        init(
+            content: PreparedBlock,
+            width  : CGFloat,
+            style  : TranscriptStyle,
+            lines  : Int = 0
+        ) {
             self.kind   = content.kind
             self.string = content.string
             self.runs   = content.runs
             self.width  = Int(width.rounded(.down))
             self.style  = style
+            self.lines  = lines
         }
     }
 
