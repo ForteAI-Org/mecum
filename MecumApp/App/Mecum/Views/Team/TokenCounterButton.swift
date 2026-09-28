@@ -25,12 +25,17 @@ struct TokenCounterButton: View {
 
         Button { isShowingDetail.toggle() } label: {
             HStack(spacing: 4) {
-                Image(systemName: "chart.bar")
+                Image(systemName: "circle.hexagongrid")
 
                 Text(wording.compact(count))
                     .monospacedDigit()
-                    .contentTransition(.numericText())
+                    .contentTransition(.numericText(value: Double(count)))
             }
+            // The digits roll only inside an animation, and nothing that changes the count runs one.
+            .animation(
+                .default,
+                value: count
+            )
         }
         .help("Tokens used")
         .accessibilityLabel("Tokens used, \(wording.spoken(count))")
