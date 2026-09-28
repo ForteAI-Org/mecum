@@ -30,6 +30,25 @@ final class ComposerHarness {
     var canAnswer   = true
     var stops       = 0
 
+    /// The words a reply strip quotes above the pill, nil for no strip. Escape
+    /// in the field takes it away, as the conversation's composer does.
+    var quote: String?
+
+    /// The queued messages a queue strip shows above the reply strip, none for no strip.
+    var queued: [String] = []
+
+    /// Whether Return during a turn hands the draft to Send, as a composer that queues does.
+    var queues = false
+
+    /// Whether Return sends, or starts a new line with Command-Return sending.
+    var returnSends = true
+
+    /// The bar's height as SwiftUI laid it out, strip included.
+    private(set) var barHeight: CGFloat = 0
+
+    /// Moved by a test to ask the bar to put the keyboard in its field.
+    var focusRequest = 0
+
     /// Plays the worker's desktop session: while true the bar offers Release,
     /// which counts and gives the computer back, as `close()` does.
     var holdsComputer = false
@@ -313,6 +332,7 @@ final class ComposerHarness {
                             TextField("After the composer", text: $other)
                         }
                         bar
+                            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { harness.barHeight = $0 }
                     }
                 }
                 .background(Color(nsColor: .windowBackgroundColor))
@@ -347,6 +367,41 @@ final class ComposerHarness {
             // The circle is measured from what the view draws, and glass draws only in the window server.
             bar.buttonGlass = false
             return bar
+                .sendsOnReturn(harness.returnSends)
+                .queuesWhileAnswering(harness.queues)
+                .onEscape(harness.quote == nil ? nil : { harness.quote = nil })
+                .focusRequest(harness.focusRequest)
+                .strip {
+                    VStack(spacing: 0) {
+                        if !harness.queued.isEmpty {
+                            ConversationQueueStrip(
+                                queue      : harness.queued.map { QueuedMessage(text: $0) },
+                                shown      : 0,
+                                isAnswering: harness.isAnswering,
+                                next       : {},
+                                sendNow    : {},
+                                edit       : {},
+                                remove     : {}
+                            )
+                        }
+                        if let quote = harness.quote {
+                            ComposerStrip(
+                                symbol           : "arrowshape.turn.up.left",
+                                title            : "Atlas",
+                                text             : quote,
+                                accessibilityText: quote,
+                                roundsTop        : harness.queued.isEmpty,
+                                open             : {}
+                            ) {
+                                ComposerStripCancelButton(
+                                    help  : "Don’t reply to this message.",
+                                    label : "Cancel Reply",
+                                    action: { harness.quote = nil }
+                                )
+                            }
+                        }
+                    }
+                }
         }
     }
 }

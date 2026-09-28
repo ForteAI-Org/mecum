@@ -22,12 +22,13 @@ import Testing
 @MainActor
 struct ComposerWindowTests {
 
-    @Test("Line breaks, indentation and Control-Tab, the pinned circle, Stop, and Release, in key windows")
+    @Test("Line breaks, indentation and Control-Tab, the pinned circle, Stop, queueing, and Release, in key windows")
     func keyWindows() async throws {
         try await lineBreaksAndSend()
         try await indentation()
         try await circleStaysPinned()
         try await circleBecomesStop()
+        try await commandReturnQueues()
         try await releaseButton()
     }
 
@@ -168,6 +169,37 @@ struct ComposerWindowTests {
         #expect(!harness.isAnswering)
         let back = try #require(harness.drawnCircle())
         #expect(back.frame == send.frame && back.glyphPixels == send.glyphPixels)
+    }
+
+    /// During a turn a composer that queues takes Command-Return as Send, where
+    /// Return starts a new line, though the circle is Stop and answers Command-Period.
+    private func commandReturnQueues() async throws {
+        let harness = try await keyWindowHarness()
+        defer { harness.close() }
+        harness.queues      = true
+        harness.returnSends = false
+        harness.isAnswering = true
+        harness.type("next")
+        try await harness.settle()
+
+        let window        = try #require(harness.window)
+        let commandReturn = try #require(NSEvent.keyEvent(
+            with                       : .keyDown,
+            location                   : .zero,
+            modifierFlags              : [.command],
+            timestamp                  : ProcessInfo.processInfo.systemUptime,
+            windowNumber               : window.windowNumber,
+            context                    : nil,
+            characters                 : "\r",
+            charactersIgnoringModifiers: "\r",
+            isARepeat                  : false,
+            keyCode                    : 36
+        ))
+        NSApplication.shared.sendEvent(commandReturn)
+        try await harness.settle()
+        #expect(harness.sends == 1)
+        #expect(harness.stops == 0)
+        #expect(harness.draft == "next", "Command-Return adds no line break")
     }
 
     /// Release shows only while the worker holds the computer, left of the circle, and releases.

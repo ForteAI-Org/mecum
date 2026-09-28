@@ -11,6 +11,14 @@ import SwiftUI
 /// The composer (§13), floating over the transcript's bottom edge. Its field
 /// hands the draft committed text only, never a composition in progress, so
 /// the pause below writes finished text.
+///
+/// A reply in progress shows as a strip joined to the pill's top, with the
+/// quoted message: a click on its text goes to that message, and its × or
+/// Escape in the field drops the quote. The next send carries it.
+///
+/// A message sent while the worker answers joins the conversation's queue,
+/// which shows as a strip above the reply's (`ConversationQueueStrip`): the
+/// reply strip stays next to the pill, since it belongs to what is typed.
 struct ConversationComposer: View {
 
     @Bindable
@@ -18,8 +26,17 @@ struct ConversationComposer: View {
 
     let worker: WorkerSnapshot
 
-    /// The composer's height, which the transcript keeps clear below its last message.
+    /// The composer's height, strip included, which the transcript keeps clear below its last message.
     @Binding var height: CGFloat
+
+    /// A count that puts the keyboard in the field each time it moves.
+    var focusRequest = 0
+
+    /// Moves when a queued message comes back into the draft, to be edited at once.
+    @State private var editFocus = 0
+
+    /// Shows a message in the transcript, as a click on the reply strip asks.
+    var reveal: (UUID) -> Void = { _ in }
 
     /// The model and effort chosen in the popup and not kept yet, nil while they are the worker's.
     @State private var pending: ModelSelection?
@@ -46,6 +63,21 @@ struct ConversationComposer: View {
             release    : team.holdsComputer(worker.id) ? { Task { await team.releaseComputer(worker.id) } } : nil
         )
         .sendsOnReturn(!sendsWithCommandReturn)
+        .queuesWhileAnswering(true)
+        .onEscape(team.draftQuote == nil ? nil : { team.draftQuote = nil })
+        .focusRequest(focusRequest + editFocus)
+        .strip {
+            VStack(spacing: 0) {
+                if !team.queue.isEmpty {
+                    queueStrip
+                        .transition(ComposerBar.stripTransition(reducesMotion: reducesMotion))
+                }
+                if let quote = team.draftQuote {
+                    replyStrip(quote)
+                        .transition(ComposerBar.stripTransition(reducesMotion: reducesMotion))
+                }
+            }
+        }
         .leading {
             if let context {
                 ConversationContextButton(
@@ -98,6 +130,14 @@ struct ConversationComposer: View {
             onClose    : { Task { await keepChoice() } }
         )
         .animation(reducesMotion ? nil : .spring(duration: 0.35, bounce: 0.15), value: context == nil)
+        .animation(
+            ComposerBar.stripAnimation,
+            value: team.draftQuote
+        )
+        .animation(
+            ComposerBar.stripAnimation,
+            value: team.queue
+        )
         .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height = $0 }
         .onChange(of: worker.id) {
             isChoosingModel = false
@@ -109,6 +149,48 @@ struct ConversationComposer: View {
             do { try await Task.sleep(for: .milliseconds(500)) } catch { return }
             await team.flushDraft()
         }
+        // A quote comes and goes in one act, not in keystrokes, so it is written at once.
+        .task(id: team.draftQuote) { await team.flushDraft() }
+    }
+
+    /// The strip of a reply in progress: the reply symbol, the worker's name when
+    /// the quote is theirs, the quoted words on one line, and × to drop the quote.
+    /// A quote of the person's own message has no name; the symbol takes the
+    /// accent instead, as the bar of such a quote does in a bubble.
+    private func replyStrip(_ quote: MessageQuote) -> some View {
+        let author = quote.isFromPerson ? nil : worker.name
+        return ComposerStrip(
+            symbol           : "arrowshape.turn.up.left",
+            tint             : quote.isFromPerson ? .accentColor : .secondary,
+            title            : author,
+            text             : quote.excerpt,
+            accessibilityText: "Replying to \(author ?? "your message"): \(quote.excerpt)",
+            roundsTop        : team.queue.isEmpty,
+            open             : { reveal(quote.messageID) }
+        ) {
+            ComposerStripCancelButton(
+                help  : "Don’t reply to this message.",
+                label : "Cancel Reply",
+                action: { team.draftQuote = nil }
+            )
+        }
+        .help("Show the message you’re replying to.")
+    }
+
+    /// The conversation's queue, showing the message that goes next.
+    private var queueStrip: some View {
+        ConversationQueueStrip(
+            queue      : team.queue,
+            shown      : team.shownQueuedIndex,
+            isAnswering: team.isAnswering(worker.id),
+            next       : { team.showNextQueued() },
+            sendNow    : { Task { await team.sendQueuedNow() } },
+            edit       : {
+                editFocus += 1
+                Task { await team.editShownQueued() }
+            },
+            remove     : { Task { await team.removeShownQueued() } }
+        )
     }
 
     /// The selected worker's context while its conversation is open, nil while its fill or window is unknown.

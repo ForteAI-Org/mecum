@@ -19,7 +19,8 @@ import SwiftUI
 /// after typing stops and again when the conversation changes, and sending
 /// writes the message first. A worker on Claude Code or Codex then answers
 /// through its agent, and its tool use shows as rows apart from its replies;
-/// Stop ends the turn.
+/// Stop ends the turn. A reply started in the transcript puts its quote on the
+/// composer and the keyboard in its field.
 struct WorkerConversationView: View {
 
     @Bindable
@@ -37,6 +38,9 @@ struct WorkerConversationView: View {
     /// The title bar's height, which the transcript scrolls under and keeps clear above its first message.
     @State private var titleBarHeight: CGFloat = 0
 
+    /// Moves each time a reply starts, which puts the keyboard in the composer's field.
+    @State private var composerFocus = 0
+
     var body: some View {
         transcriptArea
             .overlay(alignment: .top) {
@@ -51,9 +55,11 @@ struct WorkerConversationView: View {
             }
             .overlay(alignment: .bottom) {
                 ConversationComposer(
-                    team  : team,
-                    worker: worker,
-                    height: $composerHeight
+                    team        : team,
+                    worker      : worker,
+                    height      : $composerHeight,
+                    focusRequest: composerFocus,
+                    reveal      : { transcript?.revealQuoted($0) }
                 )
             }
             .onGeometryChange(for: CGFloat.self) { $0.safeAreaInsets.top } action: { titleBarHeight = $0 }
@@ -109,6 +115,11 @@ struct WorkerConversationView: View {
                     offset: offset
                 )
             }
+        }
+        let focus = $composerFocus
+        controller.onReply = { [team] quote in
+            team.draftQuote = quote
+            focus.wrappedValue += 1
         }
         controller.open(
             conversationID,

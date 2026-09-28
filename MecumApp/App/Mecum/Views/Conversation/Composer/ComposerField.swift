@@ -31,11 +31,19 @@ struct ComposerField: NSViewRepresentable {
     /// Whether Return sends, or starts a new line with Command-Return sending.
     var returnSends = true
 
+    /// What Escape does, nil to leave it to the text view.
+    var onEscape: (() -> Void)?
+
+    /// A count that puts the keyboard in the field each time it moves, as a reply
+    /// started from the transcript asks, so the reply can be typed at once.
+    var focusRequest = 0
+
     func makeNSView(context: Context) -> ComposerScrollView {
         let view = ComposerScrollView()
         view.textView.delegate = context.coordinator
         view.textView.string   = text
-        context.coordinator.agreed = text
+        context.coordinator.agreed       = text
+        context.coordinator.focusRequest = focusRequest
         return view
     }
 
@@ -45,8 +53,18 @@ struct ComposerField: NSViewRepresentable {
         coordinator.field    = self
         textView.placeholder = placeholder
         textView.onSubmit    = onSubmit
+        textView.onEscape    = onEscape
         textView.returnSends = returnSends
         textView.setAccessibilityLabel(placeholder)
+
+        if focusRequest != coordinator.focusRequest {
+            coordinator.focusRequest = focusRequest
+            // After this update, so the change of first responder does not land inside it.
+            Task { @MainActor [weak textView] in
+                guard let textView else { return }
+                textView.window?.makeFirstResponder(textView)
+            }
+        }
 
         guard text != coordinator.agreed else { return }
         textView.replaceText(with: text)
@@ -64,6 +82,9 @@ struct ComposerField: NSViewRepresentable {
 
         /// The text the field and the binding last agreed on.
         var agreed = ""
+
+        /// The focus request the field last acted on.
+        var focusRequest = 0
 
         init(field: ComposerField) { self.field = field }
 

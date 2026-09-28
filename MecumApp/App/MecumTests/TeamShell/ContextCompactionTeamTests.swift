@@ -306,15 +306,17 @@ struct ContextCompactionTeamTests {
         #expect(harness.team.isAnswering(harness.worker), "the composer waits as it does behind a turn")
 
         await harness.send("Next")
-        #expect(harness.team.draft == "Next")
+        #expect(harness.team.draft.isEmpty)
+        #expect(harness.team.queue.map(\.text) == ["Next"], "it waits in the queue")
         #expect(try await harness.messages().map(\.text) == ["Hello", "ok"])
 
         harness.team.stopAnswering(harness.worker)
         try await harness.idle()
         #expect(try await harness.events(.contextCompacted).isEmpty)
         #expect(harness.team.problem == nil, "a stopped compaction says nothing")
+        #expect(harness.team.queue.map(\.text) == ["Next"], "nor does it send the queue")
 
-        await harness.team.send()
+        await harness.team.sendQueuedNow()
         try await harness.idle()
         #expect(try harness.calls().map(\.received) == ["Hello", "/compact", "Next"])
         await harness.discard()

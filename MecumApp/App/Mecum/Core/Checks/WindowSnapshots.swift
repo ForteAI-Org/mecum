@@ -471,6 +471,8 @@ enum WindowSnapshots {
                     to    : output.appending(path: "model-popup-list-\(name).png")
                 )
             }
+
+            try await writeReply(to: output)
         } catch {
             FileHandle.standardError.write(Data("snapshots failed: \(error)\n".utf8))
             status = 1
@@ -817,7 +819,7 @@ enum WindowSnapshots {
 
     /// Hosts `content` at `width` by `height`, lets its tasks and the transcript
     /// settle, then draws the window's frame view, which holds the toolbar too.
-    private static func write(
+    static func write(
         _ content: some View,
         width    : Double,
         height   : Double = 720,

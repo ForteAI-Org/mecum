@@ -33,6 +33,10 @@ final class ComposerTextView: NSTextView {
     /// Command-Return sends, through the send button's shortcut.
     var returnSends = true
 
+    /// Called for an Escape that no input method took. Nil leaves Escape to
+    /// the text view, which offers completions.
+    var onEscape: (() -> Void)?
+
     /// Drawn while the field is empty and nothing is being composed.
     var placeholder = "" {
         didSet {
@@ -70,6 +74,18 @@ final class ComposerTextView: NSTextView {
     }
 
     override func insertNewlineIgnoringFieldEditor(_ sender: Any?) { insertLineBreak() }
+
+    /// Escape arrives as the `cancelOperation(_:)` command, which the text view
+    /// has no method of its own for, and so does Command-Period, which stays
+    /// Stop's. The Escape key is taken here only while `onEscape` is set; any
+    /// other command goes on as it always did.
+    override func doCommand(by selector: Selector) {
+        guard selector == #selector(cancelOperation(_:)), interpretedKey?.keyCode == 53,
+              let onEscape, !hasMarkedText()
+        else { return super.doCommand(by: selector) }
+
+        onEscape()
+    }
 
     override func insertTab(_ sender: Any?) {
         if isInterpreting(.control) {

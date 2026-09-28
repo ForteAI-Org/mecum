@@ -20,7 +20,12 @@ import SwiftUI
 /// The caller may put one accessory in the row, before the buttons: the
 /// conversation puts the worker's model and effort there. It may also put a
 /// view outside the pill, before it, which sits on the pill's bottom line:
-/// the conversation's context ring. There is no Add
+/// the conversation's context ring. And it may join strips to the pill's top,
+/// on the pill's own surface, such as the message a reply quotes; Escape in the
+/// field can take it away (`onEscape(_:)`). A strip comes and goes as a bubble
+/// enters (`stripTransition`, `stripAnimation`), and the pill grows with it.
+/// A composer that queues (`queuesWhileAnswering(_:)`) hands the draft to
+/// `send` during a turn too, while the circle stays Stop. There is no Add
 /// context or microphone: nothing supplies attachments or voice yet, and a
 /// control that does nothing is not shown (§21.2). A recipient that cannot answer says so
 /// only in the placeholder, with Send disabled; the draft stays editable, as
@@ -61,8 +66,20 @@ struct ComposerBar: View {
     /// What sits outside the pill, before it, set with `leading(_:)`.
     private var leadingView: AnyView?
 
+    /// What sits joined above the pill, on its surface, set with `strip(_:)`.
+    private var stripView: AnyView?
+
+    /// What Escape in the field does, set with `onEscape(_:)`; nil leaves it to the text view.
+    private var escape: (() -> Void)?
+
+    /// A count that puts the keyboard in the field each time it moves, set with `focusRequest(_:)`.
+    private var focusRequest = 0
+
     /// Whether Return sends, or starts a new line with Command-Return sending; see `sendsOnReturn(_:)`.
     private var returnSends = true
+
+    /// Whether sending during a turn hands the draft to `send` to queue; see `queuesWhileAnswering(_:)`.
+    private var queues = false
 
     @Namespace
     private var glass
@@ -99,7 +116,16 @@ struct ComposerBar: View {
 
     /// Something to say, someone to answer it, and no turn running for them.
     var canSend: Bool {
-        canAnswer && !isAnswering && !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        canAnswer && !isAnswering && hasText
+    }
+
+    /// Something to say to someone answering now, in a composer that queues it.
+    var canQueue: Bool {
+        queues && canAnswer && isAnswering && hasText
+    }
+
+    private var hasText: Bool {
+        !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     /// "Message Milo", or what Milo needs before it can be messaged.
@@ -119,22 +145,29 @@ struct ComposerBar: View {
         ) {
             leadingView
 
-            HStack(alignment: .bottom, spacing: 8) {
-                ComposerField(
-                    text       : $draft,
-                    placeholder: placeholder,
-                    onSubmit   : canSend ? send : nil,
-                    returnSends: returnSends
-                )
-                .padding(
-                    .vertical,
-                    2
-                )
-                accessoryView
-                actions
+            // One surface under the strips and the pill, so they share an outline, a material and a shadow.
+            VStack(spacing: 0) {
+                stripView
+
+                HStack(alignment: .bottom, spacing: 8) {
+                    ComposerField(
+                        text        : $draft,
+                        placeholder : placeholder,
+                        onSubmit    : canSend || canQueue ? send : nil,
+                        returnSends : returnSends,
+                        onEscape    : escape,
+                        focusRequest: focusRequest
+                    )
+                    .padding(
+                        .vertical,
+                        2
+                    )
+                    accessoryView
+                    actions
+                }
+                .padding(.leading, 14)
+                .padding([.vertical, .trailing], Self.padding)
             }
-            .padding(.leading, 14)
-            .padding([.vertical, .trailing], Self.padding)
             .modifier(ComposerSurface(
                 shape: RoundedRectangle(cornerRadius: Self.cornerRadius, style: .continuous),
                 kind : kind
@@ -163,6 +196,48 @@ struct ComposerBar: View {
     func leading(@ViewBuilder _ content: () -> some View) -> ComposerBar {
         var bar = self
         bar.leadingView = AnyView(content())
+        return bar
+    }
+
+    /// The bar with `content` joined above the pill, on the pill's surface:
+    /// `ComposerStrip`s stacked with no spacing, or nothing. Each strip brings
+    /// `stripTransition`, and the caller animates the change with `stripAnimation`.
+    func strip(@ViewBuilder _ content: () -> some View) -> ComposerBar {
+        var bar = self
+        bar.stripView = AnyView(content())
+        return bar
+    }
+
+    /// The bar that, while a turn runs, hands a draft to `send` on Return or
+    /// Command-Return, to be queued, rather than doing nothing.
+    func queuesWhileAnswering(_ queues: Bool) -> ComposerBar {
+        var bar = self
+        bar.queues = queues
+        return bar
+    }
+
+    /// How a strip comes, as a bubble enters the transcript: it fades in while
+    /// rising from 8 points below, and leaves fading while it sinks. With Reduce
+    /// Motion it only fades.
+    static func stripTransition(reducesMotion: Bool) -> AnyTransition {
+        reducesMotion ? .opacity : .opacity.combined(with: .offset(y: 8))
+    }
+
+    /// The timing of a strip's coming and going, a bubble's ease-out, which the
+    /// pill's growth follows in the same animation, so nothing jumps.
+    static let stripAnimation = Animation.easeOut(duration: 0.24)
+
+    /// The bar with `action` run by Escape in the field; nil leaves Escape to the text view.
+    func onEscape(_ action: (() -> Void)?) -> ComposerBar {
+        var bar = self
+        bar.escape = action
+        return bar
+    }
+
+    /// The bar that puts the keyboard in its field each time `request` moves.
+    func focusRequest(_ request: Int) -> ComposerBar {
+        var bar = self
+        bar.focusRequest = request
         return bar
     }
 
@@ -195,6 +270,28 @@ struct ComposerBar: View {
                         .combined(with: .opacity))
             }
             circle
+                .background { queueShortcut }
+        }
+    }
+
+    /// Command-Return while a draft can be queued. The circle is Stop then and
+    /// answers Command-Period, so the shortcut that sends is on a button of its
+    /// own, which draws nothing and takes no focus.
+    @ViewBuilder
+    private var queueShortcut: some View {
+        if canQueue {
+            Button(
+                "Queue Message",
+                action: send
+            )
+            .keyboardShortcut(
+                .return,
+                modifiers: .command
+            )
+            .buttonStyle(.plain)
+            .focusable(false)
+            .opacity(0)
+            .accessibilityHidden(true)
         }
     }
 

@@ -57,6 +57,9 @@ nonisolated struct UserFacingIssue: Sendable, Equatable {
 /// or after a completed turn leaves it at 90% or more, and started again when
 /// the person asks (`compactContext`, `startFreshContext`).
 ///
+/// A message sent while its worker answers joins its conversation's queue and
+/// goes out, one at a time, as turns end (`send`, `sendShownQueued`).
+///
 /// A refusal from the store becomes `problem`, a sentence naming what was
 /// refused and what to do about it. Nothing here fails silently.
 @Observable
@@ -125,6 +128,20 @@ final class TeamModel {
     /// Stops asked for before the worker's agent had started.
     private var pendingStops: Set<UUID> = []
 
+    /// The messages sent while each conversation's worker answered, in order,
+    /// by conversation: what the store holds, read when the conversation first
+    /// opens in this process and written on every change.
+    private var queues: [UUID: [QueuedMessage]] = [:]
+
+    /// The queued message each conversation's strip shows, which is the one
+    /// that goes next. Absent means the first; it is not stored, so a relaunch
+    /// shows the first.
+    private var shownQueued: [UUID: Int] = [:]
+
+    /// Workers whose turn Send Now stopped, so the shown queued message goes
+    /// out as soon as the turn has ended, however it ended.
+    private var sendsQueuedOnEnd: Set<UUID> = []
+
     /// One agent host per conversation, kept for the process so its turns share
     /// one loopback host. The provider session lives on the conversation.
     private var hosts: [UUID: WorkerAgentHost] = [:]
@@ -159,6 +176,13 @@ final class TeamModel {
     var draft: String = ""
 
     private var savedDraft: String = ""
+
+    /// The message the draft replies to, persisted with the draft and by the
+    /// same flush; `savedDraftQuote` is what the store holds. The next send
+    /// carries it, and the agent receives it above the message (`agentText`).
+    var draftQuote: MessageQuote?
+
+    private var savedDraftQuote: MessageQuote?
 
     /// Counts calls to `openSelectedConversation`. A call that sees a newer
     /// number after a suspension was overtaken and writes nothing.
@@ -263,9 +287,11 @@ final class TeamModel {
         await flushDraft()
         guard generation == openingGeneration else { return }
 
-        conversation = nil
-        draft        = ""
-        savedDraft   = ""
+        conversation    = nil
+        draft           = ""
+        savedDraft      = ""
+        draftQuote      = nil
+        savedDraftQuote = nil
 
         guard let id = selection else { return }
 
@@ -288,9 +314,13 @@ final class TeamModel {
                 guard generation == openingGeneration else { return }
             }
 
-            conversation = opened
-            draft        = opened.draft
-            savedDraft   = opened.draft
+            conversation    = opened
+            draft           = opened.draft
+            savedDraft      = opened.draft
+            draftQuote      = opened.draftQuote
+            savedDraftQuote = opened.draftQuote
+            // The queue already held here is newer than the store's, which only follows it.
+            if queues[opened.id] == nil { queues[opened.id] = opened.queue }
             await markReadIfAtEnd()
             await refreshUsage(of: id)
         } catch {
@@ -304,25 +334,39 @@ final class TeamModel {
         }
     }
 
-    /// Whether the draft as typed differs from what the store holds.
-    var hasUnsavedDraft: Bool { conversation != nil && draft != savedDraft }
+    /// Whether the draft as typed, or its quote, differs from what the store holds.
+    var hasUnsavedDraft: Bool {
+        conversation != nil && (draft != savedDraft || draftQuote != savedDraftQuote)
+    }
 
-    /// Writes the draft if it differs from what the store holds. The text
-    /// written is the text at the call; what is typed meanwhile is the next
-    /// flush's, and a reply for a conversation no longer open is dropped.
+    /// Writes the draft and its quote where they differ from what the store
+    /// holds. What is written is what they were at the call; what changes
+    /// meanwhile is the next flush's, and a reply for a conversation no longer
+    /// open is dropped.
     func flushDraft() async {
-        guard let conversation, draft != savedDraft else { return }
+        guard let conversation, draft != savedDraft || draftQuote != savedDraftQuote else { return }
 
-        let text = draft
+        let text  = draft
+        let quote = draftQuote
         do {
-            let updated = try await store.update(
-                conversation: conversation.id,
-                .draft(text)
-            )
+            var updated = conversation
+            if text != savedDraft {
+                updated = try await store.update(
+                    conversation: conversation.id,
+                    .draft(text)
+                )
+            }
+            if quote != savedDraftQuote {
+                updated = try await store.update(
+                    conversation: conversation.id,
+                    .draftQuote(quote)
+                )
+            }
             guard self.conversation?.id == conversation.id else { return }
 
             self.conversation = updated
             savedDraft        = text
+            savedDraftQuote   = quote
         } catch {
             problem = issue(
                 title  : "Couldn’t Save Draft",
@@ -335,32 +379,50 @@ final class TeamModel {
     /// Persists the message, then starts the worker's answer, as an agent
     /// command line or through Mecum's own loop (`WorkerAnswer`), when the
     /// worker has a provider. Otherwise the message stays saved and nothing
-    /// answers, and the composer says why.
+    /// answers, and the composer says why. While the worker answers, a turn or
+    /// a compaction, the message joins the conversation's queue instead, with
+    /// its quote, and goes out when the turn ends (`sendShownQueued`).
     ///
-    /// The text leaves the draft before the first suspension, and a second
-    /// send while this one waits does nothing, so one Return is one message.
-    /// A message the store refuses goes back into the draft: nothing typed is
-    /// consumed by a failed attempt. A refused message and a saved message
-    /// whose draft could not be cleared are reported as the two facts they are.
+    /// The text and its quote leave the draft before the first suspension, and
+    /// a second send while this one waits does nothing, so one Return is one
+    /// message. A message the store refuses goes back into the draft with its
+    /// quote: nothing typed is consumed by a failed attempt. A refused message
+    /// and a saved message whose draft could not be cleared are reported as the
+    /// two facts they are.
     func send() async {
         guard !isSending, let conversation else { return }
-
-        let workerID = conversation.participantIDs.first
-        if let workerID, isAnswering(workerID) { return }
 
         let typed = draft
         let text  = typed.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
 
+        let workerID = conversation.participantIDs.first
+        let quote    = draftQuote
         isSending = true
         defer { isSending = false }
-        draft = ""
+        draft      = ""
+        draftQuote = nil
 
-        let message: MessageSnapshot
+        if let workerID, isAnswering(workerID) {
+            queues[conversation.id, default: []].append(QueuedMessage(
+                text : text,
+                quote: quote
+            ))
+            await saveQueue(of: conversation.id)
+            await clearSavedDraft(
+                of    : conversation.id,
+                quote : quote,
+                queued: true
+            )
+            return
+        }
+
         do {
-            message = try await store.appendMessage(
-                to  : conversation.id,
-                text: text
+            try await post(
+                text,
+                quote: quote,
+                in   : conversation.id,
+                by   : workerID
             )
         } catch {
             problem = issue(
@@ -370,46 +432,92 @@ final class TeamModel {
             )
             await restoreDraft(
                 typed,
-                in: conversation.id
+                quote: quote,
+                in   : conversation.id
             )
             return
         }
 
-        if self.conversation?.id == conversation.id { transcriptRevision += 1 }
-        if let workerID {
-            startAnswer(
-                to: message,
-                in: conversation.id,
-                by: workerID
-            )
-        }
+        await clearSavedDraft(
+            of    : conversation.id,
+            quote : quote,
+            queued: false
+        )
+    }
 
+    /// Writes `text` as the person's message in `conversationID`, with the
+    /// quote it replies to, then starts `workerID`'s answer when there is a
+    /// worker. It reads nothing of the open conversation or the draft, so the
+    /// queue sends through it for a conversation that is not on screen.
+    /// `holding` says the caller already holds the worker as answering there,
+    /// as the queue does from the end of one turn to the start of the next.
+    private func post(
+        _ text           : String,
+        quote            : MessageQuote?,
+        in conversationID: UUID,
+        by workerID      : UUID?,
+        holding          : Bool = false
+    ) async throws {
+        let message = try await store.appendMessage(
+            to   : conversationID,
+            text : text,
+            quote: quote
+        )
+
+        if conversation?.id == conversationID { transcriptRevision += 1 }
+        guard let workerID else { return }
+
+        startAnswer(
+            to     : message,
+            in     : conversationID,
+            by     : workerID,
+            holding: holding
+        )
+    }
+
+    /// Empties the stored draft and its quote once what they held was sent or
+    /// queued. A failure says the text may come back after a relaunch.
+    private func clearSavedDraft(
+        of conversationID: UUID,
+        quote            : MessageQuote?,
+        queued           : Bool
+    ) async {
         do {
-            let cleared = try await store.update(
-                conversation: conversation.id,
+            var cleared = try await store.update(
+                conversation: conversationID,
                 .draft("")
             )
-            guard self.conversation?.id == conversation.id else { return }
+            if quote != nil || savedDraftQuote != nil {
+                cleared = try await store.update(
+                    conversation: conversationID,
+                    .draftQuote(nil)
+                )
+            }
+            guard self.conversation?.id == conversationID else { return }
 
             self.conversation = cleared
             savedDraft        = ""
+            savedDraftQuote   = nil
         } catch {
             problem = issue(
                 title  : "Couldn’t Clear Draft",
-                message: "The message was sent, but the same text may reappear in the draft after you reopen Mecum.",
+                message: "The message was \(queued ? "queued" : "sent"), but the same text may reappear in the draft after you reopen Mecum.",
                 error  : error
             )
         }
     }
 
-    /// Puts a refused message's text back where it was typed. Whatever was
-    /// typed after it stays, below it.
+    /// Puts a refused message's text back where it was typed, or a queued one
+    /// being edited, and its quote unless another reply was started meanwhile.
+    /// Whatever was typed after it stays, below it.
     private func restoreDraft(
         _ typed          : String,
+        quote            : MessageQuote?,
         in conversationID: UUID
     ) async {
         if self.conversation?.id == conversationID {
-            draft = draft.isEmpty ? typed : typed + "\n" + draft
+            draft      = draft.isEmpty ? typed : typed + "\n" + draft
+            draftQuote = draftQuote ?? quote
             return
         }
 
@@ -419,6 +527,10 @@ final class TeamModel {
             try await store.update(
                 conversation: conversationID,
                 .draft(typed)
+            )
+            try await store.update(
+                conversation: conversationID,
+                .draftQuote(quote)
             )
         } catch {
             problem = issue(
@@ -439,13 +551,22 @@ final class TeamModel {
     /// loop is sent the conversation before the message (`turnHistory`). A
     /// completed turn that leaves the context at 90% or more is followed by a
     /// compaction, before any next message can start.
+    ///
+    /// A turn that completed sends the queued message its conversation shows,
+    /// after that compaction when there is one; a stopped or failed turn sends
+    /// nothing, unless Send Now stopped it. `holding` says the worker is already
+    /// held as answering in `conversationID`, and is let go if nothing starts.
     private func startAnswer(
         to message       : MessageSnapshot,
         in conversationID: UUID,
-        by workerID      : UUID
+        by workerID      : UUID,
+        holding          : Bool = false
     ) {
-        guard let worker = worker(workerID), worker.configuration != nil, answering[workerID] == nil
-        else { return }
+        guard let worker = worker(workerID), worker.configuration != nil, holding || answering[workerID] == nil
+        else {
+            if holding { answering[workerID] = nil }
+            return
+        }
 
         answering[workerID] = conversationID
 
@@ -492,7 +613,7 @@ final class TeamModel {
                     // The turn gives the seat back as it ends when another entry is waiting for it.
                     try await desktop.turn {
                         try await host.run(
-                            prompt         : message.text,
+                            prompt         : Self.agentText(of: message),
                             selection      : frozen,
                             sessionID      : session,
                             role           : worker.instructions,
@@ -517,17 +638,25 @@ final class TeamModel {
             await refreshUsage(of: workerID)
             if let selection, selection != workerID { await refreshUsage(of: selection) }
 
-            answering[workerID] = nil
             pendingStops.remove(workerID)
-            // Started with no suspension after the turn ends, so no message can start a turn first.
+            let sendsNow = sendsQueuedOnEnd.remove(workerID) != nil
+            // Each next step starts with no suspension after the turn ends, so no message can start a turn first.
             if ending == .completed,
                let fraction = usage[workerID]?.context?.fraction,
                UsageWording.contextLevel(fraction) == .full {
+                answering[workerID] = nil
                 startCompaction(
                     of     : workerID,
                     in     : conversationID,
                     trigger: .automatic
                 )
+            } else if ending == .completed || sendsNow {
+                await sendShownQueued(
+                    in: conversationID,
+                    by: workerID
+                )
+            } else {
+                answering[workerID] = nil
             }
         }
     }
@@ -584,10 +713,27 @@ final class TeamModel {
         )
     }
 
-    /// Maps stored messages to turn messages. An empty message, one by anyone
-    /// other than the person or `workerID`, and one sent before `start`, where
-    /// the context last started again, are left out. `summary`, what a
-    /// compaction there left, comes first, as a system message.
+    /// What an agent receives for `message`, from a command line or through
+    /// Mecum's own loop alike: the quote it replies to as a Markdown blockquote,
+    /// every line of it behind `> `, a blank line, then the message. A message
+    /// that quotes nothing is its text unchanged.
+    static func agentText(of message: MessageSnapshot) -> String {
+        guard let quote = message.quote else { return message.text }
+
+        let quoted = quote.text
+            .split(
+                omittingEmptySubsequences: false,
+                whereSeparator           : \.isNewline
+            )
+            .map { "> " + $0 }
+            .joined(separator: "\n")
+        return quoted + "\n\n" + message.text
+    }
+
+    /// Maps stored messages to turn messages, each as `agentText` composes it.
+    /// An empty message, one by anyone other than the person or `workerID`, and
+    /// one sent before `start`, where the context last started again, are left
+    /// out. `summary`, what a compaction there left, comes first, as a system message.
     static func turnHistory(
         _ messages : [MessageSnapshot],
         by workerID: UUID,
@@ -609,12 +755,12 @@ final class TeamModel {
             case nil:
                 return TurnMessage(
                     role: .user,
-                    text: message.text
+                    text: agentText(of: message)
                 )
             case workerID?:
                 return TurnMessage(
                     role: .assistant,
-                    text: message.text
+                    text: agentText(of: message)
                 )
             default:
                 return nil
@@ -717,6 +863,10 @@ final class TeamModel {
     /// person is told of one they asked for, and of a signed-out command line
     /// whoever asked; an automatic one is logged, and the next completed turn at
     /// 90% or more tries again.
+    ///
+    /// Once it ends, the queued message its conversation shows goes out, unless
+    /// the person stopped it or a compaction they asked for failed, as after a
+    /// turn; Send Now sends it either way.
     private func startCompaction(
         of workerID      : UUID,
         in conversationID: UUID,
@@ -734,6 +884,7 @@ final class TeamModel {
 
         Task {
             var compacted: (compaction: ContextCompaction, usage: TurnUsage?)?
+            var stopped = false
             do {
                 let stored    = try await store.conversation(conversationID)
                 // A failed read only makes a Codex compaction count from its session's start.
@@ -760,6 +911,7 @@ final class TeamModel {
                 )
             } catch is CancellationError {
                 // A stopped compaction leaves the context as it was, and says nothing.
+                stopped = true
             } catch {
                 compactionFailed(
                     error,
@@ -801,7 +953,15 @@ final class TeamModel {
             await refreshUsage(of: workerID)
             compacting.remove(workerID)
             pendingStops.remove(workerID)
-            answering[workerID] = nil
+            let sendsNow = sendsQueuedOnEnd.remove(workerID) != nil
+            if sendsNow || (!stopped && (compacted != nil || trigger == .automatic)) {
+                await sendShownQueued(
+                    in: conversationID,
+                    by: workerID
+                )
+            } else {
+                answering[workerID] = nil
+            }
         }
     }
 
@@ -858,6 +1018,143 @@ final class TeamModel {
             host.stop()
         } else {
             pendingStops.insert(workerID)
+        }
+    }
+
+    // MARK: The queue
+
+    /// The open conversation's queue, in order.
+    var queue: [QueuedMessage] { conversation.flatMap { queues[$0.id] } ?? [] }
+
+    /// Where the open conversation's strip stands in its queue: the message it
+    /// shows, which is the one that goes next.
+    var shownQueuedIndex: Int { conversation.map { shownIndex(in: $0.id) } ?? 0 }
+
+    private func shownIndex(in conversationID: UUID) -> Int {
+        let count = queues[conversationID]?.count ?? 0
+        return min(
+            shownQueued[conversationID] ?? 0,
+            max(count - 1, 0)
+        )
+    }
+
+    /// Shows the next queued message in the open conversation's strip, and
+    /// after the last one the first again.
+    func showNextQueued() {
+        guard let conversation, let count = queues[conversation.id]?.count, count > 1 else { return }
+
+        shownQueued[conversation.id] = (shownIndex(in: conversation.id) + 1) % count
+    }
+
+    /// Sends the queued message the open conversation's strip shows at once. A
+    /// running turn or compaction is stopped first, as Stop stops it, and the
+    /// message goes out as soon as it has ended.
+    func sendQueuedNow() async {
+        guard let conversation, let workerID = conversation.participantIDs.first, !queue.isEmpty else { return }
+
+        if isAnswering(workerID) {
+            sendsQueuedOnEnd.insert(workerID)
+            stopAnswering(workerID)
+        } else {
+            await sendShownQueued(
+                in: conversation.id,
+                by: workerID
+            )
+        }
+    }
+
+    /// Takes the queued message the open conversation's strip shows out of the queue.
+    func removeShownQueued() async {
+        guard let conversation, takeShownQueued(from: conversation.id) != nil else { return }
+
+        await saveQueue(of: conversation.id)
+    }
+
+    /// Moves the queued message the open conversation's strip shows back into
+    /// the draft to be edited, as `restoreDraft` puts text back. The draft is
+    /// saved before the queue, so a quit between the two keeps the text twice
+    /// rather than losing it.
+    func editShownQueued() async {
+        guard let conversation, let taken = takeShownQueued(from: conversation.id) else { return }
+
+        await restoreDraft(
+            taken.message.text,
+            quote: taken.message.quote,
+            in   : conversation.id
+        )
+        await flushDraft()
+        await saveQueue(of: conversation.id)
+    }
+
+    /// Sends the queued message `conversationID`'s strip shows, and keeps the
+    /// rest queued, the strip then showing the first of them. The worker is
+    /// held as answering from before the message is written until its turn
+    /// starts, so nothing else starts a turn in between and a message sent
+    /// meanwhile joins the queue. A message the store refuses goes back where
+    /// it was in the queue, and the worker is let go, as it is when the queue is empty.
+    private func sendShownQueued(
+        in conversationID: UUID,
+        by workerID      : UUID
+    ) async {
+        guard let taken = takeShownQueued(from: conversationID) else {
+            answering[workerID] = nil
+            return
+        }
+
+        answering[workerID] = conversationID
+        do {
+            try await post(
+                taken.message.text,
+                quote  : taken.message.quote,
+                in     : conversationID,
+                by     : workerID,
+                holding: true
+            )
+        } catch {
+            answering[workerID] = nil
+            var queue = queues[conversationID] ?? []
+            queue.insert(
+                taken.message,
+                at: min(taken.index, queue.count)
+            )
+            queues[conversationID] = queue
+            problem = issue(
+                title  : "Couldn’t Send Queued Message",
+                message: "The message is still queued. Send it again from the queue.",
+                error  : error
+            )
+            return
+        }
+
+        await saveQueue(of: conversationID)
+    }
+
+    /// Removes the message a conversation's strip shows from its queue, which
+    /// then shows the first one, and returns it with the place it had.
+    private func takeShownQueued(from conversationID: UUID) -> (message: QueuedMessage, index: Int)? {
+        guard var queue = queues[conversationID], !queue.isEmpty else { return nil }
+
+        let index   = shownIndex(in: conversationID)
+        let message = queue.remove(at: index)
+        queues[conversationID]      = queue
+        shownQueued[conversationID] = nil
+        return (message, index)
+    }
+
+    /// Writes the conversation's queue as it is now. A refusal leaves the queue
+    /// working in this session and says it may not outlast it.
+    private func saveQueue(of conversationID: UUID) async {
+        do {
+            try await store.update(
+                conversation: conversationID,
+                .queue(queues[conversationID] ?? [])
+            )
+        } catch {
+            problem = issue(
+                title  : "Couldn’t Save Queued Messages",
+                message: "They will still be sent in this session, but may be gone after you quit Mecum.",
+                error  : error
+            )
         }
     }
 
@@ -1213,6 +1510,8 @@ final class TeamModel {
         modelStates[id] = nil
         usage[id]       = nil
         for conversationID in conversations {
+            queues[conversationID]      = nil
+            shownQueued[conversationID] = nil
             if let host = hosts.removeValue(forKey: conversationID) {
                 do { try await host.close() }
                 catch {

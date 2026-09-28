@@ -215,6 +215,96 @@ struct ComposerTests {
         #expect(bar(draft: "saved anyway", canAnswer: true).canSend)
     }
 
+    @Test("A strip joins the pill on its surface: the bar grows by the strip, and Escape in the field removes it")
+    func stripJoinsThePill() async throws {
+        let harness = ComposerHarness()
+        defer { harness.close() }
+        try await harness.settle()
+        let resting = harness.barHeight
+        let field   = try #require(harness.scrollView?.frame.height)
+
+        harness.quote = "Two bundles failed: capture and layout."
+        try await harness.settle()
+        #expect(harness.barHeight >= resting + ComposerStrip<EmptyView>.controlHeight)
+        #expect(harness.scrollView?.frame.height == field, "the field keeps its height under the strip")
+
+        harness.focus()
+        harness.type("which")
+        harness.press(
+            "\u{1B}",
+            keyCode: 53
+        )
+        try await harness.settle()
+        #expect(harness.quote == nil)
+        #expect(harness.draft == "which", "Escape takes the strip away and leaves the text")
+        #expect(harness.barHeight == resting)
+    }
+
+    @Test("Each strip adds its height to the bar, the queue's with its pager on one line")
+    func stripsAddTheirHeight() async throws {
+        let harness = ComposerHarness()
+        defer { harness.close() }
+        try await harness.settle()
+        let resting = harness.barHeight
+
+        harness.queued = ["Then check yesterday’s build."]
+        try await harness.settle()
+        let queue = harness.barHeight - resting
+        #expect(queue >= ComposerStrip<EmptyView>.controlHeight)
+
+        harness.quote = "Two bundles failed: capture and layout."
+        try await harness.settle()
+        let reply = harness.barHeight - resting - queue
+        #expect(reply >= ComposerStrip<EmptyView>.controlHeight)
+
+        harness.queued = ["one", "two", "three"]
+        try await harness.settle()
+        #expect(harness.barHeight == resting + queue + reply, "the pager fits the strip's line")
+
+        harness.queued = []
+        try await harness.settle()
+        #expect(harness.barHeight == resting + reply)
+        harness.quote = nil
+        try await harness.settle()
+        #expect(harness.barHeight == resting)
+    }
+
+    @Test("A composer that queues hands Return to Send during a turn, and its circle stays Stop")
+    func returnQueuesDuringATurn() async throws {
+        let harness = ComposerHarness()
+        defer { harness.close() }
+        harness.queues      = true
+        harness.isAnswering = true
+        try await harness.settle()
+        harness.focus()
+        harness.type("next")
+        try await harness.settle()
+        harness.pressReturn()
+        try await harness.settle()
+        #expect(harness.sends == 1)
+
+        #expect(!bar(draft: "next", isAnswering: true).queuesWhileAnswering(true).canSend)
+        #expect(bar(draft: "next", isAnswering: true).queuesWhileAnswering(true).canQueue)
+        #expect(!bar(draft: "next", isAnswering: true).canQueue, "a composer that does not queue waits")
+        #expect(!bar(draft: "next", isAnswering: false).queuesWhileAnswering(true).canQueue)
+        #expect(!bar(draft: " \n ", isAnswering: true).queuesWhileAnswering(true).canQueue)
+        #expect(!bar(draft: "next", isAnswering: true, canAnswer: false).queuesWhileAnswering(true).canQueue)
+    }
+
+    @Test("A focus request puts the keyboard in the field, as a reply started in the transcript does")
+    func focusRequestTakesTheKeyboard() async throws {
+        let harness = ComposerHarness()
+        defer { harness.close() }
+        try await harness.settle()
+        let textView = try #require(harness.textView)
+        harness.window?.makeFirstResponder(nil)
+        #expect(harness.window?.firstResponder !== textView)
+
+        harness.focusRequest += 1
+        try await harness.settle()
+        #expect(harness.window?.firstResponder === textView)
+    }
+
     private func bar(draft: String, isAnswering: Bool = false, canAnswer: Bool = true) -> ComposerBar {
         ComposerBar(draft: .constant(draft), recipient: "Milo", canAnswer: canAnswer, isAnswering: isAnswering,
                     send: {}, stop: {})

@@ -45,6 +45,10 @@ struct ComposerSnapshotTests {
             $0.draft         = "Open the capture log."
             $0.holdsComputer = true
         }),
+        ("reply", {
+            $0.draft = "Which one first?"
+            $0.quote = "The build finished at 07:42. Two bundles failed: the capture suite and the layout suite."
+        }),
     ]
 
     @Test("Empty, code, grown, during a turn, with no model and with Release, at two widths, in both themes")
