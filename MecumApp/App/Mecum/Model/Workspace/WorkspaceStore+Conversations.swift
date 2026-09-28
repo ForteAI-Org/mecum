@@ -46,6 +46,14 @@ extension WorkspaceStore {
         case .participants(let value): row.participantIDs = value
         case .draft(let value):        row.draft          = value
 
+        case .draftQuote(let quote):
+            row.draftQuoteMessageID      = quote?.messageID
+            row.draftQuoteAuthorWorkerID = quote?.authorWorkerID
+            row.draftQuoteText           = quote?.text
+
+        case .queue(let queue):
+            row.queuedMessages = try QueuedMessage.encoded(queue)
+
         case .readingPosition(let anchor, let offset):
             row.readingAnchorMessageID = anchor
             row.readingOffset          = offset
@@ -68,15 +76,17 @@ extension WorkspaceStore {
     /// Writes the message and returns it with the order it was given.
     ///
     /// This is the point the spec puts before routing: the text is in the
-    /// store, saved locally, before anything is sent anywhere.
+    /// store, saved locally, before anything is sent anywhere. `quote` is
+    /// what the message replies to, kept with it as a copy.
     @discardableResult
     func appendMessage(
         to conversation: UUID,
-        id             : UUID  = UUID(),
-        author         : UUID? = nil,
+        id             : UUID            = UUID(),
+        author         : UUID?           = nil,
         text           : String,
-        at             : Date  = Date(),
-        delivery       : MessageDelivery = .savedLocally
+        at             : Date            = Date(),
+        delivery       : MessageDelivery = .savedLocally,
+        quote          : MessageQuote?   = nil
     ) throws -> MessageSnapshot {
 
         guard try conversationRow(conversation) != nil else {
@@ -90,7 +100,8 @@ extension WorkspaceStore {
             text          : text,
             createdAt     : at,
             sequence      : try nextSequence(in: conversation),
-            delivery      : delivery
+            delivery      : delivery,
+            quote         : quote
         )
         modelContext.insert(message)
         try saveOrRollBack()

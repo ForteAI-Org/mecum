@@ -19,6 +19,9 @@ nonisolated struct MessageSnapshot: Sendable, Hashable, Identifiable {
     let sequence      : Int
     let delivery      : MessageDelivery
 
+    /// What the message replies to, or nil.
+    let quote         : MessageQuote?
+
     /// True when the person wrote it.
     var isFromPerson: Bool { authorWorkerID == nil }
 
@@ -30,5 +33,12 @@ nonisolated struct MessageSnapshot: Sendable, Hashable, Identifiable {
         self.createdAt      = message.createdAt
         self.sequence       = message.sequence
         self.delivery       = message.delivery
+        self.quote          = message.quotedMessageID.map { id in
+            MessageQuote(
+                messageID     : id,
+                authorWorkerID: message.quotedAuthorWorkerID,
+                text          : message.quotedText ?? ""
+            )
+        }
     }
 }

@@ -5,6 +5,7 @@
 //  Created by Eliomar Alejandro Rodriguez Ferrer on 22/09/2026.
 //
 
+import CoreData
 import Foundation
 import SwiftData
 
@@ -16,19 +17,18 @@ import SwiftData
 /// `Runs`, `Perception`, `Knowledge` and `Conversations` directories the kit
 /// and the command line already use, and a test passes a temporary one.
 ///
-/// A marker file next to the store records the schema version that last opened
-/// it. When it disagrees with the current version, or is missing while a store
-/// exists, an upgrade is due: the store files are copied first, and a failure
-/// puts the copy back. Ordinary launches, where the versions agree, copy
-/// nothing.
+/// An upgrade is due when the store's own metadata does not match the current
+/// models (`isUpgradeDue`), which is exactly when opening it migrates it, so no
+/// version number has to be kept by hand. The store files are then copied
+/// first, and a failure puts the copy back. Ordinary launches, where the store
+/// matches, copy nothing.
 ///
-/// The current version is v4. `WorkspaceMigrationTests` opens real v1, v2 and v3 stores
-/// through it, and `WorkspaceStoreFileTests` stages the failure a real upgrade
-/// cannot be made to produce on demand.
+/// `WorkspaceMigrationTests` opens real stores in earlier shapes through it,
+/// and `WorkspaceStoreFileTests` stages the failure a real upgrade cannot be
+/// made to produce on demand.
 nonisolated enum WorkspaceStoreFile {
 
-    static let storeName         = "Workspace.store"
-    static let versionMarkerName = "Workspace.schema-version"
+    static let storeName = "Workspace.store"
 
     /// The store file and the two SQLite companions it is only consistent
     /// with. A copy that took the first alone could restore a torn store.
@@ -58,17 +58,12 @@ nonisolated enum WorkspaceStoreFile {
         try manager.createDirectory(at: directory, withIntermediateDirectories: true)
 
         let store     = directory.appending(path: storeName)
-        let marker    = directory.appending(path: versionMarkerName)
-        let version   = currentVersionIdentifier()
-        let isUpgrade = manager.fileExists(atPath: store.path(percentEncoded: false))
-                     && recordedVersion(at: marker) != version
+        let isUpgrade = isUpgradeDue(store)
 
         if isUpgrade { try backUp(store) }
 
         do {
-            let container = try make(store)
-            try version.write(to: marker, atomically: true, encoding: .utf8)
-            return container
+            return try make(store)
         } catch {
             guard isUpgrade else { throw WorkspaceStoreError.openFailed(underlying: error) }
             // The open failure is what the caller needs; a failed restore is
@@ -80,19 +75,26 @@ nonisolated enum WorkspaceStoreFile {
         }
     }
 
-    // MARK: Version marker
+    // MARK: Upgrade
 
-    static func currentVersionIdentifier() -> String {
-        let version = WorkspaceSchemaV4.versionIdentifier
-        return "\(version.major).\(version.minor).\(version.patch)"
-    }
+    /// Whether the store at `store` was written in another shape than the
+    /// current models, from the entity hashes in its metadata. No store is no
+    /// upgrade. A store whose metadata cannot be read counts as one: it is
+    /// copied before the open, which is the safe direction.
+    static func isUpgradeDue(_ store: URL) -> Bool {
+        guard FileManager.default.fileExists(atPath: store.path(percentEncoded: false)) else { return false }
 
-    /// The version that last opened this store, or nil when there is no marker
-    /// or it cannot be read. Absence is a result here, not a failure: both
-    /// mean the store's version is unknown, and an unknown version is treated
-    /// as an upgrade, which is the safe direction.
-    private static func recordedVersion(at marker: URL) -> String? {
-        try? String(contentsOf: marker, encoding: .utf8)
+        let model    = NSManagedObjectModel.makeManagedObjectModel(for: WorkspaceSchema.models)
+        let metadata = try? NSPersistentStoreCoordinator.metadataForPersistentStore(
+            type: .sqlite,
+            at  : store
+        )
+        guard let model, let metadata else { return true }
+
+        return !model.isConfiguration(
+            withName                   : nil,
+            compatibleWithStoreMetadata: metadata
+        )
     }
 
     // MARK: Copy and restore
@@ -128,12 +130,16 @@ nonisolated enum WorkspaceStoreFile {
 
     // MARK: Container
 
+    /// SwiftData migrates an older store as it opens it, inferring the
+    /// lightweight migration from the store's shape and the current one.
     private static func makeContainer(at store: URL) throws -> ModelContainer {
-        let schema = Schema(versionedSchema: WorkspaceSchemaV4.self)
+        let schema = Schema(WorkspaceSchema.models)
         return try ModelContainer(
             for           : schema,
-            migrationPlan : WorkspaceMigrationPlan.self,
-            configurations: ModelConfiguration(schema: schema, url: store)
+            configurations: ModelConfiguration(
+                schema: schema,
+                url   : store
+            )
         )
     }
 }

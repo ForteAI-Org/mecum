@@ -62,17 +62,6 @@ extension WorkspaceStore {
         return UnreadState(replies: replies, hasUnseenProblem: hasProblem)
     }
 
-    /// Moves every conversation's marker to its end. The v2 to v3 migration
-    /// runs it, so the history that existed before the marker reads as seen.
-    static func markEverythingRead(in context: ModelContext) throws {
-        for conversation in try context.fetch(FetchDescriptor<Conversation>()) {
-            let end = try end(of: conversation.id, in: context)
-            conversation.readUpToSequence   = end.sequence
-            conversation.readUpToEventOrder = end.eventOrder
-        }
-        try context.save()
-    }
-
     /// The highest message sequence and event order in the conversation, zero
     /// for none.
     private static func end(of id: UUID, in context: ModelContext) throws -> (sequence: Int, eventOrder: Int) {

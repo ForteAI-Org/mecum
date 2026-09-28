@@ -107,4 +107,107 @@ struct ConversationStoreTests {
         let read     = try #require(try await reopened.messages(in: conversation.id).first)
         #expect(read.delivery == .interrupted)
     }
+
+    @Test("A reply's quote and the draft's quote survive a reopen, and the draft's clears")
+    func quotesPersist() async throws {
+        let directory = TemporaryStore.directory()
+        defer { TemporaryStore.discard(directory) }
+
+        let store        = try WorkspaceStore.opening(in: directory)
+        let worker       = try await store.createWorker(
+            name      : "Atlas",
+            appearance: TemporaryStore.appearance()
+        )
+        let conversation = try await store.createConversation(participants: [worker.id])
+        let answer       = try await store.appendMessage(
+            to    : conversation.id,
+            author: worker.id,
+            text  : "Two bundles failed.\nCapture and layout."
+        )
+        let quote        = MessageQuote(
+            messageID     : answer.id,
+            authorWorkerID: worker.id,
+            text          : "Capture and layout."
+        )
+        let own          = MessageQuote(
+            messageID     : UUID(),
+            authorWorkerID: nil,
+            text          : "My own words"
+        )
+        let reply        = try await store.appendMessage(
+            to   : conversation.id,
+            text : "Which first?",
+            quote: quote
+        )
+        try await store.update(
+            conversation: conversation.id,
+            .draftQuote(own)
+        )
+
+        #expect(reply.quote == quote)
+        let reopened = try WorkspaceStore.opening(in: directory)
+        let messages = try await reopened.messages(in: conversation.id)
+        #expect(messages.map(\.quote) == [nil, quote])
+        #expect(messages.last?.text == "Which first?", "the quote is kept apart from the text")
+        #expect(try await reopened.message(reply.id)?.quote == quote)
+        let read = try #require(try await reopened.conversation(conversation.id))
+        #expect(read.draftQuote == own)
+        #expect(read.draftQuote?.isFromPerson == true)
+
+        try await reopened.update(
+            conversation: conversation.id,
+            .draftQuote(nil)
+        )
+        #expect(try await reopened.conversation(conversation.id)?.draftQuote == nil)
+    }
+
+    @Test("A conversation's queue survives a reopen in order, each message with its quote, and empties")
+    func queuePersists() async throws {
+        let directory = TemporaryStore.directory()
+        defer { TemporaryStore.discard(directory) }
+
+        let store        = try WorkspaceStore.opening(in: directory)
+        let worker       = try await store.createWorker(
+            name      : "Atlas",
+            appearance: TemporaryStore.appearance()
+        )
+        let conversation = try await store.createConversation(participants: [worker.id])
+        let other        = try await store.createConversation(participants: [UUID()])
+        let quote        = MessageQuote(
+            messageID     : UUID(),
+            authorWorkerID: worker.id,
+            text          : "Capture\nand layout."
+        )
+        let queue        = [
+            QueuedMessage(text: "first"),
+            QueuedMessage(
+                text : "second, with a line\nbreak",
+                quote: quote
+            ),
+            QueuedMessage(text: "third"),
+        ]
+        #expect(conversation.queue.isEmpty)
+
+        let written = try await store.update(
+            conversation: conversation.id,
+            .queue(queue)
+        )
+        #expect(written.queue == queue)
+
+        let reopened = try WorkspaceStore.opening(in: directory)
+        #expect(try await reopened.conversation(conversation.id)?.queue == queue)
+        #expect(try await reopened.conversation(other.id)?.queue.isEmpty == true, "a queue is its conversation's")
+
+        try await reopened.update(
+            conversation: conversation.id,
+            .queue(Array(queue.dropFirst()))
+        )
+        #expect(try await reopened.conversation(conversation.id)?.queue.map(\.text)
+                == ["second, with a line\nbreak", "third"])
+        try await reopened.update(
+            conversation: conversation.id,
+            .queue([])
+        )
+        #expect(try await WorkspaceStore.opening(in: directory).conversation(conversation.id)?.queue.isEmpty == true)
+    }
 }

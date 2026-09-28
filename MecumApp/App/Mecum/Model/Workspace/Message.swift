@@ -64,21 +64,32 @@ nonisolated final class Message {
 
     var delivery: MessageDelivery
 
+    /// What this message replies to, a `MessageQuote` kept as three columns.
+    /// All three are nil for a message that quotes nothing, and in a store
+    /// written before replies.
+    var quotedMessageID     : UUID?
+    var quotedAuthorWorkerID: UUID?
+    var quotedText          : String?
+
     init(
-        id            : UUID  = UUID(),
+        id            : UUID            = UUID(),
         conversationID: UUID,
-        authorWorkerID: UUID? = nil,
+        authorWorkerID: UUID?           = nil,
         text          : String,
-        createdAt     : Date  = Date(),
+        createdAt     : Date            = Date(),
         sequence      : Int,
-        delivery      : MessageDelivery = .savedLocally
+        delivery      : MessageDelivery = .savedLocally,
+        quote         : MessageQuote?   = nil
     ) {
-        self.id             = id
-        self.conversationID = conversationID
-        self.authorWorkerID = authorWorkerID
-        self.text           = text
-        self.createdAt      = createdAt
-        self.sequence       = sequence
-        self.delivery       = delivery
+        self.id                   = id
+        self.conversationID       = conversationID
+        self.authorWorkerID       = authorWorkerID
+        self.text                 = text
+        self.createdAt            = createdAt
+        self.sequence             = sequence
+        self.delivery             = delivery
+        self.quotedMessageID      = quote?.messageID
+        self.quotedAuthorWorkerID = quote?.authorWorkerID
+        self.quotedText           = quote?.text
     }
 }

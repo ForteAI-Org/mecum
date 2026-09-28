@@ -13,10 +13,10 @@ import Testing
 /// What §18.4 asks for around a migration: the copy taken before one runs, and
 /// the previous store put back when it fails.
 ///
-/// The upgrade is staged by writing an older version into the marker file,
-/// the same signal a v1 store gives, and the failure by a container factory
-/// that damages the store and throws, which is what a migration that dies
-/// halfway leaves behind. The real v1 to v2 migration is `WorkspaceMigrationTests`.
+/// The upgrade is staged with a store written in an earlier shape, which is
+/// what makes one due, and the failure by a container factory that damages the
+/// store and throws, which is what a migration that dies halfway leaves
+/// behind. The real upgrades are `WorkspaceMigrationTests`.
 @Suite("Opening the store, and the copy a migration starts from")
 struct WorkspaceStoreFileTests {
 
@@ -25,16 +25,28 @@ struct WorkspaceStoreFileTests {
         let directory = TemporaryStore.directory()
         defer { TemporaryStore.discard(directory) }
 
-        let store  = try WorkspaceStore.opening(in: directory)
-        let worker = try await store.createWorker(name: "Atlas",
-                                                  appearance: TemporaryStore.appearance())
-        let conversation = try await store.createConversation(participants: [worker.id])
-        try await store.appendMessage(to: conversation.id, text: "before the upgrade")
-
-        let marker = directory.appending(path: WorkspaceStoreFile.versionMarkerName)
-        #expect(try String(contentsOf: marker, encoding: .utf8)
-                == WorkspaceStoreFile.currentVersionIdentifier())
-        try "0.9.0".write(to: marker, atomically: true, encoding: .utf8)
+        let workerID       = UUID()
+        let conversationID = UUID()
+        try writeStore(
+            in: directory,
+            as: StoreShapeV4.self
+        ) { context in
+            context.insert(Worker(
+                id        : workerID,
+                name      : "Atlas",
+                appearance: TemporaryStore.appearance()
+            ))
+            context.insert(StoreShapeV4.Conversation(
+                id            : conversationID,
+                participantIDs: [workerID],
+                draft         : ""
+            ))
+            context.insert(StoreShapeV4.Message(
+                conversationID: conversationID,
+                text          : "before the upgrade",
+                sequence      : 1
+            ))
+        }
 
         struct MigrationDied: Error {}
 
@@ -59,23 +71,43 @@ struct WorkspaceStoreFileTests {
         #expect(underlying is MigrationDied)
         #expect(restoreFailure == nil)
 
+        // What was put back is the earlier store, so the next launch upgrades it for real.
+        let file = directory.appending(path: WorkspaceStoreFile.storeName)
+        #expect(WorkspaceStoreFile.isUpgradeDue(file))
         let reopened = try WorkspaceStore.opening(in: directory)
-        #expect(try await reopened.worker(worker.id)?.name == "Atlas")
-        #expect(try await reopened.messages(in: conversation.id).map(\.text) == ["before the upgrade"])
+        #expect(try await reopened.worker(workerID)?.name == "Atlas")
+        #expect(try await reopened.messages(in: conversationID).map(\.text) == ["before the upgrade"])
     }
 
-    @Test("A launch on the current version copies nothing")
+    @Test("A launch on a store in the current shape copies nothing")
     func ordinaryLaunchTakesNoBackup() async throws {
         let directory = TemporaryStore.directory()
         defer { TemporaryStore.discard(directory) }
 
+        let file = directory.appending(path: WorkspaceStoreFile.storeName)
+        #expect(!WorkspaceStoreFile.isUpgradeDue(file), "no store is no upgrade")
         let store = try WorkspaceStore.opening(in: directory)
         try await store.createWorker(name: "Nova", appearance: TemporaryStore.appearance())
+        #expect(!WorkspaceStoreFile.isUpgradeDue(file))
 
         _ = try WorkspaceStore.opening(in: directory)
 
         let backup = directory.appending(path: WorkspaceStoreFile.storeName + WorkspaceStoreFile.backupSuffix)
         #expect(FileManager.default.fileExists(atPath: backup.path(percentEncoded: false)) == false)
+    }
+
+    @Test("A store whose metadata cannot be read is copied before it is opened")
+    func unreadableStoreCountsAsAnUpgrade() throws {
+        let directory = TemporaryStore.directory()
+        defer { TemporaryStore.discard(directory) }
+        try FileManager.default.createDirectory(
+            at                         : directory,
+            withIntermediateDirectories: true
+        )
+        let file = directory.appending(path: WorkspaceStoreFile.storeName)
+        try Data("not a store".utf8).write(to: file)
+
+        #expect(WorkspaceStoreFile.isUpgradeDue(file))
     }
 
     @Test("A failure with no upgrade due is reported as an open failure")

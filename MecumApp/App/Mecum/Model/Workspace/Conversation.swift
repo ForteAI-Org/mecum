@@ -59,8 +59,8 @@ nonisolated final class Conversation {
     /// The provider session a worker's agent resumes, and the provider that
     /// issued it. Written only together, through `ConversationChange.providerSession`
     /// and `.providerSessionCleared`, so an id recorded for one provider is never
-    /// offered to another. Nil in a conversation that has not run a turn yet, after
-    /// a fresh context, and in every v1 store.
+    /// offered to another. Nil in a conversation that has not run a turn yet, and
+    /// after a fresh context.
     var providerSessionProvider: ModelProvider?
     var providerSessionID      : String?
 
@@ -70,6 +70,20 @@ nonisolated final class Conversation {
     /// means "at the end" and the end moves. Written only by `markRead`.
     var readUpToSequence  : Int = 0
     var readUpToEventOrder: Int = 0
+
+    /// The message the draft replies to, a `MessageQuote` kept as three
+    /// columns beside the draft and written with it, so a reply in progress
+    /// survives a switch of worker and a relaunch. Nil in a store written
+    /// before replies.
+    var draftQuoteMessageID     : UUID?
+    var draftQuoteAuthorWorkerID: UUID?
+    var draftQuoteText          : String?
+
+    /// The messages sent while the worker answered, in order: JSON of
+    /// `[QueuedMessage]` in a plain data column, which reads the same on every
+    /// macOS version, rather than a Codable array whose encoding is SwiftData's
+    /// own. Nil for an empty queue, and in a store written before the queue.
+    var queuedMessages: Data?
 
     init(
         id                    : UUID             = UUID(),

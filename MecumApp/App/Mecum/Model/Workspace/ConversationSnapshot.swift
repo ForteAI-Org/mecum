@@ -17,6 +17,8 @@ nonisolated struct ConversationSnapshot: Sendable, Hashable, Identifiable {
     let title                 : String?
     let participantIDs        : [UUID]
     let draft                 : String
+    let draftQuote            : MessageQuote?
+    let queue                 : [QueuedMessage]
     let readingAnchorMessageID: UUID?
     let readingOffset         : Double
     let createdAt             : Date
@@ -30,6 +32,14 @@ nonisolated struct ConversationSnapshot: Sendable, Hashable, Identifiable {
         self.title                  = conversation.title
         self.participantIDs         = conversation.participantIDs
         self.draft                  = conversation.draft
+        self.draftQuote             = conversation.draftQuoteMessageID.map { id in
+            MessageQuote(
+                messageID     : id,
+                authorWorkerID: conversation.draftQuoteAuthorWorkerID,
+                text          : conversation.draftQuoteText ?? ""
+            )
+        }
+        self.queue                  = QueuedMessage.decoded(conversation.queuedMessages)
         self.readingAnchorMessageID = conversation.readingAnchorMessageID
         self.readingOffset          = conversation.readingOffset
         self.createdAt              = conversation.createdAt
