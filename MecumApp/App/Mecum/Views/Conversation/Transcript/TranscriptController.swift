@@ -758,6 +758,9 @@ final class TranscriptController: NSObject {
         let maximum = max(0, layout.collectionViewContentSize.height - clip.bounds.height)
         clip.scroll(to: NSPoint(x: 0, y: min(max(0, top - max(0, topInset)), maximum)))
         scrollView.reflectScrolledClipView(clip)
+        // The collection view tiles only when its prepared rect changes, and a shorter conversation in between leaves
+        // it at this one's end: back there, the cells would stay where that one had them until the reader scrolled.
+        collectionView.prepareContent(in: collectionView.visibleRect)
     }
 
     private func didScroll() {

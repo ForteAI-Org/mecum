@@ -450,6 +450,42 @@ struct RealWindowInteractionTests {
         #expect(firstRow.minY >= controller.collectionView.visibleRect.minY + 70)
         #expect(controller.captureAnchor()?.itemID == controller.rows[0].item.id)
     }
+
+    // MARK: Switching
+
+    @Test("Back from a short conversation, a long one opened at its end has cells for the rows in view")
+    func switchingConversations() async throws {
+        let fixture = try await TranscriptFixture()
+        defer { fixture.discard() }
+        for index in 0..<60 {
+            try await fixture.say("Message \(index), with a little more text to give it a line or two.",
+                                  at: Double(index) * 400, byWorker: index % 2 == 1)
+        }
+        let short = try await fixture.store.createConversation(participants: [fixture.workerID]).id
+        try await fixture.store.appendMessage(to: short, author: nil, text: "One short message.",
+                                              at: TranscriptFixture.at(0), delivery: .completed)
+        let stage = await stage(fixture, pasteboard: NSPasteboard(name: .init("mecum.tests.\(UUID())")))
+        defer { stage.window.close() }
+        let controller = stage.controller
+
+        for conversation in [short, fixture.conversation, short, fixture.conversation] {
+            controller.open(conversation, workerName: "Atlas", appearance: TranscriptFixture.appearance,
+                            readingAnchor: nil, readingOffset: 0)
+            await controller.settle()
+            let collectionView = controller.collectionView
+            let frames = controller.frameMap()
+            let inView = Set(controller.rows.indices.filter { index in
+                frames[controller.rows[index].item.id]?.intersects(collectionView.visibleRect) ?? false
+            })
+            let drawn = Set(collectionView.visibleItems().compactMap { item in
+                collectionView.indexPath(for: item).flatMap { path in
+                    item.view.frame == frames[controller.rows[path.item].item.id] ? path.item : nil
+                }
+            })
+            #expect(!inView.isEmpty)
+            #expect(inView.isSubset(of: drawn), "rows in view without a cell: \(inView.subtracting(drawn).sorted())")
+        }
+    }
 }
 
 /// KeyboardHolder takes the keyboard, as the composer does, and nothing else.
