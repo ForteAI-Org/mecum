@@ -90,6 +90,15 @@ final class TeamModel {
     /// The worker the person asked to delete, whose confirmation the team window shows.
     var deletingWorker: UUID?
 
+    /// The toolbar's token popover and the context ring's popover are open, as
+    /// their buttons and `/usage` and `/context` open them. Both close when
+    /// another conversation opens.
+    var showsUsage   = false
+    var showsContext = false
+
+    /// Moves each time `/model` asks the composer to open its model popup.
+    var modelPopupRequest = 0
+
     /// What the last check said about each configured worker's model. A
     /// worker absent here has not been checked, which is not the same as fine.
     private(set) var modelStates: [UUID: ConnectionState] = [:]
@@ -292,6 +301,8 @@ final class TeamModel {
         savedDraft      = ""
         draftQuote      = nil
         savedDraftQuote = nil
+        showsUsage      = false
+        showsContext    = false
 
         guard let id = selection else { return }
 
@@ -383,6 +394,10 @@ final class TeamModel {
     /// a compaction, the message joins the conversation's queue instead, with
     /// its quote, and goes out when the turn ends (`sendShownQueued`).
     ///
+    /// A draft that is a command runs as one before anything else, even while
+    /// the worker answers: it never becomes a message and is never queued
+    /// (`run`). A draft that starts with `//` is sent with its first `/` removed.
+    ///
     /// The text and its quote leave the draft before the first suspension, and
     /// a second send while this one waits does nothing, so one Return is one
     /// message. A message the store refuses goes back into the draft with its
@@ -392,9 +407,13 @@ final class TeamModel {
     func send() async {
         guard !isSending, let conversation else { return }
 
-        let typed = draft
-        let text  = typed.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty else { return }
+        let typed   = draft
+        let trimmed = typed.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+
+        if let command = SlashCommandInvocation(draft: trimmed) { return await run(command) }
+
+        let text = SlashCommandInvocation.messageText(trimmed)
 
         let workerID = conversation.participantIDs.first
         let quote    = draftQuote

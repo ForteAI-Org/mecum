@@ -17,7 +17,8 @@ struct TokenCounterButton: View {
     let worker: WorkerSnapshot
     let usage : WorkerUsage
 
-    @State private var isShowingDetail = false
+    /// Whether the popover is open: `TeamModel.showsUsage`, which `/usage` sets too.
+    @Binding var isShowingDetail: Bool
 
     var body: some View {
         let wording = UsageWording()

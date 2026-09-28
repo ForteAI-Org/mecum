@@ -32,7 +32,10 @@ struct ConversationContextButton: View {
     let compact     : () -> Void
     let startFresh  : () -> Void
 
-    @State private var isShowingDetail   = false
+    /// Whether the popover is open: `TeamModel.showsContext`, which `/context` sets too.
+    /// A button drawn alone, as a snapshot draws it, keeps it closed.
+    var isShowingDetail: Binding<Bool> = .constant(false)
+
     @State private var isConfirmingFresh = false
 
     @Environment(\.accessibilityReduceTransparency)
@@ -42,7 +45,7 @@ struct ConversationContextButton: View {
         let wording = UsageWording()
         let side    = ComposerBar.restingHeight
 
-        Button { isShowingDetail.toggle() } label: {
+        Button { isShowingDetail.wrappedValue.toggle() } label: {
             ConversationContextRing(
                 fraction       : context.fraction ?? 0,
                 side           : 20,
@@ -67,7 +70,7 @@ struct ConversationContextButton: View {
         .accessibilityLabel("Context")
         .accessibilityValue(isCompacting ? UsageWording.compacting : wording.contextSpoken(context))
         .popover(
-            isPresented: $isShowingDetail,
+            isPresented: isShowingDetail,
             arrowEdge  : .top
         ) {
             ConversationContextPopover(
@@ -75,12 +78,12 @@ struct ConversationContextButton: View {
                 lastTurn  : lastTurn,
                 waitReason: waitReason,
                 compact   : {
-                    isShowingDetail = false
+                    isShowingDetail.wrappedValue = false
                     compact()
                 },
                 startFresh: {
-                    isShowingDetail   = false
-                    isConfirmingFresh = true
+                    isShowingDetail.wrappedValue = false
+                    isConfirmingFresh            = true
                 }
             )
         }

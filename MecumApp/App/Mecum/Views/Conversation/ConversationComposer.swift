@@ -81,18 +81,19 @@ struct ConversationComposer: View {
         .leading {
             if let context {
                 ConversationContextButton(
-                    context     : context,
-                    lastTurn    : team.usage[worker.id]?.lastTurn?.turn,
-                    worker      : worker.name,
-                    isCompacting: team.isCompacting(worker.id),
-                    waitReason  : team.isAnswering(worker.id)
+                    context        : context,
+                    lastTurn       : team.usage[worker.id]?.lastTurn?.turn,
+                    worker         : worker.name,
+                    isCompacting   : team.isCompacting(worker.id),
+                    waitReason     : team.isAnswering(worker.id)
                         ? UsageWording.actionsWait(
                             worker      : worker.name,
                             isCompacting: team.isCompacting(worker.id)
                         )
                         : nil,
-                    compact     : { team.compactContext(of: worker.id) },
-                    startFresh  : { Task { await team.startFreshContext(of: worker.id) } }
+                    compact        : { team.compactContext(of: worker.id) },
+                    startFresh     : { Task { await team.startFreshContext(of: worker.id) } },
+                    isShowingDetail: $team.showsContext
                 )
                 .padding(
                     .trailing,
@@ -143,6 +144,8 @@ struct ConversationComposer: View {
             isChoosingModel = false
             pending         = nil
         }
+        // `/model` alone opens the popup, as the model button does.
+        .onChange(of: team.modelPopupRequest) { isChoosingModel = true }
         // The draft reaches the store once typing pauses. A new keystroke
         // cancels this task and starts it again, so a burst writes once.
         .task(id: team.draft) {

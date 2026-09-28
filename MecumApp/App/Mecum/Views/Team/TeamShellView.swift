@@ -213,8 +213,9 @@ struct TeamShellView: View {
            UsageWording.counter(of: usage) != nil {
             ToolbarItem {
                 TokenCounterButton(
-                    worker: worker,
-                    usage : usage
+                    worker         : worker,
+                    usage          : usage,
+                    isShowingDetail: $team.showsUsage
                 )
             }
 
