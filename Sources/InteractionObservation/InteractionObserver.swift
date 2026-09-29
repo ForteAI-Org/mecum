@@ -54,17 +54,18 @@ public final class InteractionObserver {
         do {
             for try await event in listener.events {
                 try Task.checkCancellation()
-                guard accepts(event.processID) else { continue }
+                // A gap belongs to no app: filtering it out would hide lost input from the report.
+                guard event.kind == .gap || accepts(event.processID) else { continue }
                 let app = NSRunningApplication(processIdentifier: event.processID)
                 let beforeSample = event.window.flatMap { samples[$0.number] }
                 let before = InteractionResolution.resolve(event: event, sample: beforeSample)
                 var afterElement: SceneElement?
                 var observation: InteractionDifference?
-                var afterStatus = event.kind == .focus ? "not_applicable" : "intervening_input"
+                var afterStatus = event.kind == .focus || event.kind == .gap ? "not_applicable" : "intervening_input"
                 var accessibility: AccessibilityPointResult?
                 if event.kind == .hover {
                     afterStatus = "not_requested_for_hover"
-                } else if event.kind != .focus, let window = event.window,
+                } else if event.kind != .focus, event.kind != .gap, let window = event.window,
                           listener.revision == event.revision {
                     let native = InteractionSceneReader.accessibility(at: event.point, processID: event.processID)
                     accessibility = listener.revision == event.revision ? native

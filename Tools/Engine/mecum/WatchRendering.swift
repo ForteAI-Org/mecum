@@ -7,6 +7,9 @@ import PerceptionCore
 enum WatchRendering {
     static func raw(_ event: InteractionEvent) -> String {
         if event.kind == .focus { return "focus pid=\(event.processID) (application activated)" }
+        if let gap = event.gap {
+            return "gap sequences \(gap.firstSequence)-\(gap.lastSequence) lost: \(gap.lostCritical) clicks/focus, \(gap.lostCoalescible) hovers/scrolls"
+        }
         let owner = event.window.map { "window #\($0.number) \"\(clean($0.title ?? ""))\" layer=\($0.layer)" } ?? "no window"
         let delta = event.kind == .scroll ? " dx=\(event.deltaX) dy=\(event.deltaY)pt" : ""
         return "\(event.kind.rawValue) pid=\(event.processID) \(owner) @\(Int(event.point.x)),\(Int(event.point.y))\(delta)"
@@ -14,7 +17,7 @@ enum WatchRendering {
 
     static func text(_ report: InteractionReport) -> String {
         var line = "\(clean(report.app)) | \(raw(report.event))"
-        guard report.event.kind != .focus else { return line }
+        guard report.event.kind != .focus, report.event.kind != .gap else { return line }
         let before = report.before
         line += "\n  BEFORE: \(before.status)"
         if let element = before.element { line += " \(describe(element))" }
@@ -38,6 +41,13 @@ enum WatchRendering {
             line += "\n  candidates: " + before.candidates.map(describe).joined(separator: " | ")
         }
         return line
+    }
+
+    /// The listener's stop line: what its queue published, coalesced and lost. The tap never blocks.
+    static func counters(observed: UInt64, _ queue: InputQueueCounters) -> String {
+        "counters: observed \(observed), queued \(queue.published), coalesced \(queue.coalescedHovers) hovers "
+            + "\(queue.aggregatedScrolls) scrolls, lost \(queue.lostCritical) clicks/focus "
+            + "\(queue.lostCoalescible) hovers/scrolls in \(queue.gaps) gaps"
     }
 
     static func json<T: Encodable>(_ value: T) throws -> String {

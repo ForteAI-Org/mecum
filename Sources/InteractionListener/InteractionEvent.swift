@@ -4,9 +4,25 @@ import Foundation
 /// InteractionEvent is one passive user gesture. Positions and frames use global top-left points.
 /// Scroll timestamps span the gesture; revisions bracket all input received, including other apps.
 /// It carries neither typed text nor pixels and is independent of perception, storage and agents.
+/// Sequences are contiguous: a `gap` event stands for the records the listener's queue could not keep.
 public struct InteractionEvent: Sendable, Codable, Equatable {
     public enum Kind: String, Sendable, Codable {
-        case click, rightClick, scroll, hover, focus
+        case click, rightClick, scroll, hover, focus, gap
+    }
+
+    /// Gap is the sequence range lost under pressure, split into clicks/focus and hovers/scrolls.
+    public struct Gap: Sendable, Codable, Equatable {
+        public let firstSequence: UInt64
+        public let lastSequence: UInt64
+        public let lostCritical: UInt32
+        public let lostCoalescible: UInt32
+
+        public init(firstSequence: UInt64, lastSequence: UInt64, lostCritical: UInt32, lostCoalescible: UInt32) {
+            self.firstSequence = firstSequence
+            self.lastSequence = lastSequence
+            self.lostCritical = lostCritical
+            self.lostCoalescible = lostCoalescible
+        }
     }
 
     public let kind: Kind
@@ -22,11 +38,14 @@ public struct InteractionEvent: Sendable, Codable, Equatable {
     public let sourceProcessID: Int32?
     public var deltaX: Double
     public var deltaY: Double
+    public let sequence: UInt64
+    public let gap: Gap?
 
     public init(
         kind: Kind, timestamp: Date, startedAt: Double, endedAt: Double,
         precedingRevision: UInt64, revision: UInt64, point: CGPoint,
-        window: InteractionWindow?, processID: Int32, deltaX: Double = 0, deltaY: Double = 0, sourceProcessID: Int32? = nil
+        window: InteractionWindow?, processID: Int32, deltaX: Double = 0, deltaY: Double = 0, sourceProcessID: Int32? = nil,
+        sequence: UInt64 = 0, gap: Gap? = nil
     ) {
         self.kind = kind
         self.timestamp = timestamp
@@ -40,6 +59,8 @@ public struct InteractionEvent: Sendable, Codable, Equatable {
         self.sourceProcessID = sourceProcessID
         self.deltaX = deltaX
         self.deltaY = deltaY
+        self.sequence = sequence
+        self.gap = gap
     }
 }
 

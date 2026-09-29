@@ -69,6 +69,14 @@ struct WatchOptions {
     name= compares the hit with Mecum's production label resolver. Pixel-only hits are observations,
     not proof of clickability. Rapid input can legitimately produce unresolved events.
 
+    At stop, one stderr line reports observed and queued sequences, coalescing, loss and gaps.
+
+    Measurement: SIGUSR1 prints three stderr lines, callback[inprocess] input, pointer and timer: n,
+    p50, p90, p99 and max of clicks and scrolls, of every other callback and of the timer since the last
+    dump, then resets them; the same lines follow at stop. SIGUSR2 pauses or resumes the --raw loop
+    that reads events while the listener keeps running; the consumer thread keeps draining the queue
+    into an unbounded stream, so the stall grows that stream and never the queue.
+
     No input is sent, no Seat is created, no provider is called, and no memory or files are written.
     Keyboard text and drag paths are not recorded. Scroll dx/dy are in screen points.
     """
