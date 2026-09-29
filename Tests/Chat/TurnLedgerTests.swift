@@ -18,7 +18,7 @@ import Testing
 @Suite("Typed turn events and the verified candidate")
 struct TurnLedgerTests {
 
-    private let request = "Seleziona Output Busses nel filtro della scheda Bus e verifica il nuovo valore. "
+    private let request = "Seleziona Output Busses nel filtro e verifica il nuovo valore. "
         + "Fermati se il controllo non è univoco."
 
     /// Runs `body` as one turn and returns its report.
@@ -64,7 +64,7 @@ struct TurnLedgerTests {
         #expect(draft.phrase == request)
         #expect(draft.step.arguments == ["control": "All Busses", "item": "Output Busses"])
         #expect(draft.context.bundleID == "test.synthetic.mixer")
-        #expect(proof.change == .changed)
+        #expect(proof.dropdown?.change == .changed)
         let event = try #require(report.event)
         #expect(event.id == "turn-\(report.turnID.uuidString)")
         #expect(event.subject == .step(draft))

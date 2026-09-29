@@ -24,7 +24,8 @@ public enum SQLiteLivingMemoryError: Error, Sendable, Equatable, CustomStringCon
     /// The store was written by a newer schema than this build understands.
     case unsupportedSchemaVersion(path: String, found: Int, supported: Int)
 
-    /// A read-only open found an older schema, which only a read-write open may migrate.
+    /// A read-only open found an older schema this build cannot read without migrating, which only a
+    /// read-write open may do.
     case needsMigration(path: String, found: Int, current: Int)
 
     /// A write was attempted through a read-only store.

@@ -24,7 +24,8 @@ import Memory
 /// Failure: a thrown operation rolled back and changed nothing. Opening never repairs: a file that
 /// is not a database, a database of something else, or a newer schema is refused with a readable
 /// `SQLiteLivingMemoryError` and left untouched. A read-only store opens only an existing store at
-/// the current schema, and never creates, migrates or writes.
+/// a schema this build reads without migrating (`SQLiteLivingMemorySchema.oldestReadableVersion`
+/// through the current one), and never creates, migrates or writes.
 public actor SQLiteLivingMemoryStore: LivingMemoryStoring {
 
     /// Access is whether the store may create, migrate and write.

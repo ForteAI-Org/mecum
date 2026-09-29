@@ -28,28 +28,40 @@ public enum ActOutcomeKind: String, Sendable, Codable, CaseIterable {
 
 /// ActOutcome is one action's answer: its kind, a sentence a person can act on, and the scene after
 /// acting when one was taken, so the caller never pays a second perception to see what happened.
-/// A dropdown selection also carries its `DropdownEvidence`; the sentence is for people only.
+/// It also carries at most one typed proof: a dropdown selection its `DropdownEvidence`, a
+/// `set_toggle` its `ToggleEvidence`, and a delivered click, double-click or right-click its
+/// `ClickEvidence`. The sentence is for people only.
 public struct ActOutcome: Sendable, Equatable {
 
     public let kind: ActOutcomeKind
     public let message: String
     public let scene: SceneSnapshot?
 
-    /// The structured proof of a dropdown selection, or nil for any other action and for a
-    /// selection that never chose an item.
-    public let dropdown: DropdownEvidence?
+    /// The outcome's typed proof, or nil when the action proved nothing structured: another action, a
+    /// selection that never chose an item, a toggle that never resolved its control, a dry run, or a
+    /// gesture that never went out.
+    public let evidence: ActEvidence?
 
     public init(
         _ kind   : ActOutcomeKind,
         _ message: String,
         scene    : SceneSnapshot? = nil,
-        dropdown : DropdownEvidence? = nil
+        evidence : ActEvidence? = nil
     ) {
-        self.kind      = kind
-        self.message   = message
-        self.scene     = scene
-        self.dropdown  = dropdown
+        self.kind     = kind
+        self.message  = message
+        self.scene    = scene
+        self.evidence = evidence
     }
+
+    /// The proof of a dropdown selection, or nil for any other proof.
+    public var dropdown: DropdownEvidence? { evidence?.dropdown }
+
+    /// The proof of a `set_toggle`, or nil for any other proof.
+    public var toggle: ToggleEvidence? { evidence?.toggle }
+
+    /// The proof of a click, double-click or right-click, or nil for any other proof.
+    public var click: ClickEvidence? { evidence?.click }
 
     /// True for the one outcome that claims success. Everything else asks the caller to look again.
     public var isSuccess: Bool { kind == .foundActed }
@@ -74,6 +86,6 @@ public struct ActOutcome: Sendable, Equatable {
             ? "selected '\(item)' in menu window #\(menuWindowNumber); the dropdown now reads '\(item)'"
             : "requested '\(item)' in menu window #\(menuWindowNumber), but the dropdown value was not verified"
         return ActOutcome(evidence.isVerified ? .foundActed : .actedUnverified, message, scene: scene,
-                          dropdown: evidence)
+                          evidence: .dropdown(evidence))
     }
 }

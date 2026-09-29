@@ -5,6 +5,7 @@
 //  Created by Ronaldo Zefi on 18/09/2026.
 //
 
+import EngineCore
 import Foundation
 import PerceptionCore
 
@@ -272,25 +273,28 @@ public enum BrainUpdater {
         return true
     }
 
-    /// Records a learned transition. The same anchor, trigger and effect add evidence; consumers trust a
+    /// Records a learned transition of `verb`. The same anchor, verb and effect add evidence, a stored
+    /// right-click's included; a stored click of unknown verb is never added to. Consumers trust a
     /// state effect only at evidence two or more. Returns the evidence after recording.
     public static func recordTransition(
         anchorKey : String,
-        trigger   : TransitionTrigger,
+        verb      : ActionVerb,
         effect    : String,
         into brain: inout UIBrain,
         now       : Date
     ) -> Int {
         if let i = brain.transitions.firstIndex(where: {
-            $0.anchorKey == anchorKey && $0.trigger == trigger && $0.effect == effect
+            $0.anchorKey == anchorKey && $0.attributedVerb == verb && $0.effect == effect
         }) {
+            brain.transitions[i].verb              = verb
             brain.transitions[i].evidence          += 1
             brain.transitions[i].lastObserved      = now
             brain.transitions[i].lastObservedEpoch = brain.ingestEpoch
             return brain.transitions[i].evidence
         }
-        brain.transitions.append(LearnedTransition(anchorKey: anchorKey, trigger: trigger, effect: effect,
-                                                   lastObserved: now, lastObservedEpoch: brain.ingestEpoch))
+        brain.transitions.append(LearnedTransition(anchorKey: anchorKey, trigger: TransitionTrigger(verb), verb: verb,
+                                                   effect: effect, lastObserved: now,
+                                                   lastObservedEpoch: brain.ingestEpoch))
         return 1
     }
 

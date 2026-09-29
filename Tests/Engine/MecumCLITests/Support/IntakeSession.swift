@@ -81,7 +81,7 @@ final class IntakeSession: AutomationSessionOperating {
         let evidence = DropdownEvidence(
             bundleID: bundleID, windowTitle: windowTitle, control: opener.label, controlRole: opener.role,
             section: opener.section, valueBefore: opener.value ?? opener.label, requestedItem: item,
-            readback: .atControl(opener.bounds, in: after, item: item, windowSizeKept: true),
+            readback: .atControl(opener.bounds, in: after, windowSizeKept: true),
             menuClosedByChoice: true
         )
         let outcome = ActOutcome.dropdownSelection(evidence, menuWindowNumber: 555_111_999, scene: after)

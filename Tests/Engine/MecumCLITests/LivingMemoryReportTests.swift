@@ -41,7 +41,7 @@ struct LivingMemoryReportTests {
         let draft = ExperienceDraft(phrase: phrase.replacingOccurrences(of: "Output Busses", with: item),
                                     step: ExperienceStep(proof), context: context)!
         let learned = try await store.record(ExperienceEvent(id: "\(bundle)-e1", subject: .step(draft),
-                                                             outcome: .verified(proof), at: t0))
+                                                             outcome: .verified(.dropdown(proof)), at: t0))
         let id = try #require(learned.experience?.id)
         _ = try await store.record(ExperienceEvent(id: "\(bundle)-e2", subject: .experience(id),
                                                    outcome: .contradicted(.userCorrection), at: t0 + 60))
@@ -136,7 +136,7 @@ struct LivingMemoryReportTests {
             sqlite3_close(handle)
             let newer = await report("test.synthetic.mixer", knowledge)
             #expect(newer == ["living memory: could not be read: the living memory store at \(file.path) "
-                              + "has schema 99; this build supports up to 1"])
+                              + "has schema 99; this build supports up to 2"])
             try Data(repeating: 0x5A, count: 4096).write(to: file)
             let garbage = await report("test.synthetic.mixer", knowledge)
             #expect(garbage.first?.contains("is not a readable database") == true)

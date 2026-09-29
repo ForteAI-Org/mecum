@@ -19,6 +19,9 @@ public final class AutomationTools {
     /// Adds a `memory` field to every observation of a freshly captured scene, when it returns one.
     public var annotateObservation: ((SceneSnapshot) -> JSONValue?)?
     private var revision = 0
+    /// The labels of the last scene given to the model, normalized: a target it copies is read back against
+    /// them, so a real label that looks like a rendering mark is not cut.
+    private var shownLabels: Set<String> = []
 
     public init(session: any AutomationSessionOperating) {
         self.session = session
@@ -35,6 +38,8 @@ public final class AutomationTools {
     Session IDs refer only to this running Mecum host. Saved chats may contain stale IDs and old screen state.
     Keep the Seat open across turns unless the user asks to release it or the task requires a different app.
     Follow newly opened dialogs by observing again. select needs the CURRENT dropdown label/value.
+    A target may be copied from its scene line: "<label> {<panel>}" acts on <label> in the panel <panel>.
+    Pass section only to tell same-named elements apart.
     Prefer set_toggle with explicit on/off over blindly clicking checkboxes.
     On ambiguous, inspect the candidates and disambiguate. On acted_unverified or transport failure, observe;
     never automatically replay an action that may already have happened. Missing permissions require the
@@ -70,81 +75,84 @@ public final class AutomationTools {
         }
         let points: JSONValue = .object(["type": .string("number"), "minimum": .number(-Self.maximumOffset),
                                          "maximum": .number(Self.maximumOffset)])
-        let inputs: [String: [String: JSONValue]] = [
-            "type_text": ["target": text, "text": text, "section": text, "replace": .object(["type": .string("boolean")])],
-            "press_key": ["key": choice(KeyChord.Name.all),
-                          "modifiers": .object(["type": .string("array"), "uniqueItems": .bool(true),
-                                                "items": choice(["cmd", "shift", "opt", "ctrl"])]),
-                          "count": whole(1...InputRequest.maximumKeyPresses)],
-            "scroll": ["target": text, "section": text, "direction": choice(["up", "down"]),
-                       "lines": whole(1...InputRequest.maximumScrollLines)],
-            "drag": ["from": text, "to": text, "dx": points, "dy": points, "section": text],
-            "context_menu": ["target": text, "item": text, "section": text]
+        let inputs: [AutomationTool: [String: JSONValue]] = [
+            .typeText: ["target": text, "text": text, "section": text, "replace": .object(["type": .string("boolean")])],
+            .pressKey: ["key": choice(KeyChord.Name.all),
+                        "modifiers": .object(["type": .string("array"), "uniqueItems": .bool(true),
+                                              "items": choice(["cmd", "shift", "opt", "ctrl"])]),
+                        "count": whole(1...InputRequest.maximumKeyPresses)],
+            .scroll: ["target": text, "section": text, "direction": choice(["up", "down"]),
+                      "lines": whole(1...InputRequest.maximumScrollLines)],
+            .drag: ["from": text, "to": text, "dx": points, "dy": points, "section": text],
+            .contextMenu: ["target": text, "item": text, "section": text]
         ]
-        let required: [String: [String]] = [
-            "type_text": ["target", "text"], "press_key": ["key"], "scroll": ["direction"], "drag": ["from"],
-            "context_menu": ["target", "item"]
+        let required: [AutomationTool: [String]] = [
+            .typeText: ["target", "text"], .pressKey: ["key"], .scroll: ["direction"], .drag: ["from"],
+            .contextMenu: ["target", "item"]
         ]
-        func tool(_ name: String, _ description: String, _ properties: [String: JSONValue],
+        func tool(_ tool: AutomationTool, _ description: String, _ properties: [String: JSONValue],
                   _ required: [String], readOnly: Bool = false) -> JSONValue {
-            .object(["name": .string(name), "description": .string(description),
+            .object(["name": .string(tool.rawValue), "description": .string(description),
                      "inputSchema": schema(properties, required),
                      "annotations": .object(["readOnlyHint": .bool(readOnly)])])
         }
-        func input(_ name: String, _ description: String) -> JSONValue {
-            tool(name, description, session.merging(inputs[name] ?? [:], uniquingKeysWith: { $1 }),
-                 ["session"] + (required[name] ?? []))
+        func input(_ input: AutomationTool, _ description: String) -> JSONValue {
+            tool(input, description, session.merging(inputs[input] ?? [:], uniquingKeysWith: { $1 }),
+                 ["session"] + (required[input] ?? []))
         }
-        func step(_ name: String) -> JSONValue {
-            schema((inputs[name] ?? [:]).merging(["operation": .object(["const": .string(name)])],
-                                                 uniquingKeysWith: { $1 }),
-                   ["operation"] + (required[name] ?? []))
+        func operation(_ tool: AutomationTool) -> [String: JSONValue] {
+            ["operation": .object(["const": .string(tool.rawValue)])]
+        }
+        func step(_ input: AutomationTool) -> JSONValue {
+            schema((inputs[input] ?? [:]).merging(operation(input), uniquingKeysWith: { $1 }),
+                   ["operation"] + (required[input] ?? []))
         }
         return [
-            tool("status", "Read Mecum's permission and session status. Never prompts.", [:], [], readOnly: true),
-            tool("windows", "Discover exact running application names, bundle IDs and window titles. Optional app filter.",
+            tool(.status, "Read Mecum's permission and session status. Never prompts.", [:], [], readOnly: true),
+            tool(.windows, "Discover exact running application names, bundle IDs and window titles. Optional app filter.",
                  ["app": text], [], readOnly: true),
-            tool("apps", "List the applications open_session can open, best match first, with name, bundleID, version "
+            tool(.apps, "List the applications open_session can open, best match first, with name, bundleID, version "
                  + "and running. Use it to find an application that is not running, then pass its bundleID to "
                  + "open_session. Optional query: part of a name, a bundle ID or initials.",
                  ["query": text], [], readOnly: true),
-            tool("open_session", "Adopt an app into one persistent background Seat and observe it. "
+            tool(.openSession, "Adopt an app into one persistent background Seat and observe it. "
                  + "Use an exact window title when needed. Close the current session before opening another.",
                  ["app": text, "window": text], ["app"]),
-            tool("observe", "Read a fresh scene in this session, including its current dialog. Required after resuming chat.",
+            tool(.observe, "Read a fresh scene in this session, including its current dialog. Required after resuming chat.",
                  session, ["session"], readOnly: true),
-            tool("act", "Resolve a current label or element ID, act, and verify. set_toggle requires value on/off. "
+            tool(.act, "Resolve a current label or element ID, act, and verify. A target copied from the scene keeps "
+                 + "its {panel} as section. set_toggle requires value on/off. "
                  + "Never automatically repeat acted_unverified. Typing, keys, scrolling, drags and contextual "
                  + "menus have their own tools.",
                  session.merging(action, uniquingKeysWith: { $1 }), ["session", "target"]),
-            tool("select", "Choose a visible dropdown item and verify its new value. control is its current value/label.",
+            tool(.select, "Choose a visible dropdown item and verify its new value. control is its current value or "
+                 + "its label; select takes no section.",
                  session.merging(["control": text, "item": text], uniquingKeysWith: { $1 }),
                  ["session", "control", "item"]),
-            input("type_text", "Resolve a current field label or element ID, click it and type text into it. "
+            input(.typeText, "Resolve a current field label or element ID, click it and type text into it. "
                   + "replace (default true) selects what the field holds first; false adds the text at its end. "
                   + "Verified by reading the field's value back. On acted_unverified observe; never retype blindly."),
-            input("press_key", "Press one key into the window, optionally with modifiers held and repeated count "
+            input(.pressKey, "Press one key into the window, optionally with modifiers held and repeated count "
                   + "times. Command-Q and Command-W are refused. A shortcut a menu resolves (Command-C, Command-V, "
                   + "Command-A, Command-Z) does nothing on this background window: use a control or context_menu. "
                   + "Verified only by a visible change in the window."),
-            input("scroll", "Scroll a target, or the window's centre without one, by wheel lines (default 3) up or "
+            input(.scroll, "Scroll a target, or the window's centre without one, by wheel lines (default 3) up or "
                   + "down. Vertical only: the Seat has no horizontal wheel. Verified only by a visible change."),
-            input("drag", "Drag from one target to another target (to), or by an offset in points (dx, dy; positive "
+            input(.drag, "Drag from one target to another target (to), or by an offset in points (dx, dy; positive "
                   + "is right and down). Both ends must lie inside the window. Destructive drop targets are refused."),
-            input("context_menu", "Right-click a target and choose the item titled item in the contextual menu it "
+            input(.contextMenu, "Right-click a target and choose the item titled item in the contextual menu it "
                   + "opens, by keyboard. Use the title as the app draws it, in its language. This is how Copy and "
                   + "Paste are reached. Destructive items are refused."),
-            tool("batch", "Run up to 20 steps of act, select, type_text, press_key, scroll, drag or context_menu in "
+            tool(.batch, "Run up to 20 steps of act, select, type_text, press_key, scroll, drag or context_menu in "
                  + "the current Seat. Stop on the first unsuccessful outcome. "
                  + "Earlier effects remain; no rollback or replay. Each step observes again.",
                  session.merging(["steps": .object(["type": .string("array"), "minItems": .number(1),
                      "maxItems": .number(20), "items": .object(["oneOf": .array([
-                         schema(action.merging(["operation": .object(["const": .string("act")])],
-                                               uniquingKeysWith: { $1 }), ["operation", "target"]),
-                         schema(["operation": .object(["const": .string("select")]), "control": text, "item": text],
+                         schema(action.merging(operation(.act), uniquingKeysWith: { $1 }), ["operation", "target"]),
+                         schema(operation(.select).merging(["control": text, "item": text], uniquingKeysWith: { $1 }),
                                 ["operation", "control", "item"])
-                     ] + Self.inputTools.map(step))])])], uniquingKeysWith: { $1 }), ["session", "steps"]),
-            tool("close_session", "Return the application's windows and release its Seat.", session, ["session"])
+                     ] + AutomationTool.inputs.map(step))])])], uniquingKeysWith: { $1 }), ["session", "steps"]),
+            tool(.closeSession, "Return the application's windows and release its Seat.", session, ["session"])
         ]
     }
 
@@ -160,7 +168,8 @@ public final class AutomationTools {
 
     private func dispatch(_ name: String, _ arguments: JSONValue) async throws -> JSONValue {
         let arguments = arguments == .null ? JSONValue.object([:]) : arguments
-        guard let definition = Self.definitions.first(where: { $0["name"].string == name }),
+        guard let tool = AutomationTool(rawValue: name),
+              let definition = Self.definitions.first(where: { $0["name"].string == name }),
               let values = arguments.object else { throw AutomationFailure("Invalid tool arguments.") }
         let schema = definition["inputSchema"]
         let allowed = Set(schema["properties"].object?.keys.map { $0 } ?? [])
@@ -170,13 +179,13 @@ public final class AutomationTools {
         }
         try record?("→ \(name) \(String(decoding: try JSONEncoder().encode(arguments), as: UTF8.self))")
         let value: JSONValue
-        if !["status", "windows", "apps", "open_session"].contains(name) {
+        if tool.needsSession {
             guard let id = session.id, arguments["session"].string == id.uuidString else {
                 throw AutomationFailure("Session ID is missing or stale. Use status; open a session if necessary and observe again.")
             }
         }
-        switch name {
-        case "status":
+        switch tool {
+        case .status:
             value = .object(["session": session.id.map { .string($0.uuidString) } ?? .null,
                 "permissions": .object([
                     "screenRecording": .bool(Permissions.preflight(.screenRecording)),
@@ -184,7 +193,7 @@ public final class AutomationTools {
                     "postEvent": .bool(Permissions.preflight(.postEvent))
                 ])])
             onEvent?(AutomationEvent(operation: .status, result: .returned))
-        case "windows":
+        case .windows:
             let apps: [NSRunningApplication]
             if values["app"] != nil { apps = [try RunningApplicationLookup.running(try string(arguments, "app"))] }
             else { apps = NSWorkspace.shared.runningApplications.filter { $0.activationPolicy == .regular } }
@@ -196,7 +205,7 @@ public final class AutomationTools {
                                                          "title": .string($0.title ?? "")]) })])
             })])
             onEvent?(AutomationEvent(operation: .windows, result: .returned))
-        case "apps":
+        case .apps:
             let found = try await session.applications(matching: optionalString(arguments, "query"))
             let shown = found.prefix(Self.applicationLimit)
             var listing: [String: JSONValue] = ["applications": .array(shown.map(Self.candidate))]
@@ -205,24 +214,24 @@ public final class AutomationTools {
             }
             value = .object(listing)
             onEvent?(AutomationEvent(operation: .apps, result: .returned))
-        case "open_session":
+        case .openSession:
             let scene = try await session.open(application: string(arguments, "app"),
                                                 window: optionalString(arguments, "window"))
             value = observation(scene)
             onEvent?(AutomationEvent(operation: .openSession, result: .returned))
-        case "observe":
+        case .observe:
             value = observation(try await session.observe())
             onEvent?(AutomationEvent(operation: .observe, result: .returned))
-        case "act", "select", "type_text", "press_key", "scroll", "drag", "context_menu":
-            let step = try Step(name, arguments)
+        case .act, .select, .typeText, .pressKey, .scroll, .drag, .contextMenu:
+            let step = try Step(name, arguments, shownLabels: shownLabels)
             let result = try await perform(step)
-            onEvent?(AutomationEvent(operation: step.operation, result: .outcome(result.kind, result.dropdown)))
+            onEvent?(AutomationEvent(operation: step.operation, result: .outcome(result.kind, result.evidence)))
             value = outcome(result)
-        case "batch":
+        case .batch:
             guard let rows = arguments["steps"].array, (1...20).contains(rows.count) else {
                 throw AutomationFailure("batch requires 1...20 steps.")
             }
-            let steps = try rows.map { try Step(string($0, "operation"), $0) }
+            let steps = try rows.map { try Step(string($0, "operation"), $0, shownLabels: shownLabels) }
             var results: [JSONValue] = []
             var complete = true
             var verified = 0
@@ -240,7 +249,7 @@ public final class AutomationTools {
                     complete = false
                     break
                 }
-                onEvent?(AutomationEvent(operation: step.operation, result: .outcome(result.kind, result.dropdown),
+                onEvent?(AutomationEvent(operation: step.operation, result: .outcome(result.kind, result.evidence),
                                          batchStep: index + 1))
                 let value = outcome(result)
                 results.append(value)
@@ -255,11 +264,10 @@ public final class AutomationTools {
                              "verifiedSteps": .number(Double(verified)),
                              "requested": .number(Double(steps.count))])
             onEvent?(AutomationEvent(operation: .batch(steps: steps.count), result: .returned))
-        case "close_session":
+        case .closeSession:
             await session.close()
             value = .object(["status": .string("closed"), "message": .string("Application session closed.")])
             onEvent?(AutomationEvent(operation: .closeSession, result: .returned))
-        default: throw AutomationFailure("Unknown tool: \(name)")
         }
         try record?("← \(name) \(String(decoding: try JSONEncoder().encode(value), as: UTF8.self))")
         return MCPRouter.toolResult(value)
@@ -278,6 +286,7 @@ public final class AutomationTools {
 
     private func observation(_ scene: SceneSnapshot) -> JSONValue {
         revision += 1
+        shownLabels = Set(scene.elements.map { LabelText.normalize($0.label) })
         var values: [String: JSONValue] = [
             "session": session.id.map { .string($0.uuidString) } ?? .null,
             "revision": .number(Double(revision)), "observedAt": .string(Date().ISO8601Format()),
@@ -332,9 +341,6 @@ public final class AutomationTools {
         return .object(fields)
     }
 
-    /// The tools that deliver an input through the engine, in the order they are listed.
-    private static let inputTools = ["type_text", "press_key", "scroll", "drag", "context_menu"]
-
     /// The largest drag offset, in points, on either axis: more than any display is wide.
     private static let maximumOffset = 5000.0
 
@@ -367,28 +373,31 @@ public final class AutomationTools {
             if case .act(_, .setToggle, _, _) = self { true } else { false }
         }
 
-        /// The step in semantic terms: a select's control and item, an act's verb.
+        /// The step in semantic terms: a select's control and item, an act's target, verb, section and state.
         var operation: AutomationEvent.Operation {
             switch self {
-                case .act(_, let verb, _, _)       : .act(verb)
-                case .select(let control, let item): .select(control: control, item: item)
-                case .input(let input, _)          : .input(tool: Self.toolName(input))
+                case .act(let target, let verb, let section, let state):
+                    .act(ActionArguments(target: target, verb: verb, section: section, desiredState: state))
+                case .select(let control, let item):
+                    .select(control: control, item: item)
+                case .input(let input, _):
+                    .input(tool: Self.tool(input))
             }
         }
 
         /// The tool that delivers `input`.
-        private static func toolName(_ input: InputRequest.Input) -> String {
+        private static func tool(_ input: InputRequest.Input) -> AutomationTool {
             switch input {
-                case .typeText   : "type_text"
-                case .pressKey   : "press_key"
-                case .scroll     : "scroll"
-                case .drag       : "drag"
-                case .contextMenu: "context_menu"
+                case .typeText   : .typeText
+                case .pressKey   : .pressKey
+                case .scroll     : .scroll
+                case .drag       : .drag
+                case .contextMenu: .contextMenu
             }
         }
 
-        init(_ name: String, _ args: JSONValue) throws {
-            guard (["act", "select"] + inputTools).contains(name),
+        init(_ name: String, _ args: JSONValue, shownLabels: Set<String> = []) throws {
+            guard let tool = AutomationTool(rawValue: name), tool.isStep,
                   let definition = AutomationTools.definitions.first(where: { $0["name"].string == name }) else {
                 throw AutomationFailure("batch supports act, select, type_text, press_key, scroll, drag and "
                                         + "context_menu only.")
@@ -398,18 +407,27 @@ public final class AutomationTools {
             guard let object = args.object, Set(object.keys).isSubset(of: permitted) else {
                 throw AutomationFailure("Unknown step argument.")
             }
-            let section = try optionalString(args, "section")
-            switch name {
-            case "type_text":
+            let given = try optionalString(args, "section")
+            // A target as the text map renders it, "<label> {<panel>}" or "<label> = <value>", is read back once
+            // here: the label is what is resolved and recorded, the container the section when none is given.
+            // A label the last scene showed is kept whole, marks included.
+            func located(_ key: String) throws -> (target: String, section: String?) {
+                let reference = SceneTargetReference(parsing: try requiredString(args, key), shownLabels: shownLabels)
+                return (reference.label, given ?? reference.container)
+            }
+            var section = given
+            switch tool {
+            case .typeText:
                 guard let text = args["text"].string, !text.isEmpty else {
                     throw AutomationFailure("text must be a nonempty string.")
                 }
                 if object["replace"] != nil, args["replace"].bool == nil {
                     throw AutomationFailure("replace must be true or false.")
                 }
-                self = .input(.typeText(text, into: try requiredString(args, "target"),
-                                        replacing: args["replace"].bool ?? true), section: section)
-            case "press_key":
+                let field = try located("target")
+                self = .input(.typeText(text, into: field.target, replacing: args["replace"].bool ?? true),
+                              section: field.section)
+            case .pressKey:
                 guard let key = KeyChord.Name(try requiredString(args, "key")) else {
                     throw AutomationFailure("key must be return, tab, escape, space, delete, an arrow, a letter or a digit.")
                 }
@@ -430,31 +448,37 @@ public final class AutomationTools {
                 }
                 let count = try whole(args, "count", 1...InputRequest.maximumKeyPresses, default: 1)
                 self = .input(.pressKey(KeyChord(key, modifiers: modifiers), times: count), section: nil)
-            case "scroll":
+            case .scroll:
                 let direction = try requiredString(args, "direction")
                 guard direction == "up" || direction == "down" else {
                     throw AutomationFailure("direction must be up or down.")
                 }
                 let lines = try whole(args, "lines", 1...InputRequest.maximumScrollLines, default: 3)
-                self = .input(.scroll(lines: direction == "up" ? lines : -lines, over: try optionalString(args, "target")),
-                              section: section)
-            case "drag":
+                let over = object["target"] == nil ? nil : try located("target")
+                self = .input(.scroll(lines: direction == "up" ? lines : -lines, over: over?.target),
+                              section: over?.section ?? section)
+            case .drag:
                 let hasOffset = object["dx"] != nil || object["dy"] != nil
                 let end: InputRequest.DragEnd
-                if let target = try optionalString(args, "to") {
+                let from = try located("from")
+                section = from.section
+                if object["to"] != nil {
                     guard !hasOffset else { throw AutomationFailure("drag takes to or dx/dy, not both.") }
-                    end = .target(target)
+                    end = .target(try located("to").target)
                 } else {
                     guard hasOffset else { throw AutomationFailure("drag needs to, or dx and dy.") }
                     end = .offset(dx: try offset(args, "dx"), dy: try offset(args, "dy"))
                 }
-                self = .input(.drag(from: try requiredString(args, "from"), to: end), section: section)
-            case "context_menu":
-                self = .input(.contextMenu(on: try requiredString(args, "target"), item: try requiredString(args, "item")),
-                              section: section)
-            case "select":
-                self = .select(try requiredString(args, "control"), try requiredString(args, "item"))
+                self = .input(.drag(from: from.target, to: end), section: section)
+            case .contextMenu:
+                let target = try located("target")
+                self = .input(.contextMenu(on: target.target, item: try requiredString(args, "item")),
+                              section: target.section)
+            case .select:
+                // select takes no section: a rendered container cannot narrow it, and is dropped with the value.
+                self = .select(try located("control").target, try requiredString(args, "item"))
             default:
+                // Only act reaches here: a step is an act, a select or one of the inputs above.
                 let rawVerb = object["verb"] == nil ? "click" : try requiredString(args, "verb")
                 guard let verb = ActionVerb(rawValue: rawVerb) else { throw AutomationFailure("Unsupported action verb.") }
                 let state: ControlState?
@@ -465,7 +489,8 @@ public final class AutomationTools {
                 } else { state = nil }
                 if verb == .setToggle, state == nil { throw AutomationFailure("set_toggle requires value on or off.") }
                 if verb != .setToggle, state != nil { throw AutomationFailure("value is only valid for set_toggle.") }
-                self = .act(try requiredString(args, "target"), verb, section, state)
+                let target = try located("target")
+                self = .act(target.target, verb, target.section, state)
             }
         }
     }

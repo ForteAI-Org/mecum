@@ -154,7 +154,7 @@ public struct ActionEngine: Sendable {
         )
 
         if request.verb == .setToggle {
-            return await setToggle(request, element: element, at: point, perceived: perceived, expected: expected)
+            return await setToggle(request, element: element, perceived: perceived, expected: expected)
         }
         let containingPopup = surfaces.popups.first { $0.insetBy(dx: -4, dy: -4).contains(point) }
         if request.verb == .click, let popup = containingPopup {
@@ -207,6 +207,10 @@ public struct ActionEngine: Sendable {
 
     // MARK: The three ways to act
 
+    /// Delivers a click, double-click or right-click, judges it by what changed structurally, and,
+    /// once the gesture was attempted, proves it with `ClickEvidence`: the effect `ClickAttribution`
+    /// credits it with, which the outcome's kind alone never is. A double-click is one gesture of two
+    /// clicks; a right-click is always sent as one, never replaced by a press action.
     private func clickVerified(
         _ request     : ActionRequest,
         element       : SceneElement,
@@ -216,6 +220,21 @@ public struct ActionEngine: Sendable {
         expected      : SceneEffect?
     ) async -> ActOutcome {
         let pid = request.processID
+        // Only the four pointer verbs reach here: set_toggle has its own path.
+        let gesture = ClickEvidence.Gesture(request.verb) ?? .click
+        func evidence(_ delivery: ClickEvidence.Delivery, _ effect: ClickEvidence.Effect) -> ClickEvidence {
+            ClickEvidence(
+                bundleID   : request.bundleID,
+                windowTitle: perceived.scene.windowTitle,
+                target     : element.label,
+                targetRole : element.role,
+                section    : element.section,
+                container  : element.container,
+                gesture    : gesture,
+                delivery   : delivery,
+                effect     : effect
+            )
+        }
         if request.isDryRun {
             let expectation = expected.map { ": expected effect: \($0.summary)" } ?? ""
             return ActOutcome(.dryRun, "would \(request.verb.rawValue) '\(element.label)' at "
@@ -223,7 +242,7 @@ public struct ActionEngine: Sendable {
         }
         await raiseIfNeeded(pid, isPopupOpen: surfacesBefore.hasOpenPopup)
         // The census after activation on purpose: raising an application floats its own palettes.
-        let censusBefore = await surfaces(pid).verdicts
+        let censusBefore = await census(pid)
         var openedByPress = false
         if request.verb == .click, let controls = dependencies.controls {
             openedByPress = await controls.pressControl(labelled: element.label, in: pid)
@@ -239,21 +258,52 @@ public struct ActionEngine: Sendable {
         } catch {
             await dependencies.actuator.confirm(.unknown, in: pid)
             return ActOutcome(.actedUnverified, "\(request.verb.performed) '\(element.label)': delivery failed: "
-                + "\(error)", scene: nil)
+                + "\(error)", scene: nil, evidence: .click(evidence(.failed, .unattributed(.notDelivered))))
         }
+        let sent: ClickEvidence.Delivery = openedByPress ? .pressed : .sent
         await pause(timing.clickSettle)
-        guard let after = await perceive(pid)?.scene else {
+        // The surfaces are listed on both sides of the capture that reads them, so a menu's items come from
+        // a capture taken while it was listed. A surface listed only after the capture gets one more reading.
+        var atReading = await census(pid)
+        guard var afterWindow = await perceive(pid) else {
             await dependencies.actuator.confirm(.unknown, in: pid)
             return ActOutcome(
                 .actedUnverified,
                 "\(request.verb.performed) '\(element.label)': no scene could be read "
-                + "afterwards; describe_scene when the window is back")
+                + "afterwards; describe_scene when the window is back",
+                evidence: .click(evidence(sent, .unattributed(.noScene))))
         }
-        let surfacesAfter = await surfaces(pid)
+        var surfacesAfter = await census(pid)
+        if let listed = surfacesAfter, let earlier = atReading, Self.lists(listed, beyond: earlier),
+           let again = await perceive(pid) {
+            atReading = listed
+            afterWindow = again
+            surfacesAfter = await census(pid)
+        }
+        let after = afterWindow.scene
+        let stable = atReading.flatMap { reading in surfacesAfter.map { Self.stable(reading, $0) } }
         let effect = Self.gatedEffect(
-            before: perceived.scene, after: after, targetID: element.id, popupIsOpen: surfacesAfter.hasOpenPopup
+            before: perceived.scene, after: after, targetID: element.id,
+            popupIsOpen: stable?.hasOpenPopup ?? false
         )
+        // Without both listings no surface can be told new, and the window clicked in would look opened.
+        let attributed: ClickEvidence.Effect = if let censusBefore, let stable {
+            ClickAttribution.effect(
+                on      : element,
+                at      : point,
+                in      : perceived,
+                census  : censusBefore.verdicts,
+                after   : afterWindow,
+                surfaces: stable,
+                change  : effect
+            )
+        } else {
+            .unattributed(.noCensus)
+        }
         let verdict = ActVerification.verdict(before: perceived.scene, after: after, effect: effect, expected: expected)
+        // A surface is proof only of a gesture the scenes verified; any other outcome credits nothing.
+        let isConfirmed = if case .landed(_, true) = verdict { true } else { false }
+        let proof = evidence(sent, isConfirmed || !attributed.opensSurface ? attributed : .unattributed(.outcomeUnverified))
         await dependencies.observer?.record(ActionRecord(
             bundleID        : request.bundleID,
             element         : element,
@@ -262,7 +312,7 @@ public struct ActionEngine: Sendable {
             windowTitleAfter: after.windowTitle
         ))
         let elsewhere = ElsewhereGuide.forUnverifiedAct(
-            app: request.appName, before: censusBefore, after: surfacesAfter.verdicts
+            app: request.appName, before: censusBefore?.verdicts ?? [], after: surfacesAfter?.verdicts ?? []
         )
         // A landed effect is observed whether or not it was the expected one; a ghost is verified absence.
         let delivery: DeliveryEffect = switch verdict {
@@ -271,15 +321,20 @@ public struct ActionEngine: Sendable {
             case .unattributable: .unknown
         }
         await dependencies.actuator.confirm(delivery, in: pid)
+        // A menu the proof attributes is named by its own rows, not by every label of a capture that also
+        // holds the window it opened over.
+        func shown(_ effect: SceneEffect) -> SceneEffect {
+            if case .menuOpened(let items) = proof.effect { .menuOpened(labels: items) } else { effect }
+        }
         switch verdict {
             case .landed(let effect, true):
                 let asExpected = expected == nil ? "" : " (as expected)"
                 return ActOutcome(.foundActed, "\(request.verb.performed) '\(element.label)': "
-                    + "\(effect.summary)\(asExpected)", scene: after)
+                    + "\(shown(effect).summary)\(asExpected)", scene: after, evidence: .click(proof))
             case .landed(let effect, false):
                 return ActOutcome(.actedUnverified, "\(request.verb.performed) '\(element.label)': expected "
-                    + "\(expected?.summary ?? "?") but observed \(effect.summary); re-perceive and re-decide. "
-                        + "\(elsewhere.sentence)", scene: after)
+                    + "\(expected?.summary ?? "?") but observed \(shown(effect).summary); re-perceive and re-decide. "
+                        + "\(elsewhere.sentence)", scene: after, evidence: .click(proof))
             case .ghost, .unattributable:
                 let why = verdict == .ghost
                     ? "this window did NOT change (identical scene)"
@@ -290,14 +345,21 @@ public struct ActionEngine: Sendable {
                     + "register: "
                     + "try the exact label with a section arg, or a menu."
                 return ActOutcome(.actedUnverified, "\(request.verb.performed) '\(element.label)': \(why).\(advice) "
-                    + "\(elsewhere.sentence)", scene: after)
+                    + "\(elsewhere.sentence)", scene: after, evidence: .click(proof))
         }
     }
 
+    /// Reaches the requested state on a stateful control with at most one click, and proves it.
+    ///
+    /// The state before is read on the resolved control first. When it is not a definite on or off,
+    /// it is read again on the control `ControlAttribution` finds in a fresh perception; when it still
+    /// is not, nothing is sent, because a click could turn the control the wrong way. The click and
+    /// the reading after it use the control as last attributed, with that perception's geometry, so a
+    /// control that moved is clicked where it is now. Every outcome after resolution carries
+    /// `ToggleEvidence`.
     private func setToggle(
         _ request: ActionRequest,
         element  : SceneElement,
-        at point : CGPoint,
         perceived: PerceivedWindow,
         expected : SceneEffect?
     ) async -> ActOutcome {
@@ -305,45 +367,136 @@ public struct ActionEngine: Sendable {
         guard let desired = request.desiredState, desired == .on || desired == .off else {
             return ActOutcome(.refused, "set_toggle needs a desired state of on or off")
         }
-        if element.state == desired {
-            return ActOutcome(.actedNoop, "'\(element.label)' is already \(desired.rawValue): nothing to "
-                + "do", scene: perceived.scene)
+        func evidence(
+            _ before: ToggleEvidence.Reading,
+            _ click : ToggleEvidence.Click,
+            _ after : ToggleEvidence.Reading?
+        ) -> ToggleEvidence {
+            ToggleEvidence(
+                bundleID    : request.bundleID,
+                windowTitle : perceived.scene.windowTitle,
+                control     : element.label,
+                controlRole : element.role,
+                section     : element.section,
+                container   : element.container,
+                desiredState: desired,
+                stateBefore : before,
+                click       : click,
+                stateAfter  : after
+            )
+        }
+        let (before, control) = await stateBefore(of: Located(element: element, window: perceived), in: pid)
+        switch before.definiteState {
+            case desired?:
+                return ActOutcome(.actedNoop, "'\(element.label)' is already \(desired.rawValue): nothing to "
+                    + "do", scene: control.window.scene, evidence: .toggle(evidence(before, .none, nil)))
+            case nil:
+                return ActOutcome(.refused, "the state of '\(element.label)' could not be read, even after reading "
+                    + "it again: not clicking blind, since a click could set it the wrong way. Observe; if it "
+                    + "still cannot be read, ask the person.", scene: control.window.scene,
+                    evidence: .toggle(evidence(before, .none, nil)))
+            default:
+                break
         }
         if request.isDryRun {
             return ActOutcome(.dryRun, "would click '\(element.label)' to set it \(desired.rawValue)")
         }
-        do { try await dependencies.actuator.perform(.click(at: point), in: pid) }
+        do { try await dependencies.actuator.perform(.click(at: control.point), in: pid) }
         catch {
             await dependencies.actuator.confirm(.unknown, in: pid)
-            return ActOutcome(.actedUnverified, "set '\(element.label)': delivery failed: \(error)")
+            return ActOutcome(.actedUnverified, "set '\(element.label)': delivery failed: \(error)",
+                              evidence: .toggle(evidence(before, .failed, nil)))
         }
         await pause(timing.clickSettle)
-        let after = await perceive(pid)?.scene
-        let readBack = await dependencies.controls?.toggleState(at: point, in: pid)
-            ?? after?.elements.first(where: { $0.id == element.id })?.state
-            ?? after?.elements.first(where: {
-                $0.state != nil && LabelText.normalize($0.label) == LabelText.normalize(element.label)
-            })?.state
-        let effect = after.flatMap { SceneDifference.effect(before: perceived.scene, after: $0, targetID: element.id) }
+        let after = await perceive(pid)
+        let reading = await stateAfter(of: control, in: after, pid: pid)
+        let effect = after.flatMap {
+            SceneDifference.effect(before: control.window.scene, after: $0.scene, targetID: control.element.id)
+        }
         await dependencies.observer?.record(ActionRecord(
             bundleID        : request.bundleID,
-            element         : element,
+            element         : control.element,
             verb            : .setToggle,
             effect          : effect,
-            windowTitleAfter: after?.windowTitle
+            windowTitleAfter: after?.scene.windowTitle
         ))
+        let readBack = reading.definiteState
         await dependencies.actuator.confirm(readBack == desired ? .observed : .unknown, in: pid)
+        let proof = evidence(before, .sent, reading)
         switch readBack {
             case desired:
-                return ActOutcome(.foundActed, "set '\(element.label)' → \(desired.rawValue)", scene: after)
+                return ActOutcome(.foundActed, "set '\(element.label)' → \(desired.rawValue)", scene: after?.scene,
+                                  evidence: .toggle(proof))
             case .some(let other):
                 return ActOutcome(.actedUnverified, "clicked '\(element.label)' but it now reads '\(other.rawValue)' "
                     + "(wanted \(desired.rawValue)): "
-                    + "re-perceive and re-decide, don't retry blindly", scene: after)
+                    + "re-perceive and re-decide, don't retry blindly", scene: after?.scene, evidence: .toggle(proof))
             case nil:
                 return ActOutcome(.actedUnverified, "clicked '\(element.label)': state unreadable after the click; "
-                    + "judge from the scene", scene: after)
+                    + "judge from the scene", scene: after?.scene, evidence: .toggle(proof))
         }
+    }
+
+    /// Located is a control as one perception attributes it: the element and the perceived window,
+    /// whose frame turns the element's bounds into the point a click or an accessibility read uses.
+    private struct Located {
+        let element: SceneElement
+        let window: PerceivedWindow
+
+        var point: CGPoint { window.globalPoint(of: element) }
+    }
+
+    /// The control's state before acting, and the control as the reading attributed it: its own state
+    /// in the scene it resolved in, else what the application reports under its point, else its state
+    /// in a fresh perception, on the element `ControlAttribution` finds there and at that element's
+    /// point. When nothing is attributed, the control stays as resolved.
+    private func stateBefore(of resolved: Located, in pid: pid_t) async -> (ToggleEvidence.Reading, Located) {
+        if let state = Self.definite(resolved.element.state) { return (.read(state, .resolvedElement), resolved) }
+        if let state = Self.definite(await dependencies.controls?.toggleState(at: resolved.point, in: pid)) {
+            return (.read(state, .accessibility), resolved)
+        }
+        guard let again = await perceive(pid) else { return (.unreadable(.noScene), resolved) }
+        switch ControlAttribution.find(resolved.element, from: resolved.window, in: again) {
+            case .unreadable(let why):
+                return (.unreadable(why), resolved)
+            case .found(let element, let source):
+                let located = Located(element: element, window: again)
+                return (await reading(of: located, source: source, in: pid), located)
+        }
+    }
+
+    /// The control's state after the click, on the element `ControlAttribution` finds at the clicked
+    /// control's place in the perception taken after it. Several candidates, one elsewhere, another
+    /// window or no scene attribute nothing, whatever they read.
+    private func stateAfter(
+        of control: Located,
+        in after  : PerceivedWindow?,
+        pid       : pid_t
+    ) async -> ToggleEvidence.Reading {
+        guard let after else { return .unreadable(.noScene) }
+        switch ControlAttribution.find(control.element, from: control.window, in: after, acrossAction: true) {
+            case .unreadable(let why):
+                return .unreadable(why)
+            case .found(let element, let source):
+                return await reading(of: Located(element: element, window: after), source: source, in: pid)
+        }
+    }
+
+    /// The state of an attributed element: what the application reports under its current point,
+    /// else its own state in the scene that attributed it.
+    private func reading(
+        of located: Located,
+        source    : ToggleEvidence.Reading.Source,
+        in pid    : pid_t
+    ) async -> ToggleEvidence.Reading {
+        if let state = Self.definite(await dependencies.controls?.toggleState(at: located.point, in: pid)) {
+            return .read(state, .accessibility)
+        }
+        return Self.definite(located.element.state).map { .read($0, source) } ?? .unreadable(.indefinite)
+    }
+
+    private static func definite(_ state: ControlState?) -> ControlState? {
+        state == .on || state == .off ? state : nil
     }
 
     private func pickInPopup(
@@ -840,7 +993,9 @@ public struct ActionEngine: Sendable {
     }
 
     /// A menu is believable only while a pop-up window exists; and when one does, the menu's rows
-    /// are the effect whatever the scene difference read, because the after scene IS the menu.
+    /// are the effect whatever the scene difference read, because the after scene is the menu, or holds
+    /// it beside the window, where a click's evidence keeps only the rows inside the pop-up
+    /// (`ClickAttribution`).
     static func gatedEffect(
         before     : SceneSnapshot,
         after      : SceneSnapshot,
@@ -849,13 +1004,18 @@ public struct ActionEngine: Sendable {
     ) -> SceneEffect? {
         var effect = SceneDifference.effect(before: before, after: after, targetID: targetID)
         if case .menuOpened(let labels) = effect, !popupIsOpen { effect = .elementsAppeared(labels: labels) }
-        if popupIsOpen {
-            let items = after.elements
-                .filter { !$0.isUnlabeled && $0.kind != .icon && (2...40).contains($0.label.count) }
-                .prefix(14).map(\.label)
-            if items.count >= 2 { effect = .menuOpened(labels: Array(Set(items)).sorted().prefix(6).map { $0 }) }
-        }
+        if popupIsOpen, let items = menuLabels(after.elements) { effect = .menuOpened(labels: items) }
         return effect
+    }
+
+    /// The labels a menu's rows show, as an effect names them: the first fourteen labelled, non-icon
+    /// elements of a row's length, unique, sorted, at most six. Nil for fewer than two such elements.
+    static func menuLabels(_ elements: [SceneElement]) -> [String]? {
+        let items = elements
+            .filter { !$0.isUnlabeled && $0.kind != .icon && (2...40).contains($0.label.count) }
+            .prefix(14).map(\.label)
+        guard items.count >= 2 else { return nil }
+        return Array(Set(items)).sorted().prefix(6).map { $0 }
     }
 
     private func perceive(_ processID: pid_t) async -> PerceivedWindow? {
@@ -863,7 +1023,25 @@ public struct ActionEngine: Sendable {
     }
 
     private func surfaces(_ processID: pid_t) async -> WindowSurfaces {
-        let rows = (try? dependencies.windows.windows(ownedBy: processID)) ?? []
+        await census(processID) ?? WindowSurfaceClassifier.classify([])
+    }
+
+    /// Whether `listed` holds a surface `earlier` did not list.
+    private static func lists(_ listed: WindowSurfaces, beyond earlier: WindowSurfaces) -> Bool {
+        let known = Set(earlier.verdicts.map(\.row.number))
+        return listed.verdicts.contains { !known.contains($0.row.number) }
+    }
+
+    /// The surfaces listed both before and after a capture: the ones that capture can show.
+    private static func stable(_ before: WindowSurfaces, _ after: WindowSurfaces) -> WindowSurfaces {
+        let listed = Set(before.verdicts.map(\.row.number))
+        return WindowSurfaceClassifier.classify(after.verdicts.map(\.row).filter { listed.contains($0.number) })
+    }
+
+    /// The surfaces the process lists now, or nil when the window server could not list them: a
+    /// click's attribution tells a failed listing from an empty one.
+    private func census(_ processID: pid_t) async -> WindowSurfaces? {
+        guard let rows = try? dependencies.windows.windows(ownedBy: processID) else { return nil }
         return WindowSurfaceClassifier.classify(rows)
     }
 

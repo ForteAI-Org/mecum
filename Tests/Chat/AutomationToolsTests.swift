@@ -188,6 +188,48 @@ struct AutomationToolsTests {
         #expect(result["structuredContent"]["status"].string == "stopped")
         #expect(result["structuredContent"]["verifiedSteps"] == .number(1))
     }
+
+    /// Claude copied these targets from the text map in the live runs of 28/09/2026; each one missed, and
+    /// the missed attempt made the turn one of several steps, which the living memory never learns from.
+    @Test
+    func aTargetCopiedFromTheSceneIsReadBackOnceBeforeItIsActedOnAndRecorded() async throws {
+        let session = SyntheticSession()
+        let tools = AutomationTools(session: session)
+        var events: [AutomationEvent] = []
+        tools.onEvent = { events.append($0) }
+        let id = JSONValue.string(try #require(session.id).uuidString)
+        _ = try await tools.call("act", .object(["session": id, "target": .string("Mute {Track 2} (row#3)"),
+                                                 "verb": .string("set_toggle"), "value": .string("on")]))
+        _ = try await tools.call("act", .object(["session": id, "section": .string("AUTO"),
+                                                 "target": .string("Automation Mode selector = auto read {Track 2}")]))
+        _ = try await tools.call("act", .object(["session": id, "target": .string("Save (Recommended)")]))
+        _ = try await tools.call("select", .object(["session": id, "control": .string("stile = Regolare {Formattazione}"),
+                                                    "item": .string("Grassetto")]))
+        _ = try await tools.call("context_menu", .object(["session": id, "target": .string("Prova mecum {Documento}"),
+                                                          "item": .string("Copia")]))
+        #expect(session.acted == ["Mute in Track 2", "Automation Mode selector in AUTO", "Save (Recommended)"])
+        #expect(session.selected == ["stile"])
+        #expect(session.inputs == [.contextMenu(on: "Prova mecum", item: "Copia")])
+        #expect(session.sections == ["Documento"])
+        #expect(events.first?.operation == .act(ActionArguments(target: "Mute", verb: .setToggle, section: "Track 2",
+                                                                desiredState: .on)))
+        #expect(events.dropFirst(3).first?.operation == .select(control: "stile", item: "Grassetto"))
+    }
+
+    @Test("a label the last observation showed is acted on whole, even when it looks like a rendering mark")
+    @MainActor
+    func aShownLabelIsNotCut() async throws {
+        let session = SyntheticSession()
+        let tools = AutomationTools(session: session)
+        let id = JSONValue.string(try #require(session.id).uuidString)
+        _ = try await tools.call("act", .object(["session": id, "target": .string("x = y")]))
+        session.elements = [SceneElement(id: "control|x", kind: .control, label: "x = y",
+                                         bounds: NormalizedRect(x: 0.1, y: 0.1, width: 0.1, height: 0.05))]
+        _ = try await tools.call("observe", .object(["session": id]))
+        _ = try await tools.call("act", .object(["session": id, "target": .string("x = y")]))
+        _ = try await tools.call("act", .object(["session": id, "target": .string("x = y {Panel}")]))
+        #expect(session.acted == ["x", "x = y", "x = y in Panel"], "before any scene every mark is read")
+    }
 }
 
 extension AutomationToolsTests {
@@ -283,9 +325,14 @@ private final class SyntheticSession: AutomationSessionOperating {
     var throwOnTarget: String?
     var inputs: [InputRequest.Input] = []
     var sections: [String?] = []
-    private let scene = SceneSnapshot(bundleID: "test.synthetic", appName: "Synthetic Mixer",
-                                      windowTitle: "Synthetic New Paths",
-                                      viewportPixelSize: ViewportPixelSize(width: 400, height: 200), elements: [])
+    var acted: [String] = []
+    var selected: [String] = []
+    /// The elements every observation shows; none by default.
+    var elements: [SceneElement] = []
+    private var scene: SceneSnapshot {
+        SceneSnapshot(bundleID: "test.synthetic", appName: "Synthetic Mixer", windowTitle: "Synthetic New Paths",
+                      viewportPixelSize: ViewportPixelSize(width: 400, height: 200), elements: elements)
+    }
 
     func open(application: String, window: String?) async throws -> SceneSnapshot {
         calls.append("open")
@@ -297,12 +344,14 @@ private final class SyntheticSession: AutomationSessionOperating {
 
     func act(target: String, verb: ActionVerb, section: String?, desiredState: ControlState?) async throws -> ActOutcome {
         calls.append(target)
+        acted.append(section.map { "\(target) in \($0)" } ?? target)
         if target == throwOnTarget { throw AutomationFailure("Synthetic transport failure after an earlier effect.") }
         return ActOutcome(results.isEmpty ? .foundActed : results.removeFirst(), "synthetic result", scene: scene)
     }
 
     func select(control: String, item: String) async throws -> ActOutcome {
         calls.append("select")
+        selected.append(control)
         return ActOutcome(.foundActed, "synthetic selection", scene: scene)
     }
 

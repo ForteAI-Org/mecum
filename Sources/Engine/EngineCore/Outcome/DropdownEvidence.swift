@@ -16,7 +16,7 @@ import PerceptionCore
 /// coordinate, or session, process, or window number, so every field describes the application
 /// rather than this run of it. `bundleID` is the application's own identifier; a caller that only
 /// has a process fallback does not attach evidence.
-public struct DropdownEvidence: Sendable, Equatable, Codable {
+public struct DropdownEvidence: StepEvidence {
 
     /// The application's bundle identifier.
     public let bundleID: String
@@ -24,7 +24,8 @@ public struct DropdownEvidence: Sendable, Equatable, Codable {
     /// The title of the adopted window the control belongs to, as the Seat reports it.
     public let windowTitle: String
 
-    /// The label of the control the request resolved to, as read before the menu opened.
+    /// The label of the control the request resolved to, as read before the menu opened, whatever
+    /// name the call used: a call may name the control by this label or by `valueBefore`.
     public let control: String
 
     /// The control's accessibility role when one was known.

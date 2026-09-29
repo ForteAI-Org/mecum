@@ -26,8 +26,9 @@ public struct ExperienceRecord: Sendable, Equatable, Codable {
     /// Contradictions: verified failures and corrections. Uncertain attempts are not counted.
     public var failureCount: Int
 
-    /// The proof of the latest verified success.
-    public var latestProof: DropdownEvidence?
+    /// The proof of the latest verified success. A record stored before toggles existed decodes its
+    /// dropdown proof unchanged.
+    public var latestProof: ActEvidence?
     public var lastVerifiedAt: Date?
     public var lastContradictedAt: Date?
 
@@ -37,7 +38,7 @@ public struct ExperienceRecord: Sendable, Equatable, Codable {
         createdAt         : Date,
         successCount      : Int = 0,
         failureCount      : Int = 0,
-        latestProof       : DropdownEvidence? = nil,
+        latestProof       : ActEvidence? = nil,
         lastVerifiedAt    : Date? = nil,
         lastContradictedAt: Date? = nil
     ) {

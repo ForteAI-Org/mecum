@@ -134,7 +134,7 @@ struct LivingMemoryStoreTests {
                     for index in 0..<25 {
                         _ = try? await store.recordSightings([first])
                         _ = try? await store.record(ExperienceEvent(
-                            id: "event-\(writer)-\(index)", subject: .step(draft), outcome: .verified(proof),
+                            id: "event-\(writer)-\(index)", subject: .step(draft), outcome: .verified(.dropdown(proof)),
                             at: t0.addingTimeInterval(Double(index))
                         ))
                     }
@@ -152,7 +152,7 @@ struct LivingMemoryStoreTests {
     @Test("a duplicate event changes nothing, and a reused id with other content is refused")
     func duplicateEvent() async throws {
         let store = InMemoryLivingMemoryStore(makeID: counter())
-        let event = ExperienceEvent(id: "event-1", subject: .step(draft), outcome: .verified(evidence()), at: t0)
+        let event = ExperienceEvent(id: "event-1", subject: .step(draft), outcome: .verified(.dropdown(evidence())), at: t0)
         let first = try await store.record(event)
         #expect(first == .applied(first.experience))
         let again = try await store.record(event)
@@ -169,10 +169,10 @@ struct LivingMemoryStoreTests {
     @Test("a correction keeps the successes, counts one failure and keeps the history")
     func correctionKeepsSuccesses() async throws {
         let store = InMemoryLivingMemoryStore(makeID: counter())
-        _ = try await store.record(ExperienceEvent(id: "e1", subject: .step(draft), outcome: .verified(evidence()),
+        _ = try await store.record(ExperienceEvent(id: "e1", subject: .step(draft), outcome: .verified(.dropdown(evidence())),
                                                    at: t0))
         let second = try await store.record(ExperienceEvent(id: "e2", subject: .step(draft),
-                                                            outcome: .verified(evidence()), at: t0 + 60))
+                                                            outcome: .verified(.dropdown(evidence())), at: t0 + 60))
         let id = try #require(second.experience?.id)
         let corrected = try await store.record(ExperienceEvent(id: "e3", subject: .experience(id),
                                                                outcome: .contradicted(.userCorrection), at: t0 + 120))
@@ -188,14 +188,14 @@ struct LivingMemoryStoreTests {
         let unreadable = evidence(.unreadable(.nothingAtControl))
         #expect(ExperienceEvent.Outcome(unreadable) == .uncertain(.readbackUnavailable(.nothingAtControl)))
         let alreadySet = evidence(before: "Output Busses")
-        #expect(ExperienceEvent.Outcome(alreadySet) == .noChange(alreadySet))
+        #expect(ExperienceEvent.Outcome(alreadySet) == .noChange(.dropdown(alreadySet)))
         #expect(ExperienceEvent.Outcome(evidence(.window("All Busses")))
                 == .contradicted(.readbackShowed("All Busses")))
-        #expect(ExperienceEvent.Outcome(evidence()) == .verified(evidence()))
+        #expect(ExperienceEvent.Outcome(evidence()) == .verified(.dropdown(evidence())))
 
         let store = InMemoryLivingMemoryStore(makeID: counter())
         let learned = try await store.record(ExperienceEvent(id: "e1", subject: .step(draft),
-                                                             outcome: .verified(evidence()), at: t0))
+                                                             outcome: .verified(.dropdown(evidence())), at: t0))
         for (index, proof) in [unreadable, alreadySet].enumerated() {
             _ = try await store.record(ExperienceEvent(id: "later-\(index)", subject: .step(draft),
                                                        outcome: ExperienceEvent.Outcome(proof), at: t0 + 60))
@@ -235,7 +235,7 @@ struct LivingMemoryStoreTests {
     @Test("candidates share a goal token with the phrase or the step, within the named applications")
     func candidates() async throws {
         let store = InMemoryLivingMemoryStore(makeID: counter())
-        _ = try await store.record(ExperienceEvent(id: "e1", subject: .step(draft), outcome: .verified(evidence()),
+        _ = try await store.record(ExperienceEvent(id: "e1", subject: .step(draft), outcome: .verified(.dropdown(evidence())),
                                                    at: t0))
         #expect(try await store.candidates(for: "metti Output Busses", in: nil).count == 1)
         #expect(try await store.candidates(for: "uscite", in: ["test.synthetic.mixer"]).count == 1)

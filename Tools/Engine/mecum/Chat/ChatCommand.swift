@@ -185,10 +185,7 @@ enum ChatCommand {
                 if let failure = memory?.decisionFailure {
                     print("memory: the recall decision was not saved (\(failure))")
                 }
-                if let briefing = memory?.briefing, let remembered = briefing.remembered {
-                    let evidence = briefing.currentEvidence ?? briefing.reason ?? ""
-                    let line = "memory context: \(briefing.status) \(remembered.tool) '\(remembered.item)' "
-                        + "(verified ×\(remembered.verifiedSuccesses), \(evidence))"
+                if let line = memory?.briefing?.contextLine {
                     print(line)
                     try transcript.append(.tool, line)
                 }

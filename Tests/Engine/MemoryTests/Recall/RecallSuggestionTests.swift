@@ -15,9 +15,9 @@ import Testing
 @Suite("Contextual recall of verified experiences")
 struct RecallSuggestionTests {
 
-    private let learning = "Seleziona Output Busses nel filtro della scheda Bus e verifica il nuovo valore. "
+    private let learning = "Seleziona Output Busses nel filtro e verifica il nuovo valore. "
         + "Fermati se il controllo non è univoco."
-    private let recalling = "Seleziona Output Busses nel filtro della scheda Bus in Pro Tools. Prima dimmi se hai "
+    private let recalling = "Seleziona Output Busses nel filtro. Prima dimmi se hai "
         + "un’esperienza verificata che può aiutare; poi osserva la finestra attuale e agisci solo se il "
         + "controllo è presente."
     private let bundle = "test.synthetic.mixer"
@@ -26,10 +26,10 @@ struct RecallSuggestionTests {
     private var routing: WindowContext { WindowContext(bundleID: bundle, windowTitle: "Synthetic Routing")! }
 
     private func record(_ id: String = "experience-1", successes: Int = 1, failures: Int = 0,
-                        bundle: String? = nil) -> ExperienceRecord {
+                        bundle: String? = nil, phrase: String? = nil) -> ExperienceRecord {
         let context = WindowContext(bundleID: bundle ?? self.bundle, windowTitle: "Synthetic Routing")!
-        let draft = ExperienceDraft(phrase: learning,
-                                    step: ExperienceStep(tool: .select, control: "All Busses", item: "Output Busses"),
+        let draft = ExperienceDraft(phrase: phrase ?? learning,
+                                    step: ExperienceStep.select(control: "All Busses", item: "Output Busses"),
                                     context: context)!
         return ExperienceRecord(id: ExperienceID(id), draft: draft, createdAt: verifiedAt, successCount: successes,
                                 failureCount: failures, lastVerifiedAt: verifiedAt)
@@ -155,5 +155,54 @@ struct RecallSuggestionTests {
             Recall.Consideration(experienceID: ExperienceID("experience-1"), match: nil, verdict: "no match"),
         ]))
         #expect(compound.decisionRecord(id: "d2", at: verifiedAt, phrase: "x", context: nil).verdict == .abstained)
+    }
+
+    @Test("a negated selection, or a second selection after a comma, does not ask for the remembered step")
+    func negatedOrListedSelection() {
+        for request in ["Non selezionare Output Busses nel filtro", "Seleziona Output Busses, seleziona All Busses"] {
+            #expect(Recall.suggest(input: request, in: world([record()])) == .abstain(nil, considered: [
+                Recall.Consideration(experienceID: ExperienceID("experience-1"), match: nil, verdict: "no match"),
+            ]), "\(request)")
+        }
+    }
+
+    @Test("words shared with the remembered phrase never recall it for a request that asks for another step")
+    func lexicalMatchNeverOverridesTheGoal() {
+        let noMatch: Recall.SuggestionAnswer = .abstain(nil, considered: [
+            Recall.Consideration(experienceID: ExperienceID("experience-1"), match: nil, verdict: "no match"),
+        ])
+        for request in [
+            "Non selezionare Output Busses nel filtro e verifica il nuovo valore. "
+                + "Fermati se il controllo non è univoco.",
+            "Seleziona Output Busses nel filtro, seleziona All Busses e verifica il nuovo valore. "
+                + "Fermati se il controllo non è univoco.",
+            // The same content words as the learned phrase: only the place of "non" moved.
+            "Non seleziona Output Busses nel filtro e verifica il nuovo valore. "
+                + "Fermati se il controllo è univoco.",
+            // "2" is too short to be a phrase token, so the word sets are equal.
+            "Seleziona Output Busses 2 nel filtro e verifica il nuovo valore. "
+                + "Fermati se il controllo non è univoco.",
+            "Seleziona Input Busses nel filtro e verifica il nuovo valore. "
+                + "Fermati se il controllo non è univoco.",
+        ] {
+            #expect(Recall.suggest(input: request, in: world([record()])) == noMatch, "\(request)")
+        }
+        let learnedChange = record(phrase: "Cambia il filtro da All Busses a Output Busses")
+        guard case .suggest(let same, _) = Recall.suggest(input: "Cambia il filtro da All Busses a Output Busses",
+                                                          in: world([learnedChange])) else {
+            Issue.record("the learned change was not recalled"); return
+        }
+        #expect(same.match == .exactPhrase)
+        #expect(Recall.suggest(input: "Cambia il filtro da Output Busses a All Busses", in: world([learnedChange]))
+                == noMatch)
+    }
+
+    @Test("a request the goal reader cannot parse may still find the memory by its phrase, as history only")
+    func partialPhraseStillRecalls() {
+        let request = "Output Busses nel filtro: verifica il nuovo valore, fermati se il controllo "
+            + "non è univoco."
+        guard case .historical(let partial, .goalNotSingle, _) = Recall.suggest(input: request, in: world([record()]))
+        else { Issue.record("the partial phrase was not kept as history"); return }
+        #expect(partial.match == .partialPhrase)
     }
 }

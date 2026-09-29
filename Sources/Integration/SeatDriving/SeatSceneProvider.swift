@@ -82,10 +82,14 @@ public struct SeatSceneProvider: SceneProviding {
             frame = union
             observedWindow = try await target.currentWindow()
         }
+        // The window server's title of the window captured, not the adopted one: a window the Seat followed
+        // after it opened is adopted untitled, and a window renamed since its adoption shows its new name.
+        let title = WindowRow.title(ofWindow: observedWindow.reference.windowNumber, in: onSeat,
+                                    fallback: observedWindow.title)
         let window = ScenePipeline.Window(
             bundleID : application.bundleID,
             appName  : application.name,
-            title    : observedWindow.title,
+            title    : title,
             processID: processID,
             frame    : frame
         )

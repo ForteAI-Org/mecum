@@ -8,6 +8,7 @@
 import EngineCore
 import Foundation
 import Memory
+import PerceptionCore
 import SQLiteLivingMemory
 
 /// LivingMemoryReport is the living-memory part of `mecum memory <app>`: for one application, its
@@ -65,8 +66,7 @@ enum LivingMemoryReport {
         var out = [
             "experience \(record.id.rawValue) in window '\(record.context.windowFamily)'",
             "  request: \"\(record.phrase)\"",
-            "  step: \(record.step.tool.rawValue) '\(record.step.item)' in the control that read "
-                + "'\(record.step.control)'",
+            "  step: " + describe(record.step),
             "  verified ×\(record.successCount), contradicted ×\(record.failureCount); last verified "
                 + (record.lastVerifiedAt.map { $0.ISO8601Format() } ?? "never"),
         ]
@@ -83,6 +83,71 @@ enum LivingMemoryReport {
             }
         }
         return out
+    }
+
+    private static func describe(_ step: ExperienceStep) -> String {
+        switch step {
+            case .select(let step):
+                "select '\(step.item)' in the control that read '\(step.control)'"
+            case .setToggle(let step):
+                "set_toggle '\(step.control)'\(place(step.section)) to \(step.state.rawValue)"
+            case .click(let step):
+                "\(step.gesture.rawValue) '\(step.target)'\(place(step.section)) to open " + step.opens.summary
+        }
+    }
+
+    /// The section a step keeps, as the report names it, or nothing for a step without one.
+    private static func place(_ section: String?) -> String {
+        section.map { " in section '\($0)'" } ?? ""
+    }
+
+    private static func describe(_ proof: ActEvidence) -> String {
+        switch proof {
+            case .dropdown(let proof): describe(proof)
+            case .toggle(let proof)  : describe(proof)
+            case .click(let proof)   : describe(proof)
+        }
+    }
+
+    private static func describe(_ proof: ClickEvidence) -> String {
+        let clicks = proof.gesture.clickCount == 1 ? "one click" : "\(proof.gesture.clickCount) clicks"
+        let delivery = switch proof.delivery {
+            case .sent   : "\(proof.gesture.rawValue) sent (\(clicks))"
+            case .pressed: "pressed by its own action"
+            case .failed : "\(proof.gesture.rawValue) failed"
+        }
+        let effect = switch proof.effect {
+            case .menuOpened(let items)  : "a menu opened at the target (\(items.joined(separator: ", ")))"
+            case .windowOpened(let title): "the new window \"\(title)\" opened"
+            case .unattributed(let why)  : "no effect attributed (\(why.rawValue))"
+        }
+        return "\(delivery) on '\(proof.target)', \(effect), from window \"\(proof.windowTitle)\""
+    }
+
+    private static func describe(_ proof: ToggleEvidence) -> String {
+        func reading(_ reading: ToggleEvidence.Reading?) -> String {
+            switch reading {
+                case .read(let state, let source)?: "'\(state.rawValue)' read \(describe(source))"
+                case .unreadable(let why)?        : "unreadable (\(why.rawValue))"
+                case nil                          : "not read"
+            }
+        }
+        let click = switch proof.click {
+            case .none  : "no click sent"
+            case .sent  : "click sent"
+            case .failed: "click failed"
+        }
+        return "\(reading(proof.stateBefore)) before, \(click), \(reading(proof.stateAfter)) after, "
+            + "wanted '\(proof.desiredState.rawValue)', window \"\(proof.windowTitle)\""
+    }
+
+    private static func describe(_ source: ToggleEvidence.Reading.Source) -> String {
+        switch source {
+            case .resolvedElement: "on the resolved control"
+            case .accessibility  : "by accessibility"
+            case .sameElement    : "on the same element"
+            case .sameLabel      : "on the control with its label"
+        }
     }
 
     private static func describe(_ proof: DropdownEvidence) -> String {

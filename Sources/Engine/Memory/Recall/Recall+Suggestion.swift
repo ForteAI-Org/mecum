@@ -5,6 +5,7 @@
 //  Created by Tommaso Mazzarini on 24/09/2026.
 //
 
+import EngineCore
 import Foundation
 import PerceptionCore
 
@@ -90,6 +91,10 @@ extension Recall {
 
     /// Why a matching memory is offered only as history.
     public enum HistoricalReason: Sendable, Equatable {
+        /// The request shares the remembered phrase's words but is not shown to ask for the step's
+        /// single goal: it could not be read, asks for no selection, or holds words the step does not
+        /// represent. Words alone never make a memory operational.
+        case goalNotSingle
         /// It was learned in another window of this application.
         case otherWindow(learnedIn: String, current: String)
         /// The fresh scene does not show the control, or shows it ambiguously, or cannot attribute it.
@@ -144,9 +149,12 @@ extension Recall {
 
     /// Decides which remembered experience, if any, to offer for `input` in the world's context.
     ///
-    /// A record matches by its exact goal words, by asking for the same single selection
-    /// (`SelectionGoal` over the step's own item and control, so a different phrasing of the same
-    /// step is found without lowering any threshold), or by the hint coverage. A matching record
+    /// A record matches as its step's kind defines (`LearnableStep.recallMatch`): a selection by its
+    /// exact goal words, by asking for the same single selection, or by the hint coverage, and never
+    /// for a request `SelectionGoal` shows asks for another step; a toggle only by a request for its own
+    /// state (`ToggleGoal`), and a click only by a request for its own gesture that names no other
+    /// surface (`ClickGoal`). Only the step's single goal makes a match operational: a match by words
+    /// alone is history (`goalNotSingle`). A matching record
     /// is then refused when it is not trustworthy or belongs to another application; offered as
     /// history when it belongs to another window or the fresh scene does not show its control;
     /// and suggested otherwise. The best answer wins: a suggestion over history over a refusal,
@@ -158,7 +166,7 @@ extension Recall {
         var refusals: [(Match, RefusedMemory)] = []
         var considered: [Consideration] = []
         for record in world.records {
-            guard let match = match(record, input: input, inputTokens: inputTokens) else {
+            guard let (match, isGoal) = match(record, input: input, inputTokens: inputTokens) else {
                 considered.append(Consideration(experienceID: record.id, match: nil, verdict: "no match"))
                 continue
             }
@@ -176,7 +184,11 @@ extension Recall {
             }
             let suggestion = Suggestion(record: record, match: match, presence: presence(of: record, in: world.context),
                                         sightingEvidence: sightingEvidence(for: record, in: world.sightings))
-            if let current = world.context.windowFamily, current != record.context.windowFamily {
+            if !isGoal {
+                history.append((suggestion, .goalNotSingle))
+                considered.append(Consideration(experienceID: record.id, match: match,
+                                                verdict: "history: \(HistoricalReason.goalNotSingle)"))
+            } else if let current = world.context.windowFamily, current != record.context.windowFamily {
                 let why = HistoricalReason.otherWindow(learnedIn: record.context.windowFamily, current: current)
                 history.append((suggestion, why))
                 considered.append(Consideration(experienceID: record.id, match: match, verdict: "history: \(why)"))
@@ -199,14 +211,15 @@ extension Recall {
 
     // MARK: Rules
 
-    private static func match(_ record: ExperienceRecord, input: String, inputTokens: Set<String>) -> Match? {
+    /// How the request relates to the record's step, as the step's kind defines it
+    /// (`LearnableStep.recallMatch`), or nil for a request without goal content.
+    private static func match(
+        _ record   : ExperienceRecord,
+        input      : String,
+        inputTokens: Set<String>
+    ) -> (match: Match, isGoal: Bool)? {
         guard !inputTokens.isEmpty else { return nil }
-        if record.draft.phraseTokens == inputTokens { return .exactPhrase }
-        if SelectionGoal.classify(input, item: record.step.item, control: record.step.control) == .single {
-            return .sameStep
-        }
-        if MemoryHint.coverage(of: GoalPhrase.tokens(record.phrase), by: inputTokens) != nil { return .partialPhrase }
-        return nil
+        return record.step.learnable.recallMatch(input, tokens: inputTokens, in: record)
     }
 
     /// What the fresh scene says about the record's control, when the scene is of its window.
@@ -215,14 +228,14 @@ extension Recall {
               scene.bundleID == record.context.bundleID,
               LabelText.letters(scene.windowTitle) == record.context.windowFamily else { return .notObserved }
         guard scene.coverage == .window else { return .unattributable }
-        let readings = [record.step.control, record.step.item].map { scene.resolve(target: $0) }
+        let readings = record.step.learnable.resolutions(in: scene)
         if readings.contains(where: { if case .found = $0 { true } else { false } }) { return .presentNow }
         if readings.contains(where: { if case .ambiguous = $0 { true } else { false } }) { return .ambiguousNow }
         return .absentNow
     }
 
     private static func sightingEvidence(for record: ExperienceRecord, in sightings: [Sighting]) -> Int {
-        let names = Set([record.step.control, record.step.item].map(LabelText.normalize))
+        let names = Set(record.step.learnable.sightedLabels.map(LabelText.normalize))
         return sightings
             .filter { $0.key.context == record.context && names.contains(LabelText.normalize($0.name)) }
             .reduce(0) { $0 + $1.evidenceCount }

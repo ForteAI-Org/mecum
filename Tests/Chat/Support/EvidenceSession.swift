@@ -23,10 +23,13 @@ final class EvidenceSession: AutomationSessionOperating {
 
     /// The controls the synthetic window shows, left to right.
     var sceneLabels: [String] = []
+    /// The application and window the scenes show; the selection's evidence stays in the routing window.
+    var sceneBundleID = "test.synthetic.mixer"
+    var sceneWindowTitle = "Synthetic Routing"
 
     private var scene: SceneSnapshot {
         var scene = SceneSnapshot(
-            bundleID: "test.synthetic.mixer", appName: "Synthetic Mixer", windowTitle: "Synthetic Routing",
+            bundleID: sceneBundleID, appName: "Synthetic Mixer", windowTitle: sceneWindowTitle,
             viewportPixelSize: ViewportPixelSize(width: 800, height: 600),
             elements: sceneLabels.enumerated().map { index, label in
                 SceneElement(id: "control|\(label)", kind: .control, label: label,

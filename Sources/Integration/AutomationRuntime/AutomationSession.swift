@@ -106,7 +106,9 @@ public final class AutomationSession: AutomationSessionOperating {
         )
         let outcome = await runtime.engine(allowsDestructive: allowsDestructive).act(request)
         await learnAfterAction(from: outcome.scene, runtime: runtime)
-        return outcome
+        // A process-number fallback names this run, not the application, so it carries no evidence.
+        guard application.bundleIdentifier == nil else { return outcome }
+        return ActOutcome(outcome.kind, outcome.message, scene: outcome.scene)
     }
 
     public func deliver(_ input: InputRequest.Input, section: String?) async throws -> ActOutcome {
@@ -125,7 +127,14 @@ public final class AutomationSession: AutomationSessionOperating {
 
     public func select(control: String, item: String) async throws -> ActOutcome {
         let (application, runtime, target) = try current()
-        let selector = SeatDropdownSelector(target: target, pipeline: ScenePipeline(text: VisionTextRecognizer()))
+        // Menus are read in pixels as ever; the window before and after with its accessibility tree, as this
+        // chat's scenes are, so the dropdown is found by its name or value and read back by its own value.
+        let selector = SeatDropdownSelector(
+            target        : target,
+            pipeline      : ScenePipeline(text: VisionTextRecognizer()),
+            windowPipeline: ProductionPerception.pipeline(),
+            windows       : runtime.windows
+        )
         let result = try await selector.select(
             control: control, item: item,
             identity: SeatDriving.ApplicationIdentity(

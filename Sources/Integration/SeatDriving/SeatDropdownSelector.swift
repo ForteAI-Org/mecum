@@ -12,21 +12,37 @@ import WindowPlacement
 /// SeatDropdownSelector keeps observation, opening, selection and verification in one Seat Turn.
 /// The Driver owns the temporary menu and its cleanup. Perception identifies a row only in a
 /// capture of that menu's attested window, never in the parent application's accessibility tree.
+///
+/// The window before and after the selection is perceived by `windowPipeline` when one is given,
+/// with the window's own accessibility tree, as the scenes of a chat are: the dropdown is then found
+/// by its name or its value and read back by the value its accessibility element reports, beside
+/// the text painted there. Without one both are pixels alone, which is what this always did.
 @MainActor
 public struct SeatDropdownSelector {
 
     private let target: SeatTarget
     private let pipeline: ScenePipeline
+    private let windowPipeline: ScenePipeline?
+    private let windows: (any WindowListing)?
     private let popupRows: (any PopupRowReading)?
 
     /// Creates a selector. `popupRows` is optional and nil by default: with a reader the arrow-key
     /// route is counted over the rows the application named for itself, scrolled-out ones included,
     /// and without one it is counted over the rows the pixels cut out of the painted page, which is
-    /// what this always did.
-    public init(target: SeatTarget, pipeline: ScenePipeline, popupRows: (any PopupRowReading)? = nil) {
-        self.target = target
-        self.pipeline = pipeline
-        self.popupRows = popupRows
+    /// what this always did. `windows` names the window as the window server does now; without it
+    /// the window keeps the title it was adopted with, which is empty for one the Seat followed.
+    public init(
+        target        : SeatTarget,
+        pipeline      : ScenePipeline,
+        windowPipeline: ScenePipeline? = nil,
+        windows       : (any WindowListing)? = nil,
+        popupRows     : (any PopupRowReading)? = nil
+    ) {
+        self.target         = target
+        self.pipeline       = pipeline
+        self.windowPipeline = windowPipeline
+        self.windows        = windows
+        self.popupRows      = popupRows
     }
 
     /// Selects one item in a flat native dropdown. Success requires the requested value to be
@@ -71,10 +87,11 @@ public struct SeatDropdownSelector {
         onMenu: @escaping @MainActor @Sendable (ContextMenu) -> Void,
         onCapture: @escaping @MainActor @Sendable (String, CGImage) throws -> Void
     ) async throws -> (outcome: ActOutcome, receipt: PopupMenuReceipt?) {
+        let title = currentTitle(of: window)
         let beforeDelivery = try await target.observe()
         let beforeStill = beforeDelivery.frame
         let before = try await perceive(
-            beforeStill, identity: identity, title: window.title,
+            beforeStill, identity: identity, title: title, window: window,
             stage: "before", onCapture: onCapture
         )
         var opener: SceneElement?
@@ -84,10 +101,10 @@ public struct SeatDropdownSelector {
             opener = element
         } else if case .none = resolution,
                   beforeStill.geometry.windowObservation != nil,
-                  let frame = try? DropdownOpening.frame(control: control, window: window.title, processID: window.reference.processID),
+                  let frame = try? DropdownOpening.frame(control: control, window: title, processID: window.reference.processID),
                   before.frame.contains(frame),
                   let bounds = AccessibilityFrameTrust.normalized(frame, in: before.frame),
-                  let scoped = try await controlScene(beforeStill, bounds: bounds, identity: identity, title: window.title),
+                  let scoped = try await controlScene(beforeStill, bounds: bounds, identity: identity, title: title),
                   case .found(let value) = scoped.resolve(target: control) {
             scopedBounds = bounds
             opener = SceneElement(id: value.id, kind: .control, label: value.label, bounds: bounds, role: "AXPopUpButton")
@@ -141,11 +158,11 @@ public struct SeatDropdownSelector {
             return element
         }
         let receipt: PopupMenuReceipt
-        if try DropdownOpening.canShow(control: opener.label, window: window.title, processID: window.reference.processID) {
+        if try DropdownOpening.canShow(control: opener.label, window: title, processID: window.reference.processID) {
             receipt = try await seat.useNativePopupMenu(
                 of: window, turn: turn,
                 opening: {
-                    try DropdownOpening.show(control: opener.label, window: window.title, processID: window.reference.processID)
+                    try DropdownOpening.show(control: opener.label, window: title, processID: window.reference.processID)
                 }
             ) { menu in
                 guard try await readItem(menu, fromDisplay: false) != nil else { return false }
@@ -167,14 +184,17 @@ public struct SeatDropdownSelector {
                 // The rows the application named for itself, when a reader is there to ask: they
                 // include what the page does not paint, so the distance between two items is the
                 // real one. Pixel rows, and no wrap through a page, otherwise.
-                let named = await rowReader?.popupRows(
+                let listed = await rowReader?.popupRows(
                     ofProcess : window.reference.processID,
                     popupFrame: menu.frame
                 ) ?? []
-                let route = PopupRowPick.plan(rows: named, currentValue: opener.label, target: element.label)
+                // The row the dropdown shows now: its value, which a control from an accessibility scene
+                // carries apart from its name.
+                let current = opener.value ?? opener.label
+                let route = PopupRowPick.plan(rows: listed, currentValue: current, target: element.label)
                     ?? PopupRowPick.plan(
                         rows        : PopupRowPick.rows(in: scene, windowFrame: menu.frame, popupFrame: menu.frame),
-                        currentValue: opener.label,
+                        currentValue: current,
                         target      : element,
                         wraps       : false
                     )
@@ -185,7 +205,7 @@ public struct SeatDropdownSelector {
         }
         let afterStill = try await target.windowStill()
         let after = try await perceive(
-            afterStill, identity: identity, title: window.title,
+            afterStill, identity: identity, title: title, window: window,
             stage: "after", onCapture: onCapture
         )
         guard receipt.selectionRequested else {
@@ -196,15 +216,15 @@ public struct SeatDropdownSelector {
         let readback: DropdownReadback
         if let scopedBounds {
             let scoped = windowSizeKept
-                ? try await controlScene(afterStill, bounds: scopedBounds, identity: identity, title: window.title)
+                ? try await controlScene(afterStill, bounds: scopedBounds, identity: identity, title: title)
                 : nil
-            readback = .inCrop(scoped, item: item, windowSizeKept: windowSizeKept)
+            readback = .inCrop(scoped, windowSizeKept: windowSizeKept)
         } else {
-            readback = .atControl(opener.bounds, in: after.scene, item: item, windowSizeKept: windowSizeKept)
+            readback = .atControl(opener.bounds, in: after.scene, windowSizeKept: windowSizeKept)
         }
         let evidence = DropdownEvidence(
             bundleID          : identity.bundleID,
-            windowTitle       : window.title,
+            windowTitle       : title,
             control           : opener.label,
             controlRole       : opener.role,
             section           : opener.section,
@@ -239,18 +259,30 @@ public struct SeatDropdownSelector {
         )
     }
 
+    /// The window's title as the window server shows it now, or the one it was adopted with.
+    private func currentTitle(of window: AdoptedWindow) -> String {
+        guard let windows, let rows = try? windows.windows(ownedBy: window.reference.processID) else { return window.title }
+        return WindowRow.title(ofWindow: window.reference.windowNumber, in: rows, fallback: window.title)
+    }
+
+    /// Perceives one still. A still of the adopted `window` is read with its accessibility tree when a
+    /// window pipeline is given; a menu's still never is, since the parent's tree does not describe it.
     private func perceive(
         _ still: SeatFrame,
         identity: ApplicationIdentity,
         title: String,
+        window: AdoptedWindow? = nil,
         stage: String,
         onCapture: (String, CGImage) throws -> Void
     ) async throws -> PerceivedWindow {
         guard still.geometry.isValid, let image = still.makeCGImage() else { throw SeatDrivingFailure.frameUnusable }
         try onCapture(stage, image)
         let frame = still.geometry.screenRect
-        var scene = try await pipeline.perceive(image, of: ScenePipeline.Window(
-            bundleID: identity.bundleID, appName: identity.name, title: title
+        let described = window == nil ? nil : windowPipeline
+        var scene = try await (described ?? pipeline).perceive(image, of: ScenePipeline.Window(
+            bundleID : identity.bundleID, appName: identity.name, title: title,
+            processID: described == nil ? nil : window?.reference.processID,
+            frame    : described == nil ? nil : frame
         ))
         // Before and after are stills of the adopted window alone; a menu's own still is not the window.
         scene.coverage = stage == "menu" ? .unattributed : .window

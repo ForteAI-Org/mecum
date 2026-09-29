@@ -414,8 +414,8 @@ let package = Package(
                     path: "Tests/Chat", resources: [.copy("Fixtures")], swiftSettings: facility),
         .testTarget(
             name: "MecumCLITests",
-            dependencies: ["mecum", "EngineCore", "PerceptionCore", "ChatCore", "AutomationRuntime", "Perception",
-                           "Memory", "SQLiteLivingMemory", "AutomationMCP", "LocalMCP", "FileKnowledge",
+            dependencies: ["mecum", "Engine", "EngineCore", "PerceptionCore", "ChatCore", "AutomationRuntime",
+                           "Perception", "Memory", "SQLiteLivingMemory", "AutomationMCP", "LocalMCP", "FileKnowledge",
                            "CLIProviders", "FileConversations"],
             path: "Tests/Engine/MecumCLITests",
             swiftSettings: facility

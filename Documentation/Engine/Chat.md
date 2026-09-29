@@ -83,7 +83,14 @@ A provider process disconnect between turns does not release the Seat.
 `status`, `windows`, `open_session`, `observe`, `act`, `select`,
 `batch`, `close_session`.
 
+The tools are the closed `AutomationTool`; a name outside it is refused before any effect.
 Action tools require the ephemeral session ID returned by open_session.
+A target copied from a scene line, such as `Mute {Track 2}` or `stile = Regolare`, is read back once
+at the tool boundary (`SceneTargetReference`): the label is what is resolved and recorded, and the
+container in braces becomes the section when the call gives none. Reading stops at a label the last
+observation showed, so a real label that holds a mark, such as `x = y`, is acted on whole. The turn's
+event records the call as it was executed, and admission compares it with what the evidence observed,
+never with a copy of it. The system instructions carry no label, panel or application from any run.
 Observations carry a revision, capture report time, and the current text scene.
 The existing engine observes afresh before acting; saved observations are not
 coordinates or authority for later input.
@@ -151,5 +158,10 @@ swift test --filter SyntheticProviderTests
 ```
 
 These checks verify two provider turns, real MCP tool calls and exact native
-session resumption with a remembered test phrase. They do not prove a live
-Pro Tools or Premiere workflow through the model.
+session resumption with a remembered test phrase. With temporary SQLite stores,
+they also exercise learning and recall in new provider conversations for select,
+set_toggle, click, double_click and right_click. The action fixture supplies
+invented typed evidence: separate Engine tests verify its production generation.
+The provider checks include non-use of toggle memory in another app or window,
+for missing or ambiguous targets, and when the record is unreliable. They do
+not prove a live Pro Tools or Premiere workflow through the model.

@@ -37,15 +37,12 @@ public struct TurnRecorder: Sendable {
         /// whose selection was not learned says why, so a missing memory is never silent.
         public var notice: String? {
             switch self {
-                case .recorded(.applied(let record?), .admittedSingleSelection),
-                     .recorded(.duplicate(let record?), .admittedSingleSelection),
-                     .recorded(.applied(let record?), .confirmsFollowedExperience),
-                     .recorded(.duplicate(let record?), .confirmsFollowedExperience):
-                    "memory: remembered \(record.step.tool.rawValue) '\(record.step.item)' in "
-                        + "'\(record.step.control)', verified ×\(record.successCount)"
+                case .recorded(.applied(let record?), let reason) where reason.verifiesStep,
+                     .recorded(.duplicate(let record?), let reason) where reason.verifiesStep:
+                    "memory: remembered \(record.step.summary), verified ×\(record.successCount)"
                 case .recorded(.applied(let record?), .contradictsFollowedExperience),
                      .recorded(.duplicate(let record?), .contradictsFollowedExperience):
-                    "memory: '\(record.step.item)' did not hold this time; the memory now counts "
+                    "memory: \(record.step.summary) did not hold this time; the memory now counts "
                         + "×\(record.successCount) verified, ×\(record.failureCount) contradicted"
                 case .recorded(_, .noSelection), .nothingToRecord(.noSelection):
                     nil

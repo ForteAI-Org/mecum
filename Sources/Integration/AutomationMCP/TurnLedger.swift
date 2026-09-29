@@ -5,6 +5,7 @@
 //  Created by Tommaso Mazzarini on 24/09/2026.
 //
 
+import EngineCore
 import Foundation
 import Memory
 
@@ -98,17 +99,22 @@ public final class TurnLedger {
                       batchSteps: turn.batchSteps, ending: ending, decision: decision, endedAt: clock())
     }
 
-    /// The attempt one direct call makes. Only a select keeps its arguments and evidence.
+    /// The attempt one direct call makes. A select keeps its arguments and its dropdown evidence, an
+    /// act its arguments and its toggle's or click's evidence, and a failed act the arguments it could
+    /// be read with.
     static func attempt(_ event: AutomationEvent) -> TurnAdmission.Attempt {
         let name = event.operation.toolName
-        if case .failed = event.result { return .failed(name) }
+        if case .failed = event.result {
+            if case .act(let arguments) = event.operation { return .failed(name, act: arguments) }
+            return .failed(name)
+        }
         switch (event.operation, event.result) {
             case (.status, _), (.windows, _), (.apps, _), (.openSession, _), (.observe, _):
                 return .preparation(name)
             case (.select(let control, let item), .outcome(let kind, let evidence)):
-                return .select(control: control, item: item, kind: kind, evidence: evidence)
-            case (.act, .outcome(let kind, _)):
-                return .act(kind)
+                return .select(control: control, item: item, kind: kind, evidence: evidence?.dropdown)
+            case (.act(let arguments), .outcome(let kind, let evidence)):
+                return .act(arguments, kind: kind, evidence: evidence)
             case (.batch, _):
                 return .batch
             default:
@@ -122,16 +128,16 @@ extension AutomationEvent.Operation {
     /// The MCP tool name of the operation.
     var toolName: String {
         switch self {
-            case .status            : "status"
-            case .windows           : "windows"
-            case .apps              : "apps"
-            case .openSession       : "open_session"
-            case .observe           : "observe"
-            case .closeSession      : "close_session"
-            case .act               : "act"
-            case .select            : "select"
-            case .input(let tool)   : tool
-            case .batch             : "batch"
+            case .status            : AutomationTool.status.rawValue
+            case .windows           : AutomationTool.windows.rawValue
+            case .apps              : AutomationTool.apps.rawValue
+            case .openSession       : AutomationTool.openSession.rawValue
+            case .observe           : AutomationTool.observe.rawValue
+            case .closeSession      : AutomationTool.closeSession.rawValue
+            case .act               : AutomationTool.act.rawValue
+            case .select            : AutomationTool.select.rawValue
+            case .input(let tool)   : tool.rawValue
+            case .batch             : AutomationTool.batch.rawValue
             case .unknown(let name) : name
         }
     }

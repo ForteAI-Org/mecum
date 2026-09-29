@@ -18,23 +18,25 @@ import Memory
 import SQLiteLivingMemory
 import Testing
 
-/// The whole learning and recall path, offline: two "processes" over one knowledge directory, each
-/// with its own store actor, brain store, session, tools and turn cycle, and two separate chat
-/// conversations. Only the Seat and the provider are synthetic; the provider is the list of tool
-/// calls a model would make. Nothing is preloaded: the second process can only know what the first
-/// learned through the production path and wrote to disk.
+/// The whole learning and recall path, offline: two compositions of `mecum chat` over one knowledge
+/// directory, each with its own store actor, brain store, session, tools and turn cycle, and two
+/// separate chat conversations. They run one after the other in this test process, not as two
+/// operating-system processes; a real restart is the live tier's. Only the Seat and the provider are
+/// synthetic; the provider is the list of tool calls a model would make. Nothing is preloaded: the
+/// second instance can only know what the first learned through the production path and wrote to disk.
 @Suite("Learning, reopening and recalling through the production path", .serialized)
 struct LivingMemoryIntegrationTests {
 
-    private let learning = "Seleziona Output Busses nel filtro della scheda Bus e verifica il nuovo valore. "
+    private let learning = "Seleziona Output Busses nel filtro e verifica il nuovo valore. "
         + "Fermati se il controllo non è univoco."
-    private let recalling = "Seleziona Output Busses nel filtro della scheda Bus in Pro Tools. Prima dimmi se hai "
+    private let recalling = "Seleziona Output Busses nel filtro. Prima dimmi se hai "
         + "un’esperienza verificata che può aiutare; poi osserva la finestra attuale e agisci solo se il "
         + "controllo è presente."
     private let bundle = "test.synthetic.mixer"
     private let routing = "Synthetic I/O Setup"
 
-    /// MecumProcess is what one `mecum chat` process composes, with a synthetic Seat.
+    /// MecumProcess is what one `mecum chat` process composes, with a synthetic Seat. A new instance
+    /// stands for a restart but runs in this test process.
     @MainActor
     private struct MecumProcess {
         let store: SQLiteLivingMemoryStore
@@ -99,7 +101,7 @@ struct LivingMemoryIntegrationTests {
         try await body(root.appendingPathComponent("Knowledge", isDirectory: true), conversations)
     }
 
-    /// Runs the first process: one admitted turn that changes the filter, then shutdown.
+    /// Runs the first instance: one admitted turn that changes the filter, then shutdown.
     @MainActor
     private func learnInFirstProcess(_ knowledge: URL, _ conversations: ConversationStore) async throws -> UUID {
         let first = try MecumProcess(knowledge: knowledge, bundle: bundle, window: routing,
@@ -120,7 +122,7 @@ struct LivingMemoryIntegrationTests {
 
     // MARK: Tests
 
-    @Test("a second process and a new conversation receive the memory from disk, and only from disk")
+    @Test("a second instance over the directory and a new conversation receive the memory from disk only")
     @MainActor
     func secondProcessRecallsFromDisk() async throws {
         try await withDirectories { knowledge, conversations in
@@ -143,6 +145,9 @@ struct LivingMemoryIntegrationTests {
             #expect(remembered.tool == "select")
             #expect(remembered.control == "All Busses")
             #expect(remembered.item == "Output Busses")
+            #expect(briefing.contextLine
+                    == "memory context: suggested select 'Output Busses' in 'All Busses' (verified ×1, notObserved)")
+            #expect(briefing.contextLine?.contains("Optional") == false)
             #expect(remembered.application == bundle)
             #expect(remembered.window == "syntheticiosetup")
             #expect(remembered.lastVerifiedAt != nil)
@@ -156,8 +161,8 @@ struct LivingMemoryIntegrationTests {
 
             let record = try #require(try await second.store.experiences(in: [bundle]).first)
             #expect(record.step.arguments == ["control": "All Busses", "item": "Output Busses"])
-            #expect(record.latestProof?.valueBefore == "All Busses")
-            #expect(record.latestProof?.readback == .window("Output Busses"))
+            #expect(record.latestProof?.dropdown?.valueBefore == "All Busses")
+            #expect(record.latestProof?.dropdown?.readback == .window("Output Busses"))
             #expect(record.context == WindowContext(bundleID: bundle, windowTitle: routing))
             #expect(!(try await second.store.sightings(in: [bundle])).isEmpty)
 
@@ -278,7 +283,7 @@ struct LivingMemoryIntegrationTests {
         }
     }
 
-    @Test("an unreliable memory, persisted by a correction, is refused by the next process")
+    @Test("an unreliable memory, persisted by a correction, is refused by the next instance")
     @MainActor
     func unreliableAfterReopening() async throws {
         try await withDirectories { knowledge, conversations in

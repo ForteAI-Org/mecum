@@ -15,7 +15,8 @@ extension SQLiteLivingMemoryStore {
     /// The file is classified before anything is written: it must read as a database, and a
     /// database with tables must carry this store's application id. Only then does a read-write
     /// open switch to WAL and migrate, re-reading the version under the write lock because another
-    /// connection may have migrated first.
+    /// connection may have migrated first. A read-only open accepts the current version and the older
+    /// ones the schema reads without migrating, and leaves them as they are.
     static func open(file: URL, access: Access, schema: SQLiteLivingMemorySchema) throws -> SQLiteConnection {
         let path = file.path
         let flags: Int32
@@ -35,7 +36,8 @@ extension SQLiteLivingMemoryStore {
         let found = try classify(connection, schema: schema)
         switch access {
             case .readOnly:
-                guard found == schema.currentVersion else {
+                // An older store this build reads as it is stays at its version: a reader never migrates.
+                guard (schema.oldestReadableVersion...schema.currentVersion).contains(found) else {
                     throw SQLiteLivingMemoryError.needsMigration(path: path, found: found,
                                                                  current: schema.currentVersion)
                 }

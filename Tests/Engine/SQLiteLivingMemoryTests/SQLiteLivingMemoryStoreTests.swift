@@ -47,7 +47,7 @@ struct SQLiteLivingMemoryStoreTests {
     }
 
     private func verified(_ id: String, at seconds: TimeInterval = 0) -> ExperienceEvent {
-        ExperienceEvent(id: id, subject: .step(draft), outcome: .verified(evidence()),
+        ExperienceEvent(id: id, subject: .step(draft), outcome: .verified(.dropdown(evidence())),
                         at: t0.addingTimeInterval(seconds))
     }
 
@@ -74,7 +74,7 @@ struct SQLiteLivingMemoryStoreTests {
             #expect(experiences.count == 1)
             #expect(experiences.first?.id == id)
             #expect(experiences.first?.phrase == "imposta le uscite su Output Busses")
-            #expect(experiences.first?.latestProof == evidence())
+            #expect(experiences.first?.latestProof == .dropdown(evidence()))
             #expect(try await reopened.candidates(for: "uscite", in: nil).count == 1)
         }
     }
@@ -87,19 +87,19 @@ struct SQLiteLivingMemoryStoreTests {
                 let store = try SQLiteLivingMemoryStore(file: file)
                 _ = try await store.recordSightings([observation(routing, "anchor-1")])
             }
-            #expect(try RawDatabase(file).integer("PRAGMA user_version") == 1)
+            #expect(try RawDatabase(file).integer("PRAGMA user_version") == 2)
             #expect(try RawDatabase(file).integer("PRAGMA application_id") == SQLiteLivingMemorySchema.applicationID)
             #expect(try RawDatabase(file).text("PRAGMA journal_mode") == "wal")
 
             let next = SQLiteLivingMemorySchema(migrations: SQLiteLivingMemorySchema.current.migrations + [
-                .init(version: 2, statements: "CREATE TABLE synthetic_notes (note TEXT NOT NULL);"),
+                .init(version: 3, statements: "CREATE TABLE synthetic_notes (note TEXT NOT NULL);"),
             ])
             do {
                 let migrated = try SQLiteLivingMemoryStore(file: file, access: .readWrite, makeID: sequentialIDs(),
                                                            schema: next)
                 #expect(try await migrated.sightings(in: ["test.synthetic.mixer"]).count == 1)
             }
-            #expect(try RawDatabase(file).integer("PRAGMA user_version") == 2)
+            #expect(try RawDatabase(file).integer("PRAGMA user_version") == 3)
             #expect(try RawDatabase(file).integer("SELECT count(*) FROM synthetic_notes") == 0)
         }
     }
@@ -111,7 +111,7 @@ struct SQLiteLivingMemoryStoreTests {
             do { _ = try SQLiteLivingMemoryStore(file: file) }
             try RawDatabase(file).execute("PRAGMA user_version = 99")
             let before = try Data(contentsOf: file)
-            let unsupported = SQLiteLivingMemoryError.unsupportedSchemaVersion(path: file.path, found: 99, supported: 1)
+            let unsupported = SQLiteLivingMemoryError.unsupportedSchemaVersion(path: file.path, found: 99, supported: 2)
             #expect(throws: unsupported) {
                 _ = try SQLiteLivingMemoryStore(file: file)
             }
@@ -199,7 +199,7 @@ struct SQLiteLivingMemoryStoreTests {
                         for index in 0..<10 {
                             _ = try await store.recordSightings([sighting])
                             _ = try await store.record(ExperienceEvent(
-                                id: "\(name)-\(index)", subject: .step(draft), outcome: .verified(proof),
+                                id: "\(name)-\(index)", subject: .step(draft), outcome: .verified(.dropdown(proof)),
                                 at: t0.addingTimeInterval(Double(index))
                             ))
                         }
@@ -265,10 +265,245 @@ struct SQLiteLivingMemoryStoreTests {
             #expect(try Data(contentsOf: file) == before)
 
             try RawDatabase(file).execute("PRAGMA user_version = 0")
-            #expect(throws: SQLiteLivingMemoryError.needsMigration(path: file.path, found: 0, current: 1)) {
+            #expect(throws: SQLiteLivingMemoryError.needsMigration(path: file.path, found: 0, current: 2)) {
                 _ = try SQLiteLivingMemoryStore(file: file, access: .readOnly)
             }
             #expect(try RawDatabase(file).integer("PRAGMA user_version") == 0)
+        }
+    }
+
+    // MARK: Toggles and the version 1 record shape
+
+    /// Rows exactly as the 492264c build (schema 1, selections only) wrote them for an invented
+    /// experience, a no-op and an uncertain attempt, copied from a store that build created.
+    private enum Legacy {
+        static let experienceID = "legacy-experience-1"
+        static let naturalKey = "test.synthetic.mixer\nsyntheticiosetup\nbus busses della filtro output scheda seleziona\n"
+            + "select|allbusses|outputbusses"
+        static let record = #"{"createdAt":"2027-01-15T08:00:00.000Z","draft":{"context":{"bundleID":"test.synthetic.mixer","windowFamily":"syntheticiosetup"},"phrase":"Seleziona Output Busses nel filtro della scheda Bus","step":{"control":"All Busses","item":"Output Busses","tool":"select"}},"failureCount":0,"id":{"rawValue":"legacy-experience-1"},"lastVerifiedAt":"2027-01-15T08:00:00.000Z","latestProof":{"bundleID":"test.synthetic.mixer","control":"All Busses","controlRole":"AXPopUpButton","menuClosedByChoice":true,"readback":{"window":{"_0":"Output Busses"}},"requestedItem":"Output Busses","valueBefore":"All Busses","windowTitle":"Synthetic I\/O Setup"},"successCount":1}"#
+        static let entries: [(id: String, experience: String?, entry: String)] = [
+            ("turn-legacy-1", experienceID, #"{"event":{"at":"2027-01-15T08:00:00.000Z","id":"turn-legacy-1","outcome":{"verified":{"_0":{"bundleID":"test.synthetic.mixer","control":"All Busses","controlRole":"AXPopUpButton","menuClosedByChoice":true,"readback":{"window":{"_0":"Output Busses"}},"requestedItem":"Output Busses","valueBefore":"All Busses","windowTitle":"Synthetic I\/O Setup"}}},"subject":{"step":{"_0":{"context":{"bundleID":"test.synthetic.mixer","windowFamily":"syntheticiosetup"},"phrase":"Seleziona Output Busses nel filtro della scheda Bus","step":{"control":"All Busses","item":"Output Busses","tool":"select"}}}}},"experienceID":{"rawValue":"legacy-experience-1"}}"#),
+            ("turn-legacy-2", nil, #"{"event":{"at":"2027-01-15T08:01:00.000Z","id":"turn-legacy-2","outcome":{"noChange":{"_0":{"bundleID":"test.synthetic.mixer","control":"Output Busses","controlRole":"AXPopUpButton","menuClosedByChoice":true,"readback":{"window":{"_0":"Output Busses"}},"requestedItem":"Output Busses","valueBefore":"Output Busses","windowTitle":"Synthetic I\/O Setup"}}},"subject":{"unattributed":{"_0":{"bundleID":"test.synthetic.mixer","windowFamily":"syntheticiosetup"}}}}}"#),
+            ("turn-legacy-3", nil, #"{"event":{"at":"2027-01-15T08:02:00.000Z","id":"turn-legacy-3","outcome":{"uncertain":{"_0":{"readbackUnavailable":{"_0":"severalAtControl"}}}},"subject":{"unattributed":{"_0":{"bundleID":"test.synthetic.mixer","windowFamily":"syntheticiosetup"}}}}}"#),
+        ]
+
+        static let schema = SQLiteLivingMemorySchema(migrations: [SQLiteLivingMemorySchema.current.migrations[0]])
+
+        static var evidence: DropdownEvidence {
+            DropdownEvidence(bundleID: "test.synthetic.mixer", windowTitle: "Synthetic I/O Setup", control: "All Busses",
+                             controlRole: "AXPopUpButton", section: nil, valueBefore: "All Busses",
+                             requestedItem: "Output Busses", readback: .window("Output Busses"),
+                             menuClosedByChoice: true)
+        }
+
+        /// A version 1 store holding the rows above, arranged behind the store's back.
+        static func write(to file: URL) throws {
+            _ = try SQLiteLivingMemoryStore(file: file, access: .readWrite, makeID: { ExperienceID("unused") },
+                                            schema: schema)
+            let raw = try RawDatabase(file)
+            try raw.insert("INSERT INTO experiences (id, natural_key, bundle_id, record) VALUES (?, ?, ?, ?)",
+                           [experienceID, naturalKey, "test.synthetic.mixer", record])
+            for row in entries {
+                try raw.insert("INSERT INTO experience_events (event_id, experience_id, entry) VALUES (?, ?, ?)",
+                               [row.id, row.experience, row.entry])
+            }
+        }
+    }
+
+    @Test("a version 1 store is migrated to 2 without rewriting a row, and its selections read as before")
+    func legacyRowsAfterMigration() async throws {
+        try await withDirectory { directory in
+            let file = SQLiteLivingMemoryStore.file(inKnowledgeDirectory: directory)
+            try Legacy.write(to: file)
+            #expect(try RawDatabase(file).integer("PRAGMA user_version") == 1)
+            let store = try SQLiteLivingMemoryStore(file: file)
+            #expect(try RawDatabase(file).integer("PRAGMA user_version") == 2)
+            #expect(try RawDatabase(file).text("SELECT record FROM experiences") == Legacy.record)
+            #expect(try RawDatabase(file).text("SELECT entry FROM experience_events WHERE event_id = 'turn-legacy-3'")
+                    == Legacy.entries[2].entry)
+
+            let record = try #require(try await store.experiences(in: ["test.synthetic.mixer"]).first)
+            #expect(record.id == ExperienceID(Legacy.experienceID))
+            #expect(record.step == .select(control: "All Busses", item: "Output Busses"))
+            #expect(record.latestProof == .dropdown(Legacy.evidence))
+            #expect(record.successCount == 1)
+            #expect(try await store.history(of: record.id).map(\.event.id) == ["turn-legacy-1"])
+            #expect(try await store.candidates(for: "Seleziona Output Busses", in: nil).map(\.id) == [record.id])
+
+            let encoder = KnowledgeCoding.makeEncoder()
+            encoder.outputFormatting = [.sortedKeys]
+            #expect(String(decoding: try encoder.encode(record), as: UTF8.self) == Legacy.record,
+                    "a select is still written in the version 1 shape")
+            let again = ExperienceEvent(id: "turn-legacy-1", subject: .step(record.draft),
+                                        outcome: .verified(.dropdown(Legacy.evidence)),
+                                        at: try #require(record.lastVerifiedAt))
+            #expect(try await store.record(again) == .duplicate(record), "a legacy event is still the same event")
+            let next = ExperienceEvent(id: "turn-new-1", subject: .step(record.draft),
+                                       outcome: .verified(.dropdown(Legacy.evidence)), at: t0)
+            let strengthened = try #require(try await store.record(next).experience)
+            #expect(strengthened.id == record.id && strengthened.successCount == 2,
+                    "a new verification finds the legacy experience by its natural key")
+        }
+    }
+
+    @Test("a read-only open reads a version 1 store as it is and leaves it at version 1")
+    func legacyReadOnly() async throws {
+        try await withDirectory { directory in
+            let file = SQLiteLivingMemoryStore.file(inKnowledgeDirectory: directory)
+            try Legacy.write(to: file)
+            let before = try Data(contentsOf: file)
+            let reader = try SQLiteLivingMemoryStore(file: file, access: .readOnly)
+            let record = try #require(try await reader.experiences(in: ["test.synthetic.mixer"]).first)
+            #expect(record.step == .select(control: "All Busses", item: "Output Busses"))
+            #expect(record.latestProof == .dropdown(Legacy.evidence))
+            #expect(try await reader.history(of: record.id).map(\.event.id) == ["turn-legacy-1"])
+            #expect(try RawDatabase(file).integer("PRAGMA user_version") == 1)
+            #expect(try Data(contentsOf: file) == before)
+            #expect(SQLiteLivingMemorySchema.current.oldestReadableVersion == 1)
+        }
+    }
+
+    @Test("a migration that changes a table ends what a read-only open accepts without migrating")
+    func readableVersionsStopAtATableChange() async throws {
+        try await withDirectory { directory in
+            let file = SQLiteLivingMemoryStore.file(inKnowledgeDirectory: directory)
+            try Legacy.write(to: file)
+            let later = SQLiteLivingMemorySchema(migrations: SQLiteLivingMemorySchema.current.migrations + [
+                .init(version: 3, statements: "CREATE TABLE synthetic_notes (note TEXT NOT NULL);"),
+            ])
+            #expect(later.oldestReadableVersion == 3)
+            #expect(throws: SQLiteLivingMemoryError.needsMigration(path: file.path, found: 1, current: 3)) {
+                _ = try SQLiteLivingMemoryStore(file: file, access: .readOnly, makeID: { ExperienceID("unused") },
+                                                schema: later)
+            }
+            #expect(try RawDatabase(file).integer("PRAGMA user_version") == 1)
+        }
+    }
+
+    @Test("a toggle experience survives a new instance, and a version 1 build refuses the file cleanly")
+    func toggleRecordAndOlderBuild() async throws {
+        try await withDirectory { directory in
+            let file = SQLiteLivingMemoryStore.file(inKnowledgeDirectory: directory)
+            try Legacy.write(to: file)
+            let mixer = WindowContext(bundleID: "test.synthetic.mixer", windowTitle: "Synthetic Mixer")!
+            let proof = ToggleEvidence(bundleID: "test.synthetic.mixer", windowTitle: "Synthetic Mixer", control: "Mute",
+                                       controlRole: "AXCheckBox", section: nil, desiredState: .on,
+                                       stateBefore: .read(.off, .resolvedElement), click: .sent,
+                                       stateAfter: .read(.on, .sameElement))
+            let draft = ExperienceDraft(phrase: "Attiva Mute", step: ExperienceStep(proof, requestedSection: nil),
+                                        context: mixer)!
+            do {
+                let store = try SQLiteLivingMemoryStore(file: file, makeID: { ExperienceID("toggle-1") })
+                _ = try await store.record(ExperienceEvent(id: "turn-toggle-1", subject: .step(draft),
+                                                           outcome: .verified(.toggle(proof)), at: t0))
+                _ = try await store.record(ExperienceEvent(id: "turn-toggle-2", subject: .unattributed(mixer),
+                                                           outcome: .uncertain(.toggleStateUnreadable(.severalMatches)),
+                                                           at: t0 + 60))
+            }
+            let reopened = try SQLiteLivingMemoryStore(file: file, access: .readOnly)
+            let records = try await reopened.experiences(in: ["test.synthetic.mixer"])
+            #expect(records.map(\.step) == [.select(control: "All Busses", item: "Output Busses"),
+                                            .setToggle(control: "Mute", section: nil, state: .on)])
+            #expect(records.last?.latestProof == .toggle(proof))
+            #expect(try await reopened.history(of: ExperienceID("toggle-1")).map(\.event.outcome)
+                    == [.verified(.toggle(proof))])
+            #expect(try await reopened.candidates(for: "Attiva Mute", in: nil).map(\.id) == [ExperienceID("toggle-1")])
+            let stored = try RawDatabase(file).text("SELECT record FROM experiences WHERE id = 'toggle-1'")
+            #expect(stored.contains(#""step":{"control":"Mute","state":"on","tool":"set_toggle"}"#))
+            #expect(stored.contains(#""latestProof":{"toggle":{"#))
+
+            let older = SQLiteLivingMemoryError.unsupportedSchemaVersion(path: file.path, found: 2, supported: 1)
+            #expect(throws: older) {
+                _ = try SQLiteLivingMemoryStore(file: file, access: .readWrite, makeID: { ExperienceID("unused") },
+                                                schema: Legacy.schema)
+            }
+        }
+    }
+
+    @Test("a click experience survives a new instance beside a legacy select, and one turn counts once")
+    func clickRecordAfterReopen() async throws {
+        try await withDirectory { directory in
+            let file = SQLiteLivingMemoryStore.file(inKnowledgeDirectory: directory)
+            try Legacy.write(to: file)
+            let mixer = WindowContext(bundleID: "test.synthetic.mixer", windowTitle: "Synthetic Mixer")!
+            let proof = ClickEvidence(bundleID: "test.synthetic.mixer", windowTitle: "Synthetic Mixer",
+                                      target: "Track 1", targetRole: nil, section: "Mixer", gesture: .rightClick,
+                                      delivery: .sent,
+                                      effect: .menuOpened(items: ["Delete Track", "Rename"]))
+            let step = try #require(ExperienceStep(proof, requestedSection: "Mixer"))
+            let draft = ExperienceDraft(phrase: "Fai clic destro su Track 1 nel Mixer", step: step, context: mixer)!
+            let event = ExperienceEvent(id: "turn-click-1", subject: .step(draft), outcome: .verified(.click(proof)),
+                                        at: t0)
+            do {
+                let store = try SQLiteLivingMemoryStore(file: file, makeID: { ExperienceID("click-1") })
+                _ = try await store.record(event)
+                _ = try await store.record(ExperienceEvent(id: "turn-click-2", subject: .unattributed(mixer),
+                                                           outcome: .uncertain(.clickEffectUnattributed(.noChange)),
+                                                           at: t0 + 60))
+            }
+            do {
+                let again = try SQLiteLivingMemoryStore(file: file, makeID: { ExperienceID("unused") })
+                guard case .duplicate(let record?) = try await again.record(event) else {
+                    Issue.record("a repeated turn was recorded again"); return
+                }
+                #expect(record.successCount == 1)
+            }
+            let reopened = try SQLiteLivingMemoryStore(file: file, access: .readOnly)
+            let records = try await reopened.experiences(in: ["test.synthetic.mixer"])
+            #expect(Set(records.map(\.step)) == [
+                .select(control: "All Busses", item: "Output Busses"),
+                .click(.rightClick, target: "Track 1", section: "Mixer", opens: .menu),
+            ])
+            let click = try #require(records.first { $0.id == ExperienceID("click-1") })
+            #expect(click.successCount == 1 && click.latestProof == .click(proof))
+            #expect(try await reopened.history(of: ExperienceID("click-1")).map(\.event.outcome)
+                    == [.verified(.click(proof))])
+            let stored = try RawDatabase(file).text("SELECT record FROM experiences WHERE id = 'click-1'")
+            #expect(stored.contains(#""tool":"right_click""#) && stored.contains(#""latestProof":{"click":{"#))
+            let select = try RawDatabase(file).text("SELECT record FROM experiences WHERE id != 'click-1'")
+            #expect(select.contains(#""step":{"control":"All Busses","item":"Output Busses","tool":"select"}"#),
+                    "a select is still stored in its version 1 shape")
+        }
+    }
+
+    @Test("the reasons added for unattributable proofs are stored as their names, beside a legacy select")
+    func newReasonsOnDisk() async throws {
+        try await withDirectory { directory in
+            let file = SQLiteLivingMemoryStore.file(inKnowledgeDirectory: directory)
+            try Legacy.write(to: file)
+            let mixer = WindowContext(bundleID: "test.synthetic.mixer", windowTitle: "Synthetic Mixer")!
+            let outcomes: [(String, ExperienceEvent.Outcome, String)] = [
+                ("turn-r1-1", .uncertain(.clickEffectUnattributed(.originNotListed)),
+                 #""uncertain":{"_0":{"clickEffectUnattributed":{"_0":"originNotListed"}}}"#),
+                ("turn-r1-2", .uncertain(.clickEffectUnattributed(.originRecreated)),
+                 #""uncertain":{"_0":{"clickEffectUnattributed":{"_0":"originRecreated"}}}"#),
+                ("turn-r1-3", .uncertain(.clickEffectUnattributed(.menuNotCaptured)),
+                 #""uncertain":{"_0":{"clickEffectUnattributed":{"_0":"menuNotCaptured"}}}"#),
+                ("turn-r1-4", .uncertain(.clickEffectUnattributed(.outcomeUnverified)),
+                 #""uncertain":{"_0":{"clickEffectUnattributed":{"_0":"outcomeUnverified"}}}"#),
+                ("turn-r1-5", .uncertain(.toggleStateUnreadable(.notAtPlace)),
+                 #""uncertain":{"_0":{"toggleStateUnreadable":{"_0":"notAtPlace"}}}"#),
+                ("turn-r1-6", .uncertain(.outcomeNotVerified), #""uncertain":{"_0":{"outcomeNotVerified":{}}}"#),
+            ]
+            do {
+                let store = try SQLiteLivingMemoryStore(file: file, makeID: { ExperienceID("unused") })
+                for (id, outcome, _) in outcomes {
+                    _ = try await store.record(ExperienceEvent(id: id, subject: .unattributed(mixer), outcome: outcome,
+                                                               at: t0))
+                }
+            }
+            for (id, outcome, shape) in outcomes {
+                let entry = try RawDatabase(file).text("SELECT entry FROM experience_events WHERE event_id = '\(id)'")
+                #expect(entry.contains(shape), "\(id): \(entry)")
+                let reopened = try SQLiteLivingMemoryStore(file: file, access: .readOnly)
+                guard case .duplicate = try await SQLiteLivingMemoryStore(file: file, makeID: { ExperienceID("unused") })
+                    .record(ExperienceEvent(id: id, subject: .unattributed(mixer), outcome: outcome, at: t0)) else {
+                    Issue.record("\(id) did not read back as the same event"); continue
+                }
+                #expect(try await reopened.experiences(in: ["test.synthetic.mixer"]).count == 1)
+            }
+            #expect(try RawDatabase(file).text("SELECT record FROM experiences") == Legacy.record,
+                    "the legacy select row is untouched")
         }
     }
 }
@@ -287,6 +522,26 @@ private final class RawDatabase {
 
     func execute(_ sql: String) throws {
         guard sqlite3_exec(handle, sql, nil, nil, nil) == SQLITE_OK else {
+            throw SQLiteLivingMemoryError.sqlite(code: -1, message: String(cString: sqlite3_errmsg(handle)))
+        }
+    }
+
+    /// Runs one statement with text bindings; a nil binds NULL.
+    func insert(_ sql: String, _ values: [String?]) throws {
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(handle, sql, -1, &statement, nil) == SQLITE_OK, let statement else {
+            throw SQLiteLivingMemoryError.sqlite(code: -1, message: String(cString: sqlite3_errmsg(handle)))
+        }
+        defer { sqlite3_finalize(statement) }
+        let transient = unsafeBitCast(-1, to: sqlite3_destructor_type.self)
+        for (offset, value) in values.enumerated() {
+            if let value {
+                sqlite3_bind_text(statement, Int32(offset + 1), value, -1, transient)
+            } else {
+                sqlite3_bind_null(statement, Int32(offset + 1))
+            }
+        }
+        guard sqlite3_step(statement) == SQLITE_DONE else {
             throw SQLiteLivingMemoryError.sqlite(code: -1, message: String(cString: sqlite3_errmsg(handle)))
         }
     }
