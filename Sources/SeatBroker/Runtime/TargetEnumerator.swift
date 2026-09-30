@@ -191,10 +191,10 @@ enum TargetEnumerator {
     /// The windows a process currently has on screen, or, when it has none,
     /// the ones it keeps in native fullscreen on a Space that is not on screen.
     @MainActor
-    static func windows(of pid: pid_t, minimumSize: CGFloat = 120) -> [TargetWindow] {
+    static func windows(of pid: pid_t, minimumSize: CGFloat = 120, maximumLayer: Int = 0) -> [TargetWindow] {
         windows(
             of            : pid,
-            onScreen      : onScreenWindows(minimumSize: minimumSize)[pid] ?? [],
+            onScreen      : onScreenWindows(minimumSize: minimumSize, maximumLayer: maximumLayer)[pid] ?? [],
             readFullScreen: { fullScreenReadings(of: pid) },
             readRows      : { numbers in
                 numbers.flatMap { number in
@@ -423,12 +423,13 @@ enum TargetEnumerator {
         }
     }
 
-    private static func onScreenWindows(minimumSize: CGFloat) -> [pid_t: [TargetWindow]] {
+    private static func onScreenWindows(minimumSize: CGFloat, maximumLayer: Int = 0) -> [pid_t: [TargetWindow]] {
         let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID)
             as? [[String: Any]] ?? []
         return onScreenWindows(
             in: list,
             minimumSize: minimumSize,
+            maximumLayer: maximumLayer,
             resolveNativeFrame: nativeFrame
         )
     }
@@ -439,13 +440,14 @@ enum TargetEnumerator {
     static func onScreenWindows(
         in list: [[String: Any]],
         minimumSize: CGFloat,
+        maximumLayer: Int = 0,
         resolveNativeFrame: (pid_t, Int) -> CGRect?
     ) -> [pid_t: [TargetWindow]] {
         var windowsByPID: [pid_t: [TargetWindow]] = [:]
         for info in list {
             guard let pid = info[kCGWindowOwnerPID as String] as? pid_t,
                   let number = info[kCGWindowNumber as String] as? Int,
-                  (info[kCGWindowLayer as String] as? Int ?? 0) == 0,
+                  (0...maximumLayer).contains(info[kCGWindowLayer as String] as? Int ?? 0),
                   let boundsDict = info[kCGWindowBounds as String] as? NSDictionary,
                   let bounds = CGRect(dictionaryRepresentation: boundsDict)
             else { continue }
