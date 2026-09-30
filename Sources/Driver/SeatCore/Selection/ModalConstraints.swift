@@ -124,6 +124,11 @@ nonisolated package struct ModalConstraints: Sendable, Equatable {
 
     /// Every block in force among these members, in a stable order so a report
     /// reads the same on every run.
+    ///
+    /// ponytail: the Window ID stands for the order two application modals were
+    /// opened in, because the window server hands them out rising. A dialog its
+    /// application hides and shows again keeps its old number; the front to back
+    /// order of the window server is the upgrade if one is measured.
     package func blocks(
         among members        : [WindowIdentity],
         excluding withdrawn  : Set<WindowIdentity> = []
@@ -141,7 +146,14 @@ nonisolated package struct ModalConstraints: Sendable, Equatable {
                     blocks.append(Block(modal: modal, blocked: blocked))
 
                 case .application:
-                    for other in members where other != modal {
+                    // A surface modal to this one, its own sheet, is what stops
+                    // it, and so does an application modal opened after it, the
+                    // modal session that runs now: blocking either back would
+                    // leave neither selectable. Measured with DaVinci Resolve's
+                    // "project exists" message over its New Project dialog.
+                    for other in members where other != modal
+                        && !leadsBack(from: other, to: modal)
+                        && !(scopes[other] == .application && other.windowNumber > modal.windowNumber) {
                         blocks.append(Block(modal: modal, blocked: other))
                     }
             }

@@ -77,6 +77,29 @@ struct ContainmentCoordinatorTests {
         #expect(!plan.isContained)
     }
 
+    /// Measured with DaVinci Resolve: its Project Manager, hidden on the
+    /// person's screen once a project opened, could not be moved, and every
+    /// session on the application stayed suspended waiting for it.
+    @Test("A window its application ordered out on the person's screen is neither moved nor waited for")
+    func anOrderedOutWindowIsNotContained() {
+        let hidden = [
+            Fixture.reading([Fixture.row(11, at: Fixture.contained), Fixture.row(12, at: Fixture.outside, isOrderedOut: true)]),
+            Fixture.reading([Fixture.row(11, at: Fixture.contained), Fixture.row(12, at: Fixture.outside, isOrderedOut: true)]),
+        ]
+        let plan = Self.plan(Self.coordinator(), Self.inventory(hidden), at: 20_000_000_000)
+
+        #expect(plan.moves.isEmpty)
+        #expect(plan.blocks.isEmpty)
+        #expect(plan.isContained)
+
+        // Shown again, it is a window like any other, still owed its old place.
+        let shown = Self.inventory(hidden + [
+            Fixture.reading([Fixture.row(11, at: Fixture.contained), Fixture.row(12, at: Fixture.outside)]),
+        ])
+        #expect(Self.plan(Self.coordinator(), shown).moves.map(\.identity) == [Fixture.identity(12)])
+        #expect(shown.surfaces[12]?.origin == .preexisting)
+    }
+
     @Test("A window already entirely inside the seat is taken in where it stands")
     func alreadyVirtualSurfaceIsNotMoved() {
         let plan = Self.plan(Self.coordinator(), Self.inventory([

@@ -125,6 +125,12 @@ nonisolated package struct AssignedSurface: Sendable, Equatable {
     /// the current presence no longer remembers where the window used to be.
     package fileprivate(set) var hadBeenContained = false
 
+    /// True while the last reading found the surface ordered out by its
+    /// application: nothing can move it and nobody can reach it, so its
+    /// containment waits until it is shown again. It stays a member, with the
+    /// place it was found at, so its return is still known then.
+    package fileprivate(set) var isOrderedOut = false
+
     package var windowNumber: Int { identity.windowNumber }
 
     /// True only for a surface that two agreeing readings put inside the seat.
@@ -301,6 +307,7 @@ nonisolated package struct AssignedSurfaceInventory: Sendable {
                     bounds     : virtualBounds,
                     at         : now
                 )
+                surfaces[number]?.isOrderedOut = row.isOrderedOut
                 pending = true
                 continue
             }
@@ -318,6 +325,7 @@ nonisolated package struct AssignedSurfaceInventory: Sendable {
                     at         : now
                 )
                 events.append(.attributed(reference))
+                surfaces[number]?.isOrderedOut = row.isOrderedOut
                 pending = true
                 continue
             }
@@ -329,9 +337,10 @@ nonisolated package struct AssignedSurfaceInventory: Sendable {
                 reference.frame
             )
 
-            existing.reference  = reference
-            existing.presence   = Self.presence(of: reference.frame, within: virtualBounds)
-            existing.isVerified = agrees
+            existing.reference    = reference
+            existing.presence     = Self.presence(of: reference.frame, within: virtualBounds)
+            existing.isVerified   = agrees
+            existing.isOrderedOut = row.isOrderedOut
             if existing.isContained { existing.hadBeenContained = true }
             // The claim starts at the first sighting inside the seat and ends
             // only on the two agreeing readings that put the surface outside.

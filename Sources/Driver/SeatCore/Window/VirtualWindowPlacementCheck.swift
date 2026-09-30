@@ -197,6 +197,16 @@ public enum VirtualWindowPlacementCheck {
     /// number of points because the thumbnail has no fixed size.
     public static let thumbnailSizeShare: CGFloat = 0.5
 
+    /// A small window's thumbnail keeps a minimum size, so one of its sides can
+    /// stay above `thumbnailSizeShare`. Measured on 27: DaVinci Resolve's 499 by
+    /// 223 pt "Change Project Frame Rate?" stashed at 139 by 124, 28% of its
+    /// width and 56% of its height. What still marks it is the rest together:
+    /// both sides shrank, the area fell to 15%, and the thumbnail is small in
+    /// points, as every one measured is (at most 164 by 180).
+    public static let smallWindowThumbnailSideShare: CGFloat = 0.75
+    public static let smallWindowThumbnailAreaShare: CGFloat = 0.2
+    public static let thumbnailLongestSide: CGFloat = 240
+
     /// True when a window server size is the Stage Manager thumbnail of a
     /// window whose own size is `fullSize`, rather than the same window read at
     /// another size.
@@ -214,7 +224,14 @@ public enum VirtualWindowPlacementCheck {
               rectangleIsUsable(CGRect(origin: .zero, size: fullSize)),
               fullSize.width > 0, fullSize.height > 0
         else { return false }
-        return serverSize.width  <= fullSize.width  * thumbnailSizeShare
-            && serverSize.height <= fullSize.height * thumbnailSizeShare
+        if serverSize.width  <= fullSize.width  * thumbnailSizeShare
+            && serverSize.height <= fullSize.height * thumbnailSizeShare {
+            return true
+        }
+        return serverSize.width  <= fullSize.width  * smallWindowThumbnailSideShare
+            && serverSize.height <= fullSize.height * smallWindowThumbnailSideShare
+            && serverSize.width * serverSize.height
+                <= fullSize.width * fullSize.height * smallWindowThumbnailAreaShare
+            && max(serverSize.width, serverSize.height) <= thumbnailLongestSide
     }
 }

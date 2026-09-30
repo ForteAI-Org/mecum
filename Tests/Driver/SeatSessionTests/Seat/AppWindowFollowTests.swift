@@ -925,6 +925,79 @@ struct AppWindowFollowTests {
         #expect(Self.refusals(log).isEmpty)
     }
 
+    /// Measured with DaVinci Resolve: "Create" in its New Project dialog hides
+    /// the Project Manager, the target, and opens the project's window. The
+    /// hidden window left every list the seat reads, and the seat answered it
+    /// as unreadable, which failed the seat on the click it had just posted.
+    @Test("an operating target its application ordered out starts no recovery, and one destroyed still does")
+    func anOrderedOutTargetStartsNoRecovery() async throws {
+        for isOrderedOut in [true, false] {
+            let sensing = FakeSensing()
+            let placing = FakePlacing()
+            let (seat, _) = try await Self.followingSeat(
+                sensing: sensing,
+                placing: placing,
+                marker : isOrderedOut ? 7_041 : 7_042
+            )
+
+            sensing.geometry   = nil
+            sensing.surfaces   = []
+            sensing.orderedOut = isOrderedOut ? [FakeGeometry.windowNumber] : []
+            await Self.pass(seat)
+
+            if isOrderedOut {
+                #expect(seat.state == .ready, "a hidden window is the selection's to answer, not the recovery's")
+            } else {
+                #expect(seat.state == .recovering)
+            }
+        }
+    }
+
+    /// The rest of the same sequence: the application withdraws the hidden
+    /// Project Manager, and the project's window, adopted beside it, is what
+    /// the seat works in from then on.
+    @Test("a hidden target the application withdrew hands the target and its guard to the window left open")
+    func aWithdrawnTargetHandsOverToTheHeldWindow() async throws {
+        let sensing = FakeSensing()
+        let placing = FakePlacing()
+        let sender  = FakeSender()
+        let reader  = ControlledSurfaceReader(sensing: sensing)
+        let (seat, first) = try await Self.followingSeat(
+            sensing: sensing,
+            placing: placing,
+            sender : sender,
+            marker : 7_043,
+            reader : reader
+        )
+        let project = Self.offer(Self.secondWindowNumber, to: sensing, placing)
+        await Self.pass(seat)
+        #expect(seat.currentTarget?.id == first.id)
+        #expect(seat.adoptedWindows.map(\.id).contains(project.windowNumber))
+
+        sensing.geometry   = nil
+        sensing.surfaces   = sensing.surfaces?.filter { $0.reference.windowNumber != first.id }
+        sensing.orderedOut = [first.id]
+        reader.withdrawn   = [try #require(first.reference.identity)]
+        await Self.pass(seat)
+        seat.refreshTargetReadings()
+
+        #expect(seat.state == .ready)
+        #expect(seat.currentTarget?.id == project.windowNumber)
+        #expect(seat.seatGuard?.target.windowNumber == project.windowNumber)
+        let turn        = try await seat.acquire()
+        let observation = try await observedReference(seat)
+        let frame       = try #require(sensing.additionalWindows[project.windowNumber]).frame
+        let click       = InputCommand.click(InputLocation(
+            screenPoint       : CGPoint(x: frame.midX, y: frame.midY),
+            windowPointFromTop: CGPoint(x: frame.width / 2, y: frame.height / 2)
+        ))
+        let receipt     = try await seat.send(click, observation: observation, turn: turn)
+        #expect(sender.sent.count == 1)
+        try seat.confirm(receipt, .observed)
+        _ = await seat.concludeObservation()
+        try seat.release(turn)
+    }
+
     @Test("an application that keeps putting its window back is given up on")
     func attemptsOnOneWindowAreBounded() async throws {
         let sensing = FakeSensing()

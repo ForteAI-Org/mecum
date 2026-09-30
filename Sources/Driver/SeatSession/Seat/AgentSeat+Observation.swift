@@ -438,13 +438,14 @@ extension AgentSeat {
         alignedSelectionGeneration = generation
         session.makeCurrent(selected.surface.windowNumber)
         if record.isStaged { stagedWindowNumber = selected.surface.windowNumber }
-        if let baseline = seatGuard {
-            seatGuard = SeatGuard(
-                target       : record.window.reference,
-                displayID    : baseline.displayID,
-                displayBounds: baseline.displayBounds
-            )
-        }
+        // The window this follows may have taken the guard with it: Resolve's
+        // Project Manager, withdrawn when a project opens, left nothing before
+        // it in the target history.
+        seatGuard = SeatGuard(
+            target       : record.window.reference,
+            displayID    : seatGuard?.displayID ?? displayID,
+            displayBounds: seatGuard?.displayBounds ?? sensing.virtualDisplayBounds
+        )
         observationIssuer.invalidate(.targetChanged)
         outstandingGeometry = nil
         eventChannel.yield(
@@ -889,18 +890,8 @@ extension AgentSeat {
     func dropDestroyedRecord(_ windowNumber: Int) -> Bool {
 
         guard session[windowNumber] != nil else { return false }
-        let successor = session.forget(windowNumber)
+        forgetRecord(windowNumber)
         if stagedWindowNumber == windowNumber { stagedWindowNumber = nil }
-        if let successor,
-           let record = session[successor] {
-            seatGuard = SeatGuard(
-                target       : record.window.reference,
-                displayID    : displayID,
-                displayBounds: sensing.virtualDisplayBounds
-            )
-        } else if seatGuard?.target.windowNumber == windowNumber {
-            seatGuard = nil
-        }
         releaseLedger[windowNumber] = .vanished
         eventChannel.yield(.windowReleased(windowNumber: windowNumber, outcome: .vanished))
         return true

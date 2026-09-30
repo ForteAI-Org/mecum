@@ -118,6 +118,10 @@ nonisolated public enum WindowReleaseOutcome: String, Sendable, Equatable {
     /// The move back was refused. On a fail-closed teardown this is the field
     /// that names which windows did not make it home.
     case refused
+
+    /// Hidden by its application, with no element to move until it is shown
+    /// again: `HiddenWindowReturns` puts it back then.
+    case returnsWhenShown
 }
 
 /// TeardownReport is the whole outcome of taking a seat host down, as fields.

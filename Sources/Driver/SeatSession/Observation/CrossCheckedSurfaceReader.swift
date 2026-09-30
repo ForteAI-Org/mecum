@@ -485,8 +485,9 @@ nonisolated package enum CrossCheckedSurfaceReader {
 
             rows.append(
                 SurfaceInventoryReading.Row(
-                    surface   : surface,
-                    provenance: .windowServerAttestedIdentity
+                    surface     : surface,
+                    provenance  : .windowServerAttestedIdentity,
+                    isOrderedOut: true
                 )
             )
             claims.visibilities.append(

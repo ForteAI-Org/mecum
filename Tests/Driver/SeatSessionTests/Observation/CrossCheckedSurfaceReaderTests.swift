@@ -631,6 +631,35 @@ struct CrossCheckedSurfaceReaderTests {
         #expect(filter.filter(raw, at: grace).withdrawnByApplication == [retained])
     }
 
+    /// DaVinci Resolve's "Change Project Frame Rate?": hidden by its own button,
+    /// still in `AXWindows` with `AXModal` true, off screen for good.
+    @Test("a modal accessibility still lists stays off screen past the grace and is withdrawn")
+    func hiddenModalIsWithdrawnAfterTheGrace() throws {
+        func pass(visible: Bool) -> AssignedSurfaceSnapshot {
+            CrossCheckedSurfaceReader.assemble(
+                windowServer : [surface(41, visible: true), surface(42, visible: visible)],
+                accessibility: [
+                    record(41, role: .document, minimised: false, modal: false),
+                    record(42, role: .dialog, minimised: false, modal: true, focused: true),
+                ],
+                observedAtNanoseconds: 0
+            )
+        }
+        func state(_ snapshot: AssignedSurfaceSnapshot) -> SurfaceVisibility? {
+            snapshot.claims.visibilities.first { $0.surface == identity(42) }?.state
+        }
+        let filter = ApplicationTargetTransitionFilter()
+        let grace  = ApplicationTargetTransitionFilter.offScreenGraceNanoseconds
+
+        #expect(state(filter.filter(pass(visible: false), at: 0)) == .uncertain)
+        #expect(state(filter.filter(pass(visible: false), at: grace - 1)) == .uncertain)
+        #expect(state(filter.filter(pass(visible: false), at: grace)) == .withdrawnEstablished)
+
+        // Shown again, it is visible at once and its clock starts over.
+        #expect(state(filter.filter(pass(visible: true), at: grace + 1)) == .visibleInteractive)
+        #expect(state(filter.filter(pass(visible: false), at: grace + 2)) == .uncertain)
+    }
+
     @Test("a surface that comes back inside the application's scope is never confirmed")
     func withdrawalIsForgottenWhenTheWindowReturns() {
         let retained = identity(42)

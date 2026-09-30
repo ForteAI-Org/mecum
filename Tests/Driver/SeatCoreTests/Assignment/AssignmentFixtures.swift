@@ -79,12 +79,14 @@ enum AssignmentFixtures {
         _ windowNumber: Int,
         at frame      : CGRect,
         of owner      : ProcessIdentity = target,
-        provenance    : EvidenceProvenance = .windowServerAttestedIdentity
+        provenance    : EvidenceProvenance = .windowServerAttestedIdentity,
+        isOrderedOut  : Bool = false
     ) -> SurfaceInventoryReading.Row {
 
         SurfaceInventoryReading.Row(
-            surface   : surface(windowNumber, at: frame, of: owner),
-            provenance: provenance
+            surface     : surface(windowNumber, at: frame, of: owner),
+            provenance  : provenance,
+            isOrderedOut: isOrderedOut
         )
     }
 

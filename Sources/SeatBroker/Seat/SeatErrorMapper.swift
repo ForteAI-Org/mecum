@@ -993,6 +993,7 @@ enum SeatErrorMapper {
         case .leftOnVirtualDisplay: "was left on the background display"
         case .vanished:             "no longer exists"
         case .refused:              "could not be put back"
+        case .returnsWhenShown:     "is hidden by its application and goes back when it is shown again"
         }
     }
 }

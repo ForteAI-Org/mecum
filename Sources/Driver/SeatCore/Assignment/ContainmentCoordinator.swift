@@ -280,6 +280,11 @@ nonisolated package struct ContainmentCoordinator: Sendable {
                         blocks.append(.surfaceUnverified(windowNumber: number))
                     }
 
+                case .outsideSeat where member.isOrderedOut:
+                    // Hidden by its application where the person had it: no
+                    // element to move and no one to reach it, until it is shown.
+                    continue
+
                 case .outsideSeat:
                     blocks.append(.surfaceOutsideSeat(windowNumber: number))
                     if let refusal = refusals[number] {
@@ -394,7 +399,7 @@ nonisolated package struct ContainmentCoordinator: Sendable {
         guard !isContained else { return [] }
 
         var expired: [ContainmentBlock] = []
-        for member in members where !member.isContained {
+        for member in members where !member.isContained && !(member.isOrderedOut && member.presence == .outsideSeat) {
 
             let number    = member.windowNumber
             let total     = now &- member.firstDetectedAtNanoseconds

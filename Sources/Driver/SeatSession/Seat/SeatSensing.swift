@@ -142,6 +142,13 @@ nonisolated public protocol SeatSensing: Sendable {
     /// measured, so a reading taken there answers "no menu" while one is on the
     /// screen. An earlier verdict of this package was exactly that mistake.
     func menuWindows(ownedBy processID: Int32) -> [WindowReference]
+
+    /// True when `window` is absent from the list `windowGeometry` reads while
+    /// the window server still names its identity for its number: a window its
+    /// application ordered out, which is how a Qt application hides one.
+    /// Measured with DaVinci Resolve's Project Manager, hidden when a project
+    /// opens, which that list no longer carries.
+    func windowIsOrderedOut(_ window: WindowReference) -> Bool
 }
 
 extension SeatSensing {
@@ -162,4 +169,5 @@ extension SeatSensing {
     public func windowIsVisibleOnPhysicalDisplay(_ window: WindowReference) -> Bool { false }
     public func visibleWindowsAreVirtual(ownedBy processID: Int32) -> Bool { false }
     public func windowSurfaces(ownedBy processIDs: Set<Int32>) -> [WindowSurface]? { nil }
+    public func windowIsOrderedOut(_ window: WindowReference) -> Bool { false }
 }

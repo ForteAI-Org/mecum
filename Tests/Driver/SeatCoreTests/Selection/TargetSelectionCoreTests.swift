@@ -265,6 +265,53 @@ struct TargetSelectionCoreTests {
         #expect(core.selected?.surface == Fixture.identity(13))
     }
 
+    /// DaVinci Resolve's Import Media panel is modal to the application and its
+    /// Go to Folder sheet is modal to the panel. Blocking each other, the two
+    /// left no candidate and every key was suspended.
+    @Test("A sheet on an application modal is not blocked by the modal it stops")
+    func sheetOnAnApplicationModalIsSelectable() {
+
+        var folder  = MemberFolder()
+        let members = folder.settle([11, 12, 13])
+        var core    = Fixture.core(documents: [11], members: members)
+
+        for number in [12, 13] {
+            core.declareRole(Fixture.role(number, .dialog), members: members)
+            core.observeVisibility(Fixture.visibility(number, .visibleInteractive), members: members)
+        }
+        core.declareModal(Fixture.modal(12, over: nil), members: members)
+        core.declareModal(Fixture.modal(13, over: 12), members: members)
+
+        #expect(core.candidates == [Fixture.identity(13)])
+        #expect(core.selected?.surface == Fixture.identity(13))
+        #expect(!core.suspensions.contains(.noEligibleTarget))
+    }
+
+    /// DaVinci Resolve's "project already exists" message opens modal to the
+    /// application over its New Project dialog, which is modal to the
+    /// application too. Each blocked the other, and the message could not be
+    /// answered.
+    @Test("Of two application modals the one opened last is selectable, and closing it frees the first")
+    func theNewestApplicationModalIsSelectable() {
+
+        var folder  = MemberFolder()
+        let members = folder.settle([11, 12, 13])
+        var core    = Fixture.core(documents: [11], members: members)
+
+        for number in [12, 13] {
+            core.declareRole(Fixture.role(number, .dialog), members: members)
+            core.observeVisibility(Fixture.visibility(number, .visibleInteractive), members: members)
+            core.declareModal(Fixture.modal(number, over: nil), members: members)
+        }
+
+        #expect(core.candidates == [Fixture.identity(13)])
+        #expect(core.selected?.surface == Fixture.identity(13))
+
+        let remaining = folder.settle([11, 12])
+        core.forget(Fixture.identity(13), members: remaining)
+        #expect(core.candidates == [Fixture.identity(12)])
+    }
+
     @Test("A modal relation on evidence that cannot carry it is a doubt, never a bypass")
     func unqualifiedModalRelationIsADoubt() {
 

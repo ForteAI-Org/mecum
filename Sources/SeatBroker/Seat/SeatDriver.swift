@@ -178,8 +178,8 @@ final class SeatDriver {
     /// back: at its original frame, or gone. The other two leave it held.
     static func isHome(_ outcome: WindowReleaseOutcome) -> Bool {
         switch outcome {
-        case .returned, .vanished:            true
-        case .refused, .leftOnVirtualDisplay: false
+        case .returned, .vanished, .returnsWhenShown: true
+        case .refused, .leftOnVirtualDisplay:         false
         }
     }
 

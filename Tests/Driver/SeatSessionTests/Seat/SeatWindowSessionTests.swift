@@ -166,6 +166,22 @@ struct SeatWindowSessionTests {
         #expect(wide[1]?.isStaged == false)
     }
 
+    /// DaVinci Resolve's "Change Project Frame Rate?", 499 by 223 pt, stashed at
+    /// 139 by 124: its height stays above half, as a small window's thumbnail does.
+    @Test("a small dialog's thumbnail is a stash though one side stays above half")
+    func aSmallDialogsThumbnailIsAStash() {
+        var dialog = SeatWindowSession()
+        dialog.adopt(Self.record(1, size: CGSize(width: 499, height: 223)))
+        dialog.refreshStaging { _ in CGSize(width: 139, height: 124) }
+        #expect(dialog[1]?.isStaged == false)
+
+        // A small window resized to two thirds of each side is still a resize.
+        var resized = SeatWindowSession()
+        resized.adopt(Self.record(1, size: CGSize(width: 300, height: 200)))
+        resized.refreshStaging { _ in CGSize(width: 200, height: 140) }
+        #expect(resized[1]?.isStaged == true)
+    }
+
     @Test("an accepted geometry becomes the operational size and keeps the obligations")
     func acceptedGeometryKeepsObligations() {
         var session = SeatWindowSession()

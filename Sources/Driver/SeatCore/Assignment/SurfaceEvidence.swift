@@ -142,9 +142,14 @@ nonisolated package struct SurfaceInventoryReading: Sendable, Equatable {
         package let surface   : WindowSurface
         package let provenance: EvidenceProvenance
 
-        package init(surface: WindowSurface, provenance: EvidenceProvenance) {
-            self.surface    = surface
-            self.provenance = provenance
+        /// True for a window its application ordered out: accessibility no
+        /// longer lists it and the window server still attests it, off screen.
+        package let isOrderedOut: Bool
+
+        package init(surface: WindowSurface, provenance: EvidenceProvenance, isOrderedOut: Bool = false) {
+            self.surface      = surface
+            self.provenance   = provenance
+            self.isOrderedOut = isOrderedOut
         }
     }
 

@@ -31,11 +31,20 @@ nonisolated package final class ApplicationTargetTransitionFilter: @unchecked Se
     /// keeps blocking exactly as it did before, for one more second.
     package static let withdrawalGraceNanoseconds: UInt64 = 1_000_000_000
 
+    /// How long a window accessibility still lists may stay off screen and
+    /// merely uncertain. A Space or Stage Manager transition is over well inside
+    /// it; a Qt dialog closed by hiding it never is. Measured on DaVinci
+    /// Resolve's "Change Project Frame Rate?": after its button, the window
+    /// stayed in `AXWindows` with `AXModal` true and off screen for good, so as
+    /// an uncertain modal it blocked the project window forever.
+    package static let offScreenGraceNanoseconds: UInt64 = 2_000_000_000
+
     private let lock = NSLock()
     private var current: WindowIdentity?
     private var visibilities: [WindowIdentity: SurfaceVisibility] = [:]
     private var attestedIdentities: Set<WindowIdentity> = []
     private var withdrawnSince: [WindowIdentity: UInt64] = [:]
+    private var offScreenSince: [WindowIdentity: UInt64] = [:]
 
     package init() {}
 
@@ -117,6 +126,7 @@ nonisolated package final class ApplicationTargetTransitionFilter: @unchecked Se
 
         let reported = claims.recency.count == 1 ? claims.recency[0] : nil
         claims.recency = []
+        claims.visibilities = settledOffScreen(claims.visibilities, rows: snapshot.inventory.rows, at: now)
 
         let previousVisibilities = visibilities
         visibilities = Dictionary(uniqueKeysWithValues: claims.visibilities.compactMap { claim in
@@ -161,6 +171,34 @@ nonisolated package final class ApplicationTargetTransitionFilter: @unchecked Se
             claims   : claims,
             retained : retained
         )
+    }
+
+    /// Turns an uncertain visibility into an established withdrawal once the
+    /// window server has shown the window off screen for the whole grace. Only
+    /// that pairing: an uncertainty with the window on screen is a reading
+    /// that decided nothing, and it keeps suspending as before.
+    private func settledOffScreen(
+        _ claims: [SurfaceVisibilityClaim],
+        rows    : [SurfaceInventoryReading.Row],
+        at now  : UInt64
+    ) -> [SurfaceVisibilityClaim] {
+        var offScreen: Set<WindowIdentity> = []
+        for row in rows where !row.surface.isVisible {
+            if let identity = row.surface.reference.identity { offScreen.insert(identity) }
+        }
+        let uncertain = Set(claims.filter { $0.state == .uncertain }.map(\.surface)).intersection(offScreen)
+        offScreenSince = offScreenSince.filter { uncertain.contains($0.key) }
+        return claims.map { claim in
+            guard uncertain.contains(claim.surface) else { return claim }
+            let since = offScreenSince[claim.surface] ?? now
+            offScreenSince[claim.surface] = since
+            guard now &- since >= Self.offScreenGraceNanoseconds else { return claim }
+            return SurfaceVisibilityClaim(
+                surface   : claim.surface,
+                state     : .withdrawnEstablished,
+                provenance: claim.provenance
+            )
+        }
     }
 
     /// Holds each withdrawal the cross-check reported inside its grace, where it

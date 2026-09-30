@@ -107,6 +107,10 @@ public final class AgentSeat {
     /// seat supplies the readings.
     public internal(set) var seatGuard: SeatGuard?
 
+    /// Where a release leaves a window its application hid: the host's shared
+    /// ledger, which outlives this seat. Nil keeps a test's releases to itself.
+    var hiddenReturns: HiddenWindowReturns?
+
     let eventChannel: AsyncStream<SeatEvent>.Continuation
 
     let sensing  : any SeatSensing
@@ -927,6 +931,7 @@ public final class AgentSeat {
             try checkAdoptionMayContinue()
             pendingAdoptions[window.windowNumber] = nil
             session.hold(record)
+            hiddenReturns?.forgive(record.window.id)
             if record.isStaged { stagedWindowNumber = record.window.id }
             windowInventory.clearAttempts(of: record.window.id)
             refreshWindowFollowing()
@@ -1112,7 +1117,7 @@ public final class AgentSeat {
         beginTransfer()
         let outcome = await returnToUserSeat(window, mode)
         endTransfer()
-        let successor = session.forget(window.id)
+        let successor = forgetRecord(window.id)
         refreshWindowFollowing()
         noteSurfaceGone(window.id)
         releaseLedger[window.id] = outcome
@@ -1124,6 +1129,48 @@ public final class AgentSeat {
         // its way out and restaging one would be work against the person.
         await takeOverAfterLostTarget(successor)
         return outcome
+    }
+
+    /// forgetRecord lets go of the record of one window and moves the guard
+    /// with it: onto the target that takes over, or off the window entirely
+    /// when nothing does.
+    ///
+    /// Every release of a record comes through here because the guard is what
+    /// the heartbeat reads while the seat is `waiting`. Left on a window the
+    /// seat no longer held, it kept watching an application the consumer had
+    /// already given back, and the consumer quitting that application read as
+    /// `processUnavailable` and failed the seat for good.
+    ///
+    /// A seat still waiting with no guard has nothing left that could end the
+    /// wait, so it goes back to `ready`, or `degraded` if it came from there,
+    /// as the release the caller asked for. A paused focus recovery is the one
+    /// exception: that wait is its own, and its verified end or its stop is
+    /// what brings the seat out of it.
+    @discardableResult
+    func forgetRecord(_ windowNumber: Int) -> Int? {
+
+        let successor = session.forget(windowNumber)
+        // A Command moves the guard onto the window it went to, which need not
+        // be the target: a panel or a dialog closing then leaves the target it
+        // was opened from, and the guard goes back to it.
+        if let next = successor ?? (seatGuard?.target.windowNumber == windowNumber
+                                        ? session.currentTargetNumber : nil),
+           let record = session[next] {
+            seatGuard = SeatGuard(
+                target       : record.window.reference,
+                displayID    : displayID,
+                displayBounds: sensing.virtualDisplayBounds
+            )
+        } else if seatGuard?.target.windowNumber == windowNumber {
+            seatGuard = nil
+        }
+        if state == .waiting, seatGuard == nil, focusRecovery?.isPaused != true {
+            transition(
+                to    : wasDegradedBeforeRecovery ? .degraded : .ready,
+                reason: .requested
+            )
+        }
+        return successor
     }
 
     /// Puts the predecessor back on stage and makes it the target again, after
@@ -1498,7 +1545,7 @@ public final class AgentSeat {
     /// of a return that is complete and without writing any geometry.
     private func letGoOfSettledRecord(_ windowNumber: Int) {
 
-        _ = session.forget(windowNumber)
+        forgetRecord(windowNumber)
         if stagedWindowNumber == windowNumber { stagedWindowNumber = nil }
         refreshWindowFollowing()
         noteSurfaceGone(windowNumber)
@@ -1550,7 +1597,7 @@ public final class AgentSeat {
         let outcome = await returnToUserSeat(window, .returnToUserSeat, until: limit)
         endTransfer()
         guard Self.mayContinue(until: limit) else { return nil }
-        let successor = session.forget(window.id)
+        let successor = forgetRecord(window.id)
         refreshWindowFollowing()
         noteSurfaceGone(window.id)
         releaseLedger[window.id] = outcome
@@ -1950,6 +1997,15 @@ public final class AgentSeat {
                     ?? recipient.windowNumber
             )
         }
+        // Where a Command went, never what it carried: a first key to a panel
+        // that did nothing could not be told from one that went elsewhere.
+        Self.log.info("""
+            \(routed.hasMouseLocation ? "pointer" : "keys", privacy: .public) on window \
+            \(observation.surface.windowNumber, privacy: .public) go to window \
+            \(recipient.windowNumber, privacy: .public) of pid \(recipient.processID, privacy: .public), \
+            \(endpoint.map { "\($0.relation) by \($0.evidence)" } ?? "no endpoint", privacy: .public), \
+            recipe \(String(describing: type(of: resolved)), privacy: .public)
+            """)
         // A Command on a modal surface can close it, and closing it is what
         // takes the focus. See `UserFocusRecovery.expectClosure`.
         if let sheet = attestedModalSurface(for: observation)
@@ -3152,11 +3208,27 @@ public final class AgentSeat {
                     else { continue }
                     // One missing reading is not a destruction, and the proof
                     // is the recovery budget, which is the target's own.
-                    if session.currentTargetNumber == windowNumber {
+                    if session.currentTargetNumber == windowNumber, !isHiddenInPlace(windowNumber) {
                         report([.windowUnavailable], cause: .windowClosure(.absentFromReading))
                     }
             }
         }
+    }
+
+    /// Whether a target that left the on-screen list is still the window server's
+    /// row, with its identity and its frame: ordered out where it stood, which
+    /// is how a Qt dialog closes. Recovery moves windows back into place, and
+    /// there is nothing to move; waiting on it held a seat in `recovering`
+    /// until the session was closed. The selection answers it instead: the
+    /// transition filter withdraws such a window once it has stayed off screen,
+    /// and the seat follows the selection to the window underneath.
+    private func isHiddenInPlace(_ windowNumber: Int) -> Bool {
+        guard let record = session[windowNumber] else { return false }
+        guard let server = sensing.windowGeometry(of: windowNumber) else {
+            return sensing.windowIsOrderedOut(record.window.reference)
+        }
+        return server.hasSameIdentity(as: record.window.reference)
+            && VirtualWindowPlacementCheck.framesMatch(server.frame, record.window.reference.frame)
     }
 
     /// Gives an observation request a bounded join point with the same window
@@ -3253,6 +3325,37 @@ public final class AgentSeat {
                 application was handed over and its direct move was refused: taking it in
                 """)
             await transferDetectedWindow(member.reference, level: nil)
+        }
+
+        // A window a previous seat left where its display stood: a dialog born
+        // there is given back to the frame it was born at, and the next display
+        // takes the same rectangle. It is contained already, so nothing plans
+        // its move, and it is in the follower's baseline, so nothing adopts it:
+        // measured with DaVinci Resolve's Import Media panel, selected and never
+        // owned. It is owned in place, as a window born in the seat would be.
+        let containedUnowned = assignmentKit.inventory.surfaces.values
+            .filter {
+                $0.identity.process == assignment.instance
+                    && $0.origin == .preexisting
+                    && $0.presence == .containedInSeat
+                    && $0.isVerified
+                    && !$0.isAttachedToHost
+                    && session[$0.reference.windowNumber] == nil
+            }
+            .map(\.reference)
+            .sorted { $0.windowNumber < $1.windowNumber }
+        for reference in containedUnowned {
+            guard !Task.isCancelled,
+                  DispatchTime.now().uptimeNanoseconds < deadlineNanoseconds,
+                  case .full = windowFollowScope(requiringWatch: false),
+                  state.acceptsCommands || containmentOnlyFollowWait,
+                  session[reference.windowNumber] == nil
+            else { return }
+            Self.log.info("""
+                window \(reference.windowNumber, privacy: .public) was already on the virtual \
+                display when the application was handed over, owned by no seat: taking it in place
+                """)
+            await ownWindowBornInSeat(reference, level: nil)
         }
     }
 
@@ -4080,6 +4183,13 @@ public final class AgentSeat {
 
         guard sensing.isActive(processID: window.reference.processID) != nil else {
             return .vanished
+        }
+
+        // A window its application ordered out answers no element, so there is
+        // nothing to write until the application shows it again.
+        if sensing.windowIsOrderedOut(window.reference) {
+            hiddenReturns?.owe(window)
+            return .returnsWhenShown
         }
 
         // Whatever fullscreen the window is in now has to come off before

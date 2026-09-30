@@ -283,6 +283,7 @@ public final class SeatHost {
             observationProfile   : configuration.observationProfile
         )
 
+        created.hiddenReturns               = .shared
         created.transfersFullScreenWindows  = configuration.transfersFullScreenWindows
         created.restoresFullScreenOnRelease = configuration.restoresFullScreenOnRelease
         created.reportMonitorHealth(currentMonitorHealth)

@@ -162,6 +162,11 @@ final class FakeSensing: SeatSensing, @unchecked Sendable {
     var geometry: WindowReference? = FakeGeometry.adoptedWindow
     var windowGeometryOverride: ((Int) -> WindowReference?)?
 
+    /// The Window IDs whose windows were ordered out: gone from the geometry
+    /// reading while the window server still names them.
+    var orderedOut: Set<Int> = []
+    func windowIsOrderedOut(_ window: WindowReference) -> Bool { orderedOut.contains(window.windowNumber) }
+
     /// Three-valued, exactly as the live witness: nil is a dead process.
     var targetIsActive: Bool? = false
 

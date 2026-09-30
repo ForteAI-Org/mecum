@@ -540,6 +540,34 @@ struct MultiWindowTests {
         #expect(seat.adoptedWindows.map(\.id) == [windows[0].id])
     }
 
+    /// Measured with DaVinci Resolve: a Command on its Import panel moved the
+    /// guard onto the panel while the main window stayed the target, and the
+    /// panel closing took the guard with it. Every later Command read no guard
+    /// as `windowUnavailable`, and the recovery that followed could not end.
+    @Test("a window the guard followed a Command onto gives the guard back to the target when it goes")
+    func guardReturnsToTheTarget() async throws {
+        let sender = FakeSender()
+        let (seat, windows) = try await Self.seat(sender: sender, also: [Self.secondWindowNumber])
+        _ = try await seat.switchTarget(to: windows[0])
+        let baseline = try #require(seat.seatGuard)
+        seat.seatGuard = SeatGuard(
+            target       : windows[1].reference,
+            displayID    : baseline.displayID,
+            displayBounds: baseline.displayBounds
+        )
+
+        _ = await seat.release(windows[1])
+
+        #expect(seat.currentTarget?.id == windows[0].id)
+        #expect(seat.seatGuard?.target.windowNumber == windows[0].id)
+        let turn = try await seat.acquire()
+        let observation = try await observedReference(seat)
+        let receipt = try await seat.send(Self.click, observation: observation, turn: turn)
+        #expect(sender.sent.count == 1)
+        try seat.confirm(receipt, .observed)
+        try seat.release(turn)
+    }
+
     @Test("with the last window gone the seat says it has no target")
     func releaseOfTheLastWindow() async throws {
         let (seat, windows) = try await Self.seat()
