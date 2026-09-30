@@ -77,6 +77,11 @@ private let anyFrame = FrameGeometryObservation(
             == [.shortcut(.character("g", holding: [.command, .shift]))])
 }
 
+@Test func aBareSlashIsTypedAndNotResolvedThroughTheLayout() throws {
+    let action = try #require(SemanticAction.key(chord: "/"))
+    #expect(try ActionExecutor.inputs(for: action, in: emptyScene, frame: anyFrame) == [.command(.text("/"))])
+}
+
 @Test(arguments: KeyName.allCases.filter { $0.rawValue.count == 1 })
 func everyLetterKeepsItsSemanticIdentity(key: KeyName) throws {
     let character = try #require(key.rawValue.first)

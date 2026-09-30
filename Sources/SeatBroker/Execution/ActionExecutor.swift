@@ -25,6 +25,9 @@ enum ActionExecutor {
     static func inputs(for action: SemanticAction, in observation: SceneObservation,
                        frame: FrameGeometryObservation) throws -> [ActionInput] {
         if case .key(let key, let modifiers) = action {
+            if modifiers.isEmpty, key == .slash || key == .tilde {
+                return [.command(.text(key.rawValue))]
+            }
             return [.shortcut(try shortcut(key, modifiers))]
         }
         let location = try location(ofElement: action.element ?? 0, in: observation, frame: frame)

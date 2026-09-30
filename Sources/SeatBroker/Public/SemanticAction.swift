@@ -8,6 +8,8 @@ public enum KeyName: String, Sendable, Hashable, CaseIterable, Codable {
     case up, down, left, right
     case a, b, c, d, e, f, g, h, i, j, k, l, m
     case n, o, p, q, r, s, t, u, v, w, x, y, z
+    /// Typed rather than pressed: an out of process file panel opens Go to Folder on a plain `/`.
+    case slash = "/", tilde = "~"
 }
 
 /// The modifiers held down for a key press. Empty for a plain key.

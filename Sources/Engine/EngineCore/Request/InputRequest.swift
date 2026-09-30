@@ -68,15 +68,15 @@ public struct InputRequest: Sendable, Equatable {
 
 /// KeyChord is one key the engine presses by name and the modifiers held around it. A named key is a
 /// position, the same on every layout; a letter or a digit is a meaning, pressed wherever the
-/// installed layout puts it.
+/// installed layout puts it; a slash or a tilde on its own is typed, like text.
 public struct KeyChord: Sendable, Equatable, CustomStringConvertible {
 
-    /// The keys a chord can name: the ones that navigate and submit, and the letters and digits a
-    /// shortcut is written with.
+    /// The keys a chord can name: the ones that navigate and submit, the letters and digits a
+    /// shortcut is written with, and the slash and tilde that open a file panel's Go to Folder.
     public enum Name: Sendable, Equatable {
         case `return`, tab, escape, space, delete
         case left, right, up, down
-        /// A letter a to z or a digit 0 to 9, lowercase.
+        /// A letter a to z, a digit 0 to 9, lowercase, or `/` or `~`.
         case character(Character)
 
         /// The key a tool names: `return`, `left`, `a`, `7`. Nil for anything else.
@@ -94,6 +94,7 @@ public struct KeyChord: Sendable, Equatable, CustomStringConvertible {
                 case let word:
                     guard word.count == 1, let character = word.first,
                           ("a"..."z").contains(character) || ("0"..."9").contains(character)
+                              || Self.typed.contains(character)
                     else { return nil }
                     self = .character(character)
             }
@@ -103,7 +104,13 @@ public struct KeyChord: Sendable, Equatable, CustomStringConvertible {
         public static var all: [String] {
             ["return", "tab", "escape", "space", "delete", "left", "right", "up", "down"]
                 + "abcdefghijklmnopqrstuvwxyz0123456789".map(String.init)
+                + Self.typed.map(String.init)
         }
+
+        /// The characters pressed by typing them rather than by finding their key. A file panel
+        /// out of process takes a plain key and drops every shortcut, so `/` is how its Go to
+        /// Folder opens there; on an Italian layout it also needs Shift, which a letter never does.
+        static let typed: [Character] = ["/", "~"]
 
         /// The name a tool writes and a sentence reads.
         public var word: String {
@@ -152,6 +159,8 @@ public struct KeyChord: Sendable, Equatable, CustomStringConvertible {
             case .right               : .key(code: Key.rightArrow, modifiers: modifiers)
             case .up                  : .key(code: Key.upArrow, modifiers: modifiers)
             case .down                : .key(code: Key.downArrow, modifiers: modifiers)
+            case .character(let value) where modifiers.isEmpty && Name.typed.contains(value):
+                .type(String(value))
             case .character(let value): .character(value, modifiers: modifiers)
         }
     }

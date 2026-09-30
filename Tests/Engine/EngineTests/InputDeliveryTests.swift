@@ -231,6 +231,17 @@ struct InputDeliveryTests {
         #expect(repeated.confirmations == [.absent])
     }
 
+    @Test("a bare slash or tilde is typed, and with a modifier it goes by character like a letter")
+    func slashIsTyped() async throws {
+        let slash = try #require(KeyChord.Name("/"))
+        #expect(KeyChord.Name("~") != nil && KeyChord.Name.all.contains("/"))
+        let actuator = RecordingActuator()
+        _ = await engine(scenes: ScriptedScenes([scene([export])]), actuator: actuator)
+            .deliver(request(.pressKey(KeyChord(slash), times: 1)))
+        #expect(actuator.gestures == [.type("/")])
+        #expect(KeyChord(slash, modifiers: .command).gesture == .character("/", modifiers: .command))
+    }
+
     @Test("a letter's chord goes by character, and an unseen Command chord says a menu does not answer here")
     func menuShortcutNote() async {
         let actuator = RecordingActuator()
@@ -353,6 +364,23 @@ struct InputDeliveryTests {
         #expect(outcome.kind == .honestMiss)
         #expect(outcome.message.contains("it offered 'Copy', 'Paste'; the menu was closed"))
         #expect(actuator.gestures == [.click(at: exportPoint, button: .right), .key(code: Key.escape)])
+    }
+
+    /// DaVinci Resolve's media pool opened its menu on the person's screen and left the seat suspended.
+    @Test("where menus open under the person's pointer, only a text field is right-clicked")
+    func contextMenuOutsideTheSeatIsRefused() async {
+        let qt = ActionPermissions(contextMenusOnTextFieldsOnly: true)
+        let untouched = RecordingActuator()
+        let refused = await engine(scenes: ScriptedScenes([scene([export])]), actuator: untouched, permissions: qt)
+            .deliver(request(.contextMenu(on: "Export", item: "Import Media...")))
+        #expect(refused.kind == .refused)
+        #expect(refused.message.contains("outside the seat"))
+        #expect(untouched.gestures.isEmpty)
+
+        let actuator = RecordingActuator()
+        _ = await engine(scenes: ScriptedScenes([scene([field(value: "x")])]), actuator: actuator, permissions: qt)
+            .deliver(request(.contextMenu(on: "Project Name", item: "Paste")))
+        #expect(actuator.gestures == [.click(at: fieldPoint, button: .right)])
     }
 
     @Test("no menu after the right click is unverified, a destructive item is refused, a dry run clicks nothing")
