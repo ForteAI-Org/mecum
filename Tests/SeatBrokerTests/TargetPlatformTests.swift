@@ -5,7 +5,9 @@
 //  Created by Eliomar Alejandro Rodriguez Ferrer on 18/09/2026.
 //
 
+import CoreGraphics
 import Foundation
+import SeatCore
 import SeatInput
 import Testing
 @testable import SeatBroker
@@ -78,6 +80,25 @@ struct TargetPlatformTests {
         #expect(TargetPlatform.chosen(bundleURL: both, bundleIdentifier: "com.example.both") == .embeddedRenderer(.framework))
     }
 
+    @Test("a bundle that ships Adobe's UXP host prepares keys only for its leaf modals, and never clicks")
+    func uxpApplicationPreparesKeysOnly() throws {
+        // Photoshop 2026 ships the host as `Contents/Frameworks/dvauxphost.framework`.
+        let bundle = try Self.bundle(embedding: ["dvauxphost.framework"])
+        let choice = TargetPlatform.chosen(bundleURL: bundle, bundleIdentifier: "com.adobe.Photoshop")
+        #expect(choice == .adobeUXP)
+
+        let platform = choice.platform
+        let point    = InputLocation(screenPoint: .zero, windowPointFromTop: .zero)
+        let key      = InputCommand.key(virtualKey: 36, text: "\r")
+        #expect(platform is UXPPlatform)
+        // A prepared Escape to the document window crashed Photoshop on 30/09/2026.
+        #expect(platform.preparation(for: key) == .none)
+        let leaf = try #require((platform as? UXPPlatform)?.preparingKeys)
+        #expect(leaf.preparation(for: .click(point, count: 1)) == .none)
+        #expect(leaf.preparation(for: key) == .internalAppKitState)
+        #expect(leaf.preparation(for: .text("mecum")) == .internalAppKitState)
+    }
+
     @Test("an application nobody has measured is driven without preparation")
     func unknownApplicationIsAppKit() throws {
         let plain = try Self.bundle()
@@ -101,6 +122,7 @@ struct TargetPlatformTests {
             TargetPlatform.embeddedRenderer(.framework),
             .embeddedRenderer(.rendererHelper),
             .qtToolkit,
+            .adobeUXP,
             .appleNative,
             .unmeasured,
         ]

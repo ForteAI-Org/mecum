@@ -51,6 +51,9 @@ import SeatInput
 ///    clicks are unprepared, since a prepared one activated a followed dialog,
 ///    whose bulk insertion is prepared for 150 ms, and which keeps the window
 ///    follower awake a second after a click for the native panels Qt opens late;
+///    the bundle ships Adobe's UXP host, `dvauxphost.framework`, which Photoshop
+///    does: it is driven with `UXPPlatform`, whose keys and text are prepared,
+///    since its New Document took Return only after the whole preparation;
 /// 3. the bundle identifier is Apple's, and Apple ships its applications in
 ///    AppKit, Finder included;
 /// 4. nothing is known, and nothing known is not a renderer: an application
@@ -70,6 +73,9 @@ enum TargetPlatform: Sendable, Equatable {
 
     /// Rule 2: Qt's core library found inside the bundle.
     case qtToolkit
+
+    /// Rule 2, second half: Adobe's UXP host found inside the bundle.
+    case adobeUXP
 
     /// Rule 3: an Apple bundle identifier.
     case appleNative
@@ -95,6 +101,9 @@ enum TargetPlatform: Sendable, Equatable {
         "Chromium Embedded Framework.framework",
     ]
 
+    /// What says the interface is drawn by Adobe's UXP host.
+    private static let uxpHosts = ["dvauxphost.framework"]
+
     /// What says the window is drawn by Qt: the core framework of a
     /// `macdeployqt` bundle, or the core dylib of a Qt 5 or Qt 6 build.
     private static let qtLibraries = [
@@ -116,6 +125,7 @@ enum TargetPlatform: Sendable, Equatable {
         if let bundleURL, frameworks(of: bundleURL, contain: renderers) { return .embeddedRenderer(.framework) }
         if let bundleURL, shipsRendererHelper(bundleURL) { return .embeddedRenderer(.rendererHelper) }
         if let bundleURL, frameworks(of: bundleURL, contain: qtLibraries) { return .qtToolkit }
+        if let bundleURL, frameworks(of: bundleURL, contain: uxpHosts) { return .adobeUXP }
         if bundleIdentifier?.hasPrefix("com.apple.") == true { return .appleNative }
         return .unmeasured
     }
@@ -127,6 +137,7 @@ enum TargetPlatform: Sendable, Equatable {
         switch self {
             case .embeddedRenderer         : ChromiumPlatform()
             case .qtToolkit                : QtPlatform()
+            case .adobeUXP                 : UXPPlatform()
             case .appleNative, .unmeasured : AppKitPlatform()
         }
     }
@@ -143,6 +154,7 @@ enum TargetPlatform: Sendable, Equatable {
             case .embeddedRenderer(.framework)     : "the bundle embeds a Chromium renderer framework"
             case .embeddedRenderer(.rendererHelper): "the bundle ships a Chromium renderer helper"
             case .qtToolkit                        : "the bundle ships Qt"
+            case .adobeUXP                         : "the bundle ships Adobe's UXP host"
             case .appleNative                      : "the bundle identifier is Apple's"
             case .unmeasured                       : "nothing in the bundle says it is a renderer"
         }

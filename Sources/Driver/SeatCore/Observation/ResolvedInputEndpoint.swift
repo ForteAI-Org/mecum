@@ -40,6 +40,11 @@ nonisolated public enum InputEndpointEvidence: Sendable, Equatable {
     /// belongs to it rather than to a remote content window.
     case attestedSurfaceItself
 
+    /// The surface the seat already holds, read as one accessibility leaf: a
+    /// top-level modal whose whole interface accessibility sees nothing in, so
+    /// nothing inside it can be another recipient.
+    case leafSurface
+
     /// AX names a focused window but no focused control. A complete bounded
     /// reading ties its input-bearing descendants to that window; only proven
     /// inert, windowless leaves may have no matching Window ID.

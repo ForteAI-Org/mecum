@@ -1927,6 +1927,49 @@ public final class AgentSeat {
         )
     }
 
+    /// Writes a modal's position back when its application reports another one.
+    ///
+    /// Measured on 30/09/2026 with Photoshop's Save panel: the panel service
+    /// lays its content out at the position the host application reports to
+    /// accessibility, and a write of `AXPosition` moves the content with it.
+    /// After the seat had taken the panel in, Photoshop kept reporting where it
+    /// used to be, 2036 by 1347 points away from where the window server showed
+    /// it, and every Command found the content outside the panel
+    /// (`notContainedInSurface`, `geometryUnavailable`). Writing the position the
+    /// window server already shows moves nothing on screen and brings the
+    /// content back. Only when both sources read the same size: a window Stage
+    /// Manager stashed reads smaller on the server, and that is not this.
+    private func realignReportedPosition(of observation: SeatObservationReference) async {
+        guard let modal = attestedModalSurface(for: observation) else { return }
+        // A sheet follows its host, so the window written is the outermost one held.
+        let outer = observationPicture(for: modal).surface
+        guard let record   = session[outer.windowNumber],
+              record.window.reference.identity == outer,
+              let server   = sensing.windowGeometry(of: outer.windowNumber),
+              server.hasSameIdentity(as: record.window.reference),
+              let reported = (try? placing.frame(of: record.window.reference)) ?? nil
+        else { return }
+        // Temporary live diagnosis: both readings, whether they agree or not.
+        Self.log.info("""
+            modal window \(outer.windowNumber, privacy: .public) reads \
+            \(String(describing: reported), privacy: .public) to accessibility and \
+            \(String(describing: server.frame), privacy: .public) to the window server
+            """)
+        guard VirtualWindowPlacementCheck.sizesMatchAcrossSources(server.frame.size, reported.size),
+              !VirtualWindowPlacementCheck.framesMatch(
+                  reported, server.frame, tolerance: VirtualWindowPlacementCheck.crossSourceTolerance
+              ),
+              (try? placing.move(record.window.reference, to: server.frame.origin)) != nil
+        else { return }
+        Self.log.info("""
+            window \(outer.windowNumber, privacy: .public) was reported at \
+            \(Int(reported.minX), privacy: .public),\(Int(reported.minY), privacy: .public) and shown at \
+            \(Int(server.frame.minX), privacy: .public),\(Int(server.frame.minY), privacy: .public): \
+            wrote the shown position back
+            """)
+        await EventLoopWait.step(.milliseconds(150))
+    }
+
     private func send(
         _ command       : InputCommand,
         observation     : SeatObservationReference,
@@ -1945,6 +1988,7 @@ public final class AgentSeat {
             throw ObservationAdmissionRefusal.menuContextRevoked
         }
         let admitted = try admitOrdinary(observation)
+        await realignReportedPosition(of: observation)
         // The picture may be the host's while the Command is over a modal drawn
         // inside it: a gesture goes to the window under the point of the down,
         // and a key to the window the observed internal focus is in.
@@ -2066,7 +2110,11 @@ public final class AgentSeat {
                         if let refusal = self.admissionRefusal(for: observation, expecting: .ordinaryTarget) {
                             throw refusal
                         }
-                        if let endpoint, let retired = self.endpointInvalidation(of: endpoint) {
+                        // The waits the recipe itself imposed are not the endpoint growing old.
+                        if let endpoint, let retired = self.endpointInvalidation(
+                            of      : endpoint,
+                            allowing: Self.preparationWait(of: resolved, for: routed)
+                        ) {
                             throw retired
                         }
                     }

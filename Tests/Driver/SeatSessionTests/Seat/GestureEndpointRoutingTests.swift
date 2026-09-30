@@ -56,6 +56,9 @@ struct GestureEndpointRoutingTests {
         var descendantKeyboardAnswer: Result<ResolvedInputEndpoint, InputEndpointRefusal>?
         var descendantKeyboardResolutions = 0
 
+        /// What the leaf reading answers once a modal's discovery refused.
+        var leafAnswer: Result<ResolvedInputEndpoint, InputEndpointRefusal>?
+
         /// What the window server answers for a Window ID at the boundary
         /// before the driver builds.
         var identities: [Int: WindowIdentity] = [:]
@@ -91,6 +94,9 @@ struct GestureEndpointRoutingTests {
                     descendantKeyboardResolutions += 1
                     return descendantKeyboardAnswer
                         ?? .failure(.subtreeUnreadable(surface: chain.surface))
+                },
+                leafSurface: { [self] _, _, chain, _ in
+                    leafAnswer ?? .failure(.subtreeUnreadable(surface: chain.surface))
                 }
             )
         }
@@ -110,7 +116,7 @@ struct GestureEndpointRoutingTests {
     ///
     /// The host is deliberately the Chromium family: what the endpoint decides
     /// has to be visible against a host whose own recipe is the other one.
-    static func panel() async throws -> Panel {
+    static func panel(placing: FakePlacing = FakePlacing()) async throws -> Panel {
 
         let sensing   = FakeSensing()
         let sender    = FakeSender()
@@ -118,6 +124,7 @@ struct GestureEndpointRoutingTests {
         let discovery = Discovery()
         let seat      = makeSeat(
             sensing  : sensing,
+            placing  : placing,
             sender   : sender,
             marker   : 1_903,
             reader   : reader,
@@ -513,6 +520,78 @@ struct GestureEndpointRoutingTests {
         try panel.seat.release(turn)
     }
 
+    @Test("a modal whose discovery refused and that is one accessibility leaf takes the click itself")
+    func aLeafModalTakesTheClickItself() async throws {
+
+        // The leaf decision is the resolver's, proven where it is written; on
+        // trial here is only that a modal's refusal asks it last.
+        let panel       = try await Self.panel()
+        let observation = try await observedReference(panel.seat)
+        let sheet       = try #require(panel.sheet.reference.identity)
+        panel.discovery.answer = .failure(.notContainedInSurface(windowNumber: panel.host.id))
+        panel.discovery.leafAnswer = .success(try Self.endpoint(
+            try #require(WindowGeometryObservation(
+                window     : panel.sheet.reference,
+                scaleFactor: 2,
+                version    : GeometryObservationVersion(observerGeneration: 4, sequence: 11)
+            )),
+            relation      : .logicalSurface,
+            logicalSurface: sheet,
+            generation    : observation.selectionGeneration,
+            hostProcessID : panel.host.reference.processID,
+            // A parallel run takes longer than a real endpoint lives.
+            lifetimeNanoseconds: 60_000_000_000
+        ))
+        panel.discovery.identities[Self.sheetWindowNumber] = sheet
+
+        let turn    = try await panel.seat.acquire()
+        let receipt = try await panel.seat.send(
+            Self.click(at: Self.insideSheet(panel)),
+            observation: observation,
+            turn       : turn
+        )
+
+        #expect(panel.sender.addressed.last?.window.identity == sheet)
+        #expect(panel.sender.sent.count == 1)
+        try panel.seat.confirm(receipt, .unknown)
+        try panel.seat.release(turn)
+    }
+
+    @Test("a modal host its application reports elsewhere is written back where it is shown, before the Command")
+    func aStaleReportedPositionIsWrittenBack() async throws {
+
+        let placing     = FakePlacing()
+        let panel       = try await Self.panel(placing: placing)
+        let observation = try await observedReference(panel.seat)
+        let host        = panel.host.reference
+        let shown       = try #require(panel.sensing.windowGeometry(of: host.windowNumber)).frame
+        // Measured on 30/09/2026: Photoshop reported its Save panel 2036 by 1347
+        // points from where the window server showed it.
+        placing.bodyFrames[host.windowNumber] = shown.offsetBy(dx: -2036, dy: -1347)
+        placing.moves = []
+
+        let turn = try await panel.seat.acquire()
+        _ = try? await panel.seat.send(
+            Self.click(at: Self.insideSheet(panel)),
+            observation: observation,
+            turn       : turn
+        )
+        #expect(placing.moves.first == shown.origin)
+        try? panel.seat.release(turn)
+
+        // Two sources that agree are left alone.
+        placing.bodyFrames[host.windowNumber] = shown
+        placing.moves = []
+        let again = try await panel.seat.acquire()
+        _ = try? await panel.seat.send(
+            Self.click(at: Self.insideSheet(panel)),
+            observation: try await observedReference(panel.seat),
+            turn       : again
+        )
+        #expect(placing.moves.isEmpty)
+        try? panel.seat.release(again)
+    }
+
     // MARK: The surface the seat holds answering for itself
 
     @Test("a surface that answers for itself keeps its application's family and its current frame")
@@ -681,5 +760,14 @@ struct GestureEndpointRoutingTests {
             .platform(for: click, ofDrivenApplication: host) == nil)
         #expect(SurfaceInputClassification.unknown
             .platform(for: key, ofDrivenApplication: host) == nil)
+
+        // Prepared keys belong to a UXP application's leaf modal only.
+        let leafKey = SurfaceInputClassification.leafSurfaceOfDrivenApplication
+            .platform(for: key, ofDrivenApplication: UXPPlatform())
+        #expect((leafKey as? UXPPlatform)?.preparation(for: key) == .internalAppKitState)
+        #expect(SurfaceInputClassification.drivenApplication
+            .platform(for: key, ofDrivenApplication: UXPPlatform())?.preparation(for: key) == Preparation.none)
+        #expect(SurfaceInputClassification.leafSurfaceOfDrivenApplication
+            .platform(for: key, ofDrivenApplication: host) is ChromiumPlatform)
     }
 }

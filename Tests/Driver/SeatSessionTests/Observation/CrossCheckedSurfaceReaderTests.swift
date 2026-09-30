@@ -151,6 +151,44 @@ struct CrossCheckedSurfaceReaderTests {
         ) == nil)
     }
 
+    @Test("a modal window accessibility reads nothing in is still the dialog it blocks the application with")
+    func emptyModalIsADialog() {
+        // Measured on 30/09/2026: Photoshop's New Document, AXDialog, AXModal
+        // true, position settable, AXRaise, a child count of zero.
+        #expect(CrossCheckedSurfaceReader.role(
+            named: kAXWindowRole as String,
+            subrole: kAXDialogSubrole as String,
+            positionIsSettable: true,
+            actions: [kAXRaiseAction as String],
+            childCount: 0,
+            isModal: true
+        ) == .dialog)
+        // The overlay the emptiness rule was written for says it is no modal.
+        #expect(CrossCheckedSurfaceReader.role(
+            named: kAXWindowRole as String,
+            subrole: kAXDialogSubrole as String,
+            positionIsSettable: true,
+            actions: [kAXRaiseAction as String],
+            childCount: 0,
+            isModal: false
+        ) == nil)
+    }
+
+    @Test("an entry whose role the application renamed keeps the scope its window subrole gives it")
+    func windowSubroleAnswersForARenamedRole() {
+        // Measured on 30/09/2026: Photoshop's New Document reads AXLayoutArea.
+        #expect(CrossCheckedSurfaceReader.roleScopeOutcome(
+            of: "AXLayoutArea" as CFString,
+            subrole: kAXDialogSubrole as CFString,
+            processID: 51_304
+        ) == .success(kAXWindowRole as String))
+        #expect(CrossCheckedSurfaceReader.roleScopeOutcome(
+            of: "AXLayoutArea" as CFString,
+            subrole: "AXUnknown" as CFString,
+            processID: 51_304
+        ) == .failure(.notAWindow(.role("AXLayoutArea"))))
+    }
+
     @Test("emptiness answers for every role the reader can answer, and not for AXDialog alone")
     func emptinessGatesEveryRole() {
         let answerable: [(role: String, subrole: String?)] = [
@@ -431,6 +469,26 @@ struct CrossCheckedSurfaceReaderTests {
         #expect(states[43] == .uncertain)
         #expect(snapshot.claims.modals.count == 1)
         #expect(snapshot.claims.modals.first?.modal.windowNumber == 42)
+    }
+
+    @Test("a focused dialog at the modal panel level blocks its application whatever AXModal says")
+    func aFocusedModalPanelDialogIsModal() {
+        // Measured on 30/09/2026: Photoshop's Duplicate Layer, AXModal false, level 8.
+        func reading(level: Int, focused: Bool, role: SurfaceRole) -> Int {
+            var dialog = surface(42, visible: true)
+            dialog = WindowSurface(reference: dialog.reference, level: level, isVisible: true)
+            return CrossCheckedSurfaceReader.assemble(
+                windowServer: [surface(41, visible: true), dialog],
+                accessibility: [
+                    record(41, role: .document, minimised: false, modal: false, main: true),
+                    record(42, role: role, minimised: false, modal: false, focused: focused),
+                ]
+            ).claims.modals.filter { $0.modal.windowNumber == 42 && $0.scope == .application }.count
+        }
+        #expect(reading(level: 8, focused: true, role: .dialog) == 1)
+        #expect(reading(level: 8, focused: false, role: .dialog) == 0, "the overlay is never focused")
+        #expect(reading(level: 3, focused: true, role: .dialog) == 0, "a floating panel is not modal")
+        #expect(reading(level: 8, focused: true, role: .document) == 0)
     }
 
     @Test("the unique focused window supplies multi-window selection order")
@@ -933,6 +991,42 @@ struct CrossCheckedSurfaceReaderTests {
         #expect(filter.retainedIdentities(ownedBy: [77]).contains(retained))
         #expect(filter.filter(raw, at: grace).withdrawnByApplication == [retained])
         #expect(!filter.retainedIdentities(ownedBy: [77]).contains(retained))
+    }
+
+    @Test("a window hidden during a fallback pass is still looked up, and then reads as ordered out")
+    func aFallbackPassDropsNothingItCannotSee() throws {
+        // Measured on 30/09/2026: Photoshop hid its "Save changes?" alert while
+        // the one pass taken was the on-screen fallback, and the alert was never
+        // looked up again.
+        let filter = ApplicationTargetTransitionFilter()
+        let alert  = identity(42)
+        _ = filter.filter(CrossCheckedSurfaceReader.assemble(
+            windowServer : [surface(41, visible: true), surface(42, visible: true)],
+            accessibility: [
+                record(41, role: .document, minimised: false, modal: false, main: true),
+                record(42, role: .dialog, minimised: false, modal: true, focused: true),
+            ],
+            observedAtNanoseconds: 0
+        ), at: 0)
+
+        _ = filter.filter(AssignedSurfaceSnapshot(
+            inventory: SurfaceInventoryReading(
+                rows: [SurfaceInventoryReading.Row(surface: surface(41, visible: true),
+                                                   provenance: .windowServerAttestedIdentity)],
+                completeness: .incomplete(reason: "the on-screen fallback")
+            ),
+            claims: SelectionClaimBatch()
+        ), at: 10_000_000)
+        #expect(filter.retainedIdentities(ownedBy: [77]).contains(alert))
+
+        let hidden = CrossCheckedSurfaceReader.assemble(
+            windowServer : [surface(41, visible: true), surface(42, visible: false)],
+            accessibility: [record(41, role: .document, minimised: false, modal: false, main: true, focused: true)],
+            retaining    : filter.retainedIdentities(ownedBy: [77]),
+            observedAtNanoseconds: 20_000_000
+        )
+        let row = try #require(hidden.inventory.rows.first { $0.surface.reference.identity == alert })
+        #expect(row.isOrderedOut)
     }
 
     @Test("an inexact pass is retained whole and still emits no recency")

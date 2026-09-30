@@ -44,6 +44,10 @@ nonisolated enum SurfaceInputClassification: Sendable, Equatable {
     /// family the seat already drives that application with applies.
     case drivenApplication
 
+    /// A modal of the driven application read as one accessibility leaf, which
+    /// is where a UXP application takes prepared keys.
+    case leafSurfaceOfDrivenApplication
+
     /// The recipient is another process's window drawn inside the surface: the
     /// out of process panel, whose measured recipe prepares nothing.
     case remotePanelContent
@@ -76,6 +80,8 @@ nonisolated enum SurfaceInputClassification: Sendable, Equatable {
                 where endpoint.identity.process != endpoint.logicalSurface.process
                     && remoteAppKitPanelServiceQualified:
                 return .remotePanelContent
+            case .logicalSurface where endpoint.evidence == .leafSurface:
+                return .leafSurfaceOfDrivenApplication
             case .logicalSurface,
                  .remoteContent where endpoint.identity.process == endpoint.logicalSurface.process:
                 return .drivenApplication
@@ -100,6 +106,10 @@ nonisolated enum SurfaceInputClassification: Sendable, Equatable {
         switch self {
             case .drivenApplication:
                 return family
+
+            case .leafSurfaceOfDrivenApplication:
+                // Measured on a UXP application's leaf modal, and nowhere else.
+                return (family as? UXPPlatform)?.preparingKeys ?? family
 
             case .remotePanelContent:
                 // `AppKitPlatform` prepares nothing for every Command in the

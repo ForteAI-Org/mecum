@@ -450,7 +450,7 @@ nonisolated package enum CrossCheckedSurfaceReader {
                 )
             }
 
-            if record.isModal == true {
+            if record.isModal == true || Self.runsModally(record, level: surface.level) {
                 claims.modals.append(
                     ModalRelationClaim(
                         modal     : identity,
@@ -731,6 +731,16 @@ nonisolated package enum CrossCheckedSurfaceReader {
         kAXDrawerRole as String
     ]
 
+    /// The AXSubrole values only a window carries, which keep an entry in the
+    /// application's scope as an `AXWindow` whatever role it reads.
+    private static let windowSubroles: Set<String> = [
+        kAXStandardWindowSubrole       as String,
+        kAXDialogSubrole               as String,
+        kAXSystemDialogSubrole         as String,
+        kAXFloatingWindowSubrole       as String,
+        kAXSystemFloatingWindowSubrole as String
+    ]
+
     /// What one entry's AXRole slot means for the application's scope: the role
     /// name for an entry the scope keeps, an exclusion for a role that is read
     /// and is no window role, and a failed pass for a role that cannot be read.
@@ -742,8 +752,15 @@ nonisolated package enum CrossCheckedSurfaceReader {
     /// desktop reads `AXScrollArea` and is no window, while an element whose
     /// window was destroyed fails AXRole outright. Reading the role first is
     /// what keeps the two apart, because both answer -25201 for their identity.
+    ///
+    /// A window subrole answers for a role the application renamed. Photoshop's
+    /// New Document, measured on 30/09/2026, is an `AXWindows` entry that reads
+    /// `AXLayoutArea` with subrole `AXDialog`, `AXModal` true, a close button
+    /// and a window server row at level 8: excluded on its role, it made no
+    /// modal claim, and the seat kept the blocked Home window as the scene.
     package static func roleScopeOutcome(
         of slot  : CFTypeRef?,
+        subrole  : CFTypeRef? = nil,
         processID: Int32
     ) -> Result<String, SurfaceScopeRefusal> {
 
@@ -756,10 +773,11 @@ nonisolated package enum CrossCheckedSurfaceReader {
             case .success(let value): roleName = value
             case .failure(let failure): return .failure(.unreadable(failure))
         }
-        guard windowRoles.contains(roleName) else {
+        if windowRoles.contains(roleName) { return .success(roleName) }
+        guard let named = subrole as? String, windowSubroles.contains(named) else {
             return .failure(.notAWindow(.role(roleName)))
         }
-        return .success(roleName)
+        return .success(kAXWindowRole as String)
     }
 
     /// What one identity reading means for the application's scope.
@@ -866,7 +884,11 @@ nonisolated package enum CrossCheckedSurfaceReader {
         // The role decides before the identity is asked for, and this is the
         // same batched read as before rather than one more round trip.
         let roleName: String
-        switch roleScopeOutcome(of: slots[kAXRoleAttribute], processID: processID) {
+        switch roleScopeOutcome(
+            of       : slots[kAXRoleAttribute],
+            subrole  : slots[kAXSubroleAttribute],
+            processID: processID
+        ) {
             case .success(let value): roleName = value
             case .failure(.notAWindow): return .success(nil)
             case .failure(.unreadable(let failure)): return .failure(failure)
@@ -936,7 +958,8 @@ nonisolated package enum CrossCheckedSurfaceReader {
                 subrole: nil,
                 positionIsSettable: false,
                 actions: [],
-                childCount: children
+                childCount: children,
+                isModal: isModal
             ))
         }
 
@@ -954,7 +977,8 @@ nonisolated package enum CrossCheckedSurfaceReader {
             subrole: subrole,
             positionIsSettable: false,
             actions: [],
-            childCount: children
+            childCount: children,
+            isModal: isModal
         )
         if let knownRole { return facts(knownRole) }
         guard subrole == "AXUnknown" else { return facts(nil) }
@@ -982,7 +1006,8 @@ nonisolated package enum CrossCheckedSurfaceReader {
             subrole: subrole,
             positionIsSettable: movable,
             actions: actions,
-            childCount: children
+            childCount: children,
+            isModal: isModal
         ))
     }
 
@@ -1029,15 +1054,23 @@ nonisolated package enum CrossCheckedSurfaceReader {
     /// taken back: `SeatTargetSelectionKit.declareRole` is only ever called
     /// with a role the reader produced, so nothing may be built on a withdrawal
     /// that does not exist.
+    ///
+    /// **A modal window answers for its own emptiness.** Its modal claim is
+    /// made whatever its role, and it blocks every other window of the
+    /// application, so a modal with no role leaves nothing eligible at all.
+    /// Photoshop's New Document, measured on 30/09/2026, draws its whole
+    /// interface in a view accessibility reads no child of, for as long as it
+    /// is open.
     package static func role(
         named role        : String,
         subrole           : String?,
         positionIsSettable: Bool,
         actions           : Set<String>,
-        childCount        : Int?
+        childCount        : Int?,
+        isModal           : Bool? = nil
     ) -> SurfaceRole? {
 
-        guard let childCount, childCount > 0 else { return nil }
+        guard isModal == true || (childCount ?? 0) > 0 else { return nil }
         if role == (kAXSheetRole as String) { return .dialog }
         if role == (kAXDrawerRole as String) { return .interactivePanel }
         guard role == (kAXWindowRole as String), let subrole else { return nil }
@@ -1224,6 +1257,28 @@ nonisolated package enum CrossCheckedSurfaceReader {
 
         guard let slot, slotError(slot) == nil else { return nil }
         return (slot as? NSNumber)?.boolValue
+    }
+
+    /// The window level AppKit reserves for modal panels.
+    static let modalPanelLevel = Int(CGWindowLevelForKey(.modalPanelWindow))
+
+    /// Whether a dialog the application runs modally is modal although its
+    /// `AXModal` says otherwise.
+    ///
+    /// Photoshop's Duplicate Layer, measured on 30/09/2026, is an `AXWindow`
+    /// with subrole `AXDialog`, seven children, `AXModal` false, at window level
+    /// 8 and the application's focused window, and Photoshop answered nothing
+    /// else while it was open: every menu command was ignored. The seat held the
+    /// dialog and kept the document as the scene; a prepared Escape sent to the
+    /// document then crashed Photoshop. The level alone is no evidence: macOS's
+    /// 66 by 20 point traffic light overlay was read at level 8 over such a
+    /// dialog. That overlay is never the application's focused window, and it
+    /// is born with no role, so the three together are what this reads.
+    static func runsModally(_ record: AccessibilitySurfaceRecord, level: Int) -> Bool {
+        record.isModal != true
+            && record.role == .dialog
+            && record.isFocused == true
+            && level == modalPanelLevel
     }
 
     /// Whether this surface is modal, from the attribute when it answers and

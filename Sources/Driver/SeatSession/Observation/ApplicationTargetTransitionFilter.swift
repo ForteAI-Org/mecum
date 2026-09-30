@@ -72,9 +72,17 @@ nonisolated package final class ApplicationTargetTransitionFilter: @unchecked Se
     /// for good.
     ///
     /// What leaves the retained set is positive as before: a destroyed identity
-    /// at once, a withdrawn one when its grace has run out, and anything the
-    /// pass carries no row for. Nothing accumulates, because the set is one
-    /// pass's rows plus the withdrawals that pass is still waiting on.
+    /// at once, a withdrawn one when its grace has run out, and anything a
+    /// qualified pass carries no row for. Nothing accumulates, because the set
+    /// is one pass's rows plus the withdrawals that pass is still waiting on.
+    ///
+    /// **An unqualified pass drops nothing it says nothing about.** The
+    /// on-screen fallback cannot list a window its application ordered out,
+    /// and cannot be asked about it either. Measured on 30/09/2026 with
+    /// Photoshop: its "Save changes?" alert, held by the seat, was hidden while
+    /// the Save panel saved, the one pass taken then was the fallback, and
+    /// the alert left this set. No later pass named it, so it stayed absent,
+    /// its budget ran out at once and the seat was suspended for good.
     package func filter(
         _ snapshot: AssignedSurfaceSnapshot,
         at now    : UInt64 = DispatchTime.now().uptimeNanoseconds
@@ -92,8 +100,10 @@ nonisolated package final class ApplicationTargetTransitionFilter: @unchecked Se
         // waits for no grace: nothing brings a destroyed window back. An
         // ancestor kept under its child carries a row of its own, so it is
         // retained by the first term like every other surface of the pass.
+        let unanswered = snapshot.inventory.completeness.isQualified ? [] : previouslyAttested
         attestedIdentities = rowIdentities
             .union(withdrawnSince.keys)
+            .union(unanswered)
             .subtracting(withdrawn)
             .subtracting(destroyed)
 

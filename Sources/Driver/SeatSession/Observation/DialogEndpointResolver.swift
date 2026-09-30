@@ -185,6 +185,7 @@ nonisolated package struct DialogEndpointResolver<Node> {
     let now         : () -> UInt64
     let focusedControl: () -> FocusedControlReading
     let focusedWindow: () -> Node?
+    let windowNode   : (Int) -> Node?
     let inertWindowlessLeaf: (Node) -> Bool
     let descendantFocus: (Node) -> DescendantFocusReading
 
@@ -200,6 +201,7 @@ nonisolated package struct DialogEndpointResolver<Node> {
         now         : @escaping () -> UInt64 = { DispatchTime.now().uptimeNanoseconds },
         focusedControl: (() -> FocusedControlReading)? = nil,
         focusedWindow: (() -> Node?)? = nil,
+        windowNode   : @escaping (Int) -> Node? = { _ in nil },
         inertWindowlessLeaf: @escaping (Node) -> Bool = { _ in false },
         descendantFocus: @escaping (Node) -> DescendantFocusReading = { _ in .unreadable }
     ) {
@@ -216,6 +218,7 @@ nonisolated package struct DialogEndpointResolver<Node> {
             focusedNode().map(FocusedControlReading.node) ?? .unreadable
         }
         self.focusedWindow = focusedWindow ?? { nil }
+        self.windowNode    = windowNode
         self.inertWindowlessLeaf = inertWindowlessLeaf
         self.descendantFocus = descendantFocus
     }
@@ -428,6 +431,49 @@ nonisolated package struct DialogEndpointResolver<Node> {
             within                 : chain,
             selectionGeneration    : selectionGeneration,
             focusedNodeWindowNumber: nil
+        )
+    }
+
+    /// The surface itself, for a window accessibility shows as a single leaf.
+    ///
+    /// Measured on 30/09/2026 with Photoshop's New Document, a top-level modal
+    /// that draws its whole interface in a view accessibility reads no child
+    /// of: the hit test inside it answered a node of the Home window behind it,
+    /// or nothing at all, and the application's focused control was absent or
+    /// in that same window. Neither is a recipient inside the dialog, and the
+    /// dialog is the only window its application lets act. Nothing inside a
+    /// leaf can be a different recipient, so when the surface's own
+    /// `AXWindows` entry has no children, the events go to the surface, for a
+    /// gesture and for a key. A sheet or a hosted panel is never answered
+    /// here: its host is another window.
+    ///
+    /// The entry is looked up by its Window ID and not taken from the
+    /// application's focused window: the same run's first session read the
+    /// focus, like the hit test, on the Home window behind the dialog.
+    package func leafSurfaceEndpoint(
+        kind               : InputEndpointKind,
+        within chain       : SurfaceChain,
+        selectionGeneration: UInt64
+    ) -> Result<ResolvedInputEndpoint, InputEndpointRefusal> {
+
+        let refusal = InputEndpointRefusal.subtreeUnreadable(surface: chain.surface)
+        guard chain.host == chain.surface else { return .failure(refusal) }
+        guard let window = windowNode(chain.surface.windowNumber),
+              focusedWindow(window, matches: chain)
+        else { return .failure(.identityUnattested(windowNumber: chain.surface.windowNumber)) }
+        switch children(window) {
+            case .leaf: break
+            case .children(let values) where values.isEmpty: break
+            case .children, .unreadable: return .failure(refusal)
+        }
+        return endpoint(
+            kind                   : kind,
+            windowNumber           : chain.surface.windowNumber,
+            accessibilityProcessID : chain.surface.processID,
+            within                 : chain,
+            selectionGeneration    : selectionGeneration,
+            focusedNodeWindowNumber: nil,
+            evidence               : .leafSurface
         )
     }
 
@@ -733,6 +779,18 @@ extension DialogEndpointResolver where Node == AXUIElement {
             },
             focusedWindow: {
                 Self.elementAttribute(application, kAXFocusedWindowAttribute)
+            },
+            windowNode: { number in
+                var value: CFTypeRef?
+                guard AXUIElementCopyAttributeValue(
+                    application, kAXWindowsAttribute as CFString, &value
+                ) == .success, let windows = value as? [AXUIElement]
+                else { return nil }
+                let window = windows.first {
+                    WindowRelocator.windowNumber(of: $0, table: table) == number
+                }
+                window.map { AXUIElementSetMessagingTimeout($0, BoundedAccessibilityRead.fastTimeout) }
+                return window
             },
             inertWindowlessLeaf: Self.inertWindowlessLeaf,
             descendantFocus: Self.descendantFocus(of:)

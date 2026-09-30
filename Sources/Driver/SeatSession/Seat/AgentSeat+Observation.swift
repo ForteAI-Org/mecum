@@ -118,6 +118,14 @@ struct EndpointDiscovery {
         .failure(.subtreeUnreadable(surface: chain.surface))
     }
 
+    /// A modal that is its own window and a single accessibility leaf is its
+    /// own recipient, which is the last reading a modal's refusal gets.
+    var leafSurface: (
+        Int32, InputEndpointKind, DialogEndpointResolver<AXUIElement>.SurfaceChain, UInt64
+    ) -> Result<ResolvedInputEndpoint, InputEndpointRefusal> = { _, _, chain, _ in
+        .failure(.subtreeUnreadable(surface: chain.surface))
+    }
+
     /// The readings the shipping seat takes.
     static let shipping = EndpointDiscovery(
         pointer: { processID, point, chain, generation in
@@ -149,6 +157,11 @@ struct EndpointDiscovery {
             DialogEndpointResolver<AXUIElement>
                 .accessibility(assignedProcessID: processID)
                 .focusedDescendantKeyboardContext(within: chain, selectionGeneration: generation)
+        },
+        leafSurface: { processID, kind, chain, generation in
+            DialogEndpointResolver<AXUIElement>
+                .accessibility(assignedProcessID: processID)
+                .leafSurfaceEndpoint(kind: kind, within: chain, selectionGeneration: generation)
         }
     )
 }
@@ -663,12 +676,37 @@ extension AgentSeat {
                 return nil
 
             case .failure(let refusal):
+                let kind: InputEndpointKind = command.firstMouseScreenPoint == nil ? .keyboardContext : .pointer
+                if hasAttestedModalRelation {
+                    switch endpoints.leafSurface(instance.processID, kind, chain, observation.selectionGeneration) {
+                        case .success(let endpoint):
+                            AgentSeat.observationLog.info("""
+                                modal window \(sheet.windowNumber, privacy: .public) is a single \
+                                accessibility leaf, so its events go to it: the discovery had refused \
+                                with \(String(describing: refusal), privacy: .public)
+                                """)
+                            return (endpoint, record.window)
+                        case .failure(let leaf):
+                            AgentSeat.observationLog.info("""
+                                modal window \(sheet.windowNumber, privacy: .public) is no single \
+                                accessibility leaf either: \(String(describing: leaf), privacy: .public)
+                                """)
+                    }
+                }
                 AgentSeat.observationLog.info("""
                     the input endpoint discovery refused: \
                     \(String(describing: refusal), privacy: .public)
                     """)
                 throw refusal
         }
+    }
+
+    /// How long `platform` waits on purpose before the first event of `command`.
+    static func preparationWait(of platform: any InputPlatform, for command: InputCommand) -> Duration {
+        let settle = platform.preparation(for: command) == .internalAppKitState
+            ? platform.preparationSettle(for: command)
+            : .zero
+        return settle + (platform.keyWindowPriming(for: command)?.settle ?? .zero)
     }
 
     /// The one modal-relation predicate shared by endpoint discovery and focus
@@ -694,7 +732,16 @@ extension AgentSeat {
     /// now. Its own window can be alive, unchanged and still the wrong place to
     /// type, which is what a focus that moved between the resolution and the
     /// boundary means.
-    func endpointInvalidation(of endpoint: ResolvedInputEndpoint) -> InputEndpointInvalidation? {
+    ///
+    /// `grace` is time the recipe itself waited between the resolution and this
+    /// reading, the preparation's settle and the host's priming: measured on
+    /// 30/09/2026, a UXP key resolved at .988 was refused as expired at .548,
+    /// 60 ms past its 500 ms, with nothing in the world changed. Every other
+    /// reading is still taken now.
+    func endpointInvalidation(
+        of endpoint    : ResolvedInputEndpoint,
+        allowing grace : Duration = .zero
+    ) -> InputEndpointInvalidation? {
         let focused: Int?
         if endpoint.evidence == .focusedSurfaceDescendant
             || endpoint.kind == .keyboardContext && endpoint.evidence == .remoteContentOfSurface {
@@ -786,8 +833,10 @@ extension AgentSeat {
                     .flatMap { endpoints.focusedWindowNumber($0.instance.processID) }
                 : nil
         }
+        let graceNanoseconds = UInt64(max(0, grace.components.seconds)) * 1_000_000_000
+            + UInt64(max(0, grace.components.attoseconds / 1_000_000_000))
         return endpoint.invalidation(
-            at                     : DispatchTime.now().uptimeNanoseconds,
+            at                     : DispatchTime.now().uptimeNanoseconds &- graceNanoseconds,
             selectionGeneration    : selectionKit.selected?.generation ?? .max,
             logicalSurface         : selectionKit.selected?.surface,
             currentIdentity        : endpoints.identity(endpoint.identity.windowNumber),

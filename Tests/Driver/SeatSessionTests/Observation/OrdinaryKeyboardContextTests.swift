@@ -86,6 +86,7 @@ struct OrdinaryKeyboardContextTests {
         tree: Tree,
         focusedControl: Focus,
         focusedWindow: Int? = 1,
+        windowNodes: [Int: Int] = [Self.hostWindow: 1],
         clock: Clock = .init(),
         inertLeafFacts: [Int: DialogEndpointResolver<Node>.InertWindowlessLeafFacts] = [:]
     ) -> DialogEndpointResolver<Node> {
@@ -117,6 +118,7 @@ struct OrdinaryKeyboardContextTests {
             now: clock.read,
             focusedControl: control,
             focusedWindow: { focusedWindow.map(Node.init(identifier:)) },
+            windowNode: { windowNodes[$0].map(Node.init(identifier:)) },
             inertWindowlessLeaf: { node in
                 guard let facts = inertLeafFacts[node.identifier] else { return false }
                 return DialogEndpointResolver<Node>.inertWindowlessLeaf(facts)
@@ -169,6 +171,43 @@ struct OrdinaryKeyboardContextTests {
         #expect(endpoint.evidence == .focusedWindowWithoutFocusedControl)
         #expect(endpoint.accessibilityProcessID == Self.applicationProcess)
         #expect(endpoint.focusedNodeWindowNumber == Self.hostWindow)
+    }
+
+    @Test("a surface that is one accessibility leaf is its own recipient, and one with content or a host is not")
+    func leafSurfaceIsItsOwnRecipient() throws {
+        // Measured on 30/09/2026: Photoshop's New Document reads no child at all.
+        let leaf = Tree(
+            children : [1: .leaf],
+            windows  : [1: Self.hostWindow],
+            processes: [1: Self.applicationProcess]
+        )
+        for kind in [InputEndpointKind.pointer, .keyboardContext] {
+            let endpoint = try resolver(tree: leaf, focusedControl: .absent)
+                .leafSurfaceEndpoint(kind: kind, within: chain, selectionGeneration: 3)
+                .get()
+            #expect(endpoint.kind == kind)
+            #expect(endpoint.identity == surface)
+            #expect(endpoint.relation == .logicalSurface)
+            #expect(endpoint.evidence == .leafSurface)
+        }
+
+        let refused = InputEndpointRefusal.subtreeUnreadable(surface: surface)
+        #expect(resolver(tree: sameWindowTree(), focusedControl: .absent)
+            .leafSurfaceEndpoint(kind: .pointer, within: chain, selectionGeneration: 3) == .failure(refused))
+        // The focus is not asked: it was read on the window behind the dialog.
+        #expect(try resolver(tree: leaf, focusedControl: .absent, focusedWindow: nil)
+            .leafSurfaceEndpoint(kind: .pointer, within: chain, selectionGeneration: 3).get()
+            .identity == surface)
+        #expect(resolver(tree: leaf, focusedControl: .absent, windowNodes: [:])
+            .leafSurfaceEndpoint(kind: .pointer, within: chain, selectionGeneration: 3)
+            == .failure(.identityUnattested(windowNumber: Self.hostWindow)))
+        let hosted = DialogEndpointResolver<Node>.SurfaceChain(
+            host        : identity(window: Self.otherWindow, process: Self.applicationProcess, connection: 7_001),
+            surface     : surface,
+            surfaceFrame: Self.surfaceFrame
+        )
+        #expect(resolver(tree: leaf, focusedControl: .absent)
+            .leafSurfaceEndpoint(kind: .pointer, within: hosted, selectionGeneration: 3) == .failure(refused))
     }
 
     @Test("only an explicit absent control is eligible")
