@@ -375,7 +375,7 @@ let package = Package(
         integration("AutomationRuntime", ["Perception", "VisionText", "PixelSections", "PixelRegions", "WindowServerListing", "AccessibilityFacts",
                     "ScreenCapture", "Engine", "EngineCore", "HIDActuation", "AccessibilityActions",
                     "WorkspaceActivation", "Memory", "FileKnowledge", "LiveScenes", "PerceptionCore",
-                    "SeatDriving", "SeatCore", "SeatSession", "PrivateSymbols"]),
+                    "SeatDriving", "SeatCore", "SeatSession", "PrivateSymbols", "WindowPlacement"]),
         integration("AutomationMCP", ["AutomationRuntime", "LocalMCP", "EngineCore", "PerceptionCore",
                                      "PrivateSymbols", "SeatCore", "WindowServerListing"]),
         // The foreground command line: windows, scene, act, memory. What a model host does, by hand.

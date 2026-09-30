@@ -9,6 +9,7 @@ import AppKit
 import ApplicationServices
 import EngineCore
 import PerceptionCore
+import WindowPlacement
 
 /// DialogButtonPress presses one button of the application's current dialog or alert by its
 /// title, through accessibility. It is the explicit route for a button the seat cannot deliver
@@ -20,8 +21,11 @@ import PerceptionCore
 /// `geometryUnavailable`, and its Cancel and Replace showed as text. Both were `AXButton`s of
 /// Photoshop with `AXPress`, and pressing Cancel closed the alert.
 ///
-/// Only the application's focused window is searched, which is the dialog or sheet in front:
-/// a button of a window behind it is not what the person sees answering.
+/// The scope searched is the dialogs the seat holds when it holds any, and the application's
+/// focused window only when it holds none: a button of a window behind a dialog is not what the
+/// person sees answering. Measured on 30/09/2026 with Photoshop, right after File > Close opened
+/// its "Save changes?" alert: the focused window was still the document, so `Save` was looked
+/// for among the document's buttons.
 @MainActor
 public enum DialogButtonPress {
 
@@ -70,24 +74,43 @@ public enum DialogButtonPress {
         return .press(only.element, title: only.title)
     }
 
-    /// Presses `title` in the focused window of `processID` and observes the scene after it,
-    /// verified like a menu item: by the application's windows.
+    /// The windows one press searches: the dialogs the seat holds, by Window ID, when it holds
+    /// any, and the application's focused window only when it holds none. It is a scope and not a
+    /// fallback, so a held dialog accessibility cannot find is left out, never replaced.
+    public static func scope<Window>(
+        dialogs      : [Int],
+        window       : (Int) -> Window?,
+        focusedWindow: () -> Window?
+    ) -> [Window] {
+        dialogs.isEmpty ? (focusedWindow().map { [$0] } ?? []) : dialogs.compactMap(window)
+    }
+
+    /// Presses `title` in the scope `dialogs` names in `processID`, the Window IDs of the dialogs
+    /// the seat holds, and observes the scene after it, verified like a menu item: by the
+    /// application's windows.
     public static func perform(
         _ title          : String,
         processID        : pid_t,
+        dialogs          : [Int],
         allowsDestructive: Bool,
         observe          : () async throws -> SceneSnapshot
     ) async throws -> ActOutcome {
 
         let application = AXUIElementCreateApplication(processID)
         AXUIElementSetMessagingTimeout(application, 1)
-        var focused: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(application, kAXFocusedWindowAttribute as CFString, &focused) == .success,
-              let focused, CFGetTypeID(focused) == AXUIElementGetTypeID()
-        else { return ActOutcome(.honestMiss, "The application has no window in front that accessibility can read.") }
+        let listed  = dialogs.isEmpty ? [] : windowsAndSheets(of: application)
+        let windows = scope(
+            dialogs      : dialogs,
+            window       : { number in listed.first { WindowRelocator.windowNumber(of: $0) == number } },
+            focusedWindow: { element(application, kAXFocusedWindowAttribute) }
+        )
+        guard !windows.isEmpty else {
+            return ActOutcome(.honestMiss, dialogs.isEmpty
+                ? "The application has no window in front that accessibility can read."
+                : "The dialog open in the seat is not one accessibility can read.")
+        }
 
-        let window = unsafeDowncast(focused, to: AXUIElement.self)
-        switch resolve(title, among: buttons(in: window), allowsDestructive: allowsDestructive) {
+        switch resolve(title, among: windows.flatMap(buttons(in:)), allowsDestructive: allowsDestructive) {
             case .outcome(let outcome):
                 return outcome
             case .press(let button, let title):
@@ -131,6 +154,30 @@ public enum DialogButtonPress {
             pending.append(contentsOf: elements.map { ($0, depth + 1) })
         }
         return found
+    }
+
+    /// The application's `AXWindows` entries and the sheets attached to them, which accessibility
+    /// lists as children of their window and not as windows of their own.
+    private static func windowsAndSheets(of application: AXUIElement) -> [AXUIElement] {
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(application, kAXWindowsAttribute as CFString, &value) == .success,
+              let windows = value as? [AXUIElement]
+        else { return [] }
+        return windows + windows.flatMap { window in
+            var children: CFTypeRef?
+            guard AXUIElementCopyAttributeValue(window, kAXChildrenAttribute as CFString, &children) == .success,
+                  let elements = children as? [AXUIElement]
+            else { return [AXUIElement]() }
+            return elements.filter { string($0, kAXRoleAttribute) == (kAXSheetRole as String) }
+        }
+    }
+
+    private static func element(_ node: AXUIElement, _ name: String) -> AXUIElement? {
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(node, name as CFString, &value) == .success,
+              let value, CFGetTypeID(value) == AXUIElementGetTypeID()
+        else { return nil }
+        return unsafeDowncast(value, to: AXUIElement.self)
     }
 
     private static func string(_ node: AXUIElement, _ name: String) -> String? {

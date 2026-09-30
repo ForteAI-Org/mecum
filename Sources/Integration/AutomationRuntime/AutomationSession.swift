@@ -137,8 +137,9 @@ public final class AutomationSession: AutomationSessionOperating {
 
     public func press(button: String) async throws -> ActOutcome {
         let (application, _, seat) = try current()
-        if case .refuse(let sentence) = try await SeatAdmission.awaited(
-            seat.agentSeat(),
+        let agentSeat = try seat.agentSeat()
+        if case .refuse(let sentence) = await SeatAdmission.awaited(
+            agentSeat,
             application: application.localizedName ?? "the application"
         ) {
             throw AutomationFailure(sentence)
@@ -146,6 +147,7 @@ public final class AutomationSession: AutomationSessionOperating {
         return try await DialogButtonPress.perform(
             button,
             processID        : application.processIdentifier,
+            dialogs          : agentSeat.openDialogs.map(\.windowNumber),
             allowsDestructive: allowsDestructive,
             observe          : { try await self.observe() }
         )
