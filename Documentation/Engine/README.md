@@ -350,3 +350,8 @@ pending singletons, replaced by the store actor's own state.
 | `LocatorCore/DescriptorStore.make{Encoder,Decoder}` | `Memory/Knowledge/KnowledgeCoding.swift` |
 | `locator-mcp/Server.swift` transition recording after an act | `Memory/Seams/BrainMemory.swift` |
 | Mecum `SeatInputBackend`, `AgentSession.captureForLocator` (the Lab's join) | `Integration/SeatDriving/*` |
+
+## Passive user interaction diagnostics
+
+The independent [interaction listener](../Interactions.md) exposes `mecum watch` for inspecting
+manual input, window attribution and production perception. It does not feed the Brain or memory.
