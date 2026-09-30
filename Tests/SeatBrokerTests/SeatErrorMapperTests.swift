@@ -1,3 +1,4 @@
+import ApplicationServices
 import CoreGraphics
 import CursorGuard
 import SeatCore
@@ -390,4 +391,26 @@ private let everySuspensionCause: [SeatSuspensionCause] = [
     let born = AssignmentObligation(identity: identity, owedFrame: nil,
                                     reason: .noDestinationInUserSeat)
     #expect(SeatErrorMapper.obligations([born])?.contains("choose a display for it") == true)
+}
+
+@Test func aFullScreenWindowTheSeatCannotTakeSaysWhyAndWhatToTellThePerson() {
+    // The person is looking at the Space: taking it would animate their display.
+    let watched = SeatErrorMapper.message(for: DisplayFailure.fullScreenSpaceStillOnScreen(windowNumber: 812))
+    #expect(watched.contains("Window 812 is in native fullscreen on the Space the person is looking at"))
+    #expect(watched.contains("taking it would animate their display, so it was left where it is"))
+    #expect(watched.contains("Tell the person to go to their desktop or to another Space, then open it again."))
+    #expect(!watched.contains("deferred"))
+
+    let readOnly = SeatErrorMapper.message(for: DisplayFailure.fullScreenNotSettable(windowNumber: 812))
+    #expect(readOnly.contains("Window 812 is in native fullscreen and does not let the seat take it out"))
+    #expect(readOnly.contains("so it was left where it is"))
+    #expect(readOnly.contains("Tell the person to take that window out of fullscreen, then open it again."))
+
+    let unreadable = SeatErrorMapper.message(for: DisplayFailure.fullScreenStateUnreadable(
+        windowNumber: 812,
+        code        : .attributeUnsupported
+    ))
+    #expect(unreadable.contains("Window 812 did not answer whether it is in native fullscreen (code -25205)"))
+    #expect(unreadable.contains("so the seat could not take it out and left it where it is"))
+    #expect(unreadable.contains("Tell the person to take that window out of fullscreen, then open it again."))
 }

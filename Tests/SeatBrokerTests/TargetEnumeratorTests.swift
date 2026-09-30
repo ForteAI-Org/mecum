@@ -266,3 +266,65 @@ private func row(_ path: String, _ bundleID: String?) -> TargetEnumerator.Instal
     // A menu bar application a person installed is not the system's, and stays listed.
     #expect(!TargetEnumerator.isSystemAgent(path: "/Applications/Raycast.app", info: ["LSUIElement": true]))
 }
+
+// MARK: A window in native fullscreen on a Space that is not on screen
+
+@Test("A fullscreen window on a Space off screen is found through accessibility")
+func aFullScreenWindowOffScreenIsFound() {
+    // The 29/09 run: Safari's only window was fullscreen on its own Space
+    // while the person was on the desktop, so nothing of it was on screen.
+    let body = CGRect(x: 0, y: 0, width: 1_512, height: 982)
+    var askedFor: [Int] = []
+    let windows = TargetEnumerator.windows(
+        of            : 42,
+        onScreen      : [],
+        readFullScreen: { [9: true, 8: false] },
+        readRows      : { numbers in
+            askedFor = numbers
+            return [windowInfo(number: 9, frame: body),
+                    windowInfo(pid: 43, number: 9, frame: body)]
+        }
+    )
+    #expect(askedFor == [9])
+    #expect(windows == [TargetWindow(pid: 42, windowNumber: 9, title: "Project Manager", frame: body)])
+}
+
+@Test("An application with no window on screen and none in fullscreen still has none")
+func noFullScreenWindowIsStillNoWindow() {
+    var rowReads = 0
+    let windows = TargetEnumerator.windows(
+        of            : 42,
+        onScreen      : [],
+        readFullScreen: { [8: false] },
+        readRows      : { _ in
+            rowReads += 1
+            return [windowInfo(number: 8, frame: CGRect(x: 0, y: 0, width: 800, height: 600))]
+        }
+    )
+    #expect(windows.isEmpty)
+    #expect(rowReads == 0)
+
+    // A row with no usable rectangle is no window either.
+    let degenerate = TargetEnumerator.windows(
+        of            : 42,
+        onScreen      : [],
+        readFullScreen: { [9: true] },
+        readRows      : { _ in [windowInfo(number: 9, frame: .zero)] }
+    )
+    #expect(degenerate.isEmpty)
+}
+
+@Test("An application with a window on screen is listed as before and reads no accessibility")
+func anOnScreenApplicationIsUnchanged() {
+    let shown = TargetWindow(pid: 42, windowNumber: 7, title: "w7",
+                             frame: CGRect(x: 0, y: 0, width: 800, height: 600))
+    var reads = 0
+    let windows = TargetEnumerator.windows(
+        of            : 42,
+        onScreen      : [shown],
+        readFullScreen: { reads += 1; return [9: true] },
+        readRows      : { _ in reads += 1; return [] }
+    )
+    #expect(windows == [shown])
+    #expect(reads == 0)
+}

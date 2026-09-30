@@ -52,12 +52,12 @@ struct TargetPlatformTests {
             bundleURL       : electron,
             bundleIdentifier: "com.tinyspeck.slackmacgap"
         )
-        #expect(choice == .embeddedRenderer)
+        #expect(choice == .embeddedRenderer(.framework))
         #expect(choice.platform is ChromiumPlatform)
 
         let cef = try Self.bundle(embedding: ["Chromium Embedded Framework.framework"])
         #expect(TargetPlatform.chosen(bundleURL: cef, bundleIdentifier: "com.example.cef")
-            == .embeddedRenderer)
+            == .embeddedRenderer(.framework))
     }
 
     @Test("a bundle that ships Qt is driven with the Qt recipe, whichever way it ships it")
@@ -75,7 +75,7 @@ struct TargetPlatformTests {
 
         // A Chromium renderer inside a Qt application is still the renderer.
         let both = try Self.bundle(embedding: ["Chromium Embedded Framework.framework", "QtCore.framework"])
-        #expect(TargetPlatform.chosen(bundleURL: both, bundleIdentifier: "com.example.both") == .embeddedRenderer)
+        #expect(TargetPlatform.chosen(bundleURL: both, bundleIdentifier: "com.example.both") == .embeddedRenderer(.framework))
     }
 
     @Test("an application nobody has measured is driven without preparation")
@@ -97,9 +97,68 @@ struct TargetPlatformTests {
 
     @Test("the renderer is the one branch whose clicks are prepared")
     func onlyTheRendererIsPrepared() {
-        let prepared = [TargetPlatform.embeddedRenderer, .qtToolkit, .appleNative, .unmeasured]
+        let prepared = [
+            TargetPlatform.embeddedRenderer(.framework),
+            .embeddedRenderer(.rendererHelper),
+            .qtToolkit,
+            .appleNative,
+            .unmeasured,
+        ]
             .filter { $0.platform is ChromiumPlatform }
-        #expect(prepared == [.embeddedRenderer])
+        #expect(prepared == [.embeddedRenderer(.framework), .embeddedRenderer(.rendererHelper)])
+    }
+
+    @Test("an Electron bundle's renderer helper is evidence of a renderer on its own")
+    func rendererHelperInFrameworksIsChromium() throws {
+        let electron = try Self.bundle(embedding: ["Row Helper (Renderer).app"])
+        let choice = TargetPlatform.chosen(
+            bundleURL       : electron,
+            bundleIdentifier: "com.example.electron"
+        )
+        #expect(choice == .embeddedRenderer(.rendererHelper))
+        #expect(choice.platform is ChromiumPlatform)
+        #expect(choice.reason.contains("renderer helper"))
+    }
+
+    @Test("Chrome's renderer helper inside its own framework is evidence of a renderer")
+    func rendererHelperInsideAFrameworkIsChromium() throws {
+        // Google Chrome ships neither known framework: its helper is the evidence.
+        let flat = try Self.bundle(embedding: ["Row Framework.framework/Helpers/Row Helper (Renderer).app"])
+        #expect(TargetPlatform.chosen(bundleURL: flat, bundleIdentifier: "com.google.Chrome")
+            == .embeddedRenderer(.rendererHelper))
+
+        // The real layout: `Helpers` is a symlink to `Versions/Current/Helpers`.
+        let linked    = try Self.bundle()
+        let framework = linked.appendingPathComponent("Contents/Frameworks/Row Framework.framework")
+        try FileManager.default.createDirectory(
+            at                         : framework.appendingPathComponent("Versions/1.0/Helpers/Row Helper (Renderer).app"),
+            withIntermediateDirectories: true
+        )
+        try FileManager.default.createSymbolicLink(
+            atPath             : framework.appendingPathComponent("Versions/Current").path,
+            withDestinationPath: "1.0"
+        )
+        try FileManager.default.createSymbolicLink(
+            atPath             : framework.appendingPathComponent("Helpers").path,
+            withDestinationPath: "Versions/Current/Helpers"
+        )
+        let choice = TargetPlatform.chosen(
+            bundleURL       : linked,
+            bundleIdentifier: "com.google.Chrome"
+        )
+        #expect(choice == .embeddedRenderer(.rendererHelper))
+        #expect(choice.platform is ChromiumPlatform)
+    }
+
+    @Test("a helper that is not the renderer's is not evidence of a renderer")
+    func otherHelpersAreNotARenderer() throws {
+        let helpers = try Self.bundle(embedding: [
+            "Row Helper.app",
+            "Row Helper (GPU).app",
+            "Row Framework.framework/Helpers/Row Helper (Plugin).app",
+        ])
+        #expect(TargetPlatform.chosen(bundleURL: helpers, bundleIdentifier: "com.example.helpers")
+            == .unmeasured)
     }
 
     @Test("an Apple application that embeds a renderer is that renderer")
@@ -108,6 +167,6 @@ struct TargetPlatformTests {
         // what the measurement is about, whoever shipped the bundle.
         let bundle = try Self.bundle(embedding: ["Electron Framework.framework"])
         #expect(TargetPlatform.chosen(bundleURL: bundle, bundleIdentifier: "com.apple.example")
-            == .embeddedRenderer)
+            == .embeddedRenderer(.framework))
     }
 }

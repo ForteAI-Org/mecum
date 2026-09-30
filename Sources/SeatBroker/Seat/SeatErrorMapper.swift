@@ -301,14 +301,20 @@ enum SeatErrorMapper {
     private static func sentence(_ failure: DisplayFailure) -> String {
         switch failure {
         case .fullScreenStateUnreadable(let windowNumber, let code):
-            "The fullscreen state of window \(windowNumber) is unreadable (code \(code.rawValue))."
+            "Window \(windowNumber) did not answer whether it is in native fullscreen "
+                + "(code \(code.rawValue)), so the seat could not take it out and left it where it is. "
+                + "Tell the person to take that window out of fullscreen, then open it again."
         case .fullScreenNotSettable(let windowNumber):
-            "Window \(windowNumber) does not allow its fullscreen state to be changed."
+            "Window \(windowNumber) is in native fullscreen and does not let the seat take it out, "
+                + "so it was left where it is. "
+                + "Tell the person to take that window out of fullscreen, then open it again."
         case .fullScreenTransitionNotObserved(let windowNumber, let wanted, let lastFrame):
             "Window \(windowNumber) did not finish \(wanted ? "entering" : "leaving") fullscreen; "
                 + "last frame: \(lastFrame.map(rectangle) ?? "unavailable")."
         case .fullScreenSpaceStillOnScreen(let windowNumber):
-            "Window \(windowNumber) is still in the visible fullscreen Space; its transfer was deferred."
+            "Window \(windowNumber) is in native fullscreen on the Space the person is looking at, and "
+                + "taking it would animate their display, so it was left where it is. "
+                + "Tell the person to go to their desktop or to another Space, then open it again."
         case .windowOwnerVanished(let windowNumber, let processID):
             "The application owning window \(windowNumber) (PID \(processID)) is no longer running."
         case .primitiveUnavailable(let key):

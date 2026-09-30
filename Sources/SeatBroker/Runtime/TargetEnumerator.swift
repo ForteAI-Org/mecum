@@ -188,9 +188,90 @@ enum TargetEnumerator {
         }
     }
 
-    /// The windows a process currently has on screen.
+    /// The windows a process currently has on screen, or, when it has none,
+    /// the ones it keeps in native fullscreen on a Space that is not on screen.
+    @MainActor
     static func windows(of pid: pid_t, minimumSize: CGFloat = 120) -> [TargetWindow] {
-        onScreenWindows(minimumSize: minimumSize)[pid] ?? []
+        windows(
+            of            : pid,
+            onScreen      : onScreenWindows(minimumSize: minimumSize)[pid] ?? [],
+            readFullScreen: { fullScreenReadings(of: pid) },
+            readRows      : { numbers in
+                numbers.flatMap { number in
+                    CGWindowID(exactly: number).flatMap {
+                        CGWindowListCopyWindowInfo(.optionIncludingWindow, $0) as? [[String: Any]]
+                    } ?? []
+                }
+            }
+        )
+    }
+
+    /// The windows `launch` hands on for one process: its on-screen ones, and
+    /// when it has none, every window accessibility says is in native
+    /// fullscreen, as the window server lists it.
+    ///
+    /// A fullscreen window whose Space is not the one on screen is not on
+    /// screen either, so the on-screen list leaves it out: Safari with its only
+    /// window fullscreen on its own Space, measured on 29/09/2026, read as
+    /// running with no window, was asked to reopen one and was refused 20 s
+    /// later for a window it had all along. The evidence has to be positive:
+    /// `AXFullScreen` true on one of the application's accessibility windows.
+    /// False or unreadable is no window: a row the server lists and nothing
+    /// shows is not evidence of a window the seat can take. The rectangle and
+    /// title come from the server's row of that window number and owner, and
+    /// the adoption attests its identity anyway.
+    ///
+    /// The readings are closures so that the cost stays where it belongs: an
+    /// application with a window on screen reads no accessibility at all, and
+    /// one with no fullscreen window reads no server row.
+    static func windows(
+        of pid        : pid_t,
+        onScreen      : [TargetWindow],
+        readFullScreen: () -> [Int: Bool],
+        readRows      : ([Int]) -> [[String: Any]]
+    ) -> [TargetWindow] {
+        guard onScreen.isEmpty else { return onScreen }
+        let fullScreen = readFullScreen().filter(\.value).keys.sorted()
+        guard !fullScreen.isEmpty else { return [] }
+        return readRows(fullScreen).compactMap { info in
+            guard info[kCGWindowOwnerPID as String] as? pid_t == pid,
+                  let number = info[kCGWindowNumber as String] as? Int,
+                  fullScreen.contains(number),
+                  let boundsDict = info[kCGWindowBounds as String] as? NSDictionary,
+                  let bounds = CGRect(dictionaryRepresentation: boundsDict),
+                  !bounds.isEmpty
+            else { return nil }
+            return TargetWindow(
+                pid         : pid,
+                windowNumber: number,
+                title       : info[kCGWindowName as String] as? String ?? "",
+                frame       : bounds
+            )
+        }
+    }
+
+    /// `AXFullScreen` for every accessibility window of `pid` that resolves to
+    /// a Window ID, leaving out the ones that do not answer it.
+    ///
+    /// `AXWindows` answers an empty list while the only window sits in a
+    /// fullscreen Space off screen, measured by the kit on 26A428, so the
+    /// application's focused and main windows are read as well, which are the
+    /// same two routes `WindowRelocator` resolves such a window through.
+    @MainActor
+    private static func fullScreenReadings(of pid: pid_t) -> [Int: Bool] {
+        let application = AXUIElementCreateApplication(pid)
+        let listed      = attribute(application, kAXWindowsAttribute) as? [AXUIElement] ?? []
+        let named       = [kAXFocusedWindowAttribute, kAXMainWindowAttribute].compactMap {
+            windowElement(attribute(application, $0))
+        }
+        var readings: [Int: Bool] = [:]
+        for element in listed + named {
+            guard let number = WindowRelocator.windowNumber(of: element),
+                  let isFullScreen = attribute(element, "AXFullScreen") as? NSNumber
+            else { continue }
+            readings[number] = isFullScreen.boolValue
+        }
+        return readings
     }
 
     // MARK: Which window of an application is the one to work in

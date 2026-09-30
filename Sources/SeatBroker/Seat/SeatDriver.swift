@@ -36,16 +36,31 @@ final class SeatDriver {
 
     private let host: SeatHost
 
+    /// The host takes a window in native fullscreen: it leaves fullscreen with
+    /// no activation and no focus taken, then moves like any other window.
+    ///
+    /// What that costs, as `SeatHostConfiguration` measured it: 36 to 100 ms
+    /// of visible change once the window's Space is off screen, and an
+    /// accessibility read per candidate per pass of the new-window watch. A
+    /// window on the Space the person is looking at is refused rather than
+    /// paying the 437 to 875 ms of display animation, and so is one whose
+    /// `AXFullScreen` is unreadable or read only. With the transfer off, Safari
+    /// fullscreen on its own Space was a window no worker could open.
+    ///
+    /// The release does not put it back into fullscreen:
+    /// `restoresFullScreenOnRelease` stays off because re-entering takes the
+    /// focus every time, measured, so the window comes home windowed.
     init(display: SeatDisplay = .standard) {
         self.display = display
         host = SeatHost(configuration: SeatHostConfiguration(
-            display          : VirtualDisplayConfiguration(
+            display                   : VirtualDisplayConfiguration(
                 pixelWidth : UInt32(display.pixelWidth),
                 pixelHeight: UInt32(display.pixelHeight),
                 refreshRate: display.refreshRate == 120 ? .high : .standard
             ),
-            followsNewWindows: true,
-            restoresUserFocus: true
+            followsNewWindows         : true,
+            restoresUserFocus         : true,
+            transfersFullScreenWindows: true
         ))
     }
     private var seat: AgentSeat?
