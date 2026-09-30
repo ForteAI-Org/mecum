@@ -4228,6 +4228,11 @@ public final class AgentSeat {
     /// Restore only the attempted PID/Window ID on unchanged physical topology.
     /// Missing geometry is unknown, never evidence that a live window vanished.
     /// Cleanup ignores task cancellation and needs two matching original frames.
+    ///
+    /// A missing reading the window server confirms as a destruction is the
+    /// one exception: that window is owed no return, so it answers `vanished`.
+    /// Measured on 30/09/2026 with Photoshop, a Save panel cancelled while it
+    /// was being adopted answered `refused` here and failed the whole seat.
     private func restorePendingAdoption(
         _ window: AdoptedWindow,
         until limit: UInt64? = nil
@@ -4261,6 +4266,12 @@ public final class AgentSeat {
                     do { try restoreOriginalGeometry(of: window) }
                     catch { writeError = error }
                 }
+            } else if sensing.windowIsDestroyed(window.reference) {
+                Self.log.info("""
+                    the window server confirmed window \(window.id, privacy: .public) was destroyed \
+                    before its adoption was rolled back: it is owed no return
+                    """)
+                return (.vanished, writeError)
             } else { previousMatched = false }
             await EventLoopWait.step(Self.boundedPause(.milliseconds(100), until: limit))
             guard Self.mayContinue(until: limit) else { return nil }

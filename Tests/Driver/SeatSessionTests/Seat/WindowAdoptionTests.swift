@@ -161,6 +161,66 @@ struct WindowAdoptionTests {
         #expect(sensing.geometry?.frame == original.frame)
     }
 
+    /// A seat holding one window, and a second window of the application that
+    /// is gone before its adoption can confirm it: closed as the move lands, or,
+    /// born in the seat, closed before it is ever read. `destroyed` says whether
+    /// the window server confirms the destruction or only reads nothing.
+    private static func adoptionOfAClosedWindow(
+        takenInPlace: Bool,
+        destroyed   : Bool
+    ) async throws -> (seat: AgentSeat, sender: FakeSender, held: AdoptedWindow, before: SeatState) {
+        let sensing = FakeSensing()
+        let placing = FakePlacing()
+        let sender  = FakeSender()
+        let (seat, windows) = try await MultiWindowTests.seat(sensing: sensing, placing: placing, sender: sender)
+        let before = seat.state
+        let panel  = MultiWindowTests.reference(MultiWindowTests.secondWindowNumber)
+        let close  = {
+            sensing.additionalWindows[panel.windowNumber] = nil
+            if destroyed { sensing.destroyed.insert(panel.windowNumber) }
+            else { sensing.orderedOut.insert(panel.windowNumber) }
+        }
+        if takenInPlace { close() } else {
+            sensing.additionalWindows[panel.windowNumber] = panel
+            placing.onMove = { _ in close() }
+        }
+        await #expect(throws: DisplayFailure.self) {
+            try await seat.integrateDetectedWindow(panel, platform: AppKitPlatform(), takenInPlace: takenInPlace)
+        }
+        return (seat, sender, windows[0], before)
+    }
+
+    @Test("a window destroyed during its adoption leaves the seat as it was, and admits the next Command",
+          arguments: [false, true])
+    func destroyedDuringAdoption(takenInPlace: Bool) async throws {
+        let (seat, sender, held, before) = try await Self.adoptionOfAClosedWindow(
+            takenInPlace: takenInPlace,
+            destroyed   : true
+        )
+        #expect(seat.state == before)
+        #expect(seat.lastAdoptionFailure?.restoration == .vanished)
+        #expect(!seat.hasPendingWindowRestorations)
+        #expect(seat.adoptedWindows.map(\.id) == [held.id])
+
+        let turn    = try await seat.acquire()
+        let receipt = try await seat.send(
+            MultiWindowTests.click,
+            observation: try await observedReference(seat),
+            turn       : turn
+        )
+        #expect(sender.sent.count == 1)
+        try seat.confirm(receipt, .unknown)
+        try seat.release(turn)
+    }
+
+    @Test("a window that only stops reading during its adoption still fails the seat, as a refused rollback")
+    func withdrawnDuringAdoption() async throws {
+        let (seat, _, _, _) = try await Self.adoptionOfAClosedWindow(takenInPlace: false, destroyed: false)
+        #expect(seat.lastAdoptionFailure?.restoration == .refused)
+        #expect(seat.state == .failed)
+        #expect(seat.hasPendingWindowRestorations)
+    }
+
     @Test("teardown waits for an in-flight adoption rollback and prevents late success")
     func teardownDuringAdoption() async throws {
         let sensing = FakeSensing()

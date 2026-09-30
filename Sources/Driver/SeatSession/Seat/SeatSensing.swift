@@ -149,6 +149,12 @@ nonisolated public protocol SeatSensing: Sendable {
     /// Measured with DaVinci Resolve's Project Manager, hidden when a project
     /// opens, which that list no longer carries.
     func windowIsOrderedOut(_ window: WindowReference) -> Bool
+
+    /// True only when the window server, asked for this Window ID by name,
+    /// answers no row of this process for it: the window is destroyed and no
+    /// wait brings it back. An ordered-out or withdrawn window still has its
+    /// row, and a reading that failed is `false`, never a destruction.
+    func windowIsDestroyed(_ window: WindowReference) -> Bool
 }
 
 extension SeatSensing {
@@ -170,4 +176,5 @@ extension SeatSensing {
     public func visibleWindowsAreVirtual(ownedBy processID: Int32) -> Bool { false }
     public func windowSurfaces(ownedBy processIDs: Set<Int32>) -> [WindowSurface]? { nil }
     public func windowIsOrderedOut(_ window: WindowReference) -> Bool { false }
+    public func windowIsDestroyed(_ window: WindowReference) -> Bool { false }
 }

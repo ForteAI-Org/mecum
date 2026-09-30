@@ -167,6 +167,10 @@ final class FakeSensing: SeatSensing, @unchecked Sendable {
     var orderedOut: Set<Int> = []
     func windowIsOrderedOut(_ window: WindowReference) -> Bool { orderedOut.contains(window.windowNumber) }
 
+    /// The Window IDs the window server, asked by name, answers no row for.
+    var destroyed: Set<Int> = []
+    func windowIsDestroyed(_ window: WindowReference) -> Bool { destroyed.contains(window.windowNumber) }
+
     /// Three-valued, exactly as the live witness: nil is a dead process.
     var targetIsActive: Bool? = false
 

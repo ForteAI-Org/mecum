@@ -98,6 +98,12 @@ nonisolated final class SystemSeatSensing: SeatSensing, @unchecked Sendable {
         return WindowServerProbe.identity(of: window.windowNumber) == identity
     }
 
+    /// The named request the surface reader's destruction proof comes from:
+    /// an empty answer is destroyed, a failed one is not.
+    func windowIsDestroyed(_ window: WindowReference) -> Bool {
+        WindowServerProbe.surfaces(matching: [window.processID: [window.windowNumber]])?.isEmpty == true
+    }
+
     func windowGeometryObservation(
         of window: WindowReference
     ) -> WindowGeometryObservation? {
