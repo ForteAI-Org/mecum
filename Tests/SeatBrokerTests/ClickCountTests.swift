@@ -28,6 +28,7 @@ private func oneElementScene() -> SceneObservation {
         #expect(prompt.contains("\"count\": 2"))
         #expect(prompt.contains("\"key:return\""))
         #expect(prompt.lowercased().contains("open or choose"))
+        #expect(prompt.contains("A file panel that just opened has no field focused yet, so first click"))
         #expect(prompt.contains("Never send again the step the previous verified history line already names"))
     }
 }

@@ -49,6 +49,8 @@ struct WorkerAgentHostTests {
     A file cannot be pasted: attach it with the app's own button and file panel. Command-Q and Command-W are refused.
     A file an app should open or import comes from that app's own file panel (its Open or Import button), never
     from Finder, even when the request says "from the Finder": that panel is the Finder inside the app.
+    A file panel that just opened has no field focused yet, so first click its file name field (a Save panel)
+    or its file list (an Open panel), then press_key /.
     In a file panel, with the file's folder known, press_key / (never Command-Shift-G, which a file panel drops):
     Go to Folder opens with / in its field; type_text the rest of the path with replace false, then press return.
     With only its name, type the name into the panel's search field. Do not browse folder by folder.

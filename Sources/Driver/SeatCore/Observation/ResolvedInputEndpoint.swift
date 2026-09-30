@@ -50,9 +50,10 @@ nonisolated public enum InputEndpointEvidence: Sendable, Equatable {
     /// inert, windowless leaves may have no matching Window ID.
     case focusedWindowWithoutFocusedControl
 
-    /// AX names the selected modal surface but no focused control. A bounded,
-    /// complete scan of that exact surface found one focused descendant whose
-    /// WindowServer identity and geometry were attested as the recipient.
+    /// AX names the selected modal surface but no focused control, or only the
+    /// surface's own window node. A bounded, complete scan of that exact
+    /// surface found one focused descendant whose WindowServer identity and
+    /// geometry were attested as the recipient.
     /// This is deliberately distinct from a merely remote modal child: the
     /// positive AX focused fact, not the modal relation alone, names the key
     /// destination.

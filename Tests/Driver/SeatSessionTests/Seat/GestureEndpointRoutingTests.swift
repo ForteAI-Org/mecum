@@ -59,6 +59,16 @@ struct GestureEndpointRoutingTests {
         /// What the leaf reading answers once a modal's discovery refused.
         var leafAnswer: Result<ResolvedInputEndpoint, InputEndpointRefusal>?
 
+        /// What a modal's remote content reading answers for keys, and how
+        /// many times it was asked.
+        var remoteContentKeyboardAnswer: Result<ResolvedInputEndpoint, InputEndpointRefusal>?
+        var remoteContentKeyboardResolutions = 0
+
+        /// What a modal's focused content reading answers for keys, and how
+        /// many times it was asked.
+        var focusedContentKeyboardAnswer: Result<ResolvedInputEndpoint, InputEndpointRefusal>?
+        var focusedContentKeyboardResolutions = 0
+
         /// What the window server answers for a Window ID at the boundary
         /// before the driver builds.
         var identities: [Int: WindowIdentity] = [:]
@@ -97,6 +107,16 @@ struct GestureEndpointRoutingTests {
                 },
                 leafSurface: { [self] _, _, chain, _ in
                     leafAnswer ?? .failure(.subtreeUnreadable(surface: chain.surface))
+                },
+                remoteContentKeyboardContext: { [self] _, chain, _ in
+                    remoteContentKeyboardResolutions += 1
+                    return remoteContentKeyboardAnswer
+                        ?? .failure(.subtreeUnreadable(surface: chain.surface))
+                },
+                focusedContentKeyboardContext: { [self] _, chain, _ in
+                    focusedContentKeyboardResolutions += 1
+                    return focusedContentKeyboardAnswer
+                        ?? .failure(.subtreeUnreadable(surface: chain.surface))
                 }
             )
         }

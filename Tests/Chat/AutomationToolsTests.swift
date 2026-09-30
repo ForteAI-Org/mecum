@@ -109,6 +109,7 @@ struct AutomationToolsTests {
         #expect(steps.compactMap { $0["properties"]["operation"]["const"].string }
             == ["act", "select", "type_text", "press_key", "scroll", "drag", "context_menu"])
         #expect(!AutomationTools.instructions.contains("Typing, scrolling, keyboard shortcuts"))
+        #expect(AutomationTools.instructions.contains("A file panel that just opened has no field focused yet"))
     }
 
     @Test

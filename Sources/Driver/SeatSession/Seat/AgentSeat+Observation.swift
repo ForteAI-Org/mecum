@@ -126,6 +126,22 @@ struct EndpointDiscovery {
         .failure(.subtreeUnreadable(surface: chain.surface))
     }
 
+    /// A modal whose focus cannot be read takes keys in the one remote content
+    /// window of another process its descendants name.
+    var remoteContentKeyboardContext: (
+        Int32, DialogEndpointResolver<AXUIElement>.SurfaceChain, UInt64
+    ) -> Result<ResolvedInputEndpoint, InputEndpointRefusal> = { _, chain, _ in
+        .failure(.subtreeUnreadable(surface: chain.surface))
+    }
+
+    /// A modal whose focus reads as its own window node takes keys in its one
+    /// foreign content window when a descendant there is focused.
+    var focusedContentKeyboardContext: (
+        Int32, DialogEndpointResolver<AXUIElement>.SurfaceChain, UInt64
+    ) -> Result<ResolvedInputEndpoint, InputEndpointRefusal> = { _, chain, _ in
+        .failure(.subtreeUnreadable(surface: chain.surface))
+    }
+
     /// The readings the shipping seat takes.
     static let shipping = EndpointDiscovery(
         pointer: { processID, point, chain, generation in
@@ -162,6 +178,16 @@ struct EndpointDiscovery {
             DialogEndpointResolver<AXUIElement>
                 .accessibility(assignedProcessID: processID)
                 .leafSurfaceEndpoint(kind: kind, within: chain, selectionGeneration: generation)
+        },
+        remoteContentKeyboardContext: { processID, chain, generation in
+            DialogEndpointResolver<AXUIElement>
+                .accessibility(assignedProcessID: processID)
+                .remoteContentKeyboardContext(within: chain, selectionGeneration: generation)
+        },
+        focusedContentKeyboardContext: { processID, chain, generation in
+            DialogEndpointResolver<AXUIElement>
+                .accessibility(assignedProcessID: processID)
+                .focusedContentKeyboardContext(within: chain, selectionGeneration: generation)
         }
     )
 }
@@ -656,6 +682,23 @@ extension AgentSeat {
                 chain,
                 observation.selectionGeneration
             )
+            if hasAttestedModalRelation,
+               let remote = remoteContentKeyboardContext(
+                   after     : outcome,
+                   processID : instance.processID,
+                   chain     : chain,
+                   generation: observation.selectionGeneration
+               ) {
+                let why = remote.evidence == .focusedSurfaceDescendant
+                    ? "has a focused descendant in its remote content window"
+                    : "answers no readable focus and names one remote content window"
+                AgentSeat.observationLog.info("""
+                    modal window \(sheet.windowNumber, privacy: .public) \(why, privacy: .public), \
+                    \(remote.identity.windowNumber, privacy: .public), so its keys go there: the \
+                    discovery had answered \(String(describing: outcome), privacy: .public)
+                    """)
+                outcome = .success(remote)
+            }
             if case .failure(.subtreeUnreadable) = outcome {
                 outcome = hasAttestedModalRelation
                     ? endpoints.focusedDescendantKeyboardContext(
@@ -721,6 +764,41 @@ extension AgentSeat {
         return surface
     }
 
+    /// The remote content a modal surface's keys go to instead of what the
+    /// keyboard discovery answered, `nil` to keep that answer.
+    ///
+    /// After a refusal for an unreadable subtree it asks
+    /// `remoteContentKeyboardContext`, which re-reads the focus to tell an
+    /// unreadable one from the other causes. After an answer that is the surface
+    /// itself, which is what a focus on its own window node resolves to, it asks
+    /// `focusedContentKeyboardContext`: a fresh panel keeps the surface, where
+    /// Escape was measured to work, and a panel whose field was clicked sends
+    /// the keys to that field's window. Only a window of the qualified panel
+    /// service is taken, the one case the remote keyboard recipe and its host
+    /// priming were measured on; any other keeps the discovery's answer.
+    /// Resolution and boundary both come through here, so they cannot disagree.
+    private func remoteContentKeyboardContext(
+        after reading: Result<ResolvedInputEndpoint, InputEndpointRefusal>,
+        processID    : Int32,
+        chain        : DialogEndpointResolver<AXUIElement>.SurfaceChain,
+        generation   : UInt64
+    ) -> ResolvedInputEndpoint? {
+        let route: Result<ResolvedInputEndpoint, InputEndpointRefusal>
+        switch reading {
+            case .failure(.subtreeUnreadable):
+                route = endpoints.remoteContentKeyboardContext(processID, chain, generation)
+            case .success(let found) where found.relation == .logicalSurface:
+                route = endpoints.focusedContentKeyboardContext(processID, chain, generation)
+            case .success, .failure:
+                return nil
+        }
+        guard case .success(let remote) = route,
+              remote.identity.process != remote.logicalSurface.process,
+              endpoints.qualifiedAppKitPanelService(remote.identity)
+        else { return nil }
+        return remote
+    }
+
     /// Why a resolved endpoint may no longer be used, read against the world as
     /// it is at the boundary before the driver builds.
     ///
@@ -766,6 +844,17 @@ extension AgentSeat {
             // A newly exposed direct focused control can replace the subtree
             // proof, but it must still name the same attested recipient.
             var reading = endpoints.keyboardContext(instance.processID, chain, generation)
+            // The resolution's own routes for a modal's unreadable or window-node focus.
+            if selectionKit.namedModalHost(of: endpoint.logicalSurface) != nil
+                   || selectionKit.isApplicationModal(endpoint.logicalSurface),
+               let remote = remoteContentKeyboardContext(
+                   after     : reading,
+                   processID : instance.processID,
+                   chain     : chain,
+                   generation: generation
+               ) {
+                reading = .success(remote)
+            }
             if case .failure(.subtreeUnreadable) = reading {
                 reading = endpoints.focusedDescendantKeyboardContext(
                     instance.processID, chain, generation

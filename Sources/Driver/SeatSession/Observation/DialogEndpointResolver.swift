@@ -319,46 +319,7 @@ nonisolated package struct DialogEndpointResolver<Node> {
               focusedWindow(window, matches: chain)
         else { return .failure(refusal) }
 
-        var pending: [(Node, Int)] = [(window, 0)]
-        var visited = 0
-        var focusedCandidate: (windowNumber: Int, accessibilityProcessID: Int32)?
-
-        while let (node, depth) = pending.popLast() {
-            guard now() < deadline,
-                  depth <= 64,
-                  visited < 1_024,
-                  let accessibilityProcessID = nodeProcess(node),
-                  accessibilityProcessID > 0
-            else { return .failure(refusal) }
-            visited += 1
-
-            switch descendantFocus(node) {
-            case .focused:
-                guard let windowNumber = nodeWindow(node) else { return .failure(refusal) }
-                if let focusedCandidate, focusedCandidate.windowNumber != windowNumber {
-                    return .failure(refusal)
-                }
-                focusedCandidate = (windowNumber, accessibilityProcessID)
-
-            case .unfocused, .notApplicable:
-                break
-
-            case .unreadable:
-                return .failure(refusal)
-            }
-
-            switch children(node) {
-            case .leaf:
-                break
-            case .unreadable:
-                return .failure(refusal)
-            case .children(let values):
-                guard values.count <= 1_024 - visited - pending.count else {
-                    return .failure(refusal)
-                }
-                pending.append(contentsOf: values.map { ($0, depth + 1) })
-            }
-        }
+        let focusedCandidate = focusedDescendantWindow(under: window, includingRoot: true, before: deadline)
 
         guard now() < deadline,
               let focusedCandidate,
@@ -474,6 +435,95 @@ nonisolated package struct DialogEndpointResolver<Node> {
             selectionGeneration    : selectionGeneration,
             focusedNodeWindowNumber: nil,
             evidence               : .leafSurface
+        )
+    }
+
+    /// The one remote content window of a modal surface, for keys, when the
+    /// application's focus cannot be read at all.
+    ///
+    /// An unreadable focus used to refuse the keys outright. On a panel an out
+    /// of process service draws, the first responder may be the service's, and
+    /// accessibility does not report it, as on DaVinci Resolve's panels. So when
+    /// the surface's descendants name exactly one window of another process
+    /// drawn over the whole surface, that window is the recipient, attested by
+    /// `endpoint` like any other; see `foreignContentWindow`. The caller asks
+    /// this only of an attested modal surface.
+    ///
+    /// A focus on the surface's own window node is not answered here, and keeps
+    /// the surface as its recipient. Measured on 30/09/2026 with Photoshop's
+    /// Save As panel opened in the background, focus on the panel's window
+    /// node: `/` to the service's window did nothing, 2 of 2 through this route
+    /// and 3 of 3 by hand with and without the host primed, since no control of
+    /// the panel had the focus; Escape to the panel window itself closed it. A
+    /// click on the name field focused it, and `/` then opened Go to Folder, 2
+    /// of 2. An absent focus is not answered here either: that is
+    /// `focusedDescendantKeyboardContext`, which asks for a positive focused
+    /// fact.
+    ///
+    /// The surface's node is its `AXWindows` entry, looked up by Window ID as in
+    /// `leafSurfaceEndpoint`: the application's focused window lags behind the
+    /// panel in the same application.
+    package func remoteContentKeyboardContext(
+        within chain       : SurfaceChain,
+        selectionGeneration: UInt64
+    ) -> Result<ResolvedInputEndpoint, InputEndpointRefusal> {
+
+        let refusal = InputEndpointRefusal.subtreeUnreadable(surface: chain.surface)
+        guard case .unreadable = focusedControl() else { return .failure(refusal) }
+        guard let window = windowNode(chain.surface.windowNumber),
+              focusedWindow(window, matches: chain)
+        else { return .failure(.identityUnattested(windowNumber: chain.surface.windowNumber)) }
+        guard let remote = foreignContentWindow(of: window, within: chain) else {
+            return .failure(refusal)
+        }
+        return endpoint(
+            kind                   : .keyboardContext,
+            windowNumber           : remote,
+            accessibilityProcessID : chain.surface.processID,
+            within                 : chain,
+            selectionGeneration    : selectionGeneration,
+            focusedNodeWindowNumber: remote,
+            evidence               : .remoteContentOfSurface
+        )
+    }
+
+    /// The one foreign content window of a modal surface, for keys, when the
+    /// application's focus reads as the surface's own window node and a
+    /// descendant in that content window is focused.
+    ///
+    /// Measured on 30/09/2026 with Photoshop's Save As panel: after a click on
+    /// the name field, `AXFocused` was true on the field, which answers the
+    /// panel service's window, and on the panel's window node, while the
+    /// application's focused element stayed the window node. `/` sent to the
+    /// service's window then opened Go to Folder, 2 of 2. On a fresh panel only
+    /// the window node is focused, and the surface stays the recipient, where
+    /// Escape closed the panel. So the window node is no candidate, the focused
+    /// descendants have to name one window, and that window has to be the one
+    /// `foreignContentWindow` answers; anything else keeps the surface.
+    package func focusedContentKeyboardContext(
+        within chain       : SurfaceChain,
+        selectionGeneration: UInt64
+    ) -> Result<ResolvedInputEndpoint, InputEndpointRefusal> where Node: Equatable {
+
+        let refusal = InputEndpointRefusal.subtreeUnreadable(surface: chain.surface)
+        let (deadline, overflow) = now().addingReportingOverflow(300_000_000)
+        guard !overflow else { return .failure(refusal) }
+        guard let window = windowNode(chain.surface.windowNumber),
+              focusedWindow(window, matches: chain)
+        else { return .failure(.identityUnattested(windowNumber: chain.surface.windowNumber)) }
+        guard case .node(let focused) = focusedControl(), focused == window,
+              let candidate = focusedDescendantWindow(under: window, includingRoot: false, before: deadline),
+              let content = foreignContentWindow(of: window, within: chain),
+              candidate.windowNumber == content
+        else { return .failure(refusal) }
+        return endpoint(
+            kind                   : .keyboardContext,
+            windowNumber           : content,
+            accessibilityProcessID : candidate.accessibilityProcessID,
+            within                 : chain,
+            selectionGeneration    : selectionGeneration,
+            focusedNodeWindowNumber: content,
+            evidence               : .focusedSurfaceDescendant
         )
     }
 
@@ -617,6 +667,88 @@ nonisolated package struct DialogEndpointResolver<Node> {
     /// accessibility evidence of where the field's events have to go.
     /// `endpoint` still attests that window's identity and its containment.
     private func remoteContentWindow(of surfaceNode: Node, within chain: SurfaceChain) -> Int? {
+        namedWindows(under: surfaceNode, within: chain, atMost: 1)?.first
+    }
+
+    /// The one window of another process the surface's descendants name, when
+    /// it is drawn over the whole surface: the keyboard route's recipient.
+    ///
+    /// Measured on 30/09/2026 with Photoshop's Save As panel: its subtree named
+    /// the panel service's window, with the panel's exact frame, and also a
+    /// window of Photoshop's own, an accessory view a third of its height. The
+    /// second is the application's and is never the remote content, so only a
+    /// window whose owner is another process counts, and it has to be one. A
+    /// named window whose identity cannot be read refuses, since nothing then
+    /// says whose it is.
+    private func foreignContentWindow(of surfaceNode: Node, within chain: SurfaceChain) -> Int? {
+        guard let named = namedWindows(under: surfaceNode, within: chain, atMost: .max) else { return nil }
+        var foreign: [Int] = []
+        for number in named.sorted() {
+            guard let owner = identity(number) else { return nil }
+            if owner.process != chain.surface.process { foreign.append(number) }
+        }
+        guard foreign.count == 1, let only = foreign.first,
+              geometry(only, chain.surfaceFrame)?.window.frame == chain.surfaceFrame
+        else { return nil }
+        return only
+    }
+
+    /// The one window the focused nodes under `root` name, with the
+    /// accessibility PID of the last of them, nil when none is focused, they
+    /// name two windows, a focused node names none, or the subtree cannot be
+    /// read whole before `deadline`. Every node must name a live process.
+    private func focusedDescendantWindow(
+        under root     : Node,
+        includingRoot  : Bool,
+        before deadline: UInt64
+    ) -> (windowNumber: Int, accessibilityProcessID: Int32)? {
+
+        var pending: [(Node, Int)] = [(root, 0)]
+        var visited = 0
+        var candidate: (windowNumber: Int, accessibilityProcessID: Int32)?
+
+        while let (node, depth) = pending.popLast() {
+            guard now() < deadline,
+                  depth <= 64,
+                  visited < 1_024,
+                  let accessibilityProcessID = nodeProcess(node),
+                  accessibilityProcessID > 0
+            else { return nil }
+            visited += 1
+
+            switch includingRoot || depth > 0 ? descendantFocus(node) : .notApplicable {
+            case .focused:
+                guard let windowNumber = nodeWindow(node) else { return nil }
+                if let candidate, candidate.windowNumber != windowNumber { return nil }
+                candidate = (windowNumber, accessibilityProcessID)
+
+            case .unfocused, .notApplicable:
+                break
+
+            case .unreadable:
+                return nil
+            }
+
+            switch children(node) {
+            case .leaf:
+                break
+            case .unreadable:
+                return nil
+            case .children(let values):
+                guard values.count <= 1_024 - visited - pending.count else { return nil }
+                pending.append(contentsOf: values.map { ($0, depth + 1) })
+            }
+        }
+        return candidate
+    }
+
+    /// Every window other than the surface that the surface's descendants
+    /// name, nil when they name more than `limit` or cannot be read whole.
+    private func namedWindows(
+        under surfaceNode: Node,
+        within chain     : SurfaceChain,
+        atMost limit     : Int
+    ) -> Set<Int>? {
         let (deadline, overflow) = now().addingReportingOverflow(300_000_000)
         guard !overflow else { return nil }
         var pending: [(Node, Int)] = [(surfaceNode, 0)]
@@ -627,7 +759,7 @@ nonisolated package struct DialogEndpointResolver<Node> {
             visited += 1
             if let window = nodeWindow(node), window != chain.surface.windowNumber {
                 named.insert(window)
-                guard named.count == 1 else { return nil }
+                guard named.count <= limit else { return nil }
             }
             switch children(node) {
             case .leaf: break
@@ -638,7 +770,7 @@ nonisolated package struct DialogEndpointResolver<Node> {
             }
         }
         guard now() < deadline else { return nil }
-        return named.first
+        return named
     }
 
     /// The bounded descent: from the node the hit test answered, into the
