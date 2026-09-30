@@ -252,19 +252,24 @@ public final class BrokeredAutomationSession: AutomationSessionOperating {
     }
 
     /// `apps` as the worker reads them, in their order, each one's folder added only where two
-    /// of them share a name, since the name alone would not say which is which.
-    static func candidates(_ apps: [TargetApp]) -> [ApplicationCandidate] {
+    /// of them share a name, since the name alone would not say which is which. The application
+    /// whose bundle ID is `defaultBrowser` is marked as the default browser.
+    static func candidates(
+        _ apps        : [TargetApp],
+        defaultBrowser: String? = WebBrowsers.defaultBundleID()
+    ) -> [ApplicationCandidate] {
         let shared = Set(Dictionary(grouping: apps, by: \.name).filter { $0.value.count > 1 }.keys)
         return apps.map { app in
             let folder = app.bundleURL.map {
                 ($0.deletingLastPathComponent().path as NSString).abbreviatingWithTildeInPath
             }
             return ApplicationCandidate(
-                name     : app.name,
-                bundleID : app.bundleID,
-                version  : app.version,
-                isRunning: app.isRunning,
-                location : shared.contains(app.name) ? folder : nil
+                name            : app.name,
+                bundleID        : app.bundleID,
+                version         : app.version,
+                isRunning       : app.isRunning,
+                location        : shared.contains(app.name) ? folder : nil,
+                isDefaultBrowser: !app.bundleID.isEmpty && app.bundleID == defaultBrowser
             )
         }
     }

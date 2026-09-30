@@ -1037,6 +1037,15 @@ final class SeatDriver {
     /// Every adoption gets its seat here, which is why the rule lives here: a
     /// warm session from the queue and a session reopening an application go
     /// through the same line.
+    /// Brings the host and the seat up as the next `adopt` would, and adopts nothing, so an open
+    /// whose own first step has an effect (a window it opens) takes it only once the seat is ready.
+    /// A seat holding a window is up already and is left alone: remaking a failed one here would
+    /// take that window home outside the release that has to account for it, so `adopt` does it.
+    func prepareSeat() async throws {
+        guard window == nil else { return }
+        _ = try await liveSeat()
+    }
+
     private func liveSeat() async throws -> AgentSeat {
         if let seat {
             guard seat.state == .failed else { return seat }

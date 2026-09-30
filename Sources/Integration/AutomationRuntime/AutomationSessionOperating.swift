@@ -39,14 +39,16 @@ public extension AutomationSessionOperating {
     /// Running regular applications only, since that is all `RunningApplicationLookup` opens. A query
     /// keeps the ones whose name or bundle ID contains it, ignoring case.
     func applications(matching query: String?) async throws -> [ApplicationCandidate] {
-        let wanted = query?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let wanted  = query?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let browser = WebBrowsers.defaultBundleID()
         return NSWorkspace.shared.runningApplications
             .filter { $0.activationPolicy == .regular }
             .map { app in
                 ApplicationCandidate(name: app.localizedName ?? "", bundleID: app.bundleIdentifier ?? "",
                                      version: app.bundleURL.flatMap { Bundle(url: $0) }?
                                         .object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String,
-                                     isRunning: true)
+                                     isRunning: true,
+                                     isDefaultBrowser: app.bundleIdentifier != nil && app.bundleIdentifier == browser)
             }
             .filter { wanted.isEmpty || $0.name.localizedCaseInsensitiveContains(wanted)
                 || $0.bundleID.localizedCaseInsensitiveContains(wanted) }
@@ -56,19 +58,23 @@ public extension AutomationSessionOperating {
 
 /// ApplicationCandidate is one application the apps tool offers: its name, the bundle ID to open it by,
 /// its version when the bundle declares one and whether it is running. `location` is set only where it
-/// tells apart two candidates that share a name.
+/// tells apart two candidates that share a name. `isDefaultBrowser` marks the application that opens
+/// web links by default (`WebBrowsers.defaultBundleID`), which the worker uses for anything on the web.
 nonisolated public struct ApplicationCandidate: Sendable, Equatable {
     public let name: String
     public let bundleID: String
     public let version: String?
     public let isRunning: Bool
     public let location: String?
+    public let isDefaultBrowser: Bool
 
-    public init(name: String, bundleID: String, version: String?, isRunning: Bool, location: String? = nil) {
+    public init(name: String, bundleID: String, version: String?, isRunning: Bool, location: String? = nil,
+                isDefaultBrowser: Bool = false) {
         self.name = name
         self.bundleID = bundleID
         self.version = version
         self.isRunning = isRunning
         self.location = location
+        self.isDefaultBrowser = isDefaultBrowser
     }
 }

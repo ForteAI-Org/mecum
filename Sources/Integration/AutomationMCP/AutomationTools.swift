@@ -27,6 +27,10 @@ public final class AutomationTools {
     Before the first action on an app in a turn, call status and observe any existing session.
     A message that needs no app needs no tool: answer it directly.
     For a new app, discover exact names and window titles with windows, then open_session.
+    For anything on the web, use the browser apps marks as the default unless the person names another one.
+    open_session on a running browser opens a new window of it to work in, but while the seat holds the browser
+    its other visible windows move to the seat's display too: if the person may be using it, ask first.
+    Pass one of their window titles only when they ask for that window.
     Session IDs refer only to this running Mecum host. Saved chats may contain stale IDs and old screen state.
     Keep the Seat open across turns unless the user asks to release it or the task requires a different app.
     Follow newly opened dialogs by observing again. select needs the CURRENT dropdown label/value.
@@ -112,7 +116,8 @@ public final class AutomationTools {
             tool("windows", "Discover exact running application names, bundle IDs and window titles. Optional app filter.",
                  ["app": text], [], readOnly: true),
             tool("apps", "List the applications open_session can open, best match first, with name, bundleID, version "
-                 + "and running. Use it to find an application that is not running, then pass its bundleID to "
+                 + "and running, and defaultBrowser on the browser that opens web links by default. Use it to "
+                 + "find an application that is not running, then pass its bundleID to "
                  + "open_session. Optional query: part of a name, a bundle ID or initials.",
                  ["query": text], [], readOnly: true),
             tool("open_session", "Adopt an app into one persistent background Seat and observe it. "
@@ -330,6 +335,7 @@ public final class AutomationTools {
                                            "running": .bool(app.isRunning)]
         if let version = app.version { fields["version"] = .string(version) }
         if let location = app.location { fields["location"] = .string(location) }
+        if app.isDefaultBrowser { fields["defaultBrowser"] = .bool(true) }
         return .object(fields)
     }
 

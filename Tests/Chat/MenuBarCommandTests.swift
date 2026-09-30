@@ -14,13 +14,16 @@ import Testing
 @Suite("Reaching a menu bar item by its path")
 struct MenuBarCommandTests {
 
-    /// A node of the fake bar: its title, whether it is enabled and its items.
+    /// A node of the fake bar: its title, whether it is enabled, its key equivalent and its items.
     final class Node {
-        let title   : String
-        let enabled : Bool
-        let children: [Node]
-        init(_ title: String, enabled: Bool = true, _ children: [Node] = []) {
-            self.title = title; self.enabled = enabled; self.children = children
+        let title    : String
+        let enabled  : Bool
+        let key      : String?
+        let modifiers: Int
+        let children : [Node]
+        init(_ title: String, enabled: Bool = true, key: String? = nil, modifiers: Int = 0, _ children: [Node] = []) {
+            self.title = title; self.enabled = enabled; self.key = key; self.modifiers = modifiers
+            self.children = children
         }
     }
 
@@ -96,5 +99,63 @@ struct MenuBarCommandTests {
         #expect(!isEnabled("Layer > Delete > Layer"), "disabled, whatever the destructive policy says")
         #expect(!isEnabled("File > Export"), "missing")
         #expect(!isEnabled("File"), "a menu is not an item")
+    }
+
+    /// A browser's menu bar around the File menu given, the Apple and application menus first.
+    static func browser(file: [Node], applicationMenu: [Node] = [], appleMenu: [Node] = []) -> Node {
+        Node("", [Node("Apple", appleMenu), Node("Browser", applicationMenu), Node("File", file),
+                  Node("Window", [Node("Minimize", key: "M")])])
+    }
+
+    func newWindow(_ bar: Node) -> String? {
+        MenuBarCommand.newWindowItem(from: bar) { node in
+            node.children.map {
+                MenuBarCommand.Item(title: $0.title, isEnabled: $0.enabled, element: $0,
+                                    keyEquivalent: $0.key, keyEquivalentModifiers: $0.modifiers)
+            }
+        }?.path
+    }
+
+    // The keys as accessibility read them on 30/09/2026: modifiers 0 is Command alone, 1 adds Shift,
+    // 2 Option, 4 Control, and 8 drops Command.
+    @Test("a new window is Command-N, and a private window on Shift is never taken")
+    func theNewWindowItemIsCommandN() {
+        let chrome = Self.browser(file: [Node("New Tab", key: "T"), Node("New Window", key: "N"),
+                                         Node("New Incognito Window", key: "N", modifiers: 1)])
+        #expect(newWindow(chrome) == "File > New Window")
+        #expect(newWindow(Self.browser(file: [Node("New Private Window", key: "N", modifiers: 1)])) == nil)
+        #expect(newWindow(Self.browser(file: [Node("New Window", key: "N", modifiers: 3)])) == nil,
+                "Shift with Option is still Shift")
+        #expect(newWindow(Self.browser(file: [Node("New Window", key: "N", modifiers: 8)])) == nil,
+                "N without Command is no key equivalent of a new window")
+        #expect(newWindow(Self.browser(file: [Node("New Window", key: "n")])) == "File > New Window")
+        #expect(newWindow(Self.browser(file: [Node("New Tab", key: "T"), Node("Open Location...", key: "L")])) == nil)
+    }
+
+    @Test("Safari with profiles opens its personal window on Option-Command-N, not a tab group on Control")
+    func optionCommandNIsTakenWhenThereIsNoCommandN() {
+        let safari = Self.browser(file: [Node("New Empty Tab Group", key: "N", modifiers: 4),
+                                         Node("New Personal Window", key: "N", modifiers: 2),
+                                         Node("New Work Window"),
+                                         Node("New Private Window", key: "N", modifiers: 1),
+                                         Node("New Tab", key: "T")])
+        #expect(newWindow(safari) == "File > New Personal Window")
+        let both = Self.browser(file: [Node("New Personal Window", key: "N", modifiers: 2),
+                                       Node("New Window", key: "N")])
+        #expect(newWindow(both) == "File > New Window", "Command alone wins over an earlier Option")
+        let tied = Node("", [Node("Apple"), Node("Browser"),
+                             Node("File", [Node("New Personal Window", key: "N", modifiers: 2)]),
+                             Node("Window", [Node("New Work Window", key: "N", modifiers: 2)])])
+        #expect(newWindow(tied) == "File > New Personal Window", "the bar's order breaks a tie")
+    }
+
+    @Test("a disabled item, and one in the Apple or the application menu, is not a new window")
+    func disabledAndSystemItemsAreSkipped() {
+        let disabled = Self.browser(file: [Node("New Window", enabled: false, key: "N"),
+                                           Node("New Personal Window", key: "N", modifiers: 2)])
+        #expect(newWindow(disabled) == "File > New Personal Window")
+        #expect(newWindow(Self.browser(file: [Node("New Window", enabled: false, key: "N")])) == nil)
+        #expect(newWindow(Self.browser(file: [], applicationMenu: [Node("New Window", key: "N")])) == nil)
+        #expect(newWindow(Self.browser(file: [], appleMenu: [Node("New Window", key: "N")])) == nil)
     }
 }

@@ -615,7 +615,7 @@ struct BrokeredAutomationSessionTests {
             TargetApp(pid: nil, bundleID: "com.avid.ProToolsDeveloper", name: "Pro Tools Developer",
                       bundleURL: URL(fileURLWithPath: "/Applications/Pro Tools Developer.app"), windows: []),
         ]
-        #expect(BrokeredAutomationSession.candidates(apps) == [
+        #expect(BrokeredAutomationSession.candidates(apps, defaultBrowser: nil) == [
             ApplicationCandidate(name: "Pro Tools", bundleID: "com.avid.ProTools", version: "26.4.1.179",
                                  isRunning: true, location: "/Applications"),
             ApplicationCandidate(name: "Pro Tools", bundleID: "com.example.ProTools", version: nil,
@@ -623,5 +623,19 @@ struct BrokeredAutomationSessionTests {
             ApplicationCandidate(name: "Pro Tools Developer", bundleID: "com.avid.ProToolsDeveloper", version: nil,
                                  isRunning: false),
         ])
+    }
+
+    @Test("apps marks the application that opens web links by default, and no other")
+    func appsMarksOnlyTheDefaultBrowser() {
+        let apps = [
+            TargetApp(pid: 7, bundleID: "com.example.Browser", name: "Browser", bundleURL: nil, windows: []),
+            TargetApp(pid: nil, bundleID: "com.example.Other", name: "Other Browser", bundleURL: nil, windows: []),
+            TargetApp(pid: 9, bundleID: "", name: "Helper", bundleURL: nil, windows: []),
+        ]
+        let marked = BrokeredAutomationSession.candidates(apps, defaultBrowser: "com.example.Browser")
+        #expect(marked.map(\.isDefaultBrowser) == [true, false, false])
+        #expect(BrokeredAutomationSession.candidates(apps, defaultBrowser: nil).allSatisfy { !$0.isDefaultBrowser })
+        #expect(BrokeredAutomationSession.candidates(apps, defaultBrowser: "").allSatisfy { !$0.isDefaultBrowser },
+                "an application with no bundle ID is nobody's browser")
     }
 }

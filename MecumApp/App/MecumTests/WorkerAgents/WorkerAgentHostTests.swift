@@ -27,6 +27,10 @@ struct WorkerAgentHostTests {
     Before the first action on an app in a turn, call status and observe any existing session.
     A message that needs no app needs no tool: answer it directly.
     For a new app, discover exact names and window titles with windows, then open_session.
+    For anything on the web, use the browser apps marks as the default unless the person names another one.
+    open_session on a running browser opens a new window of it to work in, but while the seat holds the browser
+    its other visible windows move to the seat's display too: if the person may be using it, ask first.
+    Pass one of their window titles only when they ask for that window.
     Session IDs refer only to this running Mecum host. Saved chats may contain stale IDs and old screen state.
     Keep the Seat open across turns unless the user asks to release it or the task requires a different app.
     Follow newly opened dialogs by observing again. select needs the CURRENT dropdown label/value.

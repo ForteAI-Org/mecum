@@ -110,6 +110,8 @@ struct AutomationToolsTests {
             == ["act", "select", "type_text", "press_key", "scroll", "drag", "context_menu"])
         #expect(!AutomationTools.instructions.contains("Typing, scrolling, keyboard shortcuts"))
         #expect(AutomationTools.instructions.contains("A file panel that just opened has no field focused yet"))
+        #expect(AutomationTools.instructions.contains("use the browser apps marks as the default"))
+        #expect(AutomationTools.instructions.contains("its other visible windows move to the seat's display too"))
     }
 
     @Test
@@ -199,6 +201,23 @@ extension AutomationToolsTests {
         #expect(apps["inputSchema"]["required"] == .array([]))
         #expect(apps["inputSchema"]["properties"].object?.keys.sorted() == ["query"])
         #expect(apps["description"].string?.contains("then pass its bundleID to open_session") == true)
+        #expect(apps["description"].string?.contains("defaultBrowser on the browser that opens web links") == true)
+    }
+
+    @Test
+    func appsMarksTheDefaultBrowserAndOnlyIt() async throws {
+        let session = CatalogueSession(candidates: [
+            ApplicationCandidate(name: "Browser", bundleID: "com.example.Browser", version: "1.0", isRunning: true,
+                                 isDefaultBrowser: true),
+            ApplicationCandidate(name: "Other Browser", bundleID: "com.example.Other", version: nil, isRunning: true)
+        ])
+        let result = try await AutomationTools(session: session).call("apps", .null)
+        #expect(result["structuredContent"] == .object(["applications": .array([
+            .object(["name": .string("Browser"), "bundleID": .string("com.example.Browser"),
+                     "version": .string("1.0"), "running": .bool(true), "defaultBrowser": .bool(true)]),
+            .object(["name": .string("Other Browser"), "bundleID": .string("com.example.Other"),
+                     "running": .bool(true)])
+        ])]))
     }
 
     @Test

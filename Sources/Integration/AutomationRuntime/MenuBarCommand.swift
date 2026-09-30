@@ -26,16 +26,29 @@ import PerceptionCore
 @MainActor
 public enum MenuBarCommand {
 
-    /// One item of a menu as the walk reads it.
+    /// One item of a menu as the walk reads it. The key equivalent is read only by the walk that
+    /// looks for a new window: `keyEquivalent` is `AXMenuItemCmdChar`, nil when the item has none,
+    /// and `keyEquivalentModifiers` is `AXMenuItemCmdModifiers`, where 0 is Command alone, 1 adds
+    /// Shift, 2 Option, 4 Control and 8 takes Command away.
     public struct Item<Element> {
-        public let title    : String
-        public let isEnabled: Bool
-        public let element  : Element
+        public let title                 : String
+        public let isEnabled             : Bool
+        public let element               : Element
+        public let keyEquivalent         : String?
+        public let keyEquivalentModifiers: Int
 
-        public init(title: String, isEnabled: Bool, element: Element) {
-            self.title     = title
-            self.isEnabled = isEnabled
-            self.element   = element
+        public init(
+            title                 : String,
+            isEnabled             : Bool,
+            element               : Element,
+            keyEquivalent         : String? = nil,
+            keyEquivalentModifiers: Int     = 0
+        ) {
+            self.title                  = title
+            self.isEnabled              = isEnabled
+            self.element                = element
+            self.keyEquivalent          = keyEquivalent
+            self.keyEquivalentModifiers = keyEquivalentModifiers
         }
     }
 
@@ -142,6 +155,59 @@ public enum MenuBarCommand {
         guard let bar = element(application, kAXMenuBarAttribute) else { return false }
         AXUIElementSetMessagingTimeout(bar, timeout)
         return isEnabled(steps(of: path), from: bar) { menuItems(of: $0, pollTimeout: timeout) }
+    }
+
+    /// The item that opens a new window of the application, found by its key equivalent because
+    /// titles are localized and the key is not: an enabled item whose key is N with Command held,
+    /// in the menus after the Apple menu and the application's own.
+    ///
+    /// Shift on it is the private window by convention (Chrome's Incognito and Safari's Private
+    /// Window are both Shift-Command-N), so an item with Shift is never taken. Of the rest the
+    /// lowest `keyEquivalentModifiers` wins, which is Command alone, then Option, then Control, and
+    /// the bar's order breaks a tie. Measured on 30/09/2026, Safari with profiles has no Command-N:
+    /// New Personal Window is Option-Command-N and New Empty Tab Group, which opens no window, is
+    /// Control-Command-N. A submenu is not looked into.
+    public static func newWindowItem<Element>(
+        from root: Element,
+        items    : (Element) -> [Item<Element>]
+    ) -> (element: Element, path: String)? {
+
+        // Shift (1) and no Command (8): the header's constants for them are not imported into Swift.
+        let excluded = 1 | 8
+        var best: (element: Element, path: String, modifiers: Int)?
+        for menu in items(root).dropFirst(2) {
+            for item in items(menu.element) where item.isEnabled
+                && item.keyEquivalent?.lowercased() == "n"
+                && item.keyEquivalentModifiers & excluded == 0
+                && item.keyEquivalentModifiers < (best?.modifiers ?? .max) {
+                let path = "\(menu.title) > \(item.title)"
+                // Nothing beats Command alone, so the rest of the bar is not read.
+                if item.keyEquivalentModifiers == 0 { return (item.element, path) }
+                best = (item.element, path, item.keyEquivalentModifiers)
+            }
+        }
+        return best.map { ($0.element, $0.path) }
+    }
+
+    /// Presses `newWindowItem` in the menu bar of `processID` and answers the item's path. An
+    /// application in the background stays there: measured on 30/09/2026 with Chrome and Safari
+    /// behind the person's application, the front application never changed. Throws when there is
+    /// no menu bar or no such item, having pressed nothing, and when the press answers an error.
+    public static func pressNewWindow(processID: pid_t) throws -> String {
+        let application = AXUIElementCreateApplication(processID)
+        AXUIElementSetMessagingTimeout(application, 1)
+        guard let bar = element(application, kAXMenuBarAttribute) else {
+            throw AutomationFailure("It shows no menu bar to accessibility.")
+        }
+        guard let (item, path) = newWindowItem(from: bar, items: { menuItems(of: $0, readsKeyEquivalents: true) })
+        else {
+            throw AutomationFailure("No enabled item of its menu bar opens a new window with Command-N.")
+        }
+        let error = AXUIElementPerformAction(item, kAXPressAction as CFString)
+        guard error == .success || error == .cannotComplete else {
+            throw AutomationFailure("Pressing \(path) failed with AXError \(error.rawValue).")
+        }
+        return path
     }
 
     /// Case, the ellipsis and trailing dots do not tell two titles apart: "Save As…", "Save As..."
@@ -267,8 +333,12 @@ public enum MenuBarCommand {
     /// since accessibility keeps one per element; the first item that answers `cannotComplete`
     /// ends the reading with no items, since a busy application answers every read only at its
     /// timeout; and an enabled state that does not answer reads as disabled, where `run` reads
-    /// it as enabled.
-    private static func menuItems(of node: AXUIElement, pollTimeout: Float? = nil) -> [Item<AXUIElement>] {
+    /// it as enabled. `readsKeyEquivalents` reads each item's key equivalent as well.
+    private static func menuItems(
+        of node            : AXUIElement,
+        pollTimeout        : Float? = nil,
+        readsKeyEquivalents: Bool   = false
+    ) -> [Item<AXUIElement>] {
         var children = elements(node, kAXChildrenAttribute, timeout: pollTimeout)
         if string(node, kAXRoleAttribute) != (kAXMenuBarRole as String) {
             guard let menu = children.first(where: { string($0, kAXRoleAttribute) == (kAXMenuRole as String) })
@@ -280,9 +350,16 @@ public enum MenuBarCommand {
             var enabled: CFTypeRef?
             let answer = AXUIElementCopyAttributeValue(child, kAXEnabledAttribute as CFString, &enabled)
             if pollTimeout != nil, answer == .cannotComplete { return [] }
-            items.append(Item(title    : string(child, kAXTitleAttribute) ?? "",
-                              isEnabled: (enabled as? Bool) ?? (pollTimeout == nil),
-                              element  : child))
+            var modifiers: CFTypeRef?
+            if readsKeyEquivalents {
+                AXUIElementCopyAttributeValue(child, kAXMenuItemCmdModifiersAttribute as CFString, &modifiers)
+            }
+            items.append(Item(title                 : string(child, kAXTitleAttribute) ?? "",
+                              isEnabled             : (enabled as? Bool) ?? (pollTimeout == nil),
+                              element               : child,
+                              keyEquivalent         : readsKeyEquivalents
+                                  ? string(child, kAXMenuItemCmdCharAttribute) : nil,
+                              keyEquivalentModifiers: (modifiers as? NSNumber)?.intValue ?? 0))
         }
         return items
     }

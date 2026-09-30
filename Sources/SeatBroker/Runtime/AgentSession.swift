@@ -1,4 +1,5 @@
 import AppKit
+import AutomationRuntime
 import EngineCore
 import Foundation
 import ModelTransports
@@ -135,6 +136,13 @@ public final class AgentSession {
     /// several, refuses before anything is released. An application this call
     /// launched and could not hand to `use` is quit again before the refusal,
     /// and the refusal says so; one that was already running is left alone.
+    ///
+    /// A web browser that was already running, with no title, is given a new
+    /// window of its own and that window is adopted (`BrowserOpening.seat`):
+    /// its main window is the person's. The seat is made ready before the new
+    /// window is asked for, and a new window it could not take is closed
+    /// again. When no new window appears the open refuses before anything is
+    /// released, and takes none of the others.
     @discardableResult
     public func open(applicationNamed name: String, windowTitled title: String? = nil) async throws -> TargetApp {
         guard isOpen else { throw SeatBrokerError.sessionClosed }
@@ -145,6 +153,33 @@ public final class AgentSession {
             throw SeatBrokerError.applicationNotResolved(
                 "\(wanted.name) is the application this seat is already holding; "
                     + "act on the scene you were given instead of opening it again.")
+        }
+        if BrowserOpening.opensNewWindow(
+            wasRunning  : wanted.isRunning,
+            windowTitled: title,
+            isBrowser   : WebBrowsers.bundleIDs().contains(wanted.bundleID)
+        ) {
+            // Not launched: `launch` asks a running application with no window to reopen, one more window.
+            return try await BrowserOpening.seat(
+                wanted,
+                prepare: { try await self.driver.prepareSeat() },
+                arm    : {
+                    LaunchFocusComeback(
+                        allowUnvalidatedBuild: self.environment.configuration.allowUnvalidatedBuild,
+                        taker                : "the browser"
+                    )
+                },
+                open   : { try await BrowserOpening.openWindow(of: wanted, tick: $0) },
+                use    : { window in
+                    let opened = TargetApp(pid: wanted.pid, bundleID: wanted.bundleID, name: wanted.name,
+                                           bundleURL: wanted.bundleURL, windows: [window],
+                                           bundleName: wanted.bundleName, version: wanted.version,
+                                           lastUsed: wanted.lastUsed)
+                    try await self.use(window, of: opened)
+                    return opened
+                },
+                close  : { await BrowserOpening.close($0) }
+            )
         }
         let opened = try await environment.launch(wanted)
         let window: TargetWindow

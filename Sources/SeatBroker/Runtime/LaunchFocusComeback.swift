@@ -21,8 +21,12 @@ import WindowPlacement
 /// the seat waited until the person clicked elsewhere. The front goes back through the recovery's
 /// own restorer, and only while the launched application holds it: an application the person
 /// chose meanwhile is left in front.
+///
+/// A running browser given a new window takes the front the same way, during or just after that
+/// window's adoption and before the seat knows a window of the person's (measured with Chrome on
+/// 30/09/2026, 2 of 2), so `BrowserOpening.seat` arms one before its press.
 @MainActor
-final class LaunchFocusComeback {
+final class LaunchFocusComeback: FrontRestoring {
 
     /// The front is given back this many times at most: an application that keeps taking it is
     /// the seat's focus recovery's to answer once it is adopted.
@@ -32,11 +36,13 @@ final class LaunchFocusComeback {
 
     private let restorer: UserFocusRestorer
     private let window  : WindowReference
+    private let taker   : String
     private var restores = 0
 
     /// Nil when there is no person's window in front to come back to, or the restorer is not
-    /// qualified on this build: the launch then goes on as it did before.
-    init?(allowUnvalidatedBuild: Bool) {
+    /// qualified on this build: the launch then goes on as it did before. `taker` names the
+    /// application watched in the log line.
+    init?(allowUnvalidatedBuild: Bool, taker: String = "the launched application") {
         guard let front = NSWorkspace.shared.frontmostApplication?.processIdentifier,
               let window = Self.focusedWindow(of: front),
               let restorer = try? UserFocusRestorer(allowUnvalidatedBuild: allowUnvalidatedBuild),
@@ -44,6 +50,12 @@ final class LaunchFocusComeback {
         else { return nil }
         self.restorer = restorer
         self.window   = window
+        self.taker    = taker
+    }
+
+    /// Whether the application of the person's window is the frontmost one now.
+    var isPersonsApplicationInFront: Bool {
+        NSWorkspace.shared.frontmostApplication?.processIdentifier == window.processID
     }
 
     /// Gives the front back when `pid`, the application being launched, has taken it.
@@ -55,13 +67,13 @@ final class LaunchFocusComeback {
         do {
             let code = try restorer.restore(window)
             Self.log.info("""
-                the launched application \(pid, privacy: .public) took the front: sent it back to \
+                \(self.taker, privacy: .public) \(pid, privacy: .public) took the front: sent it back to \
                 window \(self.window.windowNumber, privacy: .public), request code \(code, privacy: .public)
                 """)
             try restorer.prepare(window, targets: [])
         } catch {
             Self.log.info("""
-                the launched application \(pid, privacy: .public) took the front and it could not be \
+                \(self.taker, privacy: .public) \(pid, privacy: .public) took the front and it could not be \
                 given back: \(String(describing: error), privacy: .public)
                 """)
         }
@@ -79,4 +91,15 @@ final class LaunchFocusComeback {
         else { return nil }
         return window
     }
+}
+
+/// FrontRestoring gives the front back to the person's window when an application the seat is
+/// taking has taken it, and says whether the person's application holds it now.
+@MainActor
+protocol FrontRestoring: AnyObject {
+
+    /// Gives the front back when `pid` holds it, a bounded number of times.
+    func restore(ifTakenBy pid: pid_t)
+
+    var isPersonsApplicationInFront: Bool { get }
 }
