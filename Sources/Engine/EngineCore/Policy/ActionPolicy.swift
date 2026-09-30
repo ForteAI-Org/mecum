@@ -49,7 +49,21 @@ public struct ActionPermissions: Sendable, Equatable, Codable {
     /// Destructive targets are refused by default; the person flips this to let the agent delete or send.
     public var allowsDestructive: Bool
 
-    public init(allowsDestructive: Bool = false) {
-        self.allowsDestructive = allowsDestructive
+    /// A contextual menu may be opened only on a text field. Set for a Qt application on the seat: a
+    /// custom widget there draws its menu under the person's own pointer, outside the seat, where it
+    /// cannot be read, moved or closed, and the seat stays suspended until the person closes it. A text
+    /// field's menu opens where the click landed, and it is the only way to reach Copy and Paste.
+    public var contextMenusOnTextFieldsOnly: Bool
+
+    public init(allowsDestructive: Bool = false, contextMenusOnTextFieldsOnly: Bool = false) {
+        self.allowsDestructive            = allowsDestructive
+        self.contextMenusOnTextFieldsOnly = contextMenusOnTextFieldsOnly
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        allowsDestructive            = try container.decode(Bool.self, forKey: .allowsDestructive)
+        contextMenusOnTextFieldsOnly = try container.decodeIfPresent(Bool.self, forKey: .contextMenusOnTextFieldsOnly)
+            ?? false
     }
 }

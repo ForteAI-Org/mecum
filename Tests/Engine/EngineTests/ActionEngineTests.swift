@@ -385,4 +385,14 @@ struct ActionEngineTests {
         #expect(unverified.kind == .refused)
         #expect(unverified.message.contains("does not show"))
     }
+
+    @Test("where menus open under the person's pointer, right_click is refused off a text field")
+    func rightClickOutsideTheSeatIsRefused() async {
+        let actuator = RecordingActuator()
+        let outcome = await engine(scenes: ScriptedScenes([scene([export])]), actuator: actuator,
+                                   permissions: ActionPermissions(contextMenusOnTextFieldsOnly: true))
+            .act(request("Export", verb: .rightClick))
+        #expect(outcome.kind == .refused)
+        #expect(actuator.gestures.isEmpty)
+    }
 }

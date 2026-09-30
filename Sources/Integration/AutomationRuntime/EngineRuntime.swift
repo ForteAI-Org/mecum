@@ -55,7 +55,7 @@ public struct EngineRuntime {
     }
 
     /// The engine over the foreground adapters, remembering through the brain.
-    public func engine(allowsDestructive: Bool) -> ActionEngine {
+    public func engine(allowsDestructive: Bool, contextMenusOnTextFieldsOnly: Bool = false) -> ActionEngine {
         ActionEngine(
             ActionEngine.Dependencies(
                 scenes      : scenes,
@@ -66,7 +66,10 @@ public struct EngineRuntime {
                 expectations: memory,
                 observer    : memory
             ),
-            permissions: ActionPermissions(allowsDestructive: allowsDestructive)
+            permissions: ActionPermissions(
+                allowsDestructive           : allowsDestructive,
+                contextMenusOnTextFieldsOnly: contextMenusOnTextFieldsOnly
+            )
         )
     }
 

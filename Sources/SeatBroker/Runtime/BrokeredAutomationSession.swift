@@ -296,7 +296,10 @@ public final class BrokeredAutomationSession: AutomationSessionOperating {
             appName: application.localizedName ?? "application",
             target: target, verb: verb, section: section, desiredState: desiredState
         )
-        return await runtime.engine(allowsDestructive: allowsDestructive).act(request)
+        return await runtime.engine(
+            allowsDestructive           : allowsDestructive,
+            contextMenusOnTextFieldsOnly: Self.drawsMenusUnderThePointer(application)
+        ).act(request)
     }
 
     public func deliver(_ input: InputRequest.Input, section: String?) async throws -> ActOutcome {
@@ -314,7 +317,10 @@ public final class BrokeredAutomationSession: AutomationSessionOperating {
             input    : input,
             section  : section
         )
-        return await runtime.engine(allowsDestructive: allowsDestructive).deliver(request)
+        return await runtime.engine(
+            allowsDestructive           : allowsDestructive,
+            contextMenusOnTextFieldsOnly: Self.drawsMenusUnderThePointer(application)
+        ).deliver(request)
     }
 
     public func select(control: String, item: String) async throws -> ActOutcome {
@@ -425,6 +431,18 @@ public final class BrokeredAutomationSession: AutomationSessionOperating {
             Task { @MainActor in self?.watchQueue(for: lease) }
         }
         if isSomeoneWaiting { Task { await releaseIfSomeoneWaits() } }
+    }
+
+    /// Whether a custom widget of `application` opens its contextual menu under the person's pointer
+    /// rather than at the click: measured on DaVinci Resolve's media pool, a Qt application, whose menu
+    /// opened on the person's screen and left the seat suspended until it was closed there.
+    static func drawsMenusUnderThePointer(_ application: NSRunningApplication) -> Bool {
+        let choice = TargetPlatform.chosen(
+            bundleURL       : application.bundleURL,
+            bundleIdentifier: application.bundleIdentifier
+        )
+        if case .qtToolkit = choice { return true }
+        return false
     }
 
     private func current() throws -> (NSRunningApplication, EngineRuntime, SeatTarget) {

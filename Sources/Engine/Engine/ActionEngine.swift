@@ -147,6 +147,10 @@ public struct ActionEngine: Sendable {
             return ActOutcome(.refused, "'\(element.label)' looks destructive/irreversible: refused. "
                 + "If you want the agent to do this, the person must allow destructive actions.", scene: scene)
         }
+        if request.verb == .rightClick,
+           let refusal = menuOutsideTheSeat(on: element, appName: request.appName, scene: scene) {
+            return refusal
+        }
         let point = perceived.globalPoint(of: element)
         let surfaces = await surfaces(pid)
         let expected = await dependencies.expectations?.expectedEffect(
@@ -696,6 +700,9 @@ public struct ActionEngine: Sendable {
             return ActOutcome(.refused, "'\(item)' looks destructive/irreversible: refused. If you want the agent "
                 + "to do this, the person must allow destructive actions.", scene: perceived.scene)
         }
+        if let refusal = menuOutsideTheSeat(on: element, appName: request.appName, scene: perceived.scene) {
+            return refusal
+        }
         let point = perceived.globalPoint(of: element)
         if request.isDryRun {
             return ActOutcome(.dryRun, "would right-click '\(element.label)' at \(Int(point.x)),\(Int(point.y)) "
@@ -736,6 +743,19 @@ public struct ActionEngine: Sendable {
     }
 
     // MARK: Helpers
+
+    /// The roles whose contextual menu opens where the click landed, in every toolkit measured.
+    private static let textFieldRoles: Set<String> = ["AXTextField", "AXTextArea", "AXComboBox"]
+
+    /// The refusal of a right click whose menu would open outside the seat, nil when it may go ahead.
+    private func menuOutsideTheSeat(on element: SceneElement, appName: String, scene: SceneSnapshot) -> ActOutcome? {
+        guard permissions.contextMenusOnTextFieldsOnly, !Self.textFieldRoles.contains(element.role ?? "") else {
+            return nil
+        }
+        return ActOutcome(.refused, "\(appName) opens the contextual menu of '\(element.label)' on the person's own "
+            + "screen, outside the seat, so it was not right-clicked: use a visible button or control instead. "
+            + "A text field's contextual menu still works here.", scene: scene)
+    }
 
     /// The element a target names in this scene, or the outcome that says why there is none: several
     /// share the name, or none has it.
