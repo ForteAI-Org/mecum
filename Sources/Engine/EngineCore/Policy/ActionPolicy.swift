@@ -55,15 +55,28 @@ public struct ActionPermissions: Sendable, Equatable, Codable {
     /// field's menu opens where the click landed, and it is the only way to reach Copy and Paste.
     public var contextMenusOnTextFieldsOnly: Bool
 
-    public init(allowsDestructive: Bool = false, contextMenusOnTextFieldsOnly: Bool = false) {
+    /// A field's text is selected with a triple click and no key. Set while the seat holds a file
+    /// panel the system draws out of process: measured on 30/09/2026 in Photoshop's Save As panel,
+    /// Command and Up went to the enclosing folder, the other selecting keys did nothing, and replacing
+    /// the name typed into its middle, while a triple click selected all of it.
+    public var selectsFieldsByTripleClick: Bool
+
+    public init(
+        allowsDestructive           : Bool = false,
+        contextMenusOnTextFieldsOnly: Bool = false,
+        selectsFieldsByTripleClick  : Bool = false
+    ) {
         self.allowsDestructive            = allowsDestructive
         self.contextMenusOnTextFieldsOnly = contextMenusOnTextFieldsOnly
+        self.selectsFieldsByTripleClick   = selectsFieldsByTripleClick
     }
 
     public init(from decoder: any Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         allowsDestructive            = try container.decode(Bool.self, forKey: .allowsDestructive)
         contextMenusOnTextFieldsOnly = try container.decodeIfPresent(Bool.self, forKey: .contextMenusOnTextFieldsOnly)
+            ?? false
+        selectsFieldsByTripleClick   = try container.decodeIfPresent(Bool.self, forKey: .selectsFieldsByTripleClick)
             ?? false
     }
 }

@@ -142,6 +142,12 @@ struct EndpointDiscovery {
         .failure(.subtreeUnreadable(surface: chain.surface))
     }
 
+    /// The one window of another process drawn over a modal surface, read
+    /// without any focus: what says whose panel the surface is.
+    var foreignContentWindow: (
+        Int32, DialogEndpointResolver<AXUIElement>.SurfaceChain
+    ) -> Int? = { _, _ in nil }
+
     /// The readings the shipping seat takes.
     static let shipping = EndpointDiscovery(
         pointer: { processID, point, chain, generation in
@@ -188,6 +194,11 @@ struct EndpointDiscovery {
             DialogEndpointResolver<AXUIElement>
                 .accessibility(assignedProcessID: processID)
                 .focusedContentKeyboardContext(within: chain, selectionGeneration: generation)
+        },
+        foreignContentWindow: { processID, chain in
+            DialogEndpointResolver<AXUIElement>
+                .accessibility(assignedProcessID: processID)
+                .foreignContentWindow(within: chain)
         }
     )
 }

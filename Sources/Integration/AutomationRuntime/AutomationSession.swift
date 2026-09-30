@@ -99,7 +99,10 @@ public final class AutomationSession: AutomationSessionOperating {
             appName: application.localizedName ?? "application",
             target: target, verb: verb, section: section, desiredState: desiredState
         )
-        return await runtime.engine(allowsDestructive: allowsDestructive).act(request)
+        return await runtime.engine(
+            allowsDestructive         : allowsDestructive,
+            selectsFieldsByTripleClick: try seat.agentSeat().holdsRemoteFilePanel
+        ).act(request)
     }
 
     public func deliver(_ input: InputRequest.Input, section: String?) async throws -> ActOutcome {
@@ -116,7 +119,10 @@ public final class AutomationSession: AutomationSessionOperating {
             appName: application.localizedName ?? "application",
             input: input, section: section
         )
-        return await runtime.engine(allowsDestructive: allowsDestructive).deliver(request)
+        return await runtime.engine(
+            allowsDestructive         : allowsDestructive,
+            selectsFieldsByTripleClick: try seat.agentSeat().holdsRemoteFilePanel
+        ).deliver(request)
     }
 
     public func menu(path: String) async throws -> ActOutcome {

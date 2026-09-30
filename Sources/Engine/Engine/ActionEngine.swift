@@ -461,7 +461,8 @@ public struct ActionEngine: Sendable {
     /// composer, and the text typed next went into that message, twice in a row, on 25 Sep 2026. A
     /// field read as empty has nothing to select; one whose value cannot be read, which is what a
     /// Chromium composer is, is selected with a triple click, which sends no key an application can
-    /// bind, and selects the paragraph clicked in a field of several.
+    /// bind, and selects the paragraph clicked in a field of several. A field of a file panel the
+    /// system draws is selected the same way (`selectsFieldsByTripleClick`), whatever it holds.
     static let selectAll: [Gesture] = [
         .key(code: Key.upArrow, modifiers: .command),
         .key(code: Key.downArrow, modifiers: [.command, .shift]),
@@ -469,14 +470,38 @@ public struct ActionEngine: Sendable {
     ]
 
     /// How a field is focused and prepared before the text: at its end to append, and to replace,
-    /// by what its value says it holds (`selectAll`).
-    static func preparing(field value: String?, at point: CGPoint, replacing: Bool) -> [Gesture] {
+    /// by what its value says it holds (`selectAll`), or by clicks alone where `byTripleClick` says so.
+    static func preparing(
+        field value  : String?,
+        at point     : CGPoint,
+        replacing    : Bool,
+        byTripleClick: Bool
+    ) -> [Gesture] {
         guard replacing else { return [.click(at: point), endOfField] }
         switch value {
-            case nil:       return [.click(at: point, count: 3)]
-            case ""?:       return [.click(at: point)]
-            case .some:     return [.click(at: point)] + selectAll
+            case nil:                       return [.click(at: point, count: 3)]
+            case ""?:                       return [.click(at: point)]
+            case .some where byTripleClick: return [.click(at: point, count: 3)]
+            case .some:                     return [.click(at: point)] + selectAll
         }
+    }
+
+    /// The extension kept when `text` replaces the file name `value` in a file panel: measured on
+    /// 30/09/2026, Photoshop's Save As panel selects only the base name and saves exactly what the field
+    /// holds, so a triple click would drop it. Nil when `text` has an extension of its own or is a path.
+    static func keptExtension(of value: String?, replacedBy text: String) -> Substring? {
+        func fileExtension(_ name: Substring) -> Substring? {
+            guard let dot = name.lastIndex(of: "."), dot != name.startIndex else { return nil }
+            let suffix = name[name.index(after: dot)...]
+            guard (1...6).contains(suffix.count),
+                  suffix.allSatisfy({ $0.isASCII && ($0.isLetter || $0.isNumber) })
+            else { return nil }
+            return suffix
+        }
+        guard let value, !text.contains("/"), !text.hasPrefix("~"), fileExtension(Substring(text)) == nil,
+              let name = value.split(separator: "/", omittingEmptySubsequences: false).last
+        else { return nil }
+        return fileExtension(name)
     }
 
     /// Command and Down, the key binding that moves to the end of a document, and of a field.
@@ -505,15 +530,25 @@ public struct ActionEngine: Sendable {
             return error.outcome
         }
         let point = perceived.globalPoint(of: element)
-        let inserts = text.count > Self.typedTextLimit
+        let kept = replacing && permissions.selectsFieldsByTripleClick
+            ? Self.keptExtension(of: element.value, replacedBy: text)
+            : nil
+        let typed   = kept.map { text + "." + $0 } ?? text
+        let keeping = kept.map { " (kept the extension .\($0))" } ?? ""
+        let inserts = typed.count > Self.typedTextLimit
         if request.isDryRun {
             return ActOutcome(.dryRun, "would click '\(element.label)' at \(Int(point.x)),\(Int(point.y)), "
                 + (replacing ? "select what it holds" : "move to its end") + " and "
-                + (inserts ? "insert" : "type") + " \(text.count) characters")
+                + (inserts ? "insert" : "type") + " \(typed.count) characters"
+                + (kept.map { ", keeping the extension .\($0)" } ?? ""))
         }
         await raiseIfNeeded(pid, isPopupOpen: (await surfaces(pid)).hasOpenPopup)
-        let gestures = Self.preparing(field: element.value, at: point, replacing: replacing)
-            + [inserts ? .insert(text) : .type(text)]
+        let gestures = Self.preparing(
+            field        : element.value,
+            at           : point,
+            replacing    : replacing,
+            byTripleClick: permissions.selectsFieldsByTripleClick
+        ) + [inserts ? .insert(typed) : .type(typed)]
         if let error = await send(gestures, to: pid) {
             return ActOutcome(.actedUnverified, "typing into '\(element.label)': delivery failed: \(error)")
         }
@@ -521,16 +556,16 @@ public struct ActionEngine: Sendable {
         let after = await perceive(pid)?.scene
         let readBack = await dependencies.controls?.focusedFieldValue(in: pid)
             ?? after?.elements.first(where: { $0.id == element.id })?.value
-        let wanted = replacing ? text : element.value.map { $0 + text }
+        let wanted = replacing ? typed : element.value.map { $0 + text }
         await dependencies.actuator.confirm(readBack != nil && readBack == wanted ? .observed : .unknown, in: pid)
         let composing = inserts ? " A long text goes in as one event, which a field composing with an input "
             + "method drops." : ""
         switch (readBack, wanted) {
             case (.some(let value), .some(let wanted)) where value == wanted:
-                return ActOutcome(.foundActed, "typed into '\(element.label)': the field reads "
+                return ActOutcome(.foundActed, "typed into '\(element.label)'\(keeping): the field reads "
                     + "'\(Self.shortened(value))'", scene: after)
             case (.some(let value), .some(let wanted)):
-                return ActOutcome(.actedUnverified, "typed into '\(element.label)' but the field reads "
+                return ActOutcome(.actedUnverified, "typed into '\(element.label)'\(keeping) but the field reads "
                     + "'\(Self.shortened(value))', not '\(Self.shortened(wanted))': observe and re-decide, do not "
                     + "type it again blindly.\(composing)", scene: after)
             case (.some(let value), nil):
@@ -538,7 +573,7 @@ public struct ActionEngine: Sendable {
                     + "'\(Self.shortened(value))', but what it held before could not be read, so the appended text "
                     + "cannot be confirmed: observe and re-decide.", scene: after)
             case (nil, _):
-                return ActOutcome(.actedUnverified, "typed into '\(element.label)': no field's value could be "
+                return ActOutcome(.actedUnverified, "typed into '\(element.label)'\(keeping): no field's value could be "
                     + "read afterwards, so the text cannot be confirmed; observe before typing again.\(composing)",
                     scene: after)
         }

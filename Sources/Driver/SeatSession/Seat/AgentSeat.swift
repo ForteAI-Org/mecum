@@ -3948,6 +3948,33 @@ public final class AgentSeat {
         }
     }
 
+    /// Whether a dialog open in the seat is a file panel the system draws out
+    /// of process: one of `openDialogs` whose one foreign content window
+    /// belongs to the qualified panel service.
+    ///
+    /// Such a panel answers the keys that select a field differently. Measured
+    /// on 30/09/2026 in Photoshop's Save As panel, its name field clicked:
+    /// Command and Up went to the enclosing folder and left the selection as it
+    /// was, Command, Shift and Down and Command and A did nothing, and a triple
+    /// click selected the whole name with no key.
+    public var holdsRemoteFilePanel: Bool {
+        guard let instance = assignmentKit.lifecycle.current?.instance else { return false }
+        return openDialogs.contains { dialog in
+            guard let frame = sensing.windowGeometry(of: dialog.windowNumber)?.frame else { return false }
+            let chain = DialogEndpointResolver<AXUIElement>.SurfaceChain(
+                host        : selectionKit.attachedHost(of: dialog)
+                    ?? selectionKit.namedModalHost(of: dialog)
+                    ?? dialog,
+                surface     : dialog,
+                surfaceFrame: frame
+            )
+            guard let content = endpoints.foreignContentWindow(instance.processID, chain),
+                  let owner = endpoints.identity(content)
+            else { return false }
+            return endpoints.qualifiedAppKitPanelService(owner)
+        }
+    }
+
     private func refuseBriefActivation(
         _ refusal: BriefActivationOutcome.Refusal,
         _ reason : String

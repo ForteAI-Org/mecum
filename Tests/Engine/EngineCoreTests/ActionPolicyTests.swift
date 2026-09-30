@@ -6,6 +6,7 @@
 //
 
 @testable import EngineCore
+import Foundation
 import Testing
 
 @Suite("Action policy")
@@ -28,6 +29,14 @@ struct ActionPolicyTests {
         #expect(!ActivationPolicy.needsActivation(target: 5, frontmost: 5, isPopupOpen: false))
         #expect(!ActivationPolicy.needsActivation(target: 5, frontmost: 7, isPopupOpen: true))
         #expect(ActivationPolicy.needsActivation(target: 5, frontmost: nil, isPopupOpen: false))
+    }
+
+    @Test("permissions encoded before a rule existed decode with that rule off")
+    func permissionsDecodeOlderEncodings() throws {
+        let older = try JSONDecoder().decode(ActionPermissions.self, from: Data(#"{"allowsDestructive":true}"#.utf8))
+        #expect(older == ActionPermissions(allowsDestructive: true))
+        let rules = ActionPermissions(contextMenusOnTextFieldsOnly: true, selectsFieldsByTripleClick: true)
+        #expect(try JSONDecoder().decode(ActionPermissions.self, from: JSONEncoder().encode(rules)) == rules)
     }
 
     @Test("verbs keep the tool vocabulary")

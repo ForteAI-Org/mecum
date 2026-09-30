@@ -298,7 +298,8 @@ public final class BrokeredAutomationSession: AutomationSessionOperating {
         )
         return await runtime.engine(
             allowsDestructive           : allowsDestructive,
-            contextMenusOnTextFieldsOnly: Self.drawsMenusUnderThePointer(application)
+            contextMenusOnTextFieldsOnly: Self.drawsMenusUnderThePointer(application),
+            selectsFieldsByTripleClick  : try seat.agentSeat().holdsRemoteFilePanel
         ).act(request)
     }
 
@@ -319,7 +320,8 @@ public final class BrokeredAutomationSession: AutomationSessionOperating {
         )
         return await runtime.engine(
             allowsDestructive           : allowsDestructive,
-            contextMenusOnTextFieldsOnly: Self.drawsMenusUnderThePointer(application)
+            contextMenusOnTextFieldsOnly: Self.drawsMenusUnderThePointer(application),
+            selectsFieldsByTripleClick  : try seat.agentSeat().holdsRemoteFilePanel
         ).deliver(request)
     }
 

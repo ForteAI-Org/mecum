@@ -122,6 +122,51 @@ struct InputDeliveryTests {
         }
     }
 
+    @Test("in a file panel the system draws, a field holding text is selected with a triple click and no key")
+    func replaceInARemoteFilePanelSendsNoKey() async {
+        let panel    = ActionPermissions(selectsFieldsByTripleClick: true)
+        let actuator = RecordingActuator()
+        let controls = FakeControls(); controls.focused = "mecum-probe-a"
+        let outcome = await engine(scenes: ScriptedScenes([scene([field(value: "Untitled-1")])]),
+                                   actuator: actuator, controls: controls, permissions: panel)
+            .deliver(request(.typeText("mecum-probe-a", into: "Project Name", replacing: true)))
+        #expect(outcome.kind == .foundActed, Comment(rawValue: outcome.message))
+        #expect(actuator.gestures == [.click(at: fieldPoint, count: 3), .type("mecum-probe-a")])
+
+        // Appending there still clicks and moves to the end, as everywhere else.
+        let appending = RecordingActuator()
+        _ = await engine(scenes: ScriptedScenes([scene([field(value: "Budget")])]), actuator: appending,
+                         permissions: panel)
+            .deliver(request(.typeText(" 2027", into: "Project Name", replacing: false)))
+        #expect(appending.gestures == [.click(at: fieldPoint), .key(code: Key.downArrow, modifiers: .command),
+                                       .type(" 2027")])
+    }
+
+    @Test("in a file panel the system draws, a name replaced without an extension keeps the one it had")
+    func replaceInARemoteFilePanelKeepsTheExtension() async {
+        let actuator = RecordingActuator()
+        let controls = FakeControls(); controls.focused = "mecum-ps-test.psd"
+        let outcome = await engine(scenes: ScriptedScenes([scene([field(value: "Untitled-1.psd")])]),
+                                   actuator: actuator, controls: controls,
+                                   permissions: ActionPermissions(selectsFieldsByTripleClick: true))
+            .deliver(request(.typeText("mecum-ps-test", into: "Project Name", replacing: true)))
+        #expect(outcome.kind == .foundActed, Comment(rawValue: outcome.message))
+        #expect(outcome.message
+            == "typed into 'Project Name' (kept the extension .psd): the field reads 'mecum-ps-test.psd'")
+        #expect(actuator.gestures == [.click(at: fieldPoint, count: 3), .type("mecum-ps-test.psd")])
+
+        // Anything else is typed as given, and nothing is added without the panel's rule.
+        for (value, text, rule) in [("Untitled-1.psd", "report.pdf", true), ("Untitled-1.psd", "~/Desktop", true),
+                                    ("Untitled-1.psd", "/tmp/x", true), ("Untitled-1", "mecum-ps-test", true),
+                                    ("Untitled-1.psd", "mecum-ps-test", false)] {
+            let plain = RecordingActuator()
+            _ = await engine(scenes: ScriptedScenes([scene([field(value: value)])]), actuator: plain,
+                             permissions: ActionPermissions(selectsFieldsByTripleClick: rule))
+                .deliver(request(.typeText(text, into: "Project Name", replacing: true)))
+            #expect(plain.gestures.last == .type(text), Comment(rawValue: "\(value) + \(text), rule \(rule)"))
+        }
+    }
+
     @Test("a value that is not the typed text is acted_unverified, and says what the field reads")
     func wrongValueIsUnverified() async {
         let actuator = RecordingActuator()

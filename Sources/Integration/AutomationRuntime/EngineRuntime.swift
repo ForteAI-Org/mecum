@@ -55,7 +55,11 @@ public struct EngineRuntime {
     }
 
     /// The engine over the foreground adapters, remembering through the brain.
-    public func engine(allowsDestructive: Bool, contextMenusOnTextFieldsOnly: Bool = false) -> ActionEngine {
+    public func engine(
+        allowsDestructive           : Bool,
+        contextMenusOnTextFieldsOnly: Bool = false,
+        selectsFieldsByTripleClick  : Bool = false
+    ) -> ActionEngine {
         ActionEngine(
             ActionEngine.Dependencies(
                 scenes      : scenes,
@@ -68,7 +72,8 @@ public struct EngineRuntime {
             ),
             permissions: ActionPermissions(
                 allowsDestructive           : allowsDestructive,
-                contextMenusOnTextFieldsOnly: contextMenusOnTextFieldsOnly
+                contextMenusOnTextFieldsOnly: contextMenusOnTextFieldsOnly,
+                selectsFieldsByTripleClick  : selectsFieldsByTripleClick
             )
         )
     }

@@ -680,6 +680,16 @@ nonisolated package struct DialogEndpointResolver<Node> {
     /// window whose owner is another process counts, and it has to be one. A
     /// named window whose identity cannot be read refuses, since nothing then
     /// says whose it is.
+    ///
+    /// This entry reads no focus: it is what says whose content a modal surface
+    /// draws, whether or not any of it is focused.
+    package func foreignContentWindow(within chain: SurfaceChain) -> Int? {
+        guard let window = windowNode(chain.surface.windowNumber),
+              focusedWindow(window, matches: chain)
+        else { return nil }
+        return foreignContentWindow(of: window, within: chain)
+    }
+
     private func foreignContentWindow(of surfaceNode: Node, within chain: SurfaceChain) -> Int? {
         guard let named = namedWindows(under: surfaceNode, within: chain, atMost: .max) else { return nil }
         var foreign: [Int] = []

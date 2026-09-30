@@ -81,6 +81,10 @@ struct GestureEndpointRoutingTests {
         /// not enough to select the AppKit panel recipe.
         var qualifiesRemotePanelService = true
 
+        /// The one foreign content window the modal's descendants name, read
+        /// without any focus.
+        var foreignContentWindow: Int?
+
         /// Applied the moment a resolution is answered, which is how a helper
         /// replaced between the discovery and the boundary is expressed.
         var afterResolving: (() -> Void)?
@@ -117,7 +121,8 @@ struct GestureEndpointRoutingTests {
                     focusedContentKeyboardResolutions += 1
                     return focusedContentKeyboardAnswer
                         ?? .failure(.subtreeUnreadable(surface: chain.surface))
-                }
+                },
+                foreignContentWindow: { [self] _, _ in foreignContentWindow }
             )
         }
     }
@@ -721,6 +726,22 @@ struct GestureEndpointRoutingTests {
         }
         #expect(panel.sender.sent.isEmpty)
         try panel.seat.release(turn)
+    }
+
+    @Test("a held modal is a remote file panel only when its one foreign content is the qualified service's")
+    func aRemoteFilePanelIsTheQualifiedServicesContent() async throws {
+
+        let panel  = try await Self.panel()
+        let remote = try #require(try Self.remoteContent(of: panel).window.identity)
+        panel.discovery.identities[Self.remoteWindowNumber] = remote
+        #expect(panel.seat.openDialogs == [try #require(panel.sheet.reference.identity)])
+        #expect(!panel.seat.holdsRemoteFilePanel, "an ordinary dialog names no foreign content")
+
+        panel.discovery.foreignContentWindow = Self.remoteWindowNumber
+        #expect(panel.seat.holdsRemoteFilePanel)
+
+        panel.discovery.qualifiesRemotePanelService = false
+        #expect(!panel.seat.holdsRemoteFilePanel, "another process's content is not the panel service")
     }
 
     // MARK: The classification on its own
