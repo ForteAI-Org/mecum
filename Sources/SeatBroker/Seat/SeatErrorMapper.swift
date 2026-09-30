@@ -122,11 +122,22 @@ enum SeatErrorMapper {
     /// and the size that was asked for is the one the driver handed over. The
     /// requested origin is deliberately absent, because the seat centres the
     /// window and the driver never computed one to name.
+    ///
+    /// No restoration and no frame is a failure that came before any move: a
+    /// move the seat started writes an adoption report, and a window it took
+    /// is released with an outcome. `seat.adopt` refusing a failed seat with
+    /// `seatNotReady` is this case, and saying the window "was never given
+    /// back" there alarmed a person about a window that never left.
     static func detail(requestedSize: CGSize, bounds: CGRect, observed: CGRect?,
                        restoration: WindowReleaseOutcome?) -> String {
+        guard restoration != nil || observed != nil else {
+            return "The seat was asked for \(size(requestedSize)) on the background display "
+                + "\(rectangle(bounds)) and stopped before it moved any window, so there was "
+                + "nothing to give back."
+        }
         // The observed frame is in the failure's own sentence, which this one
         // is appended to, so it is read for the verdict and not repeated.
-        "The seat was asked for \(size(requestedSize)) on the background display "
+        return "The seat was asked for \(size(requestedSize)) on the background display "
             + "\(rectangle(bounds)); the window "
             + "\(restoration.map(self.restoration) ?? "was never given back")."
             + " " + verdict(requested: requestedSize, observed: observed?.size)

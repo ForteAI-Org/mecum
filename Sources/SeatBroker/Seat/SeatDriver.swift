@@ -57,9 +57,14 @@ final class SeatDriver {
     /// can observe a window it was not lent: see `revokeBorrows`.
     private var lent: [SeatTarget] = []
 
-    /// The two subscriptions to the event channel, one per stream, for as long
-    /// as the host is up.
-    private var watchers: [Task<Void, Never>] = []
+    /// The subscription to the host's event channel, made once for the life of
+    /// this driver: a host started again keeps the stream it published.
+    private var hostWatcher: Task<Void, Never>?
+
+    /// The subscription to the current seat's event channel. Every seat has a
+    /// stream of its own, so a seat made in place of a failed one gets a new
+    /// watcher and the one reading the replaced seat is cancelled.
+    private var seatWatcher: Task<Void, Never>?
 
     /// What the seat did that a run's record has to be able to name, oldest
     /// first, taken by the session when it writes one.
@@ -999,20 +1004,42 @@ final class SeatDriver {
             removal \(report.removalNanoseconds / 1_000_000, privacy: .public) ms
             """)
         // The watchers are left running: the teardown's own events are still
-        // coming, and both streams end when this driver is released.
+        // coming. The seat's is cancelled only when a new seat replaces it.
         return SeatErrorMapper.teardown(report)
     }
 
     /// The host and the seat are brought up on first use and then kept: one
     /// host per process, one seat per host, and `makeSeat` refuses the second.
+    ///
+    /// A seat that has failed is the exception, and it is torn down and made
+    /// again here. `failed` is terminal: the seat refuses every adoption from
+    /// then on, and keeping it handed the same refusal to every later session
+    /// of the process until the app was restarted. `makeSeat` refuses a second
+    /// seat while the host holds one, so the whole host goes down with it,
+    /// through the same `stop` a closing session uses, and comes back from
+    /// `off`. What that teardown could not put back goes to the run's notes.
+    ///
+    /// Every adoption gets its seat here, which is why the rule lives here: a
+    /// warm session from the queue and a session reopening an application go
+    /// through the same line.
     private func liveSeat() async throws -> AgentSeat {
-        if let seat { return seat }
+        if let seat {
+            guard seat.state == .failed else { return seat }
+            Self.log.info("the seat failed: taking the host down to make a new seat")
+            if let sentence = await stop() { keep(sentence) }
+            // The failed seat's releases are named in the notes already, and
+            // they are no window of the adoption that is about to start.
+            lastReleases    = []
+            lastObligations = []
+        }
         try await host.start()
         let created = try host.makeSeat()
         seat = created
-        // Once per seat lifetime, and the host's stream at the same moment
-        // because the two are made together. Guarded, never repeated.
-        if watchers.isEmpty { watchers = [watch(host.events), watch(created.events)] }
+        // The host's stream once per driver and the seat's once per seat. The
+        // replaced seat's watcher had the whole restart to drain its stream.
+        if hostWatcher == nil { hostWatcher = watch(host.events) }
+        seatWatcher?.cancel()
+        seatWatcher = watch(created.events)
         return created
     }
 
@@ -1022,9 +1049,11 @@ final class SeatDriver {
     /// **One iterator per stream, and this is it.** An `AsyncStream` has one
     /// continuation, so a second `for await` anywhere in the lab would take
     /// events away from this one rather than see the same ones; anything else
-    /// that wants them reads `takeNotes` or the log. It is also why the
+    /// that wants them reads `takeNotes` or the log. It is also why the host's
     /// subscription is guarded rather than remade: a host that is started again
-    /// keeps the stream it published, and iterating it twice splits it.
+    /// keeps the stream it published, and iterating it twice splits it. A seat
+    /// made in place of a failed one publishes a new stream, so its watcher is
+    /// new and the replaced seat's is cancelled: still one iterator per stream.
     ///
     /// **Nothing here acts on what it reads.** `windowAdoptedNotTargeted` in
     /// particular is recorded and not answered: the kit's rule is that only the

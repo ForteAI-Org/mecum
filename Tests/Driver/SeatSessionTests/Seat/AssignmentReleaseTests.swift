@@ -536,4 +536,80 @@ struct AssignmentReleaseTests {
         #expect(fixture.seat.hasPendingWindowRestorations,
                 "the rollback stays owed rather than being dropped with the assignment")
     }
+
+    // MARK: Waiting on an application given back
+
+    /// The live order this comes from: the release put the window back, the
+    /// consumer quit the application it had launched, and the heartbeat, still
+    /// waiting on a guard about the released window, failed the seat for good.
+    @Test("a seat released while waiting stops waiting, and the application quitting fails nothing")
+    func aReleaseEndsTheWaitOnTheApplication() async throws {
+
+        let fixture = try await Self.fixture(marker: 2_112)
+
+        fixture.sensing.targetIsActive = true
+        fixture.seat.report([.targetActivated])
+        #expect(fixture.seat.state == .waiting)
+
+        let report = await fixture.seat.releaseAssignment()
+        #expect(report.outcome == .released)
+        #expect(fixture.seat.seatGuard == nil, "the guard is about a window the seat no longer holds")
+        #expect(fixture.seat.state == .ready)
+
+        fixture.sensing.targetIsActive = nil
+        fixture.seat.heartbeat()
+
+        #expect(fixture.seat.state == .ready, "a quit application the seat gave back is not an Issue")
+    }
+
+    @Test("a window already home when a waiting seat is released leaves no guard behind")
+    func aReconciledReleaseEndsTheWaitToo() async throws {
+
+        let fixture = try await Self.fixture(marker: 2_113)
+
+        fixture.sensing.targetIsActive = true
+        fixture.seat.report([.targetActivated])
+
+        // The reconciliation lets this one go without writing, on its own path.
+        fixture.router.place(Self.hostWindow, at: FakeGeometry.userSeatWindow.frame)
+        let report = await fixture.seat.releaseAssignment()
+
+        #expect(report.reconciled == [fixture.host.id])
+        #expect(fixture.seat.seatGuard == nil)
+        #expect(fixture.seat.state == .ready)
+
+        fixture.sensing.targetIsActive = nil
+        fixture.seat.heartbeat()
+        #expect(fixture.seat.state == .ready)
+    }
+
+    @Test("releasing the target while waiting hands the guard to the window that survives it")
+    func aReleaseWithASuccessorKeepsWaitingOnIt() async throws {
+
+        let fixture = try await Self.fixture(marker: 2_114)
+        let extra   = FakeGeometry.reference(
+            frame       : CGRect(x: 1800, y: 900, width: 300, height: 250),
+            windowNumber: Self.secondWindowNumber
+        )
+        fixture.sensing.additionalWindows[Self.secondWindowNumber] = extra
+        fixture.router.adopting = MoveRouter.Window(
+            number: Self.secondWindowNumber,
+            size  : extra.frame.size
+        )
+        let second = try await fixture.seat.adopt(extra, platform: AppKitPlatform())
+        fixture.router.adopting = nil
+        #expect(fixture.seat.seatGuard?.target.windowNumber == second.id)
+
+        fixture.sensing.targetIsActive = true
+        fixture.seat.report([.targetActivated])
+        await fixture.seat.release(second, .leaveOnVirtualDisplay)
+
+        // The person is still in the application, and the seat still holds it.
+        #expect(fixture.seat.seatGuard?.target.windowNumber == fixture.host.id)
+        #expect(fixture.seat.state == .waiting)
+
+        fixture.sensing.targetIsActive = false
+        fixture.seat.heartbeat()
+        #expect(fixture.seat.state == .ready)
+    }
 }

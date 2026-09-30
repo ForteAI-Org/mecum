@@ -198,11 +198,37 @@ import VirtualScreens
         requestedSize: CGSize(width: 800, height: 600),
         bounds       : CGRect(x: 0, y: 0, width: 1920, height: 1080),
         observed     : nil,
-        restoration  : nil
+        restoration  : .returned
     )
     #expect(blind.contains("asked for 800×600 pt"))
-    #expect(blind.contains("was never given back"))
+    #expect(blind.contains("was put back where it was"))
     #expect(blind.contains("nothing here says which of the two it was"))
+}
+
+@Test func aFailureBeforeAnyMoveDoesNotSayTheWindowWasNeverGivenBack() {
+    // The run where `seat.adopt` refused a failed seat with `seatNotReady`:
+    // nothing was moved, so nothing was owed back.
+    let refused = SeatErrorMapper.detail(
+        requestedSize: CGSize(width: 1200, height: 828),
+        bounds       : CGRect(x: 2000, y: 1000, width: 1920, height: 1080),
+        observed     : nil,
+        restoration  : nil
+    )
+    #expect(refused.contains("asked for 1200×828 pt"))
+    #expect(refused.contains("background display [2000,1000 1920×1080]"))
+    #expect(refused.contains("stopped before it moved any window, so there was nothing to give back"))
+    #expect(!refused.contains("never given back"))
+    #expect(!refused.contains("which of the two"))
+
+    // A frame that came back is a move that happened, and there the old
+    // wording still holds.
+    let moved = SeatErrorMapper.detail(
+        requestedSize: CGSize(width: 1200, height: 828),
+        bounds       : CGRect(x: 2000, y: 1000, width: 1920, height: 1080),
+        observed     : CGRect(x: 2360, y: 1126, width: 1200, height: 828),
+        restoration  : nil
+    )
+    #expect(moved.contains("was never given back"))
 }
 
 @Test func theFrameTheWindowServerLastSawIsReadOutOfTheUnconfirmedMoves() {

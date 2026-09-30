@@ -139,7 +139,19 @@ public final class SeatHost {
     /// The Monitor is the one part that is allowed to fail without failing the
     /// start: the person loses the preview, the seat works, and the host says
     /// `degraded` with `monitorUnavailable`.
+    ///
+    /// A start waits for a fail-closed teardown to finish first. `failClosed`
+    /// leaves the host `failed` and schedules its own `stop`, so without the
+    /// wait a restart could run before that `stop` and be torn down by it, or
+    /// run beside a teardown that outlived the five seconds `stop` waits.
     public func start() async throws {
+
+        guard await EventLoopWait.until(
+            { !self.isFailingClosed && !self.isTearingDown },
+            timeout: .seconds(5)
+        ) else {
+            throw SessionFailure.hostNotReady(state)
+        }
 
         guard state == .off || state == .failed else {
             throw SessionFailure.hostNotReady(state)

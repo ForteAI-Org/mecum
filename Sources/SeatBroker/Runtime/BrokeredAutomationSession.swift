@@ -281,9 +281,11 @@ public final class BrokeredAutomationSession: AutomationSessionOperating {
     public func act(target: String, verb: ActionVerb, section: String?, desiredState: ControlState?) async throws
         -> ActOutcome {
         let (application, runtime, seat) = try current()
-        guard try seat.agentSeat().state == .ready else {
-            throw AutomationFailure("The Seat is not ready for input. Observe, then close and reopen if "
-                                    + "recovery is needed.")
+        if case .refuse(let sentence) = try await SeatAdmission.awaited(
+            seat.agentSeat(),
+            application: application.localizedName ?? "the application"
+        ) {
+            throw AutomationFailure(sentence)
         }
         if verb == .setToggle, desiredState != .on && desiredState != .off {
             throw AutomationFailure("set_toggle requires value on or off.")
@@ -299,9 +301,11 @@ public final class BrokeredAutomationSession: AutomationSessionOperating {
 
     public func deliver(_ input: InputRequest.Input, section: String?) async throws -> ActOutcome {
         let (application, runtime, seat) = try current()
-        guard try seat.agentSeat().state == .ready else {
-            throw AutomationFailure("The Seat is not ready for input. Observe, then close and reopen if "
-                                    + "recovery is needed.")
+        if case .refuse(let sentence) = try await SeatAdmission.awaited(
+            seat.agentSeat(),
+            application: application.localizedName ?? "the application"
+        ) {
+            throw AutomationFailure(sentence)
         }
         let request = InputRequest(
             processID: application.processIdentifier,
