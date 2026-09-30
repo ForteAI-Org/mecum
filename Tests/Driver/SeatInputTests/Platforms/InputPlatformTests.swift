@@ -86,6 +86,18 @@ struct InputPlatformTests {
         #expect(platform.preparation(for: .scroll(Self.anywhere, deltaY: -6)) == .none)
     }
 
+    @Test("the remote keyboard recipe primes the panel's host for the keys, and nothing for the mouse")
+    func remoteKeyboardPrimesTheHost() {
+        let host = WindowReference(processID: 35_487, windowNumber: 77_904, frame: CGRect(x: 0, y: 0, width: 891, height: 448))
+        let platform = RemoteKeyboardPlatform(host: host)
+
+        #expect(platform.keyWindowPriming(for: .text("/"))?.host == host)
+        #expect(platform.keyWindowPriming(for: .key(virtualKey: 53, text: ""))?.settle == .milliseconds(300))
+        #expect(platform.keyWindowPriming(for: .click(Self.anywhere)) == nil)
+        #expect(RemoteKeyboardPlatform().keyWindowPriming(for: .text("/")) == nil)
+        #expect(AppKitPlatform().keyWindowPriming(for: .text("/")) == nil)
+    }
+
     @Test("the remote keyboard settle is the recipe's own, and not the shared default")
     func remoteKeyboardCarriesItsOwnSettle() {
         let platform = RemoteKeyboardPlatform()

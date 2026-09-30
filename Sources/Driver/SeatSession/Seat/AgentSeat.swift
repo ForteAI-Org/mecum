@@ -1987,7 +1987,8 @@ public final class AgentSeat {
         )
         guard let resolved = platform ?? classification.platform(
             for                : routed,
-            ofDrivenApplication: record.platform
+            ofDrivenApplication: record.platform,
+            host               : window.reference
         ) else {
             sender.recordCompletedTrace(
                 traceContext.completed(at: DispatchTime.now().uptimeNanoseconds)

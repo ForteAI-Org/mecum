@@ -93,7 +93,8 @@ nonisolated enum SurfaceInputClassification: Sendable, Equatable {
     /// measured recipe replaces.
     func platform(
         for command        : InputCommand,
-        ofDrivenApplication family: (any InputPlatform)?
+        ofDrivenApplication family: (any InputPlatform)?,
+        host               : WindowReference? = nil
     ) -> (any InputPlatform)? {
 
         switch self {
@@ -105,7 +106,7 @@ nonisolated enum SurfaceInputClassification: Sendable, Equatable {
                 // vocabulary, which is the `.none` the three closures used.
                 return command.hasMouseLocation
                     ? AppKitPlatform()
-                    : RemoteKeyboardPlatform()
+                    : RemoteKeyboardPlatform(host: host)
 
             case .unknown:
                 return nil

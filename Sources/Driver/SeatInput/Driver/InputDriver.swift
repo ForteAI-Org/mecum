@@ -228,6 +228,8 @@ public actor InputDriver {
                 through: DispatchTime.now().uptimeNanoseconds
             )
 
+            try await primeKeyWindow(platform.keyWindowPriming(for: command))
+
             let preparationStart = DispatchTime.now().uptimeNanoseconds
             var rollbackTiming: AppKitStatePreparation.RollbackTiming?
             do {
@@ -403,6 +405,17 @@ public actor InputDriver {
         }
     }
 
+    /// The key-window pair on a host window of another process, and the wait its
+    /// owner takes to pass it on, before the recipient's own Preparation. See
+    /// `RemoteKeyboardPlatform`. The pair is not undone, as the recipient's is not.
+    private func primeKeyWindow(_ priming: (host: WindowReference, settle: Duration)?) async throws {
+        guard let priming else { return }
+        let host = try engine.preparation.participant(for: priming.host)
+        try validate(host, against: try engine.identity(of: priming.host))
+        try engine.preparation.makeKey(host)
+        try await Task.sleep(for: priming.settle)
+    }
+
     /// Posts several Commands under **one** Preparation: prepared once at the
     /// start, restored once at the end, with the settle paid once.
     ///
@@ -553,6 +566,10 @@ public actor InputDriver {
                         through: identityEnd
                     )
                 }
+
+                try await primeKeyWindow(
+                    commands.lazy.compactMap { platform.keyWindowPriming(for: $0) }.first
+                )
 
                 let preparationStart = DispatchTime.now().uptimeNanoseconds
                 var rollbackTiming: AppKitStatePreparation.RollbackTiming?

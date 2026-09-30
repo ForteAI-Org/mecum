@@ -45,6 +45,11 @@ nonisolated public protocol InputPlatform: Sendable {
     /// have made every click pay for it.
     func preparationSettle(for command: InputCommand) -> Duration
 
+    /// A window of another process that has to be made key before this
+    /// Command's own Preparation, and how long its owner takes to pass that on.
+    /// Nil for every recipe but the remote panel's keyboard.
+    func keyWindowPriming(for command: InputCommand) -> (host: WindowReference, settle: Duration)?
+
     /// The pacing of a drag: the pause after the opening move, after the press
     /// and after every step.
     var dragPacing: DragPacing { get }
@@ -82,6 +87,10 @@ nonisolated extension InputPlatform {
     /// worked plus half again. Qt inherits this conservative default.
     public func preparationSettle(for command: InputCommand) -> Duration {
         .milliseconds(30)
+    }
+
+    public func keyWindowPriming(for command: InputCommand) -> (host: WindowReference, settle: Duration)? {
+        nil
     }
 
     /// The pacing measured on the fixture and on Chromium renderers. Qt uses

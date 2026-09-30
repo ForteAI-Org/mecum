@@ -52,6 +52,12 @@ nonisolated public enum InputEndpointEvidence: Sendable, Equatable {
     /// positive AX focused fact, not the modal relation alone, names the key
     /// destination.
     case focusedSurfaceDescendant
+
+    /// The focused control, or the node under the point, answers no Window ID,
+    /// and a bounded, complete scan of the attested surface found exactly one
+    /// other window named by its descendants: an out of process sheet's
+    /// content, whose own controls carry no window.
+    case remoteContentOfSurface
 }
 
 /// InputEndpointRelation is the endpoint's relation to the logical surface the

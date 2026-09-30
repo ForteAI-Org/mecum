@@ -398,6 +398,22 @@ nonisolated package struct DialogEndpointResolver<Node> {
         let descended: (node: Node, windowNumber: Int?)
         switch descend(from: seed, to: point) {
         case .success(let result): descended = result
+        case .failure(.windowless(let accessibilityProcessID, let windowAbove)):
+            // Only a node that sits straight on the surface: one below a remote
+            // group that stopped answering is a recipient gone, not a sheet.
+            guard windowAbove == chain.surface.windowNumber,
+                  nodeWindow(seed) == chain.surface.windowNumber,
+                  let remote = remoteContentWindow(of: seed, within: chain)
+            else { return .failure(.subtreeUnreadable(surface: chain.surface)) }
+            return endpoint(
+                kind                   : .pointer,
+                windowNumber           : remote,
+                accessibilityProcessID : accessibilityProcessID,
+                within                 : chain,
+                selectionGeneration    : selectionGeneration,
+                focusedNodeWindowNumber: nil,
+                evidence               : .remoteContentOfSurface
+            )
         case .failure: return .failure(.subtreeUnreadable(surface: chain.surface))
         }
         guard let windowNumber = descended.windowNumber,
@@ -430,9 +446,25 @@ nonisolated package struct DialogEndpointResolver<Node> {
         guard let focused = focusedNode() ?? focusedNode() else {
             return .failure(.subtreeUnreadable(surface: chain.surface))
         }
-        guard let windowNumber = nodeWindow(focused) ?? nodeWindow(focused),
-              let accessibilityProcessID = nodeProcess(focused) ?? nodeProcess(focused)
+        guard let accessibilityProcessID = nodeProcess(focused) ?? nodeProcess(focused)
         else { return .failure(.subtreeUnreadable(surface: chain.surface)) }
+        guard let windowNumber = nodeWindow(focused) ?? nodeWindow(focused) else {
+            // A control of an out of process sheet answers no Window ID at all.
+            // The surface it sits in may still name its remote content window.
+            guard let frame = nodeFrame(focused), chain.surfaceFrame.contains(frame),
+                  let surfaceNode = focusedWindow(), focusedWindow(surfaceNode, matches: chain),
+                  let remote = remoteContentWindow(of: surfaceNode, within: chain)
+            else { return .failure(.subtreeUnreadable(surface: chain.surface)) }
+            return endpoint(
+                kind                   : .keyboardContext,
+                windowNumber           : remote,
+                accessibilityProcessID : accessibilityProcessID,
+                within                 : chain,
+                selectionGeneration    : selectionGeneration,
+                focusedNodeWindowNumber: remote,
+                evidence               : .remoteContentOfSurface
+            )
+        }
 
         return endpoint(
             kind                   : .keyboardContext,
@@ -529,6 +561,40 @@ nonisolated package struct DialogEndpointResolver<Node> {
         return true
     }
 
+    /// The one window other than the surface that the surface's descendants
+    /// name, nil when they name none, more than one, or cannot be read whole.
+    ///
+    /// Measured on 27 on DaVinci Resolve's Go to Folder sheet: the sheet
+    /// answers the host's window, its text field and buttons answer no Window
+    /// ID at all (`-25201`), and the list beside them answers the panel
+    /// service's window, with the sheet's own frame. That sibling is the only
+    /// accessibility evidence of where the field's events have to go.
+    /// `endpoint` still attests that window's identity and its containment.
+    private func remoteContentWindow(of surfaceNode: Node, within chain: SurfaceChain) -> Int? {
+        let (deadline, overflow) = now().addingReportingOverflow(300_000_000)
+        guard !overflow else { return nil }
+        var pending: [(Node, Int)] = [(surfaceNode, 0)]
+        var visited = 0
+        var named: Set<Int> = []
+        while let (node, depth) = pending.popLast() {
+            guard now() < deadline, depth <= 64, visited < 1_024 else { return nil }
+            visited += 1
+            if let window = nodeWindow(node), window != chain.surface.windowNumber {
+                named.insert(window)
+                guard named.count == 1 else { return nil }
+            }
+            switch children(node) {
+            case .leaf: break
+            case .unreadable: return nil
+            case .children(let values):
+                guard values.count <= 1_024 - visited - pending.count else { return nil }
+                pending.append(contentsOf: values.map { ($0, depth + 1) })
+            }
+        }
+        guard now() < deadline else { return nil }
+        return named.first
+    }
+
     /// The bounded descent: from the node the hit test answered, into the
     /// smallest child that still contains the point, and so on.
     ///
@@ -543,6 +609,9 @@ nonisolated package struct DialogEndpointResolver<Node> {
     /// decide it.
     private enum ChildReadFailure: Error {
         case unreadable
+        /// The innermost node under the point answered no Window ID; its
+        /// accessibility PID and the last Window ID above it are kept.
+        case windowless(accessibilityProcessID: Int32, windowAbove: Int?)
     }
 
     private func descend(
@@ -571,7 +640,10 @@ nonisolated package struct DialogEndpointResolver<Node> {
             }
             guard let innermost else { break }
             node = innermost
-            guard let found = nodeWindow(innermost) else { return .failure(.unreadable) }
+            guard let found = nodeWindow(innermost) else {
+                guard let processID = nodeProcess(innermost) else { return .failure(.unreadable) }
+                return .failure(.windowless(accessibilityProcessID: processID, windowAbove: windowNumber))
+            }
             windowNumber = found
         }
         return .success((node, windowNumber))

@@ -50,9 +50,32 @@ import SeatCore
 /// driver waits it without blocking the main actor and re-checks cancellation,
 /// identity, the person's intention and the gate after it, before the first
 /// event.
+///
+/// ## The host first
+///
+/// On 27 that preparation alone was not enough: the service beeped at every key,
+/// on every freshly opened panel, measured on DaVinci Resolve's Import Media
+/// with `/`, which opens Go to Folder. What made it work, every time, was the
+/// key-window pair on the panel's **host** window first, in the host's own
+/// process, and 250 ms or more before the service's own Preparation; 150 ms
+/// was not enough and 300 ms is the setting. The host is what tells the service
+/// its view is in a key window, and it takes that long to say so. With it, `/`
+/// opened Go to Folder, Escape closed it and Escape again closed the panel,
+/// with the host application in the background throughout.
 nonisolated public struct RemoteKeyboardPlatform: InputPlatform {
 
-    public init() {}
+    /// The window the remote content is drawn in, nil when the caller has none.
+    public let host: WindowReference?
+
+    public init(host: WindowReference? = nil) {
+        self.host = host
+    }
+
+    /// The host's key-window pair for every Command that carries keys.
+    public func keyWindowPriming(for command: InputCommand) -> (host: WindowReference, settle: Duration)? {
+        guard let host, preparation(for: command) == .internalAppKitState else { return nil }
+        return (host, .milliseconds(300))
+    }
 
     /// Every Command that carries keys is prepared; the mouse is not this
     /// recipe's and is answered by the measured `.none` of `AppKitPlatform`.

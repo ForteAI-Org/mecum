@@ -696,13 +696,15 @@ extension AgentSeat {
     /// boundary means.
     func endpointInvalidation(of endpoint: ResolvedInputEndpoint) -> InputEndpointInvalidation? {
         let focused: Int?
-        if endpoint.evidence == .focusedSurfaceDescendant {
+        if endpoint.evidence == .focusedSurfaceDescendant
+            || endpoint.kind == .keyboardContext && endpoint.evidence == .remoteContentOfSurface {
             guard let instance = assignmentKit.lifecycle.current?.instance,
                   let record = session[endpoint.logicalSurface.windowNumber],
                   record.window.reference.identity == endpoint.logicalSurface,
                   let geometry = sensing.windowGeometryObservation(of: record.window.reference),
                   geometry.window.identity == endpoint.logicalSurface,
-                  selectionKit.namedModalHost(of: endpoint.logicalSurface) != nil
+                  endpoint.evidence == .remoteContentOfSurface
+                    || selectionKit.namedModalHost(of: endpoint.logicalSurface) != nil
                     || selectionKit.isApplicationModal(endpoint.logicalSurface)
             else { return .focusedNodeChanged }
 

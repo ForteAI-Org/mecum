@@ -121,6 +121,10 @@ struct KeyboardEndpointRoutingTests {
         #expect(platform.preparationSettle(for: Self.escapeKey) == .milliseconds(50))
         // And the mouse's recipe on the same endpoint is untouched by it.
         #expect(AppKitPlatform().preparation(for: Self.escapeKey) == .none)
+        // The panel's host window is primed first: without its key-window pair
+        // the service beeps at every key, measured with DaVinci Resolve on 27.
+        #expect(platform.keyWindowPriming(for: Self.escapeKey)?.host.windowNumber
+            == observation.surface.windowNumber)
 
         try panel.seat.confirm(receipt, .unknown)
         try panel.seat.release(turn)
