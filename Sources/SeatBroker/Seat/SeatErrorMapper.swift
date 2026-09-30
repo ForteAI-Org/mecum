@@ -572,6 +572,15 @@ enum SeatErrorMapper {
             + numbers.map(String.init).joined(separator: ", ")
     }
 
+    /// The Issue's sentence, unless the cause says more than the Issue can. A
+    /// screen connected is `displayChanged` like any other, but the generic
+    /// sentence reads as a fault, and this one is the person's own plug.
+    private static func sentence(_ issue: SeatIssue, cause: SeatIssueCause?) -> String {
+        guard cause == .watchdog(.physicalDisplayAdded) else { return sentence(issue) }
+        return "a screen was connected while the seat was running, so the seat stopped and "
+            + "will start again, including the new screen, the next time an application is opened"
+    }
+
     private static func sentence(_ issue: SeatIssue) -> String {
         switch issue {
         case .keysNotReleased:         "held keys could not be released safely"
@@ -828,7 +837,7 @@ enum SeatErrorMapper {
         case .seatStateChanged(let from, let to, let reason):
             "the seat went from \(from.rawValue) to \(to.rawValue) because \(phrase(reason))"
         case .issueDetected(let issue, let cause):
-            "issue \(issue.rawValue): \(sentence(issue))"
+            "issue \(issue.rawValue): \(sentence(issue, cause: cause))"
                 + (cause.map { " (\(String(describing: $0)))" } ?? "")
         case .fenceSignals(let signals):
             "the cursor fence latched \(signals.tapDisabled) tap disable(s) and "

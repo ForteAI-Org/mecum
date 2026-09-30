@@ -343,6 +343,20 @@ private let everySuspensionCause: [SeatSuspensionCause] = [
     }
 }
 
+@Test func aScreenConnectedWhileTheSeatRanSaysSoAndWhenItComesBack() {
+    let line = SeatErrorMapper.line(
+        for: .issueDetected(.displayChanged, cause: .watchdog(.physicalDisplayAdded)))
+    #expect(line.contains("a screen was connected while the seat was running"))
+    #expect(line.contains("including the new screen, the next time an application is opened"))
+    #expect(!line.contains("no longer trustworthy"))
+
+    // Every other cause of the same Issue keeps the generic sentence.
+    let moved = SeatErrorMapper.line(
+        for: .issueDetected(.displayChanged, cause: .watchdog(.physicalGeometryChanged)))
+    #expect(moved.contains("no longer trustworthy"))
+    #expect(!moved.contains("a screen was connected"))
+}
+
 @Test func anExtraWindowTheSeatTookNamesItAndTheWindowTheLabStaysIn() {
     let window = WindowReference(processID: 42, windowNumber: 45_170,
                                  frame: CGRect(x: 0, y: 0, width: 933, height: 490))

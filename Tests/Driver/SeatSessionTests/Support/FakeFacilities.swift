@@ -122,6 +122,7 @@ final class FakeSensing: SeatSensing, @unchecked Sendable {
 
     var mainDisplayID               = FakeGeometry.mainDisplayID
     var physicalTopologyIsUnchanged = true
+    var physicalDisplayWasAdded     = false
     var virtualDisplayIsOnline      = true
     var virtualDisplayBounds        = FakeGeometry.virtual
     var fenceIsActive               = true

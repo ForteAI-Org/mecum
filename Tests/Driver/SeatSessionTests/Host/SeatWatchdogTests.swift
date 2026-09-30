@@ -11,7 +11,7 @@ import SeatCore
 @testable import SeatSession
 import Testing
 
-/// The eight checks, one test each, plus the two rows that are only true
+/// The nine checks, one test each, plus the two rows that are only true
 /// because the watchdog combines the fence's latch with the display's geometry.
 @Suite("Seat watchdog")
 struct SeatWatchdogTests {
@@ -25,6 +25,7 @@ struct SeatWatchdogTests {
             mainDisplayID              : FakeGeometry.mainDisplayID,
             expectedMainDisplayID      : FakeGeometry.mainDisplayID,
             physicalTopologyIsUnchanged: true,
+            physicalDisplayWasAdded    : false,
             virtualDisplayIsOnline     : true,
             virtualDisplayBounds       : FakeGeometry.virtual,
             fenceIsActive              : true,
@@ -36,6 +37,7 @@ struct SeatWatchdogTests {
     static func readings(
         mainDisplayID     : CGDirectDisplayID = FakeGeometry.mainDisplayID,
         topologyUnchanged : Bool = true,
+        displayAdded      : Bool = false,
         displayOnline     : Bool = true,
         fenceActive       : Bool = true,
         cursor            : CGPoint? = CGPoint(x: 700, y: 500),
@@ -45,6 +47,7 @@ struct SeatWatchdogTests {
             mainDisplayID              : mainDisplayID,
             expectedMainDisplayID      : FakeGeometry.mainDisplayID,
             physicalTopologyIsUnchanged: topologyUnchanged,
+            physicalDisplayWasAdded    : displayAdded,
             virtualDisplayIsOnline     : displayOnline,
             virtualDisplayBounds       : FakeGeometry.virtual,
             fenceIsActive              : fenceActive,
@@ -73,6 +76,39 @@ struct SeatWatchdogTests {
             readings: Self.readings(topologyUnchanged: false),
             signals : .quiet
         ) == [.physicalGeometryChanged])
+    }
+
+    /// The live report of 29 Sep 2026: a screen connected while the seat ran,
+    /// and the cursor moved onto it. The fence's region predates that screen, so
+    /// the cursor reads outside it; the cause is the new screen, not the person.
+    @Test("a screen connected after the start is named, and the cursor on it is not interference")
+    func physicalDisplayAdded() {
+
+        let violations = SeatWatchdog.violations(
+            readings: Self.readings(
+                displayAdded      : true,
+                cursor            : CGPoint(x: -900, y: 300),
+                cursorInsideRegion: false
+            ),
+            signals : .quiet
+        )
+
+        #expect(violations == [.physicalDisplayAdded])
+        #expect(violations.map(\.issue) == [.displayChanged])
+    }
+
+    /// The added screen makes only the physical region stale. The virtual
+    /// display's bounds are read live, so a cursor inside it is still an escape.
+    @Test("a screen connected does not hide a cursor inside the virtual display")
+    func physicalDisplayAddedKeepsVirtualEscape() {
+        #expect(SeatWatchdog.violations(
+            readings: Self.readings(
+                displayAdded      : true,
+                cursor            : CGPoint(x: 2500, y: 900),
+                cursorInsideRegion: false
+            ),
+            signals : .quiet
+        ) == [.physicalDisplayAdded, .pointerEnteredVirtualDisplay])
     }
 
     @Test("check three: the virtual display left the online list")
@@ -188,7 +224,7 @@ struct SeatWatchdogTests {
         for violation in WatchdogViolation.allCases {
             #expect(violation.issue.isCritical)
         }
-        #expect(WatchdogViolation.allCases.count == 8)
+        #expect(WatchdogViolation.allCases.count == 9)
     }
 
     @Test("several broken invariants are reported together, not one at a time")

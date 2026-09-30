@@ -363,7 +363,7 @@ public final class SeatHost {
         }
     }
 
-    /// One pass of the eight checks. The readings are gathered into one value
+    /// One pass of the nine checks. The readings are gathered into one value
     /// first, so the whole verdict is about one instant.
     private func check(expectedMainDisplayID: CGDirectDisplayID) {
 

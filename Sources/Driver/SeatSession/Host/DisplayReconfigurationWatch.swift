@@ -12,7 +12,7 @@ import Foundation
 /// tells the host that a display appeared, went away, moved or changed mode,
 /// instead of the host asking fifty times a second whether it did.
 ///
-/// This is where the wake-up budget is won. Re-reading all eight invariants on
+/// This is where the wake-up budget is won. Re-reading all nine invariants on
 /// a 20 ms timer pays for every one of them, and the two that can change
 /// abruptly, the
 /// display set and the topology, are exactly the two the system publishes. So

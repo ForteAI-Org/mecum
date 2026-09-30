@@ -49,6 +49,16 @@ nonisolated final class SystemSeatSensing: SeatSensing, @unchecked Sendable {
         MainActor.assumeIsolated { display.topology.physicalTopologyUnchanged }
     }
 
+    /// A list that cannot be read answers false: it is no evidence of a screen
+    /// connected, and `virtualDisplayIsOnline` fails closed on the same failure.
+    var physicalDisplayWasAdded: Bool {
+        guard let active = try? DisplayList.active() else { return false }
+        return display.topology.physicalDisplayWasAdded(
+            activeDisplayIDs: active,
+            virtualDisplayID: display.displayID
+        )
+    }
+
     var virtualDisplayIsOnline: Bool {
         MainActor.assumeIsolated { (try? display.isOnline) == true }
     }

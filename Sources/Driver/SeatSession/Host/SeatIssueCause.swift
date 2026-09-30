@@ -27,7 +27,7 @@ import SeatCore
 /// guessing between them is the misreport this type exists to stop.
 nonisolated public enum SeatIssueCause: Sendable, Equatable {
 
-    /// One of the eight invariants of a live seat, found by the watchdog.
+    /// One of the nine invariants of a live seat, found by the watchdog.
     case watchdog(WatchdogViolation)
 
     /// What is known about the target window being gone, in the kit's own terms

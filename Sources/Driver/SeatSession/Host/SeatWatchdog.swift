@@ -9,8 +9,8 @@ import CoreGraphics
 import CursorGuard
 import SeatCore
 
-/// WatchdogViolation is one of the eight invariants of a live seat, named. The
-/// Issue a violation maps to is coarse on purpose (three values for eight
+/// WatchdogViolation is one of the nine invariants of a live seat, named. The
+/// Issue a violation maps to is coarse on purpose (three values for nine
 /// causes), and a report needs the cause, so the cause is the type and the
 /// Issue is derived from it.
 nonisolated public enum WatchdogViolation: String, Sendable, Equatable, CaseIterable {
@@ -20,6 +20,11 @@ nonisolated public enum WatchdogViolation: String, Sendable, Equatable, CaseIter
 
     /// A physical display moved or changed size.
     case physicalGeometryChanged
+
+    /// A physical display the seat did not start with is active. The fence's
+    /// region was fixed at start and does not contain it, so the host stops and
+    /// the next start takes a region that does.
+    case physicalDisplayAdded
 
     /// The virtual display is no longer in the online display list.
     case virtualDisplayOffline
@@ -45,12 +50,13 @@ nonisolated public enum WatchdogViolation: String, Sendable, Equatable, CaseIter
     /// The global cursor position could not be read, which is not a zero.
     case pointerPositionUnavailable
 
-    /// Whose invariant broke. All eight are host level: they are about the
+    /// Whose invariant broke. All nine are host level: they are about the
     /// display and the fence, which the host owns and every seat shares.
     public var issue: SeatIssue {
 
         switch self {
-            case .mainDisplayChanged, .physicalGeometryChanged, .virtualDisplayOffline:
+            case .mainDisplayChanged, .physicalGeometryChanged, .physicalDisplayAdded,
+                 .virtualDisplayOffline:
                 .displayChanged
 
             case .fenceTapInactive, .fenceTapDisabled:
@@ -64,14 +70,14 @@ nonisolated public enum WatchdogViolation: String, Sendable, Equatable, CaseIter
     }
 }
 
-/// SeatWatchdog is the eight checks as a pure function, so the engine that
+/// SeatWatchdog is the nine checks as a pure function, so the engine that
 /// runs them can change without the contract changing with it, and so the
 /// whole set is asserted in a unit test with no Mac attached.
 ///
 /// ## Why the engine changed and the contract did not
 ///
 /// Run on a 20 ms timer these checks cost fifty wake-ups a second, forever, for
-/// eight readings that almost never change. This runs them on events where
+/// nine readings that almost never change. This runs them on events where
 /// events exist (the display reconfiguration callback for the display and the
 /// topology, the fence's own latch for the tap and the pointer) plus one
 /// heartbeat a second that re-reads everything. About one wake-up a second
@@ -92,7 +98,7 @@ nonisolated public enum SeatWatchdog {
 
     /// violations returns every broken invariant, empty when the seat is
     /// intact. It performs no system call: the caller supplies the readings, so
-    /// the same eight checks run in a test and in the heartbeat.
+    /// the same nine checks run in a test and in the heartbeat.
     ///
     /// `signals` is the fence's latched batch. Both of its counters are used:
     /// a disable is `fenceTapDisabled`, and a latched out-of-region point is
@@ -112,6 +118,10 @@ nonisolated public enum SeatWatchdog {
 
         if !readings.physicalTopologyIsUnchanged {
             violations.append(.physicalGeometryChanged)
+        }
+
+        if readings.physicalDisplayWasAdded {
+            violations.append(.physicalDisplayAdded)
         }
 
         if !readings.virtualDisplayIsOnline {
@@ -143,12 +153,15 @@ nonisolated public enum SeatWatchdog {
         // The two cursor checks are mutually exclusive on a live reading, and
         // the more specific one wins: a cursor inside the virtual display is by
         // construction outside the physical region, and reporting both would
-        // tell the person their pointer did two different wrong things.
+        // tell the person their pointer did two different wrong things. The
+        // same rule covers an added screen: the region predates it, so a cursor
+        // outside the region is explained by the screen, not by interference.
         if readings.virtualDisplayBounds.contains(cursor) {
             if !violations.contains(.pointerEnteredVirtualDisplay) {
                 violations.append(.pointerEnteredVirtualDisplay)
             }
         } else if !readings.cursorIsInsidePhysicalRegion,
+                  !readings.physicalDisplayWasAdded,
                   !violations.contains(.pointerLeftPhysicalRegion) {
             violations.append(.pointerLeftPhysicalRegion)
         }

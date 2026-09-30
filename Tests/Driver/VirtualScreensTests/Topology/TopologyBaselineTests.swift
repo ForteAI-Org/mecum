@@ -160,6 +160,49 @@ struct TopologyBaselineGeometryTests {
     }
 }
 
+/// A screen connected after the baseline was taken. The baseline predates the
+/// kit's own virtual display, so that display's id is in every active list the
+/// seat reads and must never count as the person's new screen.
+@Suite("A physical display added after the baseline")
+struct PhysicalDisplayAddedTests {
+
+    static let virtualID: CGDirectDisplayID = 0x2000_0001
+
+    @Test("an id the baseline does not know is an added display")
+    func addedIsDetected() {
+        #expect(SyntheticTopology.laptop.physicalDisplayWasAdded(
+            activeDisplayIDs: [SyntheticTopology.laptopID, Self.virtualID, SyntheticTopology.externalID],
+            virtualDisplayID: Self.virtualID
+        ))
+    }
+
+    @Test("the kit's own virtual display is not an added display")
+    func virtualIsNotCounted() {
+        #expect(!SyntheticTopology.laptop.physicalDisplayWasAdded(
+            activeDisplayIDs: [SyntheticTopology.laptopID, Self.virtualID],
+            virtualDisplayID: Self.virtualID
+        ))
+    }
+
+    @Test("the same set of displays is unchanged")
+    func sameSetIsUnchanged() {
+        #expect(!SyntheticTopology.laptopWithExternalRight.physicalDisplayWasAdded(
+            activeDisplayIDs: [SyntheticTopology.laptopID, SyntheticTopology.externalID],
+            virtualDisplayID: Self.virtualID
+        ))
+    }
+
+    /// Removal is the bounds check's to catch: the missing display reads as a
+    /// zero rectangle there, and calling it "added" would name the wrong event.
+    @Test("a removed display is not an added one")
+    func removedIsNotAdded() {
+        #expect(!SyntheticTopology.laptopWithExternalRight.physicalDisplayWasAdded(
+            activeDisplayIDs: [SyntheticTopology.laptopID, Self.virtualID],
+            virtualDisplayID: Self.virtualID
+        ))
+    }
+}
+
 @Suite("Deciding whether the person's topology may be restored")
 struct TopologyRestorationDecisionTests {
 

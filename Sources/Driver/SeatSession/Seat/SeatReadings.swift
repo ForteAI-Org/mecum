@@ -8,7 +8,7 @@
 import CoreGraphics
 
 /// SeatReadings is one instant of the running system as the session layer sees
-/// it: the eight values the watchdog checks, taken together.
+/// it: the nine values the watchdog checks, taken together.
 ///
 /// Taken together matters. Reading the cursor, then the display bounds, then
 /// the tap's state leaves three instants in one verdict, and a verdict on three
@@ -25,6 +25,9 @@ nonisolated public struct SeatReadings: Sendable, Equatable {
 
     /// Whether every physical display kept its bounds.
     public let physicalTopologyIsUnchanged: Bool
+
+    /// Whether a display the seat did not start with is active now.
+    public let physicalDisplayWasAdded: Bool
 
     /// Whether the virtual display is in the online display list.
     public let virtualDisplayIsOnline: Bool
@@ -45,6 +48,7 @@ nonisolated public struct SeatReadings: Sendable, Equatable {
         mainDisplayID              : CGDirectDisplayID,
         expectedMainDisplayID      : CGDirectDisplayID,
         physicalTopologyIsUnchanged: Bool,
+        physicalDisplayWasAdded    : Bool,
         virtualDisplayIsOnline     : Bool,
         virtualDisplayBounds       : CGRect,
         fenceIsActive              : Bool,
@@ -54,6 +58,7 @@ nonisolated public struct SeatReadings: Sendable, Equatable {
         self.mainDisplayID                = mainDisplayID
         self.expectedMainDisplayID        = expectedMainDisplayID
         self.physicalTopologyIsUnchanged  = physicalTopologyIsUnchanged
+        self.physicalDisplayWasAdded      = physicalDisplayWasAdded
         self.virtualDisplayIsOnline       = virtualDisplayIsOnline
         self.virtualDisplayBounds         = virtualDisplayBounds
         self.fenceIsActive                = fenceIsActive
@@ -72,6 +77,7 @@ nonisolated public struct SeatReadings: Sendable, Equatable {
             mainDisplayID              : sensing.mainDisplayID,
             expectedMainDisplayID      : expectedMainDisplayID,
             physicalTopologyIsUnchanged: sensing.physicalTopologyIsUnchanged,
+            physicalDisplayWasAdded    : sensing.physicalDisplayWasAdded,
             virtualDisplayIsOnline     : sensing.virtualDisplayIsOnline,
             virtualDisplayBounds       : sensing.virtualDisplayBounds,
             fenceIsActive              : sensing.fenceIsActive,

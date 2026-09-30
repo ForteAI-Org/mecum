@@ -62,6 +62,24 @@ nonisolated public struct TopologyBaseline: Sendable, Equatable {
         }
     }
 
+    /// Whether the active display list holds a display this baseline does not
+    /// know, the kit's own virtual display aside.
+    ///
+    /// `physicalTopologyUnchanged` cannot see this, because it only asks about
+    /// the displays of the baseline: a removed one reads as a zero rectangle
+    /// there, an added one is simply never asked about. Yet an added screen is
+    /// outside the fence's region, which was fixed at start, and macOS reflows
+    /// the virtual display next to it. The baseline was taken before the
+    /// virtual display existed (see `capture()`), so its id is in every list
+    /// read afterwards and is excluded here rather than counted as new.
+    public func physicalDisplayWasAdded(
+        activeDisplayIDs: [CGDirectDisplayID],
+        virtualDisplayID: CGDirectDisplayID
+    ) -> Bool {
+        let known = Set(physicalDisplays.map(\.displayID))
+        return activeDisplayIDs.contains { $0 != virtualDisplayID && !known.contains($0) }
+    }
+
     /// The two invariants a seat cannot run without: the person's main display
     /// is still main, and none of their displays moved or was resized.
     public func verify() throws {

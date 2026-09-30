@@ -38,6 +38,11 @@ nonisolated public protocol SeatSensing: Sendable {
     /// coordinates were computed in.
     var physicalTopologyIsUnchanged: Bool { get }
 
+    /// True when a display the seat did not start with is active now, the
+    /// virtual display aside. It is not folded into the reading above: the
+    /// displays the seat knows kept their bounds, and the cause has its own name.
+    var physicalDisplayWasAdded: Bool { get }
+
     /// True when the virtual display is a member of the online display list.
     /// Membership, never `CGDisplayIsOnline`: for a display that has gone away
     /// that call answers `0xFFFFFFFF`, so `!= 0` reads "online" exactly when
