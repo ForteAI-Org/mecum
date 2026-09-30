@@ -935,6 +935,158 @@ struct UserFocusRecoveryTests {
         fixture.recovery.stop()
     }
 
+    // MARK: An activation the seat causes on purpose (ADR 0013)
+
+    @Test("an expected activation of the target closes nothing, reports nothing and spends nothing")
+    func expectedActivationIsNotASteal() async throws {
+        let fixture = Harness()
+        fixture.recovery.beginHold()
+        try await fixture.recovery.prepareBeforeAction()
+        fixture.recovery.expectActivation(of: FakeGeometry.targetPID, until: fixture.time + 1_000_000_000)
+        fixture.activateTarget()
+        #expect(!fixture.gate.isPaused)
+        #expect(!fixture.recovery.isPaused)
+        #expect(fixture.reports.isEmpty)
+        #expect(fixture.requested.isEmpty)
+        #expect(fixture.recovery.restoreRequests == 0)
+
+        // Ended, the same activation is a steal again, with its one request intact.
+        fixture.recovery.endExpectedActivation()
+        fixture.activateTarget()
+        #expect(fixture.gate.isPaused)
+        #expect(fixture.reports.first?.outcome == .restoring)
+        #expect(fixture.requested == [Self.user])
+        fixture.returnUser()
+        #expect(fixture.reports.last?.outcome == .restored)
+        fixture.recovery.stop()
+    }
+
+    @Test("an expectation past its deadline explains nothing")
+    func expectationEndsAtItsDeadline() async throws {
+        let fixture = Harness()
+        fixture.recovery.beginHold()
+        try await fixture.recovery.prepareBeforeAction()
+        fixture.recovery.expectActivation(of: FakeGeometry.targetPID, until: fixture.time + 100)
+        fixture.time += 100
+        fixture.activateTarget()
+        #expect(fixture.gate.isPaused)
+        #expect(fixture.reports.first?.outcome == .restoring)
+        #expect(fixture.requested == [Self.user])
+        fixture.recovery.stop()
+    }
+
+    @Test("the person switching application during an expectation still becomes the destination")
+    func personStillChoosesDuringAnExpectation() {
+        let fixture = Harness()
+        fixture.recovery.beginHold()
+        fixture.recovery.expectActivation(of: FakeGeometry.targetPID, until: fixture.time + 1_000_000_000)
+        fixture.activateTarget()
+        fixture.bringInFront(Self.other)
+        fixture.recovery.activationChanged(to: Self.other.processID)
+        fixture.recovery.endExpectedActivation()
+
+        // Nothing read the person's window again: the destination is the one
+        // their activation recorded while the expectation stood.
+        fixture.activateTarget()
+        #expect(fixture.reports.first?.destination == Self.other)
+        fixture.recovery.stop()
+    }
+
+    @Test("a brief activation brings the target in front and gives the front back, reporting nothing")
+    func briefActivationGivesTheFrontBack() async {
+        let fixture = Harness()
+        fixture.requiresPausedGate = false
+        fixture.onRestore = { [unowned fixture] in fixture.bringInFront($0) }
+        var reads = 0
+        let run = await fixture.recovery.bringBrieflyInFront(
+            FakeGeometry.adoptedWindow,
+            until : {
+                reads += 1
+                fixture.time += 20_000_000
+                // The workspace notification of the seat's own request lands in the poll.
+                if reads == 1 { fixture.recovery.activationChanged(to: FakeGeometry.targetPID) }
+                return reads == 2
+            },
+            atMost: 1_000_000_000
+        )
+        #expect(run.outcome == .ready(afterMilliseconds: 40))
+        #expect(fixture.requested == [FakeGeometry.adoptedWindow, Self.user], "in front once, back once")
+        #expect(!fixture.gate.isPaused)
+        #expect(fixture.reports.isEmpty, "nothing was read as the person's focus being taken")
+
+        // Over, the target taking the front is a steal again, and the
+        // preparation rebuilt at the end answers it.
+        fixture.activateTarget()
+        #expect(fixture.gate.isPaused)
+        #expect(fixture.requested.last == Self.user)
+        fixture.recovery.stop()
+    }
+
+    @Test("a brief activation with no window of the person's in front refuses and asks for nothing")
+    func briefActivationNeedsAPersonsWindow() async {
+        let fixture = Harness()
+        fixture.sensing.focusedUserWindow = nil
+        let run = await fixture.recovery.bringBrieflyInFront(
+            FakeGeometry.adoptedWindow,
+            until : { true },
+            atMost: 1_000_000_000
+        )
+        #expect(run.outcome == .refused(.noUserWindow))
+        #expect(fixture.requested.isEmpty)
+        #expect(fixture.preparedDestinations.isEmpty)
+        #expect(!fixture.gate.isPaused)
+        fixture.recovery.stop()
+    }
+
+    @Test("the front the person takes during a brief activation stays theirs")
+    func personsChoiceDuringABriefActivationStands() async {
+        let fixture = Harness()
+        fixture.requiresPausedGate = false
+        fixture.onRestore = { [unowned fixture] in fixture.bringInFront($0) }
+        var reads = 0
+        let run = await fixture.recovery.bringBrieflyInFront(
+            FakeGeometry.adoptedWindow,
+            until : {
+                reads += 1
+                fixture.bringInFront(Self.other)
+                fixture.recovery.activationChanged(to: Self.other.processID)
+                return false
+            },
+            atMost: 1_000_000_000
+        )
+        #expect(run.outcome == .notReady(afterMilliseconds: 0))
+        #expect(reads == 1, "the poll stops once the front is no longer the target's")
+        #expect(fixture.requested == [FakeGeometry.adoptedWindow], "nothing is handed back over the person")
+        #expect(fixture.reports.isEmpty)
+        #expect(!fixture.gate.isPaused)
+        fixture.recovery.stop()
+    }
+
+    @Test("a handback the target keeps goes to the ordinary recovery, never to a silent success")
+    func unverifiedHandbackFallsBack() async {
+        let fixture = Harness()
+        fixture.requiresPausedGate = false
+        fixture.onRestore = { [unowned fixture] window in
+            // The target keeps the front whatever is asked for.
+            if window.processID == FakeGeometry.targetPID { fixture.bringInFront(window) }
+        }
+        let run = await fixture.recovery.bringBrieflyInFront(
+            FakeGeometry.adoptedWindow,
+            until : { true },
+            atMost: 1_000_000_000
+        )
+        #expect(run.outcome == .handbackNotVerified)
+        #expect(fixture.gate.isPaused)
+        #expect(fixture.reports.first?.outcome == .restoring)
+        #expect(fixture.reports.first?.timing.activationSource == .briefActivationHandback)
+        #expect(fixture.requested == [FakeGeometry.adoptedWindow, Self.user], "the handback was the one request")
+
+        fixture.returnUser()
+        #expect(fixture.reports.last?.outcome == .restored)
+        #expect(!fixture.gate.isPaused)
+        fixture.recovery.stop()
+    }
+
     @MainActor
     private final class Harness {
         let sensing = FakeSensing()
@@ -951,11 +1103,19 @@ struct UserFocusRecoveryTests {
         var request = UserFocusRequestTiming()
         var reports: [UserFocusRecoveryReport] = []
         var time: UInt64 = 1_000_000_000
+        /// False for a brief activation, the one request made with the gate open:
+        /// the seat is `acting` for it, so no Command is admitted anyway.
+        var requiresPausedGate = true
+        /// What a request does to the front, which a real request changes.
+        var onRestore: ((WindowReference) -> Void)?
         lazy var recovery = UserFocusRecovery(sensing: sensing, gate: gate,
             adopted: { [unowned self] in targets },
             restore: { [unowned self] window in
-                #expect(gate.isPaused, "The restoration call must never precede the input stop")
+                if requiresPausedGate {
+                    #expect(gate.isPaused, "The restoration call must never precede the input stop")
+                }
                 requested.append(window)
+                onRestore?(window)
                 if let restoreFailure { throw restoreFailure }
                 return restoreCode
             }, now: { [unowned self] in time },
@@ -988,6 +1148,12 @@ struct UserFocusRecoveryTests {
             sensing.focusedUserWindow = userWindow
             recovery.verify()
             recovery.verify()
+        }
+        /// The front as a request that took effect leaves it, before its
+        /// workspace notification arrives.
+        func bringInFront(_ window: WindowReference) {
+            sensing.frontmostProcessID = window.processID
+            sensing.focusedUserWindow = window
         }
     }
 }

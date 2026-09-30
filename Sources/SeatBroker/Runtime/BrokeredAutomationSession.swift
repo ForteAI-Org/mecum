@@ -325,13 +325,14 @@ public final class BrokeredAutomationSession: AutomationSessionOperating {
 
     public func menu(path: String) async throws -> ActOutcome {
         let (application, _, seat) = try current()
-        if case .refuse(let sentence) = try await SeatAdmission.awaited(
-            seat.agentSeat(),
+        let agentSeat = try seat.agentSeat()
+        if case .refuse(let sentence) = await SeatAdmission.awaited(
+            agentSeat,
             application: application.localizedName ?? "the application"
         ) {
             throw AutomationFailure(sentence)
         }
-        // An Adobe UXP application recomputes its menus only when it is in front.
+        // An Adobe UXP application recomputes its menus only when it is in front (ADR 0013).
         let processID = application.processIdentifier
         let stale = TargetPlatform.chosen(
             bundleURL       : application.bundleURL,
@@ -342,10 +343,42 @@ public final class BrokeredAutomationSession: AutomationSessionOperating {
             processID        : processID,
             allowsDestructive: allowsDestructive,
             refresh          : stale
-                ? { await BriefActivation.refresh(processID: processID, allowUnvalidatedBuild: false) }
+                ? {
+                    let outcome = await agentSeat.bringTargetBrieflyInFront(
+                        until: { MenuBarCommand.isEnabled(path, processID: processID) }
+                    )
+                    return Self.refresh(after: outcome)
+                }
                 : nil,
             observe          : { try await self.observe() }
         )
+    }
+
+    /// What a moment in front answered, as the menu command reads it: the item is read again only
+    /// when it read enabled in front, a dialog open in the seat gets the dialog's own refusal, and
+    /// any other refusal says why in one sentence a worker can repeat, with none of the seat's
+    /// internals.
+    static func refresh(after outcome: BriefActivationOutcome) -> MenuBarCommand.Refresh {
+        switch outcome {
+            case .ready:
+                return .readAgain
+            case .notReady:
+                return .stillDisabled(reason: nil)
+            case .handbackNotVerified:
+                return .stillDisabled(reason: "It was brought forward for a moment, and the seat now waits "
+                    + "for the person's own window to come back in front.")
+            case .refused(let refusal):
+                let because: String
+                switch refusal {
+                    case .dialogOpen         : return .blockedByDialog
+                    case .noFocusRecovery    : because = "this seat cannot give the person's focus back"
+                    case .seatNotReady       : because = "the seat is busy"
+                    case .noUserWindow       : because = "no window of the person's own is in front to come back to"
+                    case .targetNotPrepared  : because = "its window could not be identified"
+                    case .frontRequestRefused: because = "macOS refused to bring it forward"
+                }
+                return .stillDisabled(reason: "It could not be brought forward for a moment, because \(because).")
+        }
     }
 
     public func press(button: String) async throws -> ActOutcome {

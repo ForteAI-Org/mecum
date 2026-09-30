@@ -257,6 +257,13 @@ package final class SeatTargetSelectionKit {
         core.modalBlocks.contains { $0.blocked == surface }
     }
 
+    /// The modals whose block on this surface is in force among the members. A
+    /// member can outlive its window until the inventory reads again, so a
+    /// caller that needs the dialog open now checks each one is still live.
+    package func modals(blocking surface: WindowIdentity) -> [WindowIdentity] {
+        core.modalBlocks.filter { $0.blocked == surface }.map(\.modal)
+    }
+
     package func status(observation: TargetObservationClaim? = nil) -> TargetSelectionStatus {
         refold()
         return makeStatus(observation: observation)

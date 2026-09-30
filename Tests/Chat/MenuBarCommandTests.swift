@@ -82,4 +82,19 @@ struct MenuBarCommandTests {
         #expect(kind("File > Export") == .honestMiss)
         #expect(kind("") == .honestMiss)
     }
+
+    @Test("the poll of a moment in front reads an enabled item as ready, and nothing else")
+    func enabledPredicate() {
+        func isEnabled(_ path: String) -> Bool {
+            MenuBarCommand.isEnabled(MenuBarCommand.steps(of: path), from: Self.bar) {
+                $0.children.map { MenuBarCommand.Item(title: $0.title, isEnabled: $0.enabled, element: $0) }
+            }
+        }
+        #expect(isEnabled("File > Save As..."))
+        #expect(isEnabled("layer > new > layer"))
+        #expect(!isEnabled("File > Save"), "disabled")
+        #expect(!isEnabled("Layer > Delete > Layer"), "disabled, whatever the destructive policy says")
+        #expect(!isEnabled("File > Export"), "missing")
+        #expect(!isEnabled("File"), "a menu is not an item")
+    }
 }

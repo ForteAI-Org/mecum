@@ -11,8 +11,10 @@
 /// it does not prove that the user application has processed its focus events.
 nonisolated public struct UserFocusRecoveryTiming: Sendable, Equatable, Codable {
     /// Origin and observer receipt use the same monotonic clock as detection.
+    /// `briefActivationHandback` is a brief activation whose handback was not
+    /// verified, handed to the ordinary recovery (ADR 0013).
     public enum ActivationSource: String, Sendable, Codable {
-        case workspaceNotification, contextMenuPoll, unspecified
+        case workspaceNotification, contextMenuPoll, briefActivationHandback, unspecified
     }
     public internal(set) var activationSource: ActivationSource?
     public internal(set) var notificationReceivedAtUptimeNanoseconds: UInt64?

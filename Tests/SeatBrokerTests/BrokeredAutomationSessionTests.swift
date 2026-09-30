@@ -13,6 +13,7 @@ import LocalMCP
 import PerceptionCore
 import SeatCore
 import SeatDriving
+import SeatSession
 import Testing
 @testable import SeatBroker
 
@@ -584,6 +585,22 @@ struct BrokeredAutomationSessionTests {
         #expect(asked == [launched])
         #expect(ledger.provenance(of: launched) == .alreadyRunning)
         #expect(broker.queue.entries.isEmpty)
+    }
+
+    @Test("a moment in front is read again only when the item read enabled, and a refusal says why")
+    func menuRefreshReadsTheSeatsAnswer() {
+        #expect(BrokeredAutomationSession.refresh(after: .ready(afterMilliseconds: 1050)) == .readAgain)
+        #expect(BrokeredAutomationSession.refresh(after: .notReady(afterMilliseconds: 2000))
+            == .stillDisabled(reason: nil), "the disabled refusal stands as it is")
+        #expect(BrokeredAutomationSession.refresh(after: .refused(.noUserWindow)) == .stillDisabled(
+            reason: "It could not be brought forward for a moment, because no window of the person's own "
+                + "is in front to come back to."
+        ))
+        #expect(BrokeredAutomationSession.refresh(after: .refused(.dialogOpen)) == .blockedByDialog,
+                "an open dialog gets its own refusal, not the stale-menu one")
+        guard case .stillDisabled(.some) = BrokeredAutomationSession.refresh(after: .handbackNotVerified) else {
+            Issue.record("an unverified handback was not explained"); return
+        }
     }
 
     @Test("apps keeps the ranking's order and names the folder only where two share a name")

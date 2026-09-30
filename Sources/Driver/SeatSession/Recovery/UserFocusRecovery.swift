@@ -141,6 +141,21 @@ final class UserFocusRecovery {
     private var expectedClosure: (dialog: WindowIdentity?, helpers: [WindowReference])?
     private var reconcileInFlight = false
 
+    /// The activation the seat is causing itself, and the uptime past which it
+    /// explains nothing any more. See `expectActivation(of:until:)`.
+    private var expectedActivation: (processID: Int32, deadline: UInt64)?
+
+    /// How often a brief activation reads its caller's condition while the
+    /// target is in front.
+    static let briefActivationPollNanoseconds: UInt64 = 20_000_000
+
+    /// The longest a brief activation holds the front, whatever its caller
+    /// asks: the bound ADR 0013 accepted. One run measured on 30/09/2026 put
+    /// Photoshop's menus disabled at 5 ms, unreadable from 61 to 961 ms and
+    /// enabled at 1050 ms, so two seconds is that run with room, not a budget
+    /// qualified over many.
+    static let briefActivationLimitNanoseconds: UInt64 = 2_000_000_000
+
     /// Whether a request was already made for the activation being answered
     /// now. A verification that did not agree is not a reason to ask again, so
     /// the reconciliation arms only an activation that asked for nothing.
@@ -410,6 +425,175 @@ final class UserFocusRecovery {
         invalidatePreparation()
     }
 
+    /// Declares that the seat is about to bring `processID` in front on
+    /// purpose, so its activation before `deadline`, on this recovery's clock,
+    /// is not read as the person's focus being taken: the gate stays open,
+    /// nothing is reported, no episode opens, no request is made and no budget
+    /// is spent. The destination stays the person's window observed before it.
+    ///
+    /// Only that process is expected. The person switching to an application
+    /// of their own meanwhile keeps its ordinary meaning and becomes the
+    /// destination. Once the expectation ends or its deadline passes, an
+    /// activation of that process is answered exactly as it always was.
+    /// ADR 0013 records the one reason it exists.
+    func expectActivation(of processID: Int32, until deadline: UInt64) {
+        expectedActivation = (processID, deadline)
+    }
+
+    func endExpectedActivation() { expectedActivation = nil }
+
+    private var isExpectingActivation: Bool {
+        expectedActivation.map { now() < $0.deadline } == true
+    }
+
+    private func isExpected(_ processID: Int32) -> Bool {
+        isExpectingActivation && expectedActivation?.processID == processID
+    }
+
+    /// Brings `target` in front through the restorer the recovery gives the
+    /// focus back with, reads `isReady` every 20 ms while it is there, and
+    /// gives the front back to the person's window, all under an expectation
+    /// of its own activation. The summary is one log line's worth of what
+    /// happened, with its timings.
+    ///
+    /// It refuses before any request when the recovery is paused, when no
+    /// window of the person's own is in front, or when the target's identity
+    /// cannot be resolved. The target is a window the seat holds, never the
+    /// application's focused window, which lags behind in the application this
+    /// exists for. The front goes back only while the target still holds it: a
+    /// person who took it meanwhile keeps it, and the poll stops there too.
+    ///
+    /// The handback is verified by two agreeing readings inside the 250 ms
+    /// verification window. A target that still holds the front after it is
+    /// handed to the ordinary path as an activation of the target, so the seat
+    /// pauses and waits for the person as it does for any other; the handback
+    /// was that episode's request, so the recovery asks nothing more. The
+    /// restorer holds one participant and the target spends it, so what was
+    /// prepared for the person is dropped first and rebuilt at the end.
+    ///
+    /// `bound` is capped at two seconds. `isReady` runs on the main actor
+    /// between two sleeps and holds the actor while it reads, so it has to
+    /// answer quickly. A cancelled caller stops the poll and still hands back.
+    func bringBrieflyInFront(
+        _ target     : WindowReference,
+        until isReady: @MainActor () -> Bool,
+        atMost bound : UInt64
+    ) async -> (outcome: BriefActivationOutcome, summary: String) {
+        guard !isPaused else { return (.refused(.seatNotReady), "the focus recovery is paused") }
+        rememberUserWindow()
+        guard let person = destination, sensing.frontmostProcessID == person.processID else {
+            return (.refused(.noUserWindow), "no window of the person's own is in front to come back to")
+        }
+        let targets = adopted()
+        invalidatePreparation()
+        do { try prepareDestination(target, targets) }
+        catch {
+            return (.refused(.targetNotPrepared),
+                    "window \(target.windowNumber) could not be prepared: \(String(describing: error))")
+        }
+
+        let bound = min(bound, Self.briefActivationLimitNanoseconds)
+        let start = now()
+        expectActivation(of: target.processID, until: start &+ bound &+ Self.verificationWindowNanoseconds)
+        var frontRefusal: String?
+        do {
+            let code = try restore(target)
+            if code != 0 { frontRefusal = "request code \(code)" }
+        } catch { frontRefusal = String(describing: error) }
+        var readyAfter: UInt64?
+        if frontRefusal == nil {
+            readyAfter = await pollInFront(target, until: isReady, from: start, bound: bound)
+        }
+
+        let inFront = now() &- start
+        let outcome: BriefActivationOutcome = frontRefusal != nil
+            ? .refused(.frontRequestRefused)
+            : readyAfter.map { .ready(afterMilliseconds: Int($0 / 1_000_000)) }
+                ?? .notReady(afterMilliseconds: Int(inFront / 1_000_000))
+        var summary = frontRefusal.map { "the request for the front was refused: \($0)" }
+            ?? "in front for \(Self.milliseconds(inFront)), "
+                + (readyAfter.map { "ready after \(Self.milliseconds($0))" } ?? "not ready")
+
+        // A request that failed may still have moved the front, so this asks
+        // the window server rather than the request's answer.
+        guard isFrontmost(target.processID) else {
+            endExpectedActivation()
+            let front = sensing.frontmostProcessID.map { "process \($0)" } ?? "no process"
+            summary += ", and the front is with \(front), where it was left"
+            await refreshPreparation()
+            return (outcome, summary)
+        }
+        let handbackStart = now()
+        let handback = await giveFrontBack(to: person, targets: targets)
+        let handbackDuration = now() &- handbackStart
+        endExpectedActivation()
+        guard handback.verified || !isFrontmost(target.processID) else {
+            activationChanged(to: target.processID, source: .briefActivationHandback)
+            summary += ", and the front was not verified back on window \(person.windowNumber) within "
+                + Self.milliseconds(Self.verificationWindowNanoseconds)
+                + (handback.refusal.map { " (\($0))" } ?? "")
+                + ", so the ordinary recovery has it"
+            return (.handbackNotVerified, summary)
+        }
+        summary += handback.verified
+            ? ", gave the front back to window \(person.windowNumber) in \(Self.milliseconds(handbackDuration))"
+            : ", and the front went to process "
+                + (sensing.frontmostProcessID.map { "\($0)" } ?? "none")
+                + " instead of window \(person.windowNumber)"
+        await refreshPreparation()
+        return (outcome, summary)
+    }
+
+    /// Reads `isReady` every 20 ms while `target` is in front, and answers how
+    /// long after `start` it held, nil when it never did. It stops at `bound`,
+    /// on cancellation, and once the person has taken the front the target had.
+    /// A count bounds it as well as the clock, so an injected clock that stands
+    /// still cannot hold the front for ever.
+    private func pollInFront(
+        _ target     : WindowReference,
+        until isReady: @MainActor () -> Bool,
+        from start   : UInt64,
+        bound        : UInt64
+    ) async -> UInt64? {
+        let deadline = start &+ bound
+        let polls    = bound / Self.briefActivationPollNanoseconds + 1
+        var seenInFront = false
+        for _ in 0 ..< polls {
+            guard now() < deadline, !Task.isCancelled else { return nil }
+            await EventLoopWait.sleep(.nanoseconds(Self.briefActivationPollNanoseconds))
+            let inFront = isFrontmost(target.processID)
+            // The activation can show a moment after the request, so only a
+            // front the target was seen holding can be taken from it.
+            if seenInFront, !inFront { return nil }
+            seenInFront = seenInFront || inFront
+            if isReady() { return now() &- start }
+        }
+        return nil
+    }
+
+    /// Asks for the person's window and waits, inside the verification window
+    /// and at the recovery's own 5 ms cadence, for it to read as focused twice
+    /// in a row. `refusal` says why the request itself failed.
+    private func giveFrontBack(
+        to person: WindowReference,
+        targets  : [WindowReference]
+    ) async -> (verified: Bool, refusal: String?) {
+        do {
+            try prepareDestination(person, targets)
+            let code = try restore(person)
+            if code != 0 { return (false, "request code \(code)") }
+        } catch { return (false, String(describing: error)) }
+        let deadline = now() &+ Self.verificationWindowNanoseconds
+        var agreeing = 0
+        for _ in 0 ..< Self.verificationWindowNanoseconds / 5_000_000 {
+            guard now() < deadline, !Task.isCancelled else { break }
+            await EventLoopWait.sleep(.milliseconds(5))
+            agreeing = currentUserWindow()?.hasSameIdentity(as: person) == true ? agreeing + 1 : 0
+            if agreeing == 2 { return (true, nil) }
+        }
+        return (false, nil)
+    }
+
     /// The driver awaits this before preparation and before every atomic command,
     /// including menu selection and each command of a sequence. It never replays input.
     func prepareBeforeAction() async throws {
@@ -491,6 +675,9 @@ final class UserFocusRecovery {
         // One refresh at a time: a second would supersede the first and pay for
         // a second enumeration to reach the same answer.
         guard !isRefreshing else { return }
+        // The seat holds the front on purpose, so nothing of the person's is in
+        // front to prepare, and the restorer's participant is in use.
+        guard !isExpectingActivation else { return }
         // A closure transition is the one episode that may refresh with the gate
         // closed, and it refreshes something else: see `reconcileClosureEvidence`.
         guard !isPaused else {
@@ -744,6 +931,12 @@ final class UserFocusRecovery {
             } else {
                 rememberUserWindow()
             }
+            return
+        }
+        // The seat brought this process in front itself: not a steal, and it
+        // spends nothing. See `expectActivation(of:until:)`.
+        if isExpected(processID) {
+            note("process \(processID) is in front because the seat brought it there on purpose")
             return
         }
         // Outside a Turn nothing had armed this, so the activation returned in
@@ -1038,10 +1231,11 @@ final class UserFocusRecovery {
 
     func stop() {
         invalidatePreparation()
-        closure          = nil
-        expectedClosure  = nil
-        holdIsArmed      = false
-        operationIsArmed = false
+        closure            = nil
+        expectedClosure    = nil
+        expectedActivation = nil
+        holdIsArmed        = false
+        operationIsArmed   = false
         timer?.invalidate()
         timer = nil
         // Terminal on purpose, and its own cause: a seat that lost its focus

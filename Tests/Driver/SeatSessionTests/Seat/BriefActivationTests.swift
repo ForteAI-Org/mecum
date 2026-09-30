@@ -1,0 +1,159 @@
+//
+//  BriefActivationTests.swift
+//  AgentSeatKit
+//
+//  Created by Eliomar Alejandro Rodriguez Ferrer on 30/09/2026.
+//
+
+import CoreGraphics
+import SeatCore
+@testable import SeatSession
+import Testing
+
+/// The seat bringing its target in front on purpose (ADR 0013), over the fakes and a focus
+/// recovery built on them, whose requests move the front the way a real one does. The recovery's
+/// reports are recorded rather than routed to the seat: a `restoring` among them is exactly what
+/// would move the seat to `waiting`. No display, no window of a person's.
+@MainActor
+@Suite("A moment in front, on purpose")
+struct BriefActivationTests {
+
+    private static let user = FakeGeometry.reference(
+        frame       : CGRect(x: 100, y: 100, width: 600, height: 500),
+        processID   : FakeGeometry.userPID,
+        windowNumber: 801
+    )
+
+    /// What the recovery was asked and what it said.
+    @MainActor
+    private final class Record {
+        var requested: [WindowReference]         = []
+        var reports  : [UserFocusRecoveryReport] = []
+    }
+
+    private static func seat(
+        sensing: FakeSensing
+    ) async throws -> (seat: AgentSeat, record: Record, recovery: UserFocusRecovery) {
+        sensing.additionalWindows[user.windowNumber] = user
+        sensing.focusedUserWindow = user
+        sensing.frontmostProcessID = user.processID
+        let sender = FakeSender()
+        let (seat, _) = try await MultiWindowTests.seat(sensing: sensing, sender: sender)
+        let record = Record()
+        let recovery = UserFocusRecovery(
+            sensing: sensing,
+            gate   : sender.gate,
+            adopted: { [weak seat] in seat?.adoptedWindows.map(\.reference) ?? [] },
+            restore: { window in
+                record.requested.append(window)
+                sensing.frontmostProcessID = window.processID
+                sensing.focusedUserWindow = window
+                return 0
+            },
+            changed: { record.reports.append($0) }
+        )
+        seat.focusRecovery = recovery
+        return (seat, record, recovery)
+    }
+
+    @Test("the target is in front until the condition holds, the front goes back once, and the seat never waits")
+    func normalCase() async throws {
+        let sensing = FakeSensing()
+        let (seat, record, recovery) = try await Self.seat(sensing: sensing)
+        let log = MultiWindowTests.EventLog(seat)
+        defer { log.stop() }
+        let before = seat.state
+        let target = try #require(seat.currentTarget).reference
+        // The stream buffers the adoption's own transitions; only what follows counts.
+        await log.drain()
+        let adoption = log.events.count
+
+        var reads = 0
+        let outcome = await seat.bringTargetBrieflyInFront(until: {
+            reads += 1
+            // The workspace notification of the seat's own request.
+            if reads == 1 { recovery.activationChanged(to: target.processID) }
+            return reads == 2
+        })
+        await log.drain()
+
+        guard case .ready = outcome else { Issue.record("not ready: \(outcome)"); return }
+        #expect(record.requested == [target, Self.user], "in front once, and the handback asked once")
+        #expect(record.reports.isEmpty, "nothing read the seat's own activation as the person's focus taken")
+        #expect(seat.inputPauseReasons.isEmpty, "the gate never closed")
+        #expect(seat.state == before)
+        let states = log.events.dropFirst(adoption).compactMap { event -> SeatState? in
+            guard case .seatStateChanged(_, let to, _) = event else { return nil }
+            return to
+        }
+        #expect(!states.contains(.waiting))
+        #expect(states == [.acting, before], "acting for the length of it, like a Command")
+    }
+
+    @Test("with no window of the person's in front it refuses by name and brings nothing in front")
+    func refusesWithoutADestination() async throws {
+        let sensing = FakeSensing()
+        let (seat, record, _) = try await Self.seat(sensing: sensing)
+        sensing.focusedUserWindow = nil
+        let before = seat.state
+
+        let outcome = await seat.bringTargetBrieflyInFront(until: { true })
+
+        #expect(outcome == .refused(.noUserWindow))
+        #expect(record.requested.isEmpty)
+        #expect(record.reports.isEmpty)
+        #expect(seat.state == before)
+    }
+
+    @Test("a dialog of the application open in the seat refuses by name, and a closed one no longer does")
+    func refusesWhileADialogIsOpen() async throws {
+        let sensing = FakeSensing()
+        let (seat, record, _) = try await Self.seat(sensing: sensing)
+        let dialog = try #require(seat.currentTarget?.reference.identity)
+        seat.selectionKit.declareModal(ModalRelationClaim(
+            modal     : dialog,
+            scope     : .application,
+            provenance: .qualifiedModalAttestation
+        ))
+        #expect(seat.selectionKit.isApplicationModal(dialog))
+        let before = seat.state
+
+        #expect(await seat.bringTargetBrieflyInFront(until: { true }) == .refused(.dialogOpen))
+        #expect(record.requested.isEmpty, "nothing was brought in front")
+        #expect(record.reports.isEmpty)
+        #expect(seat.state == before)
+
+        // Gone from the window server, the dialog stops refusing before the inventory reads again.
+        sensing.geometry = nil
+        let outcome = await seat.bringTargetBrieflyInFront(until: { true })
+        guard case .ready = outcome else { Issue.record("a closed dialog still refused: \(outcome)"); return }
+    }
+
+    @Test("the dialogs open in the seat are each held modal once, and a closed one drops out")
+    func openDialogsAreTheLiveHeldModals() async throws {
+        let sensing = FakeSensing()
+        let (seat, windows) = try await MultiWindowTests.seat(
+            sensing: sensing,
+            also   : [MultiWindowTests.secondWindowNumber, MultiWindowTests.thirdWindowNumber]
+        )
+        #expect(seat.openDialogs.isEmpty, "no window is a modal yet")
+        let dialogs = try windows.dropFirst().map { try #require($0.reference.identity) }
+        for dialog in dialogs {
+            seat.selectionKit.declareModal(ModalRelationClaim(
+                modal     : dialog,
+                scope     : .application,
+                provenance: .qualifiedModalAttestation
+            ))
+        }
+        #expect(seat.openDialogs == dialogs)
+
+        sensing.additionalWindows[MultiWindowTests.secondWindowNumber] = nil
+        #expect(seat.openDialogs == [dialogs[1]], "gone from the window server, it is no longer searched")
+    }
+
+    @Test("a seat with no focus recovery refuses by name")
+    func refusesWithoutARecovery() async throws {
+        let (seat, _) = try await MultiWindowTests.seat()
+        #expect(await seat.bringTargetBrieflyInFront(until: { true }) == .refused(.noFocusRecovery))
+    }
+}

@@ -3841,6 +3841,123 @@ public final class AgentSeat {
         return attached
     }
 
+    // MARK: A moment in front, on purpose
+
+    /// Brings the seat's target window in front for a moment, reads `isReady`
+    /// every 20 ms while it is there, and gives the front back to the person's
+    /// window as soon as it holds or `bound` passes, two seconds at most.
+    ///
+    /// It exists for one measured reason, recorded in ADR 0013: an Adobe UXP
+    /// application recomputes its menu bar only when it becomes active, so a
+    /// seat that drives it in the background finds its items disabled after a
+    /// dialog closes. It is not a way to deliver input, a paste or a key
+    /// equivalent, which ADR 0012 already measured and withdrew.
+    ///
+    /// The default bound is one run's measurement with room, 30/09/2026 on
+    /// Photoshop 27.10 left in front: File > Save As... read disabled at 5 ms,
+    /// its menu bar answered nothing from 61 to 961 ms while it recomputed, and
+    /// the item read enabled at 1050 ms. A fixed 150 ms hold could never have
+    /// worked, which is why this polls for the answer instead of waiting a time.
+    ///
+    /// The activation goes through the focus recovery's own restorer, onto the
+    /// window the seat holds, and the recovery is told to expect it, so it is
+    /// not read as the person's focus being taken: the seat reports no
+    /// `targetActivated` and never waits, and it is `acting` for the length of
+    /// it, like a Command, so no other pass runs underneath. It ends in the
+    /// state it began in. If the person takes the front meanwhile it is left
+    /// with them. A handback that is not verified is handed to the ordinary
+    /// recovery, which pauses and waits for the person; that is
+    /// `handbackNotVerified`, never a success.
+    ///
+    /// It refuses before bringing anything in front, and logs one line saying
+    /// why, when no focus recovery is installed, when the seat is not ready,
+    /// when a dialog of the application is open in the seat, when no window of
+    /// the person's own is in front, or when the target window cannot be
+    /// prepared.
+    public func bringTargetBrieflyInFront(
+        until isReady: @MainActor () -> Bool,
+        atMost bound : Duration = .seconds(2)
+    ) async -> BriefActivationOutcome {
+
+        guard let recovery = focusRecovery else {
+            return refuseBriefActivation(.noFocusRecovery, "no focus recovery is installed")
+        }
+        guard !isTearingDown, state.acceptsCommands, !actionInFlight, !adoptionInFlight,
+              transfersInFlight == 0, !recovery.isPaused else {
+            return refuseBriefActivation(
+                .seatNotReady,
+                "the seat is \(state.rawValue)" + (recovery.isPaused ? " and its focus recovery is paused" : "")
+            )
+        }
+        if let dialog = openDialogs.first {
+            return refuseBriefActivation(
+                .dialogOpen,
+                "window \(dialog.windowNumber) of the application is a dialog open in the seat"
+            )
+        }
+        guard let target = session.currentTarget?.window.reference else {
+            return refuseBriefActivation(.targetNotPrepared, "the seat holds no target window")
+        }
+
+        let previous = state
+        actionInFlight = true
+        transition(to: .acting, reason: .requested)
+        defer {
+            actionInFlight = false
+            restoreActionState(previous, reason: .requested)
+            // What the application did while it was in front is looked for now.
+            requestWindowFollow()
+        }
+        let run = await recovery.bringBrieflyInFront(
+            target,
+            until : isReady,
+            atMost: UInt64(clamping: bound.wholeNanoseconds)
+        )
+        if case .refused(let refusal) = run.outcome, refusal != .frontRequestRefused {
+            return refuseBriefActivation(refusal, run.summary)
+        }
+        Self.log.info("""
+            brought pid \(target.processID, privacy: .public) window \(target.windowNumber, privacy: .public) \
+            briefly in front: \(run.summary, privacy: .public)
+            """)
+        return run.outcome
+    }
+
+    /// The dialogs of the driven application open in the seat now, empty when
+    /// there is none: every adopted window the selection kit attests as a modal
+    /// of either scope, and every modal whose block on the current target is in
+    /// force, each once, in that order.
+    ///
+    /// It is the seat's own state and not a reading of accessibility, which is
+    /// why it is the scope of a dialog button's press. Measured on 30/09/2026
+    /// with Photoshop's "Save changes?" alert up: File > Save As... read
+    /// disabled for that reason, and two seconds in front changed nothing; and
+    /// right after the alert opened, Photoshop's focused window was still the
+    /// document behind it. Only a window the window server still shows under
+    /// the same identity counts, so a dialog already closed drops out at once
+    /// rather than when the inventory next reads.
+    public var openDialogs: [WindowIdentity] {
+        let adopted = adoptedWindows.compactMap(\.reference.identity).filter {
+            selectionKit.isApplicationModal($0) || selectionKit.namedModalHost(of: $0) != nil
+        }
+        let blocking = currentTarget?.reference.identity.map { selectionKit.modals(blocking: $0) } ?? []
+        var seen: Set<WindowIdentity> = []
+        return (adopted + blocking).filter { dialog in
+            seen.insert(dialog).inserted
+                && sensing.windowGeometry(of: dialog.windowNumber)?.identity == dialog
+        }
+    }
+
+    private func refuseBriefActivation(
+        _ refusal: BriefActivationOutcome.Refusal,
+        _ reason : String
+    ) -> BriefActivationOutcome {
+        Self.log.info("""
+            a brief activation was refused, \(refusal.rawValue, privacy: .public): \(reason, privacy: .public)
+            """)
+        return .refused(refusal)
+    }
+
     /// Install only through a host configured for recovery. The private writer
     /// never receives an arbitrary caller-selected user window.
     func enableFocusRecovery(driver: InputDriver, allowUnvalidatedBuild: Bool, usesKeyRecords: Bool = false) throws {
