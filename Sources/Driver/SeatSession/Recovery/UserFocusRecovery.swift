@@ -180,6 +180,12 @@ final class UserFocusRecovery {
     private(set) var restoreRequests = 0
     private var holdIsArmed = false
     private var operationIsArmed = false
+
+    /// Whether a transfer joined the open operation, whose end then ends it,
+    /// and when an operation no transfer joined had its restoration verified.
+    /// See `openOperationOnActivation(at:)`.
+    private var operationHasTransfer = false
+    private var operationRestoredAt: UInt64?
     private var timer: Timer?
     private var userSelectedDestination = false
     private var isRefreshing = false
@@ -299,8 +305,41 @@ final class UserFocusRecovery {
     /// nowhere: no request, no pause and no reported miss. A Turn already holds
     /// an episode, so a transfer inside one finds this closed to it.
     func beginOperation() {
+        if !isPaused, !allowed {
+            operationIsArmed = true
+            openEpisode()
+        }
+        // A transfer that finds the operation open joins it: its end is the end.
+        if operationIsArmed {
+            operationHasTransfer = true
+            operationRestoredAt  = nil
+        }
+    }
+
+    /// Opens the operation an activation outside a Turn is the first signal of,
+    /// after ending an earlier one that is over although nothing ended it.
+    ///
+    /// Measured on 30/09/2026 with Photoshop: an activation opened an operation
+    /// for the Save panel it announced, the restoration was verified, and the
+    /// panel was cancelled before the seat detected it. No transfer began, so
+    /// no `endOperation` came, and eight seconds later the activation of the
+    /// next panel found the one request spent and left the seat waiting. So an
+    /// operation no transfer joined ends once its restoration has been verified
+    /// for a preparation's lifetime, the horizon past which nothing prepared
+    /// before it is evidence either. Before that, or with a transfer joined, a
+    /// second activation is the same operation and its one request stays spent.
+    private func openOperationOnActivation(at detected: UInt64) {
+        if operationIsArmed, !operationHasTransfer, !holdIsArmed, closure == nil,
+           let restoredAt = operationRestoredAt,
+           detected &- restoredAt > Self.preparationLifetimeNanoseconds {
+            note("the operation restored \(Self.milliseconds(detected &- restoredAt)) ago "
+                + "was never joined by a transfer: it is over")
+            operationIsArmed    = false
+            operationRestoredAt = nil
+        }
         guard !isPaused, !allowed else { return }
-        operationIsArmed = true
+        operationIsArmed     = true
+        operationHasTransfer = false
         openEpisode()
     }
 
@@ -312,7 +351,9 @@ final class UserFocusRecovery {
     /// about to need, so the preparation goes only when no hold is left.
     func endOperation() {
         guard operationIsArmed else { return }
-        operationIsArmed = false
+        operationIsArmed     = false
+        operationHasTransfer = false
+        operationRestoredAt  = nil
         guard !holdIsArmed else { return }
         invalidatePreparation()
     }
@@ -941,7 +982,7 @@ final class UserFocusRecovery {
         }
         // Outside a Turn nothing had armed this, so the activation returned in
         // silence. It is the first signal of the operation, so it opens it.
-        beginOperation()
+        openOperationOnActivation(at: detected)
         guard allowed || isPaused else { return }
         guard !isPaused else { return }
 
@@ -1149,6 +1190,7 @@ final class UserFocusRecovery {
                 // A closure transition is explicit and keeps its count: the
                 // distinct steal after a return spends the second of its two.
                 if holdIsArmed { restoreRequests = 0 }
+                else if operationIsArmed, !operationHasTransfer { operationRestoredAt = now() }
                 requestedThisActivation = false
                 gate.resume(.focusRecovery)
                 emit(userSelectedDestination ? .userTookControl : .restored)
@@ -1231,11 +1273,13 @@ final class UserFocusRecovery {
 
     func stop() {
         invalidatePreparation()
-        closure            = nil
-        expectedClosure    = nil
-        expectedActivation = nil
-        holdIsArmed        = false
-        operationIsArmed   = false
+        closure              = nil
+        expectedClosure      = nil
+        expectedActivation   = nil
+        holdIsArmed          = false
+        operationIsArmed     = false
+        operationHasTransfer = false
+        operationRestoredAt  = nil
         timer?.invalidate()
         timer = nil
         // Terminal on purpose, and its own cause: a seat that lost its focus

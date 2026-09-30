@@ -348,6 +348,50 @@ struct UserFocusRecoveryTests {
         fixture.recovery.stop()
     }
 
+    /// An activation outside a Turn, armed by the beat, restored and verified,
+    /// with no transfer after it: the window it announced was gone before the
+    /// seat saw it. `joinTransfer` is a transfer that begins after all.
+    private static func restoredOperation(joinTransfer: Bool = false) async -> Harness {
+        let fixture = Harness()
+        await fixture.recovery.refreshPreparation()
+        fixture.activateTarget()
+        fixture.returnUser()
+        if joinTransfer { fixture.recovery.beginOperation() }
+        return fixture
+    }
+
+    @Test("an operation no transfer joined ends once restored, and the next activation asks once")
+    func anOperationWithoutATransferEnds() async throws {
+        let fixture = await Self.restoredOperation()
+        #expect(fixture.requested.count == 1)
+        #expect(!fixture.gate.isPaused)
+
+        fixture.time += UserFocusRecovery.preparationLifetimeNanoseconds + 1
+        await fixture.recovery.refreshPreparation()
+        fixture.activateTarget()
+        #expect(fixture.requested.count == 2, "the next panel's activation is the next operation")
+        #expect(fixture.reports.last?.outcome == .restoring)
+        fixture.returnUser()
+        #expect(!fixture.gate.isPaused)
+        fixture.recovery.stop()
+    }
+
+    @Test("a second activation of the same operation is refused, before the bound or with a transfer joined",
+          arguments: [false, true])
+    func aSecondActivationOfTheSameOperationIsRefused(joinTransfer: Bool) async throws {
+        let fixture = await Self.restoredOperation(joinTransfer: joinTransfer)
+        fixture.time += joinTransfer
+            ? UserFocusRecovery.preparationLifetimeNanoseconds + 1
+            : UserFocusRecovery.preparationLifetimeNanoseconds / 2
+        await fixture.recovery.refreshPreparation()
+        fixture.activateTarget()
+        #expect(fixture.requested.count == 1)
+        #expect(fixture.reports.last?.detail
+            == "The one automatic request of this episode was already spent")
+        #expect(fixture.gate.isPaused)
+        fixture.recovery.stop()
+    }
+
     @Test("a transfer inside a held Turn neither rearms the Turn nor disarms it")
     func operationInsideAHoldChangesNothing() async throws {
         let fixture = Harness()
