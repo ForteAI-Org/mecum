@@ -51,6 +51,12 @@ nonisolated struct ToolStep: Sendable, Hashable {
         /// Right-clicked `target` and chose `item` in its contextual menu.
         case contextMenu(target: String, item: String)
 
+        /// Listed or pressed `path` in the application's menu bar.
+        case menu(path: String)
+
+        /// Pressed the dialog button titled `button` through accessibility.
+        case press(button: String)
+
         /// Closes the app the session held, when this turn opened it.
         case close(app: String?)
 
@@ -107,6 +113,8 @@ nonisolated struct ToolStep: Sendable, Hashable {
         "scroll",
         "drag",
         "context_menu",
+        "menu",
+        "press",
     ]
 
     /// The steps `lines` record, in call order.
@@ -238,6 +246,12 @@ nonisolated struct ToolStep: Sendable, Hashable {
                 target: target,
                 item  : item
             )
+        case "menu":
+            guard let path = text("path") else { return .other(name: name) }
+            return .menu(path: path)
+        case "press":
+            guard let button = text("button") else { return .other(name: name) }
+            return .press(button: button)
         case "web_search":
             return .webSearch(query: text("query"))
         case "web_fetch":

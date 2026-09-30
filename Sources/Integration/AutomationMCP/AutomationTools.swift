@@ -40,8 +40,12 @@ public final class AutomationTools {
     scroll turns the wheel up or down over a target or the window; there is no horizontal scroll.
     drag goes from one target to another or by an offset; context_menu right-clicks a target and picks an item.
     A key, scroll or drag is verified only by a visible change: on acted_unverified, observe before repeating it.
-    Not implemented: the menu bar, and shortcuts a menu resolves (Command-C, Command-V, Command-A, Command-Z),
-    which do nothing on this background window; reach Copy and Paste through context_menu instead.
+    menu reaches the app's menu bar by a path such as "File > Save As...": a path that ends on a menu lists its
+    items and presses nothing, one that ends on an item presses it. Use it for a command the window shows no
+    control for. Shortcuts a menu resolves (Command-C, Command-V, Command-A, Command-Z) do nothing on this
+    background window; reach Copy and Paste through context_menu instead.
+    press presses a button of the dialog or alert in front by its title. Use it only when a click on that button
+    was refused or the button shows as plain text, never in place of a click that works.
     A file cannot be pasted: attach it with the app's own button and file panel. Command-Q and Command-W are refused.
     A file an app should open or import comes from that app's own file panel (its Open or Import button), never
     from Finder, even when the request says "from the Finder": that panel is the Finder inside the app.
@@ -126,7 +130,7 @@ public final class AutomationTools {
                   + "Verified by reading the field's value back. On acted_unverified observe; never retype blindly."),
             input("press_key", "Press one key into the window, optionally with modifiers held and repeated count "
                   + "times. Command-Q and Command-W are refused. A shortcut a menu resolves (Command-C, Command-V, "
-                  + "Command-A, Command-Z) does nothing on this background window: use a control or context_menu. "
+                  + "Command-A, Command-Z) does nothing on this background window: use menu, a control or context_menu. "
                   + "Verified only by a visible change in the window."),
             input("scroll", "Scroll a target, or the window's centre without one, by wheel lines (default 3) up or "
                   + "down. Vertical only: the Seat has no horizontal wheel. Verified only by a visible change."),
@@ -145,6 +149,15 @@ public final class AutomationTools {
                          schema(["operation": .object(["const": .string("select")]), "control": text, "item": text],
                                 ["operation", "control", "item"])
                      ] + Self.inputTools.map(step))])])], uniquingKeysWith: { $1 }), ["session", "steps"]),
+            tool("menu", "List or press an item of the application's menu bar, through accessibility and without "
+                 + "bringing the application forward. path names it from the menu bar down, such as "
+                 + "\"File > Save As...\" or \"Layer > New > Layer...\". A path that ends on a menu answers its items; "
+                 + "one that ends on an item presses it. Disabled, hiding and destructive items are refused.",
+                 session.merging(["path": text], uniquingKeysWith: { $1 }), ["session", "path"]),
+            tool("press", "Press a button of the application's dialog or alert in front by its title, through "
+                 + "accessibility. For a button a click cannot reach: the click was refused, or the scene shows the "
+                 + "button as text. Disabled and destructive buttons are refused.",
+                 session.merging(["button": text], uniquingKeysWith: { $1 }), ["session", "button"]),
             tool("close_session", "Return the application's windows and release its Seat.", session, ["session"])
         ]
     }
@@ -207,6 +220,10 @@ public final class AutomationTools {
                                                 window: optionalString(arguments, "window"))
             value = observation(scene)
         case "observe": value = observation(try await session.observe())
+        case "menu":
+            value = outcome(try await session.menu(path: string(arguments, "path")))
+        case "press":
+            value = outcome(try await session.press(button: string(arguments, "button")))
         case "act", "select", "type_text", "press_key", "scroll", "drag", "context_menu":
             let step = try Step(name, arguments)
             value = outcome(try await perform(step))

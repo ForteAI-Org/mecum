@@ -323,6 +323,47 @@ public final class BrokeredAutomationSession: AutomationSessionOperating {
         ).deliver(request)
     }
 
+    public func menu(path: String) async throws -> ActOutcome {
+        let (application, _, seat) = try current()
+        if case .refuse(let sentence) = try await SeatAdmission.awaited(
+            seat.agentSeat(),
+            application: application.localizedName ?? "the application"
+        ) {
+            throw AutomationFailure(sentence)
+        }
+        // An Adobe UXP application recomputes its menus only when it is in front.
+        let processID = application.processIdentifier
+        let stale = TargetPlatform.chosen(
+            bundleURL       : application.bundleURL,
+            bundleIdentifier: application.bundleIdentifier
+        ) == .adobeUXP
+        return try await MenuBarCommand.perform(
+            path,
+            processID        : processID,
+            allowsDestructive: allowsDestructive,
+            refresh          : stale
+                ? { await BriefActivation.refresh(processID: processID, allowUnvalidatedBuild: false) }
+                : nil,
+            observe          : { try await self.observe() }
+        )
+    }
+
+    public func press(button: String) async throws -> ActOutcome {
+        let (application, _, seat) = try current()
+        if case .refuse(let sentence) = try await SeatAdmission.awaited(
+            seat.agentSeat(),
+            application: application.localizedName ?? "the application"
+        ) {
+            throw AutomationFailure(sentence)
+        }
+        return try await DialogButtonPress.perform(
+            button,
+            processID        : application.processIdentifier,
+            allowsDestructive: allowsDestructive,
+            observe          : { try await self.observe() }
+        )
+    }
+
     public func select(control: String, item: String) async throws -> ActOutcome {
         let (application, _, target) = try current()
         let selector = SeatDropdownSelector(target: target, pipeline: ScenePipeline(text: VisionTextRecognizer()))

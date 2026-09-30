@@ -14,6 +14,10 @@ public protocol AutomationSessionOperating: AnyObject {
     func select(control: String, item: String) async throws -> ActOutcome
     /// Types, presses a key, scrolls, drags or chooses a contextual menu item, resolved and verified.
     func deliver(_ input: InputRequest.Input, section: String?) async throws -> ActOutcome
+    /// Lists or presses an item of the held application's menu bar by a path such as "File > Close".
+    func menu(path: String) async throws -> ActOutcome
+    /// Presses a button of the held application's dialog or alert in front, by its title.
+    func press(button: String) async throws -> ActOutcome
     func close() async
     /// The applications `open` can open that `query` names, best first, or all of them when it is nil.
     /// Read-only: it needs no open session and opens nothing.
@@ -21,6 +25,16 @@ public protocol AutomationSessionOperating: AnyObject {
 }
 
 public extension AutomationSessionOperating {
+
+    /// A session with no application to read a menu bar of.
+    func menu(path: String) async throws -> ActOutcome {
+        throw AutomationFailure("The menu bar is not available in this session.")
+    }
+
+    /// A session with no application whose dialog could be read.
+    func press(button: String) async throws -> ActOutcome {
+        throw AutomationFailure("Pressing a dialog button is not available in this session.")
+    }
 
     /// Running regular applications only, since that is all `RunningApplicationLookup` opens. A query
     /// keeps the ones whose name or bundle ID contains it, ignoring case.

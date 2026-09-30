@@ -90,7 +90,7 @@ struct AutomationToolsTests {
         let required: [String: [String]] = [
             "type_text": ["session", "target", "text"], "press_key": ["session", "key"],
             "scroll": ["session", "direction"], "drag": ["session", "from"],
-            "context_menu": ["session", "target", "item"]
+            "context_menu": ["session", "target", "item"], "menu": ["session", "path"], "press": ["session", "button"]
         ]
         for (name, fields) in required {
             let tool = try #require(tools[name], "missing tool \(name)")

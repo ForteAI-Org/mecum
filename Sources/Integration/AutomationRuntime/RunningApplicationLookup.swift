@@ -14,15 +14,19 @@ import SeatDriving
 public enum RunningApplicationLookup {
 
     /// The running application a word names: an exact bundle id first, then a case-insensitive name,
-    /// then a name prefix. Ambiguous prefixes are refused.
+    /// then a name prefix, then a name that contains it ("Photoshop" for "Adobe Photoshop 2026").
+    /// Ambiguous matches are refused.
     public static func running(_ word: String) throws -> NSRunningApplication {
         let applications = NSWorkspace.shared.runningApplications.filter { $0.activationPolicy == .regular }
         let lower = word.lowercased()
         if let exact = applications.first(where: { $0.bundleIdentifier?.lowercased() == lower }) { return exact }
         if let named = applications.first(where: { $0.localizedName?.lowercased() == lower }) { return named }
         let prefixes = applications.filter { $0.localizedName?.lowercased().hasPrefix(lower) == true }
-        if prefixes.count == 1, let match = prefixes.first { return match }
-        if prefixes.count > 1 { throw AutomationFailure("Application name is ambiguous: \(word). Use its bundle ID.") }
+        let matches  = prefixes.isEmpty
+            ? applications.filter { $0.localizedName?.lowercased().contains(lower) == true }
+            : prefixes
+        if matches.count == 1, let match = matches.first { return match }
+        if matches.count > 1 { throw AutomationFailure("Application name is ambiguous: \(word). Use its bundle ID.") }
         throw AutomationFailure("No running application matches '\(word)'. Use windows to discover exact app names.")
     }
 

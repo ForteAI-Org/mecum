@@ -40,8 +40,12 @@ struct WorkerAgentHostTests {
     scroll turns the wheel up or down over a target or the window; there is no horizontal scroll.
     drag goes from one target to another or by an offset; context_menu right-clicks a target and picks an item.
     A key, scroll or drag is verified only by a visible change: on acted_unverified, observe before repeating it.
-    Not implemented: the menu bar, and shortcuts a menu resolves (Command-C, Command-V, Command-A, Command-Z),
-    which do nothing on this background window; reach Copy and Paste through context_menu instead.
+    menu reaches the app's menu bar by a path such as "File > Save As...": a path that ends on a menu lists its
+    items and presses nothing, one that ends on an item presses it. Use it for a command the window shows no
+    control for. Shortcuts a menu resolves (Command-C, Command-V, Command-A, Command-Z) do nothing on this
+    background window; reach Copy and Paste through context_menu instead.
+    press presses a button of the dialog or alert in front by its title. Use it only when a click on that button
+    was refused or the button shows as plain text, never in place of a click that works.
     A file cannot be pasted: attach it with the app's own button and file panel. Command-Q and Command-W are refused.
     A file an app should open or import comes from that app's own file panel (its Open or Import button), never
     from Finder, even when the request says "from the Finder": that panel is the Finder inside the app.

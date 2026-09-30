@@ -68,7 +68,7 @@ final class LaunchFocusComeback {
     }
 
     /// The focused window of `pid` as the window server attests it, or nil.
-    private static func focusedWindow(of pid: pid_t) -> WindowReference? {
+    static func focusedWindow(of pid: pid_t) -> WindowReference? {
         let application = AXUIElementCreateApplication(pid)
         AXUIElementSetMessagingTimeout(application, 0.1)
         var value: CFTypeRef?
