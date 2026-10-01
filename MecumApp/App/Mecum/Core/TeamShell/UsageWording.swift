@@ -64,7 +64,7 @@ nonisolated struct UsageWording {
         /// From 70%: filling up, orange.
         case filling
 
-        /// From 90%, where Mecum compacts the context: red.
+        /// From 90% of the available window: red.
         case full
     }
 

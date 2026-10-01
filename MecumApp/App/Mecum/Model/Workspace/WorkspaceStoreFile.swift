@@ -84,17 +84,37 @@ nonisolated enum WorkspaceStoreFile {
     static func isUpgradeDue(_ store: URL) -> Bool {
         guard FileManager.default.fileExists(atPath: store.path(percentEncoded: false)) else { return false }
 
-        let model    = NSManagedObjectModel.makeManagedObjectModel(for: WorkspaceSchema.models)
-        let metadata = try? NSPersistentStoreCoordinator.metadataForPersistentStore(
-            type: .sqlite,
-            at  : store
-        )
-        guard let model, let metadata else { return true }
+        guard let expected = currentModelHashes,
+              let stored = try? modelHashes(at: store)
+        else { return true }
+        return expected != stored
+    }
 
-        return !model.isConfiguration(
-            withName                   : nil,
-            compatibleWithStoreMetadata: metadata
+    /// SwiftData exposes no public conversion from its schema to NSManagedObjectModel.
+    /// Read the public entity hashes from an empty scratch store once per process instead.
+    /// Failure keeps upgrade detection conservative: the real store is backed up before opening.
+    private static let currentModelHashes: [String: Data]? = {
+        let directory = FileManager.default.temporaryDirectory.appending(
+            path: "mecum-schema-\(UUID())",
+            directoryHint: .isDirectory
         )
+        defer { try? FileManager.default.removeItem(at: directory) }
+        do {
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            let file = directory.appending(path: storeName)
+            let container = try makeContainer(at: file)
+            return try withExtendedLifetime(container) { try modelHashes(at: file) }
+        } catch {
+            return nil
+        }
+    }()
+
+    private static func modelHashes(at store: URL) throws -> [String: Data]? {
+        let metadata = try NSPersistentStoreCoordinator.metadataForPersistentStore(
+            type: .sqlite,
+            at: store
+        )
+        return metadata[NSStoreModelVersionHashesKey] as? [String: Data]
     }
 
     // MARK: Copy and restore

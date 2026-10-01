@@ -27,7 +27,7 @@ nonisolated struct ContextCompaction: Sendable, Hashable, Codable {
         /// The person, from the context popover.
         case manual
 
-        /// Mecum, after a turn that left the context at 90% or more.
+        /// Mecum, after a turn that left the context at the context budget.
         case automatic
     }
 

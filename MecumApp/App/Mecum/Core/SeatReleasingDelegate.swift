@@ -8,7 +8,7 @@
 import AppKit
 import SeatBroker
 
-/// Quitting gives the seat back and keeps what was typed.
+/// Quitting gives the seat back, stops passive observation and keeps what was typed.
 ///
 /// Nothing else gives the seat back. A window the seat took is on a background
 /// display this process owns, and a process that exits without releasing
@@ -30,6 +30,7 @@ import SeatBroker
 final class SeatReleasingDelegate: NSObject, NSApplicationDelegate {
 
     var model: AppModel?
+    private var isTerminating = false
 
     /// Every team window's model, held weakly: a closed window's team goes
     /// with it.
@@ -48,11 +49,19 @@ final class SeatReleasingDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard !isTerminating else { return .terminateLater }
         let drafts    = teams.allObjects.filter(\.hasUnsavedDraft)
         let agents    = teams.allObjects.filter(\.hasAgentHosts)
-        guard !drafts.isEmpty || !agents.isEmpty else { return .terminateNow }
+        guard !drafts.isEmpty || !agents.isEmpty || model?.watcher.isActive == true || model?.mcp.hasDirectory == true else { return .terminateNow }
 
+        isTerminating = true
         Task { @MainActor in
+            await Self.bounded(.seconds(5)) { [model] in
+                await model?.mcp.shutdown()
+            }
+            await Self.bounded(.seconds(3)) { [model] in
+                await model?.watcher.shutdown()
+            }
             await Self.bounded(.seconds(2)) {
                 for team in drafts { await team.flushDraft() }
             }

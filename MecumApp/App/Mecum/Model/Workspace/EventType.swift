@@ -45,7 +45,7 @@ nonisolated enum EventType: Sendable, Hashable {
     case turnUsage
 
     /// The conversation's model context was compacted, by the person or by
-    /// Mecum above 90%. The payload is a `ContextCompaction` as JSON, at
+    /// Mecum at its context budget. The payload is a `ContextCompaction` as JSON, at
     /// `ContextCompaction.payloadVersion`; its subject is the conversation.
     case contextCompacted
 

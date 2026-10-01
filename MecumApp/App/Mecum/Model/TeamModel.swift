@@ -7,8 +7,11 @@
 
 import AppKit
 import AutomationRuntime
+import BrowserCore
+import ChromeBrowser
 import ChatCore
 import Foundation
+import Memory
 import ModelTransports
 import Observation
 import os
@@ -54,7 +57,7 @@ nonisolated struct UserFacingIssue: Sendable, Equatable {
 /// edits, so a key entered in either place serves both.
 ///
 /// A worker's context is compacted as a turn of its own, when the person asks
-/// or after a completed turn leaves it at 90% or more, and started again when
+/// or after a completed turn leaves it at the context budget, and started again when
 /// the person asks (`compactContext`, `startFreshContext`).
 ///
 /// A message sent while its worker answers joins its conversation's queue and
@@ -67,6 +70,8 @@ nonisolated struct UserFacingIssue: Sendable, Equatable {
 final class TeamModel {
 
     private let store: WorkspaceStore
+    private let livingMemory: (any LivingMemoryStoring)?
+    private let browserSessions: BrowserSessionPool
 
     let connections: ModelSettingsStore
 
@@ -207,16 +212,20 @@ final class TeamModel {
         store           : WorkspaceStore,
         connections     : ModelSettingsStore,
         broker          : SeatBroker,
+        livingMemory    : (any LivingMemoryStoring)? = nil,
         agents          : @escaping (ModelProvider) throws -> (ChatProvider, URL) = WorkerAgentHost.agent(for:),
         bridgeExecutable: URL = Bundle.main.bundleURL.appending(path: "Contents/Helpers/mecum-bridge"),
-        preferences     : UserDefaults = .standard
+        preferences     : UserDefaults = .standard,
+        browserSessions : BrowserSessionPool = BrowserSessionPool { ChromeBrowser(configuration: .standard()) }
     ) {
         self.store            = store
+        self.livingMemory     = livingMemory
         self.connections      = connections
         self.broker           = broker
         self.agents           = agents
         self.bridgeExecutable = bridgeExecutable
         self.preferences      = preferences
+        self.browserSessions  = browserSessions
     }
 
     // MARK: Reading
@@ -568,7 +577,7 @@ final class TeamModel {
     /// from `send`, so writing to another worker meanwhile is not held up, and
     /// a failed turn is reported and never retried. A turn through Mecum's own
     /// loop is sent the conversation before the message (`turnHistory`). A
-    /// completed turn that leaves the context at 90% or more is followed by a
+    /// completed turn that leaves the context at the context budget is followed by a
     /// compaction, before any next message can start.
     ///
     /// A turn that completed sends the queued message its conversation shows,
@@ -633,6 +642,7 @@ final class TeamModel {
                     try await desktop.turn {
                         try await host.run(
                             prompt         : Self.agentText(of: message),
+                            learningRequest: message.text,
                             selection      : frozen,
                             sessionID      : session,
                             role           : worker.instructions,
@@ -661,8 +671,10 @@ final class TeamModel {
             let sendsNow = sendsQueuedOnEnd.remove(workerID) != nil
             // Each next step starts with no suspension after the turn ends, so no message can start a turn first.
             if ending == .completed,
-               let fraction = usage[workerID]?.context?.fraction,
-               UsageWording.contextLevel(fraction) == .full {
+               ChatContextBudget.shouldCompact(
+                   usedTokens: usage[workerID]?.context?.tokens,
+                   windowTokens: usage[workerID]?.context?.window
+               ) {
                 answering[workerID] = nil
                 startCompaction(
                     of     : workerID,
@@ -693,6 +705,8 @@ final class TeamModel {
             workingDirectory: workingFolder(of: conversationID),
             bridgeExecutable: bridgeExecutable,
             session         : { desktop },
+            livingMemory    : livingMemory,
+            browser         : browserSessions.client(),
             agents          : agents,
             transports      : { [connections] in $0.transport(settings: connections.providerSettings) },
             contextWindows  : { [connections] selection in
@@ -881,7 +895,7 @@ final class TeamModel {
     /// A failure leaves the context as it was and is not retried here. The
     /// person is told of one they asked for, and of a signed-out command line
     /// whoever asked; an automatic one is logged, and the next completed turn at
-    /// 90% or more tries again.
+    /// the context budget tries again.
     ///
     /// Once it ends, the queued message its conversation shows goes out, unless
     /// the person stopped it or a compaction they asked for failed, as after a
@@ -1188,7 +1202,8 @@ final class TeamModel {
             knowledgeDirectory: WorkspaceLaunch.directory.appending(
                 path         : "Knowledge",
                 directoryHint: .isDirectory
-            )
+            ),
+            livingMemory: livingMemory
         )
         desktops[workerID] = desktop
         return desktop

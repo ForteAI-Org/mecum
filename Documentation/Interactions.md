@@ -3,9 +3,36 @@
 `mecum watch` prints the events a person produces while using applications and diagnoses
 which element the production perception pipeline resolves at each pointer position.
 It is read-only: no Seat, actuation, provider calls, Brain ingestion or persistence.
-The application does not start this listener yet.
+The application hosts the same modules in its Watcher window; watching starts only on request.
 
-## Try it
+## In the application
+
+Open **Watcher → Show Watcher** or the waveform button in the main window's toolbar.
+Choose **All applications** or a particular running application, then **Start Watching**.
+Move the pointer into the target window and wait for **Ready** before clicking. Expand an event
+for window identity, coordinates, source process, Before/After perception, native AX evidence and
+any confirmed scene difference. Missing or interrupted evidence stays visible as such.
+
+Input Monitoring and Screen Recording must belong to **Mecum**, not just the terminal.
+The panel reads grants without prompting and offers explicit buttons to request missing grants and
+open the corresponding System Settings pane. Accessibility is optional: without it the panel warns
+that only pixel perception is available. After changing grants, reopen Mecum if macOS requires it.
+
+One `WatcherModel` in `AppModel` owns the listener for all windows. Closing the Watcher window keeps
+an explicit run active; the toolbar indicates its state and the Watcher menu can still stop it.
+**Stop Watching** waits for native threads and pending perception to finish before permitting a
+restart. Quitting the app includes watcher teardown in the delegate's bounded shutdown. Lost required
+grants, target-app termination, tap failure or a full delivery buffer stop the run with an explanation.
+Reopening a target app does not silently attach to its new process: select it and start again.
+
+The panel keeps at most 100 compact display records in memory and the listener buffers at most 256
+events. Overflow fails explicitly rather than silently dropping input. Clear empties the displayed
+history without stopping. Restart starts a fresh history; quitting discards it. No event database,
+screenshot archive, provider call or automatic Brain/living-memory ingestion is created. Perception
+uses an eight-scene transient cache; scene differences remain observations with unverified causality.
+Input from another automation process can appear, with its source PID; it is not proof of human input.
+
+## Try the CLI
 
 Build with the repository's Swift 6.4 toolchain, then run from a terminal with macOS grants:
 
@@ -65,9 +92,11 @@ After changing grants, quit and reopen the terminal if macOS still reports them 
 - `WatchCommand`: options, signal/duration handling, app selection and terminal rendering. Composes
   the modules with `ProductionPerception.pipeline()` without constructing an action engine.
 
-`UserInteractions` exposes both modules as a library product. A future app host can own the same
-listener and consume its event/report stream. Connecting Brain, memory or application settings
-requires a separate change; this implementation creates none of those connections.
+`UserInteractions` exposes both modules as a library product. `NativeWatcherSession` composes them
+inside Mecum's process with the production perception pipeline. `WatcherModel` owns lifecycle,
+permission/target health checks and bounded UI history. A typed `InteractionObserverStatus` reports
+readiness and capture failure without parsing CLI diagnostics. Brain and memory ingestion remain
+separate from this passive diagnostic stream.
 
 ## Timing and ownership
 
@@ -88,8 +117,10 @@ The queue holds 1024 records, 256 of them reserved for clicks, focus and loss ma
 it keeps the last hover, aggregates compatible scrolls and keeps critical input in its reserve; when
 the reserve is exhausted too, a `gap` event reports the lost sequence range and how many critical and
 coalescible records it held. Sequences are otherwise contiguous, `queueCounters` totals coalescing and
-loss, and pressure never fails the stream. The event stream after the consumer thread is unbounded,
-so a stalled reader grows memory instead of degrading the queue. A disabled tap terminates the
+loss. Queue pressure does not fail the stream. Hosts can additionally bound the event stream after
+the consumer thread with `eventBufferLimit`; overflow ends it with `consumerTooSlow` and requests
+tap teardown. The application uses 256 events. The CLI retains its unbounded diagnostic stream,
+so a stalled CLI reader grows memory instead of degrading the queue. A disabled tap terminates the
 stream instead of claiming uninterrupted recording. Only one capture is in flight per observer.
 Its cache retains at most eight window scenes and is discarded at process exit. Event reads have
 priority over ambient refresh. A matching in-flight acquisition is shared; an older one is joined
@@ -156,7 +187,7 @@ must correlate its own actuation before classifying those observations as human 
 
 ## Why one process
 
-The tap, its queue and the consumer run in the `mecum watch` process. A two-process variant (the tap
+The tap, its queue and the consumer run in their host process (the CLI or Mecum app). A two-process variant (the tap
 in a separate observer process behind a shared-memory ring) was built and measured live against this
 one on 29 Sep 2026: at human pace it had the same callback latency and the same CPU, and cost 8 MiB
 more memory and 6 more threads. The in-process queue already isolates the callback from the consumer:
@@ -209,6 +240,11 @@ swift test --no-parallel --filter 'InteractionTests|WatchOptionsTests'
 make test SWIFT=swift
 git diff --check
 ```
+
+The app's `WatcherModelTests` use a controlled session to cover no automatic startup, grant checks,
+joined cleanup, duplicate starts, late callbacks, history bounds, permission revocation, target exit,
+shutdown and visible listener failure. They do not request grants or observe real apps.
+`ListenerBufferTests` exercises explicit delivery overflow without a live tap.
 
 The pure tests cover the record layout, queue wraparound, degradation and gap accounting, a
 two-thread stress with randomized consumer stalls, snapshot parity with the direct window reader,

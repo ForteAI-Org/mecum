@@ -5,6 +5,8 @@
 //  Created by Eliomar Alejandro Rodriguez Ferrer on 22/09/2026.
 //
 
+import BrowserCore
+import ChromeBrowser
 import SeatBroker
 import SwiftUI
 
@@ -32,6 +34,8 @@ struct TeamWindowView: View {
     /// Told once the team is made, so quitting can write what is typed in it.
     var didOpenTeam: (TeamModel) -> Void
 
+    var browserSessions: BrowserSessionPool? = nil
+
     @State private var team: TeamModel?
 
     /// Closed in a new window, and as the person left it in a restored one.
@@ -55,10 +59,19 @@ struct TeamWindowView: View {
                 let model = TeamModel(
                     store      : store,
                     connections: connections,
-                    broker     : broker
+                    broker     : broker,
+                    livingMemory: launch.livingMemory,
+                    browserSessions: browserSessions ?? BrowserSessionPool { ChromeBrowser(configuration: .standard()) }
                 )
                 didOpenTeam(model)
                 await model.load()
+                if let failure = launch.memoryFailure, model.problem == nil {
+                    model.problem = UserFacingIssue(
+                        title: "Memory Is Unavailable",
+                        message: "You can keep chatting, but Mecum cannot learn or recall verified actions this session.",
+                        technicalDetails: failure
+                    )
+                }
                 restore(into: model)
                 team = model
                 await model.openSelectedConversation()

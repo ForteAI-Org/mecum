@@ -5,6 +5,7 @@
 //  Created by Eliomar Alejandro Rodriguez Ferrer on 23/09/2026.
 //
 
+import AutomationRuntime
 import ChatCore
 import Foundation
 import ModelTransports
@@ -115,6 +116,20 @@ struct WorkerTurnRecorderTests {
         let messages = try await fixture.store.messages(in: fixture.conversation)
         #expect(messages.map(\.text) == ["Which apps have windows?", "Starting."])
         #expect(messages.first?.delivery == .interrupted)
+    }
+
+    @Test func automationStopRecordsItsExplanationInsteadOfAnNSErrorCode() async throws {
+        let fixture = try await Fixture()
+        defer { fixture.discard() }
+        let reason = "Mecum stopped after 3 unsuccessful automation attempts without a verified result."
+        let ending = try await fixture.recorder.run { _, _, emit in
+            emit(.provider(.failure("Provider interrupted")))
+            throw AutomationFailure(reason)
+        }
+        #expect(ending == .failed(reason: reason))
+        let events = try await fixture.events()
+        #expect(events.filter { $0.type == .executionFailed }.count == 1)
+        #expect(events.last.flatMap(WorkerTurnRecorder.text(of:)) == reason)
     }
 
     @Test func aStopRecordsACancellationWithTheInterruptionNote() async throws {

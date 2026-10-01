@@ -131,3 +131,12 @@ what it does not, as of 23 September 2026:
   window's original frame or display to disk (`AdoptedWindow.originalFrame` is
   in memory only), and nothing at launch looks for a window an earlier process
   took. What the window server does with that window has not been measured.
+
+## Elevated application dialogs
+
+Target enumeration includes elevated application-window layers accepted by the shared
+`WindowSurfaceClassifier`, provided the exact WindowServer identity also resolves to a
+usable native window frame. A layer-zero full-size window retains the cheap listing path.
+A high layer alone is insufficient: unqualified overlays and menu layers remain excluded.
+This makes an explicit `open_session(window:)` able to address dialogs such as I/O Setup,
+which Pro Tools exposes above the main window.

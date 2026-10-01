@@ -5,6 +5,7 @@
 //  Created by Eliomar Alejandro Rodriguez Ferrer on 23/09/2026.
 //
 
+import AutomationRuntime
 import ChatCore
 import CLIProviders
 import Foundation
@@ -163,6 +164,7 @@ final class WorkerTurnRecorder {
         let ending: Ending
         switch thrown {
         case is CancellationError:  ending = .cancelled
+        case .some(let error as AutomationFailure): ending = .failed(reason: error.description)
         case .some(let error):      ending = .failed(reason: state.reportedFailure ?? error.localizedDescription)
         case .none:                 ending = state.reportedFailure.map { .failed(reason: $0) } ?? .completed
         }

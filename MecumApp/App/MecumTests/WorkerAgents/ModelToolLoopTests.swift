@@ -215,7 +215,7 @@ struct ModelToolLoopTests {
 
         let sent = transport.sent
         #expect(sent.count == 2)
-        #expect(sent.first?.tools.map(\.name) == AutomationTools.definitions.compactMap { $0["name"].string })
+        #expect(sent.first?.tools.map(\.name) == AutomationTools.definitions.compactMap { $0["name"].string }.filter { $0 != "browser_screenshot" })
         #expect(sent.first?.messages.map(\.role) == [.system, .user, .assistant, .user])
         #expect(sent.first?.messages.first?.text == WorkerAgentHost.instructions(role: "Be brief."))
         #expect(sent.first?.messages.last?.text == "Is all well?")

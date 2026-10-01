@@ -8,9 +8,12 @@
 import AutomationMCP
 import AutomationRuntime
 import ChatCore
+import BrowserCore
+import ChromeBrowser
 import CLIProviders
 import Foundation
 import LocalMCP
+import Memory
 import ModelTransports
 
 /// WorkerAgentHost answers one conversation, through a signed-in agent command
@@ -46,6 +49,7 @@ final class WorkerAgentHost {
     private let bridgeExecutable: URL
     private let tools           : AutomationTools
     private let router          : MCPRouter
+    private let memoryCycle     : TurnCycle
     private let host            : LocalMCPHost
     private let provider        = CLIProvider()
     private let agents          : (ModelProvider) throws -> (ChatProvider, URL)
@@ -58,8 +62,8 @@ final class WorkerAgentHost {
     /// The running loop turn's loop. Non-nil exactly while a loop turn runs.
     private var loop: ModelToolLoop?
 
-    /// `close` calls waiting for the running loop turn to end, resumed as it ends.
-    private var loopEndWaiters: [CheckedContinuation<Void, Never>] = []
+    /// `close` calls waiting for the whole turn, including memory persistence, to end.
+    private var turnEndWaiters: [CheckedContinuation<Void, Never>] = []
 
     /// The running turn's receiver. Non-nil exactly while a turn runs.
     private var onEvent: (@MainActor (WorkerAgentEvent) -> Void)?
@@ -94,6 +98,8 @@ final class WorkerAgentHost {
         workingDirectory: URL,
         bridgeExecutable: URL,
         session         : () -> any AutomationSessionOperating,
+        livingMemory    : (any LivingMemoryStoring)? = nil,
+        browser         : any BrowserControlling = ChromeBrowser(configuration: .standard()),
         transports      : @escaping (ModelSelection) -> any ModelTransport = { $0.transport() },
         contextWindows  : @escaping (ModelSelection) -> Int?               = { _ in nil }
     ) {
@@ -101,6 +107,8 @@ final class WorkerAgentHost {
             workingDirectory: workingDirectory,
             bridgeExecutable: bridgeExecutable,
             session         : session,
+            livingMemory    : livingMemory,
+            browser         : browser,
             agents          : Self.agent(for:),
             transports      : transports,
             contextWindows  : contextWindows
@@ -113,6 +121,8 @@ final class WorkerAgentHost {
         workingDirectory: URL,
         bridgeExecutable: URL,
         session         : () -> any AutomationSessionOperating,
+        livingMemory    : (any LivingMemoryStoring)? = nil,
+        browser         : any BrowserControlling = ChromeBrowser(configuration: .standard()),
         agents          : @escaping (ModelProvider) throws -> (ChatProvider, URL),
         transports      : @escaping (ModelSelection) -> any ModelTransport = { $0.transport() },
         contextWindows  : @escaping (ModelSelection) -> Int?               = { _ in nil }
@@ -122,14 +132,16 @@ final class WorkerAgentHost {
         self.agents           = agents
         self.transports       = transports
         self.contextWindows   = contextWindows
-        let tools  = AutomationTools(session: session())
-        let router = MCPRouter(tools: AutomationTools.definitions) { name, arguments in
+        let tools  = AutomationTools(session: session(), browser: browser)
+        let router = MCPRouter(tools: AutomationTools.definitions, instructions: ChatInstructions.standard) { name, arguments in
             try await tools.call(name, arguments)
         }
         self.tools  = tools
+        self.memoryCycle = TurnCycle(tools: tools, livingMemory: livingMemory)
         self.router = router
         self.host   = LocalMCPHost(router: router)
         tools.record = { [weak self] text in self?.onEvent?(.tool(text)) }
+        tools.onStalled = { [weak self] _ in self?.stop() }
     }
 
     /// What this app adds to the command line's text: its `open_session` launches an installed
@@ -156,7 +168,7 @@ final class WorkerAgentHost {
         hasTools   : Bool = true,
         searchesWeb: Bool = false
     ) -> String {
-        var base = hasTools ? AutomationTools.instructions + "\n" + appInstructions : textOnlyInstructions
+        var base = hasTools ? ChatInstructions.standard + "\n" + appInstructions : textOnlyInstructions
         if searchesWeb { base += "\n" + webInstructions }
         guard let role = role?.trimmingCharacters(in: .whitespacesAndNewlines), !role.isEmpty else {
             return base
@@ -185,6 +197,7 @@ final class WorkerAgentHost {
     /// loop turn ignores it.
     func run(
         prompt              : String,
+        learningRequest     : String? = nil,
         selection           : ModelSelection,
         sessionID           : String?,
         role                : String?,
@@ -199,8 +212,59 @@ final class WorkerAgentHost {
         }
         self.onEvent    = onEvent
         isStopRequested = false
-        defer { self.onEvent = nil }
+        defer { finishTurn() }
 
+        do {
+            let start = try await memoryCycle.begin(learningRequest ?? prompt, sessionIsOpen: tools.session.id != nil)
+            if let failure = start.memory?.failure { onEvent(.tool("Memory could not be read: \(failure)")) }
+            if let failure = start.memory?.decisionFailure { onEvent(.tool("Memory decision was not saved: \(failure)")) }
+            if let context = start.memory?.briefing?.contextLine { onEvent(.tool(context)) }
+            if isStopRequested { throw CancellationError() }
+            let prepared = try TurnMemory.prompt(for: prompt, briefing: start.memory?.briefing)
+            try await performTurn(
+                prompt: prepared, selection: selection, sessionID: sessionID, role: role,
+                history: history, lastUsage: lastUsage, allowsWebSearch: allowsWebSearch,
+                inheritedEnvironment: inheritedEnvironment, onEvent: onEvent
+            )
+            await router.drain()
+            if let reason = tools.stalledReason { throw AutomationFailure(reason) }
+            if isStopRequested || Task.isCancelled { throw CancellationError() }
+            reportMemory(await memoryCycle.end(.completed), to: onEvent)
+        } catch {
+            router.pause()
+            await router.drain()
+            reportMemory(await memoryCycle.end(
+                tools.stalledReason == nil && (isStopRequested || error is CancellationError) ? .interrupted : .failed
+            ), to: onEvent)
+            if tools.stalledReason != nil { await tools.session.close() }
+            await releaseBrowserAfterFailure()
+            router.resume()
+            if let reason = tools.stalledReason { throw AutomationFailure(reason) }
+            throw error
+        }
+    }
+
+    private func releaseBrowserAfterFailure() async {
+        do { try await tools.closeBrowser() }
+        catch { onEvent?(.tool("Browser connection cleanup failed: \(error)")) }
+    }
+
+    /// Reports persistence separately from desktop effects; a failed write never retries input.
+    private func reportMemory(_ end: TurnCycle.End?, to emit: (WorkerAgentEvent) -> Void) {
+        if let notice = end?.recording?.notice { emit(.tool(notice)) }
+    }
+
+    private func performTurn(
+        prompt              : String,
+        selection           : ModelSelection,
+        sessionID           : String?,
+        role                : String?,
+        history             : [TurnMessage] = [],
+        lastUsage           : TurnUsage? = nil,
+        allowsWebSearch     : Bool = false,
+        inheritedEnvironment: [String: String] = ProcessInfo.processInfo.environment,
+        onEvent             : @escaping @MainActor (WorkerAgentEvent) -> Void
+    ) async throws {
         if WorkerAnswer(provider: selection.provider) == .modelLoop {
             let loop  = ModelToolLoop { [tools] name, arguments in try await tools.call(name, arguments) }
             self.loop = loop
@@ -302,11 +366,16 @@ final class WorkerAgentHost {
         }
     }
 
-    /// Clears the loop turn that ended and resumes the `close` calls waiting for it.
+    /// Releases the loop once its in-flight tool calls have ended.
     private func endLoop() {
-        loop           = nil
-        let waiters    = loopEndWaiters
-        loopEndWaiters = []
+        loop = nil
+    }
+
+    /// Releases the turn only after its memory result has been reported.
+    private func finishTurn() {
+        onEvent = nil
+        let waiters = turnEndWaiters
+        turnEndWaiters = []
         for waiter in waiters { waiter.resume() }
     }
 
@@ -347,7 +416,7 @@ final class WorkerAgentHost {
         // A receiver that drops everything, which also marks the compaction as the running turn.
         onEvent         = { _ in }
         isStopRequested = false
-        defer { onEvent = nil }
+        defer { finishTurn() }
 
         if WorkerAnswer(provider: selection.provider) == .modelLoop {
             let loop  = ModelToolLoop { _, _ in throw AutomationFailure("A summary calls no tool.") }
@@ -608,17 +677,17 @@ final class WorkerAgentHost {
     /// is not used again afterwards. Throws when that directory could not be
     /// removed, after everything else has been released.
     func close() async throws {
-        loop?.stop()
+        stop()
         router.pause()
         provider.cancel()
-        // A loop turn's call in flight finishes before the session is closed, as the router's does.
-        // The wait ignores cancellation: the stopped turn always ends and resumes it.
-        if loop != nil { await withCheckedContinuation { loopEndWaiters.append($0) } }
+        // This also covers recall before the provider starts and recording after it stops.
+        if isRunning { await withCheckedContinuation { turnEndWaiters.append($0) } }
         await router.drain()
         await tools.session.close()
         await provider.waitUntilStopped()
         host.stop()
         connectionFile = nil
+        try await tools.closeBrowser()
         guard let temporary else { return }
         self.temporary = nil
         try FileManager.default.removeItem(at: temporary)

@@ -58,11 +58,20 @@ struct MecumApp: App {
                 launch     : workspace,
                 connections: model.settings,
                 broker     : model.broker,
-                didOpenTeam: { delegate.teams.add($0) }
+                didOpenTeam: { delegate.teams.add($0) },
+                browserSessions: model.browserSessions
             )
             // The delegate is made by AppKit and the model by SwiftUI, so
             // this window, the one that always exists, is where they meet.
-            .task { delegate.model = model }
+            .task {
+                delegate.model = model
+                if !Self.isCheckRun {
+                    workspace.open()
+                    model.externalSessions.memory = workspace.livingMemory
+                    await model.mcp.prepare()
+                }
+            }
+            .toolbar { ToolbarItem { WatcherToolbarButton(watcher: model.watcher) } }
         }
         // A snapshot run draws offscreen and quits; it opens no window and no workspace.
         .defaultLaunchBehavior(Self.isCheckRun ? .suppressed : .automatic)
@@ -75,7 +84,22 @@ struct MecumApp: App {
             #endif
             TeamMenuCommands()
             SettingsCommands()
+            WatcherCommands(watcher: model.watcher)
+            MCPConnectionsCommands()
         }
+
+        Window("MCP Connections", id: MCPConnectionsView.windowID) {
+            MCPConnectionsView(model: model.mcp)
+        }
+        .defaultLaunchBehavior(.suppressed)
+        .restorationBehavior(.disabled)
+
+        Window("Watcher", id: WatcherView.windowID) {
+            WatcherView(watcher: model.watcher)
+                .task { delegate.model = model }
+        }
+        .defaultLaunchBehavior(.suppressed)
+        .restorationBehavior(.disabled)
 
         // A window of its own rather than the Settings scene, for the full title bar and toolbar.
         Window(

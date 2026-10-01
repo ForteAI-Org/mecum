@@ -15,6 +15,25 @@ import Testing
 @Suite("Tool line: phrases per tool, repeats, failures, expand and collapse")
 struct ToolLineTests {
 
+    @Test func unverifiedNativeMenuIsNotShownAsCompleted() {
+        let steps = ToolStep.steps(from: [
+            #"→ menu {"path":["Setup","I/O..."]}"#,
+            #"← menu {"status":"acted_unverified","message":"The window was not verified"}"#
+        ])
+        #expect(steps.first?.action == .menu(path: ["Setup", "I/O..."]))
+        #expect(steps.first?.state == .failed(reason: "The window was not verified"))
+    }
+
+    @Test func recentDocumentWithIntermediateDialogIsNotShownAsOpened() {
+        let steps = ToolStep.steps(from: [
+            #"→ open_recent {"app":"Synthetic Editor","path":["File","Open Recent","/Projects/Example.prproj"]}"#,
+            #"← open_recent {"status":"acted_unverified","message":"Link Media needs attention","session":"fresh"}"#
+        ])
+        #expect(steps.first?.isEffectful == true)
+        #expect(steps.first?.state == .failed(reason: "Link Media needs attention"))
+        #expect(TranscriptWording.toolSteps(steps, ending: .completed) == ["Tried to open Synthetic Editor"])
+    }
+
     private static func done(_ lines: [String]) -> [String] {
         TranscriptWording.toolSteps(ToolStep.steps(from: lines), ending: .completed)
     }

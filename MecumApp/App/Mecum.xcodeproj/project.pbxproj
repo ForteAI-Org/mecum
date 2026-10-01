@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		000000000000000200000006 /* UserInteractions in Frameworks */ = {isa = PBXBuildFile; productRef = 000000000000000200000017 /* UserInteractions */; };
 		000000000000000200000001 /* SeatBroker in Frameworks */ = {isa = PBXBuildFile; productRef = 000000000000000200000011 /* SeatBroker */; };
 		000000000000000200000002 /* ModelTransports in Frameworks */ = {isa = PBXBuildFile; productRef = 000000000000000200000012 /* ModelTransports */; };
 		000000000000000200000003 /* MecumChat in Frameworks */ = {isa = PBXBuildFile; productRef = 000000000000000200000013 /* MecumChat */; };
@@ -66,6 +67,7 @@
 				000000000000000200000001 /* SeatBroker in Frameworks */,
 				000000000000000200000002 /* ModelTransports in Frameworks */,
 				000000000000000200000005 /* MecumPerception in Frameworks */,
+				000000000000000200000006 /* UserInteractions in Frameworks */,
 				000000000000000200000004 /* MecumEngine in Frameworks */,
 				000000000000000200000003 /* MecumChat in Frameworks */,
 			);
@@ -120,6 +122,7 @@
 				000000000000000200000012 /* ModelTransports */,
 				000000000000000200000015 /* mecum-bridge */,
 				000000000000000200000016 /* MecumPerception */,
+				000000000000000200000017 /* UserInteractions */,
 				000000000000000200000014 /* MecumEngine */,
 				000000000000000200000013 /* MecumChat */,
 			);
@@ -550,6 +553,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 000000000000000300000001 /* XCLocalSwiftPackageReference "../.." */;
 			productName = MecumPerception;
+		};
+		000000000000000200000017 /* UserInteractions */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 000000000000000300000001 /* XCLocalSwiftPackageReference "../.." */;
+			productName = UserInteractions;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

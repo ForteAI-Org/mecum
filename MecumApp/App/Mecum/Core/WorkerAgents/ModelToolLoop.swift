@@ -49,7 +49,7 @@ final class ModelToolLoop {
 
     /// The tools a model is handed: `AutomationTools.definitions`, each with its schema.
     static func definitions() throws -> [ToolDefinition] {
-        try AutomationTools.definitions.map { definition in
+        try AutomationTools.definitions.filter { $0["name"].string != "browser_screenshot" }.map { definition in
             ToolDefinition(
                 name       : definition["name"].string ?? "",
                 description: definition["description"].string ?? "",
@@ -275,6 +275,9 @@ final class ModelToolLoop {
     private func result(of toolCall: ToolCall) async -> TurnMessage {
         let result: JSONValue
         do {
+            guard toolCall.name != "browser_screenshot" else {
+                throw AutomationFailure("This model transport currently accepts text tool results only. Use browser_snapshot; screenshots are available through the MCP providers.")
+            }
             let arguments = try JSONDecoder().decode(
                 JSONValue.self,
                 from: toolCall.arguments

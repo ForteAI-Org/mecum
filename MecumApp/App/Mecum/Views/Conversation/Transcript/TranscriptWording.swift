@@ -174,6 +174,12 @@ nonisolated enum TranscriptWording {
             return forms("Looked up", "look up", "Looking up", query.map { "“\(label($0))”" } ?? "apps")
         case .open(let app):
             return forms("Opened", "open", "Opening", label(app))
+        case .menus:
+            return forms("Read", "read", "Reading", "the application menus")
+        case .resolveAction(let query):
+            return forms("Checked", "check", "Checking", query.map { "ways to use \(label($0))" } ?? "available actions")
+        case .menu(let path):
+            return forms("Used", "use", "Using", path.map(label).joined(separator: " → "))
         case .observe:
             return forms("Viewed", "view", "Viewing", "the window")
         case .select(let control, let item):
@@ -209,8 +215,6 @@ nonisolated enum TranscriptWording {
             return forms("Dragged", "drag", "Dragging", label(source) + (destination.map { " to \(label($0))" } ?? ""))
         case .contextMenu(let target, let item):
             return forms("Selected", "select", "Selecting", "\(label(item)) from \(label(target))’s menu")
-        case .menu(let path):
-            return forms("Chose", "choose", "Choosing", "\(label(path)) from the menu bar")
         case .press(let button):
             return forms("Pressed", "press", "Pressing", "\(label(button)) in the dialog")
         case .webSearch(let query):
@@ -221,8 +225,35 @@ nonisolated enum TranscriptWording {
             return forms("Read", "read", "Reading", site.map(label) ?? "a web page")
         case .note(let text):
             return (text, text, text)
+        case .browser(let name):
+            return browserPhrase(name)
         case .other(let name):
             return (name, name, name)
+        }
+    }
+
+    private static func browserPhrase(_ name: String) -> (String, String, String) {
+        switch name {
+        case "browser_connect": ("Connected to Chrome", "connect to Chrome", "Connecting to Chrome")
+        case "browser_disconnect": ("Disconnected from Chrome", "disconnect from Chrome", "Disconnecting from Chrome")
+        case "browser_status": ("Checked Chrome connection", "check Chrome connection", "Checking Chrome connection")
+        case "browser_tabs": ("Read Chrome tabs", "read Chrome tabs", "Reading Chrome tabs")
+        case "browser_snapshot": ("Read the browser page", "read the browser page", "Reading the browser page")
+        case "browser_screenshot": ("Captured the browser page", "capture the browser page", "Capturing the browser page")
+        case "browser_dialog": ("Read the browser dialog", "read the browser dialog", "Reading the browser dialog")
+        case "browser_open": ("Opened a Chrome tab", "open a Chrome tab", "Opening a Chrome tab")
+        case "browser_close": ("Closed a Chrome tab", "close a Chrome tab", "Closing a Chrome tab")
+        case "browser_fill": ("Filled a browser field", "fill a browser field", "Filling a browser field")
+        case "browser_select": ("Selected a browser option", "select a browser option", "Selecting a browser option")
+        case "browser_set_checked": ("Set a browser checkbox", "set a browser checkbox", "Setting a browser checkbox")
+        case "browser_click": ("Sent a browser click", "send a browser click", "Clicking the browser page")
+        case "browser_key": ("Sent a browser key", "send a browser key", "Sending a browser key")
+        case "browser_collect": ("Read articles from the browser", "read articles from the browser", "Reading articles from the browser")
+        case "browser_scroll": ("Scrolled the browser page", "scroll the browser page", "Scrolling the browser page")
+        case "browser_navigate", "browser_back", "browser_forward", "browser_reload":
+            ("Requested browser navigation", "navigate the browser", "Navigating the browser")
+        case "browser_handle_dialog": ("Answered the browser dialog", "answer the browser dialog", "Answering the browser dialog")
+        default: ("Used Chrome", "use Chrome", "Using Chrome")
         }
     }
 

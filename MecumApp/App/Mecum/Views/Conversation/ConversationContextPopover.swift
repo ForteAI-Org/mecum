@@ -72,7 +72,7 @@ struct ConversationContextPopover: View {
             action(
                 "Compact context",
                 systemImage: "arrow.down.right.and.arrow.up.left",
-                detail     : "Summarizes the conversation so far and keeps going. Mecum does it on its own above 90%.",
+                detail     : "Summarizes the conversation so far and keeps going. Mecum also does this automatically when context grows large.",
                 run        : compact
             )
 

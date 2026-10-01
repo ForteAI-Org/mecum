@@ -94,7 +94,7 @@ private final class Harness {
         def say(event):
             event['session_id'] = 's1'
             print(json.dumps(event), flush=True)
-        window = {'claude-sonnet-5': {'contextWindow': 1000}}
+        window = {'claude-sonnet-5': {'contextWindow': int(setting('window', '1000'))}}
         say({'type': 'system', 'subtype': 'init', 'model': 'claude-sonnet-5'})
         if received == '/compact':
             kind = setting('compaction', 'compacts')
@@ -183,6 +183,18 @@ private final class Harness {
 @MainActor
 @Suite("Compacting a worker's context from the team", .serialized)
 struct ContextCompactionTeamTests {
+
+    @Test func aLargeWindowCompactsAtThePreferredBudgetWithoutRemovingMessages() async throws {
+        let harness = try await Harness()
+        try harness.set("window", to: "258400")
+        try harness.set("context", to: "64000")
+        await harness.send("Hello")
+        try await harness.idle()
+        #expect(try harness.calls().map(\.received) == ["Hello", "/compact"])
+        #expect(try await harness.events(.contextCompacted).count == 1)
+        #expect(try await harness.messages().map(\.text) == ["Hello", "ok"])
+        await harness.discard()
+    }
 
     @Test func aCompletedTurnAtNinetyPercentIsCompactedRightAfter() async throws {
         let harness = try await Harness()

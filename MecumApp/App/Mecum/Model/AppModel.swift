@@ -6,11 +6,13 @@
 //
 
 import Foundation
+import BrowserCore
+import ChromeBrowser
 import ModelTransports
 import SeatBroker
 
 /// AppModel is what every window of the app shares: the seat broker the
-/// workers' desktops go through, and the model settings.
+/// workers' desktops go through, the model settings and the passive watcher.
 ///
 /// Every connection is checked once as the app starts, in the background, so
 /// the sidebar's badge and the workers' models are known before anyone opens
@@ -22,6 +24,20 @@ final class AppModel {
     let broker = SeatBroker(configuration: .init(allowUnvalidatedBuild: true))
 
     let settings = ModelSettingsStore()
+
+    /// One passive watcher shared by every window; construction starts no listener.
+    let watcher = WatcherModel()
+
+    let browserSessions = BrowserSessionPool { ChromeBrowser(configuration: .standard()) }
+
+    lazy var externalSessions = MCPAppSessions(broker: broker, browser: browserSessions,
+                                               watcher: watcher, support: WorkspaceLaunch.directory)
+    lazy var mcp = MCPConnectionsModel(
+        directory: WorkspaceLaunch.directory.appendingPathComponent("MCP", isDirectory: true),
+        executable: Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/mecum-bridge"),
+        makeSession: { [externalSessions] profile, activity, stalled in
+            externalSessions.make(profile, activity: activity, stalled: stalled) }
+    )
 
     init() {
         broker.display = Self.storedDisplay

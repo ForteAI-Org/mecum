@@ -3,6 +3,9 @@
 For the provider/model picker, saved conversations and persistent background tool sessions,
 see [CLI chat](Chat.md). Start with `mecum --chat`.
 
+For browser sessions without profile copying, the shared browser engine and MCP server,
+see [Browser automation](Browser.md).
+
 How the agent acts on what it sees: perceive this instant, resolve a target by name, refuse what
 policy refuses, deliver a gesture through a role, perceive again, and judge the effect by what
 changed structurally. The layer knows which application it is driving only as a process id and a
@@ -235,6 +238,9 @@ What the Seat's geometry buys: a click is routed only through the last full-wind
 pixel-to-screen observation, so a point outside the adopted window is refused rather than posted
 somewhere, and a pop-up is chosen with the keyboard, which the engine already does. While a pop-up
 is open the scene comes from a display still cropped to the union of the window and the pop-up.
+A Seat scene is titled with the window server's current title of the window captured, not the
+title the window was adopted with: the Seat adopts a window it follows after it opened with an
+empty title, and a window renamed since its adoption keeps its new name.
 
 Measured on this Mac, Pro Tools adopted from the real screen onto the virtual display: adoption in
 0.25 to 0.33 s, a 553-element scene in 1.5 s, two clicks `found_acted` with the expectation the
@@ -276,6 +282,13 @@ Driver offers is not yet turned on here.
   to the window that was looked at, never by the calendar: an application nobody opens does not
   forget (the 2026-09-06 wipe). A name a person or a model assigned is protected until a
   contradiction retracts it. A state transition is trusted at evidence two; a menu reveal at one.
+- A learned transition keeps the verb that produced it, and an expectation for one verb reads only
+  that verb's transitions, so a click, a double-click, a right-click and a `set_toggle` never set
+  each other's expectations. A transition stored before verbs were kept has a `click` trigger that
+  any of three verbs may have produced: it is kept and annotated as of unknown verb, never added to
+  and never an expectation. A stored `rightclick` had one producer and stays the right-click's. The
+  trigger is still written, so an older build reads the file. An expectation never replaces the
+  verification of the effect in front of the engine.
 - A route is a belief: only a proof (`RouteEarning.verdict` over the outcomes its own steps cover,
   and an answer that does not hand the work back) may create one, a contradiction demotes it, and
   demotion never erases. Steps store semantic targets, never coordinates, and never typed text.
@@ -285,32 +298,151 @@ Driver offers is not yet turned on here.
 - `KnowledgeStoring` serializes its own mutations, and a load after a mutation returns sees what
   the mutation wrote whether or not it has reached disk. No storage type appears in a public API of
   the pure module; the file adapter takes its directory, clock and diagnostics at construction.
+- `set_toggle` reads the control before it clicks: the resolved element's state, else a second
+  reading of the same control (accessibility under its point, then a fresh perception). A state
+  that stays unreadable is refused, so nothing is clicked blind. Every reading after resolution
+  goes through `ControlAttribution`: ids come from labels, so an id never identifies a control
+  alone; the candidate must be in the same window and section with the same id, or the same label
+  and a state, and several candidates are settled only by the control's earlier place in a window
+  of unchanged size. Before the click, one candidate is the control wherever it is now; after the
+  click, one candidate must also be at the clicked control's place (`notAtPlace` otherwise), since a
+  lone label elsewhere may be a homonym and a moved control cannot be told from one. At the place
+  means over more than half of the smaller width and of the smaller height, so the next strip's
+  homonym grazing the control's edge is not it, and the requested state never chooses among
+  candidates. The click and
+  every later reading use the control as last attributed, with that perception's geometry. Every
+  outcome after resolution carries `ToggleEvidence`: the requested state, the states before and
+  after with where each was read, and whether a click was sent. The evidence of a toggle or a click
+  keeps the control's scene section and its container, the panel the scene shows in braces, as
+  observed; it never copies the request's words. Admission accepts a section the call named only
+  when it names one of those two, by the rule the resolver found the control by, and the step keeps
+  the observed name.
+- A delivered `click`, `double_click` or `right_click` carries `ClickEvidence`: the gesture, how it
+  was delivered, and the one effect `ClickAttribution` credits it with. A menu is a pop-up window not
+  listed before the gesture, the only new surface, that opened at the target and shows readable
+  items; a window is a window not listed before, the only new surface, with a title, and the one
+  perceived afterwards, so origin and destination are linked. Both come from the window listings
+  before and after the gesture: when either cannot be taken nothing is attributed (`noCensus`), and
+  when the listing before answers without the window the gesture was sent in, empty included,
+  nothing is either (`originNotListed`), since that window would otherwise look new. A new window
+  with the origin's title while the origin is gone is the origin re-created (`originRecreated`). A
+  menu's items must come from a capture taken while its pop-up was listed, bracketed by listings on
+  both sides, and of the menu rather than of the window clicked in alone (`menuNotCaptured`); in a
+  capture of the window and its pop-ups together, as the Seat takes one, only the elements lying
+  mostly inside the new pop-up's frame are its items, so the window's controls and the target the
+  menu opened at never are, and a menu with fewer than two such rows is `unreadableSurface`. The
+  evidence keeps every row that reads a letter or a digit, with no cap on their number or length;
+  only the outcome's sentence names a few. A
+  surface is credited only when the scenes verified the gesture (`found_acted`); otherwise it is
+  `outcomeUnverified`. Anything else, a `found_acted` over a scene that merely changed included, is
+  `unattributed` with its reason. A double-click is one
+  gesture of two clicks, and a right-click is never replaced by a press action.
+- A `select` is verified only by `DropdownReadback`, the value read at the control's place after
+  the menu closed, in the full window scene or in a recognition of the control's bounds alone. At
+  the place means over more than half of the smaller width and height, so the next dropdown grazing
+  the control's edge is not read as its value when the control itself is not perceived. A
+  value is attributed only when every element read there reads that one value in one place: an
+  unlabelled chevron or a second detection of the same label does not make it uncertain, while two
+  different values, or one value in two places, do. The requested item is never preferred among
+  readings, and a label recalled from memory is not a reading. Text read in the pixels reads its
+  label; an element described by the application's accessibility tree reads its value, since its
+  label names the control ("stile") and its value is what it shows ("Regolare"), and it must agree
+  with the text painted at the same place. In chat the selector perceives the window before and
+  after with that tree, as chat scenes are, and the menu in pixels alone. The evidence keeps the
+  control's label and the value it showed before, both as read; a call and a request may name the
+  dropdown by either, and the step keeps the label.
+- The living memory learns at most one verified step per turn: one `select` whose readback shows
+  the requested item after another value, under a request for exactly that selection
+  (`SelectionGoal`); one `set_toggle` whose evidence shows the other definite state before, a
+  click, and the requested state after, under a request that asks for exactly that state
+  (`ToggleGoal`); or one click, double-click or right-click whose evidence attributes a menu or a
+  window to it, under a request for exactly that gesture on that target and, when it names one,
+  that surface (`ClickGoal`). No goal admits a
+  negation, an alternative or a second action in the step's clause, and a second step clause,
+  after a comma or a sequencing word, makes the goal compound; a negation in a verifying or guard
+  clause stays that clause's. The item's or target's name, with any section the call used, must
+  appear as whole words. For a toggle or a click, any other word in the step's clause beyond
+  connectives and the proof's window titles makes the goal `qualified`, so a memory without a
+  section is neither learned nor recalled nor confirmed for "in Track 2". For a select, every word
+  of the selection clause must be the item's, the control's, the proof's window title's, a verb, an
+  article, a preposition, courtesy or a dropdown noun, otherwise the request is `unexplained`: a
+  select step keeps no section or application, so "della scheda Bus", "di Track 2" and "in Pro
+  Tools" are not learned, and a dropdown's name counts only when it is the control's label. The
+  words beside the item must not extend it ("Output Busses 2" is `qualified`); an item introduced
+  by an origin ("da", "dal", "from") or a replacement ("invece di", "invece che", "al posto delle",
+  "piuttosto di", "anziché", "instead of"), with at most articles, prepositions and "valore"
+  between ("from the X"), or sent on by a change or setting verb to another value ("Cambia X in Y",
+  "Cambia X con il valore Y", "Set X to Y"), is the value left, `itemIsOrigin`. A replacement word
+  without the preposition that says which value is left is `unexplained`, and an item after a
+  replacement with other words between is `uncertain`. An avoidance ("evita di", "avoid") is a
+  negation. Every clause is read, so an
+  unparsed opening clause never hides a later negation or second selection. Recall offers a select
+  memory operationally only to a request that is its single selection; one `SelectionGoal` shows
+  asks for another step gets nothing, whatever words it shares, and one that only shares the
+  phrase's words (unparsed, no selection, or unexplained) is history at most (`goalNotSingle`),
+  never a suggestion or a followed experience. "Stop" is a guard only as a condition ("stop if"),
+  so "Clicca Play e poi Stop" is two targets. A toggle already in the state is kept as no change
+  and never confirms; an unreadable start or end is uncertain; the other state after the click
+  contradicts only the followed experience of the same step in the same window. A turn of several
+  steps is never promoted or confirmed, but it contradicts the followed experience when that one
+  contradiction is every verdict about it; a verified repetition beside it, or two different
+  readings, decide nothing, and the other steps' outcomes are not kept. A click without an
+  attributed surface is uncertain and never contradicts. Recall offers a memory only to a request
+  for its own state, or its own gesture and surface, and section, and briefs a toggle as a state to
+  reach with `set_toggle` and a click as an effect to check with its own verb. Only a suggestion's
+  briefing names a tool: a historical or refused briefing, for another window or application, an
+  unreliable memory, a target not usable now or a request that is not the step's goal, says the
+  memory authorizes nothing in that context, and a fresh observation updates it either way.
+- Each kind of step the living memory learns is one `LearnableStep` in `Memory/Living`
+  (`SelectionStep`, `ToggleStep`, `ClickStep`). It holds every rule of its kind: the semantic
+  arguments and key it keeps, the `StepEvidence` that proves it, what a turn's call and evidence must
+  show to teach it, how a request asks for it again, what a fresh scene resolves for it, and its
+  briefing. `ExperienceStep` is the closed allowlist of kinds and their stored shape; `TurnAdmission`,
+  `Recall` and `RecallBriefing` read a step only through the protocol, so a new kind is one conformer
+  and one case. The act goals share one rule, `ActGoal`, and differ only in their
+  `ActGoalVocabulary` (`ToggleGoal`, `ClickGoal`); `SelectionGoal` keeps its own reading of the item.
+  All of them read the clauses and companion clauses `GoalClause` reads.
+- The living memory's SQLite `user_version` also versions its JSON records. Version 2 marks toggle
+  and click steps and their evidence; version 1 rows are neither rewritten nor reinterpreted, a
+  select is still written in the version 1 shape, and a version 1 build refuses a version 2 file at
+  open. Version 2 was never released before click records joined it, so it was extended rather
+  than followed by a third version. A
+  migration that changes no table is declared to read its previous version, so a read-only open,
+  such as `mecum memory`, reads a version 1 file as it is; the next read-write open migrates it.
 
 ## Evidence
 
-Unit: `ActVerificationTests` (one test per verdict), `ActOracleTests` (11: the three oracles, the exact
+Unit: `ActVerificationTests` (one test per verdict), `ActOracleTests` (10: the three oracles, the exact
 typed-value transition, a landed effect a contradicted oracle demotes, the unchanged no-oracle path and
 the interrupted reading), `ActionPolicyTests`, `ElsewhereGuideTests`,
 `PopupRowPickTests` (Premiere's measured list geometry), and `ActionEngineTests`, which drives the
 whole cycle through doubles that honor the roles: resolution and its misses, the destructive gate,
 dry runs, a landed click, a ghost, a repaint with a window that appeared elsewhere, expectation by
-family, menu gating, activation, a dropdown opened by press, delivery failure, `set_toggle`'s three
-answers, the keyboard pick, type-ahead, and the pop-up dismissal. `MemoryTests` (121) covers the
-knowledge containers and their legacy JSON, the brain (anchors, groups, ordinal rescue, identity
-hygiene from measured Premiere failures, enrichment, the naming ledger, decay and the observation
-clock), routes and route earning against the real `route-corpus.json`, recall against the real
-`misfire-corpus.json` and its human table, the in-memory store's serialization, and the
-`BrainMemory` seam end to end. `FileKnowledgeTests` (7) proves the file adapter at its boundary:
-round-trip, write-behind and scheduled flush, two hundred concurrent increments, daily backups with
-pruning, and quarantine with restore. The other adapters are proven at their framework boundary on a
-Mac.
+family, menu gating, activation, a dropdown opened by press, delivery failure, `set_toggle`'s
+readings, attribution and homonyms, the click, double-click and right-click evidence with its window
+census, the keyboard pick, type-ahead, and the pop-up dismissal. `MemoryTests` (224 tests in 20
+suites) covers the knowledge containers and their legacy JSON, the brain (anchors, groups, ordinal
+rescue, identity hygiene from measured Premiere failures, enrichment, the naming ledger, decay, the
+observation clock and expectations per verb), routes and route earning against the real
+`route-corpus.json`, recall against the real `misfire-corpus.json` and its human table, the living
+memory's goals, turn admission and contextual recall for selections, toggles and clicks, the
+in-memory store's serialization, and the `BrainMemory` seam end to end. `SQLiteLivingMemoryTests`
+(14) proves the SQLite store: schema versions, migration, read-only opens, atomicity, idempotency and
+the stored shape of its reasons. `MecumCLITests` and `ChatTests` run the chat's production path over
+synthetic windows and providers (`LivingMemoryIntegrationTests`, `ToggleLivingMemoryTests`,
+`ClickLivingMemoryTests`, `TurnLedgerTests`, `TurnRecorderTests`, `TurnMemoryTests`). A second
+composition over the same knowledge directory stands for a restart there, inside the test process; a
+real restart and real providers and applications are outside these tests. `FileKnowledgeTests` (7)
+proves the file adapter at its boundary: round-trip, write-behind and scheduled flush, two hundred
+concurrent increments, daily backups with pruning, and quarantine with restore. The other adapters
+are proven at their framework boundary on a Mac.
 
 ## Not here yet, in porting order
 
 1. `Scrolling`: the scroll and reach machinery, over `Actuating` and `SceneProviding`; reach reads
    `UIBrain.revealers` so a name behind a dropdown is never hunted by scrolling.
-2. The experience and sighting stores behind `Recall.World` (the SQLite living memory), behind a
-   role beside `KnowledgeStoring`; read-hit accounting with them.
+2. Read-hit accounting beside the living memory, which is now `SQLiteLivingMemory` behind
+   `LivingMemoryStoring`.
 3. `AppAdapters`: Premiere, Pro Tools, Resolve, AppleScript, Chrome, each behind one capability
    role, so the engine never imports a bridge.
 4. A native `AgentLoop`. CLI chat currently delegates reasoning and conversation context to
@@ -355,3 +487,8 @@ pending singletons, replaced by the store actor's own state.
 
 The independent [interaction listener](../Interactions.md) exposes `mecum watch` for inspecting
 manual input, window attribution and production perception. It does not feed the Brain or memory.
+
+## External local clients
+
+The macOS app can expose its existing engine to local MCP clients. See
+[Local MCP connections](LocalMCP.md) for setup, capabilities, task boundaries and cleanup.

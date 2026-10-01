@@ -7,6 +7,7 @@
 
 import Foundation
 import Observation
+import SQLiteLivingMemory
 
 /// WorkspaceLaunch opens the workspace store when the app starts.
 ///
@@ -23,6 +24,9 @@ import Observation
 final class WorkspaceLaunch {
 
     private(set) var store: WorkspaceStore?
+    /// One durable memory shared by workers, separate from their conversations.
+    private(set) var livingMemory: SQLiteLivingMemoryStore?
+    private(set) var memoryFailure: String?
 
     /// Why the store is not open, nil while it is or before the attempt.
     private(set) var failure: String?
@@ -67,6 +71,15 @@ final class WorkspaceLaunch {
         do {
             store   = try WorkspaceStore.opening(in: directory)
             failure = nil
+            do {
+                livingMemory = try SQLiteLivingMemoryStore(file: SQLiteLivingMemoryStore.file(
+                    inKnowledgeDirectory: directory.appending(path: "Knowledge", directoryHint: .isDirectory)
+                ))
+                memoryFailure = nil
+            } catch {
+                livingMemory = nil
+                memoryFailure = String(describing: error)
+            }
         } catch {
             store   = nil
             failure = String(describing: error)

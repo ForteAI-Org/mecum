@@ -33,6 +33,9 @@ nonisolated struct ToolStep: Sendable, Hashable {
 
         case open(app: String)
         case observe
+        case menus
+        case resolveAction(query: String?)
+        case menu(path: [String])
         case act(verb: String, target: String, section: String?, value: String?)
         case select(control: String, item: String)
 
@@ -51,9 +54,6 @@ nonisolated struct ToolStep: Sendable, Hashable {
         /// Right-clicked `target` and chose `item` in its contextual menu.
         case contextMenu(target: String, item: String)
 
-        /// Listed or pressed `path` in the application's menu bar.
-        case menu(path: String)
-
         /// Pressed the dialog button titled `button` through accessibility.
         case press(button: String)
 
@@ -68,6 +68,8 @@ nonisolated struct ToolStep: Sendable, Hashable {
 
         /// What the worker said it was about to do, in its own words.
         case note(String)
+
+        case browser(name: String)
 
         case other(name: String)
     }
@@ -86,7 +88,8 @@ nonisolated struct ToolStep: Sendable, Hashable {
     /// True for a step that changes the app, rather than one that only looks.
     var isEffectful: Bool {
         switch action {
-        case .status, .windows, .apps, .observe, .webSearch, .webRead, .note: false
+        case .status, .windows, .apps, .observe, .menus, .resolveAction, .webSearch, .webRead, .note: false
+        case .browser(let name): !["browser_status", "browser_tabs", "browser_snapshot", "browser_dialog", "browser_screenshot"].contains(name)
         default:                                                              true
         }
     }
@@ -107,13 +110,14 @@ nonisolated struct ToolStep: Sendable, Hashable {
     /// The tools whose result is an outcome with a status, rather than a reading.
     static let outcomeTools: Set<String> = [
         "act",
+        "menu",
+        "open_recent",
         "select",
         "type_text",
         "press_key",
         "scroll",
         "drag",
         "context_menu",
-        "menu",
         "press",
     ]
 
@@ -183,7 +187,9 @@ nonisolated struct ToolStep: Sendable, Hashable {
                 batch = []
                 continue
             }
-            let answer = state(of: rest, checksOutcome: outcomeTools.contains(name))
+            let answer = name.hasPrefix("browser_")
+                ? browserState(of: rest)
+                : state(of: rest, checksOutcome: outcomeTools.contains(name))
             if let index = waiting[name]?.first {
                 waiting[name]?.removeFirst()
                 steps[index].state = answer
@@ -201,11 +207,20 @@ nonisolated struct ToolStep: Sendable, Hashable {
         func text(_ key: String) -> String? {
             (arguments[key] as? String).map(shortened)
         }
+        if name.hasPrefix("browser_") { return .browser(name: name) }
         switch name {
         case "status":        return .status
         case "windows":       return .windows(app: text("app"))
         case "apps":          return .apps(query: text("query"))
-        case "open_session":  return text("app").map(Action.open) ?? .other(name: name)
+        case "open_session", "open_recent": return text("app").map(Action.open) ?? .other(name: name)
+        case "menus":         return .menus
+        case "resolve_action": return .resolveAction(query: text("query"))
+        case "menu":
+            let path = (arguments["path"] as? [String]) ?? text("path").map {
+                $0.split(separator: ">").map { $0.trimmingCharacters(in: .whitespaces) }
+            }
+            guard let path else { return .other(name: name) }
+            return .menu(path: path.map(shortened))
         case "observe":       return .observe
         case "close_session": return .close(app: lastApp)
         case "select":
@@ -246,9 +261,6 @@ nonisolated struct ToolStep: Sendable, Hashable {
                 target: target,
                 item  : item
             )
-        case "menu":
-            guard let path = text("path") else { return .other(name: name) }
-            return .menu(path: path)
         case "press":
             guard let button = text("button") else { return .other(name: name) }
             return .press(button: button)
@@ -259,6 +271,13 @@ nonisolated struct ToolStep: Sendable, Hashable {
         default:
             return .other(name: name)
         }
+    }
+
+    private static func browserState(of answer: Substring) -> State {
+        if let outcome = object(answer), outcome["status"] as? String == "unverified" {
+            return .failed(reason: shortened(outcome["message"] as? String ?? "Browser effect was not verified.", limit: 120))
+        }
+        return state(of: answer, checksOutcome: false)
     }
 
     /// A result's state: an error names its reason, and an act or select

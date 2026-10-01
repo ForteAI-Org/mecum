@@ -40,7 +40,14 @@ Saved conversations:
 
 Inside chat: `/model`, `/status`, `/release`, `/help`, `/quit`.
 Ctrl+C or SIGTERM stops further tool calls, cancels the provider, drains the
-active tool operation, releases the Seat and saves an interrupted entry.
+active tool operation, releases the Seat and browser connection, and saves an interrupted entry.
+
+CLI chat and app workers stop after three unsuccessful tool attempts without a verified
+result. Observing, switching targets, or reopening the session does not reset this budget.
+A verified action (including an explicit toggle already at its requested value) resets it;
+a new user message starts a new budget. The host stops its provider, drains active work,
+and releases the session. The stop is reported as a failure and cannot teach a successful
+memory. Read-only inspection and release remain available at the tool boundary.
 
 The explicit research flag is still required on a macOS build not validated by
 the Driver ledger. It is never inferred from a prior chat or silently enabled.
@@ -80,10 +87,20 @@ A provider process disconnect between turns does not release the Seat.
 
 ## Tools and results
 
-`status`, `windows`, `open_session`, `observe`, `act`, `select`,
-`batch`, `close_session`.
+`status`, `windows`, `apps`, `open_session`, `observe`, `act`, `select`,
+`type_text`, `press_key`, `scroll`, `drag`, `context_menu`, `menus`, `resolve_action`,
+`menu`, `batch`, `close_session`.
 
-Action tools require the ephemeral session ID returned by open_session.
+These native tools use the closed `AutomationTool` vocabulary. The same registry also exposes
+[`browser_*` tools](Browser.md) for Chrome page content. Unknown tool names are refused before
+any effect. Native actions require the ephemeral session ID returned by `open_session`;
+browser actions use a separate connection, tab and current snapshot reference.
+A target copied from a scene line, such as `Mute {Track 2}` or `stile = Regolare`, is read back once
+at the tool boundary (`SceneTargetReference`): the label is what is resolved and recorded, and the
+container in braces becomes the section when the call gives none. Reading stops at a label the last
+observation showed, so a real label that holds a mark, such as `x = y`, is acted on whole. The turn's
+event records the call as it was executed, and admission compares it with what the evidence observed,
+never with a copy of it. The system instructions carry no label, panel or application from any run.
 Observations carry a revision, capture report time, and the current text scene.
 The existing engine observes afresh before acting; saved observations are not
 coordinates or authority for later input.
@@ -98,9 +115,11 @@ tracking. Dropdown selection uses the same native/custom dropdown selector as
 the terminal command. Tool results preserve the Engine's outcome vocabulary,
 including honest_miss, ambiguous and acted_unverified.
 
-Typing, scrolling, keyboard shortcuts and menu-bar navigation are not yet in this
-chat surface. There is no foreground fallback. Multi-app concurrent control,
-remote ChatGPT connections, and a shipping application host are separate work.
+[Native application menus](ApplicationMenus.md) use a separate exact-path tool, with
+fresh availability checks and verified new-window effects. `resolve_action` keeps ambiguous
+UI and menu routes explicit. There is no foreground fallback. Shortcuts normally handled by
+the menu bar are not a substitute for the native menu tool. Remote ChatGPT connections remain
+separate from the local signed-in CLI providers.
 
 ## Permissions and provider access
 
@@ -116,8 +135,9 @@ uses a read-only sandbox, and explicitly authorizes the Mecum server's tools.
 Neither adapter uses a global permission/sandbox bypass. Managed provider policies
 can still refuse a request.
 
-Normal chat sends the user's prompts and Mecum's textual tool results to the
-selected provider. Screenshots are not sent by this interface. Provider sign-in
+Normal chat sends the user's prompts and Mecum's requested tool results to the
+selected provider. Browser tools can return page text and screenshots through MCP;
+local tool summaries omit full page content and typed field values. Provider sign-in
 credentials remain with the provider CLI.
 
 ## Persistence
@@ -133,7 +153,13 @@ private (0600) under a private directory (0700), and updates replace files atomi
 Provider-native conversation history supplies actual continuation context.
 The local transcript is an inspectable record, not a fabricated replacement for a
 missing provider session. A failed resume is reported; there is no silent fresh
-conversation or automatic replay. After restarting Mecum, old Seat IDs are invalid.
+conversation or automatic replay. After restarting Mecum, old Seat and browser connection IDs
+are invalid. Browser snapshots and element references also expire after actions or a new snapshot.
+
+## Living memory in the app
+
+The CLI and desktop workers use the same turn admission, recall and recording cycle.
+See [worker memory](WorkerMemory.md) for ownership, failure behavior and verification.
 
 ## Verification
 
@@ -151,5 +177,24 @@ swift test --filter SyntheticProviderTests
 ```
 
 These checks verify two provider turns, real MCP tool calls and exact native
-session resumption with a remembered test phrase. They do not prove a live
-Pro Tools or Premiere workflow through the model.
+session resumption with a remembered test phrase. With temporary SQLite stores,
+they also exercise learning and recall in new provider conversations for select,
+set_toggle, click, double_click and right_click. The action fixture supplies
+invented typed evidence: separate Engine tests verify its production generation.
+The provider checks include non-use of toggle memory in another app or window,
+for missing or ambiguous targets, and when the record is unreliable. They do
+not prove a live Pro Tools or Premiere workflow through the model.
+
+### Context budget
+
+Codex turns request automatic compaction at 64,000 tokens, including resumed CLI conversations.
+The app also asks CLI providers to compact after a completed turn at 64,000 tokens or 90% of
+the known context window, whichever comes first. Failed or stopped turns do not trigger this
+step. Provider compaction replaces model context with a summary; it does not delete visible
+chat messages. Manual compaction remains available. Direct model transports retain their
+existing bounded history behavior.
+
+## External local clients
+
+The macOS app can expose its existing engine to local MCP clients. See
+[Local MCP connections](LocalMCP.md) for setup, capabilities, task boundaries and cleanup.
