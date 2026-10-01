@@ -66,7 +66,8 @@ public struct LiveSceneProvider: SceneProviding {
             appName  : application.name,
             title    : target.title ?? "",
             processID: processID,
-            frame    : frame
+            frame    : frame,
+            windowNumber: target.number
         )
         let scene = try await pipeline.perceive(image, of: window)
         return PerceivedWindow(scene: scene, frame: frame)

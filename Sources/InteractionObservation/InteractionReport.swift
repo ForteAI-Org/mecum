@@ -1,7 +1,7 @@
 import InteractionListener
 import PerceptionCore
 
-/// InteractionReport is the diagnostic stream consumed by a CLI or a future host.
+/// InteractionReport is the diagnostic stream consumed by the CLI and the application watcher.
 /// The before hit, current AX hit and after hit remain separate because input can replace the UI.
 /// A visual difference is an observation, not a learned causal claim or a verified agent action.
 public struct InteractionReport: Sendable, Codable {

@@ -7,15 +7,18 @@ import PixelSections
 import PixelRegions
 import ScreenCapture
 import VisionText
+import IncrementalText
+import PerceptionCore
 import WindowServerListing
 
 /// ProductionPerception composes the same observation adapters for actions and visual inspection.
 /// It creates no memory store, actuator, provider connection, or background seat.
 public enum ProductionPerception {
 
-    /// Creates a fresh pipeline with local OCR, icon and media geometry, panels and native facts.
-    public static func pipeline() -> ScenePipeline {
-        ScenePipeline(text: VisionTextRecognizer(), regions: ConnectedComponentSegmenter(),
+    /// Creates a pipeline with scoped incremental OCR and fresh native facts on every observation.
+    /// The injected text adapter supplies full or cropped reads; this pipeline owns its retained OCR.
+    public static func pipeline(text: any TextRecognizing = VisionTextRecognizer()) -> ScenePipeline {
+        ScenePipeline(text: IncrementalTextRecognizer(inner: text), regions: ConnectedComponentSegmenter(),
                       regionFilter: MediaRegionFilter(), sections: ColorSectionDetector(),
                       augmentation: AccessibilityAugmenter())
     }

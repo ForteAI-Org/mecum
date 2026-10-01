@@ -181,7 +181,7 @@ let package = Package(
     products : [
         .library(name: "MecumChat",
                  targets: ["ChatCore", "CLIProviders", "FileConversations", "LocalMCP",
-                           "AutomationRuntime", "AutomationMCP"]),
+                           "AutomationRuntime", "AutomationMCP", "BrowserCore", "ChromeBrowser", "BrowserMCP"]),
         .library(
             name: "MecumDriver",
             targets: ["SeatCore", "PrivateSymbols", "VirtualScreens", "WindowPlacement",
@@ -196,8 +196,9 @@ let package = Package(
         .library(
             name: "MecumEngine",
             targets: ["EngineCore", "Engine", "HIDActuation", "AccessibilityActions", "WorkspaceActivation",
-                      "Memory", "FileKnowledge", "LiveScenes"]
+                      "Memory", "FileKnowledge", "SQLiteLivingMemory", "LiveScenes"]
         ),
+        .library(name: "MecumBrowser", targets: ["BrowserCore", "ChromeBrowser", "BrowserMCP"]),
         .library(name: "UserInteractions", targets: ["InteractionListener", "InteractionObservation"]),
         .library(name: "SeatBroker", targets: ["SeatBroker"]),
         .library(name: "ModelTransports", targets: ["ModelTransports"]),
@@ -327,6 +328,8 @@ let package = Package(
         // MARK: Engine
         // Outcomes, the verification rule, policies and the roles an actuator and a scene source fill. Pure.
         engine("EngineCore", ["PerceptionCore"], settings: pure),
+        engine("BrowserCore", settings: pure),
+        engine("ChromeBrowser", ["BrowserCore"], settings: pure),
 
         // The act and observe cycle over the roles: resolve, gesture, verify, outcome. Nonisolated on purpose.
         engine("Engine", ["EngineCore", "PerceptionCore"], settings: pure),
@@ -345,6 +348,9 @@ let package = Package(
 
         // `KnowledgeStoring` over one JSON file per application, with backups and write-behind.
         engine("FileKnowledge", ["Memory"], settings: pure),
+
+        // `LivingMemoryStoring` over one SQLite file: versioned schema, durable transactions. The SDK's SQLite.
+        engine("SQLiteLivingMemory", ["Memory"], settings: pure),
 
         // `SceneProviding` for a window on the real screen: census, capture, pipeline.
         engine("LiveScenes", ["EngineCore", "PerceptionCore", "Perception", "ScreenCapture"], settings: pure),
@@ -372,12 +378,13 @@ let package = Package(
         .target(name: "FileConversations", dependencies: ["ChatCore"],
                 path: "Sources/Chat/FileConversations", swiftSettings: pure),
         .target(name: "LocalMCP", path: "Sources/Chat/LocalMCP", swiftSettings: facility),
-        integration("AutomationRuntime", ["Perception", "VisionText", "PixelSections", "PixelRegions", "WindowServerListing", "AccessibilityFacts",
+        integration("AutomationRuntime", ["Perception", "VisionText", "IncrementalText", "PixelSections", "PixelRegions", "WindowServerListing", "AccessibilityFacts",
                     "ScreenCapture", "Engine", "EngineCore", "HIDActuation", "AccessibilityActions",
                     "WorkspaceActivation", "Memory", "FileKnowledge", "LiveScenes", "PerceptionCore",
                     "SeatDriving", "SeatCore", "SeatSession", "PrivateSymbols"]),
-        integration("AutomationMCP", ["AutomationRuntime", "LocalMCP", "EngineCore", "PerceptionCore",
-                                     "PrivateSymbols", "SeatCore", "WindowServerListing"]),
+        integration("BrowserMCP", ["BrowserCore", "LocalMCP"]),
+        integration("AutomationMCP", ["AutomationRuntime", "LocalMCP", "BrowserCore", "ChromeBrowser", "BrowserMCP", "EngineCore", "PerceptionCore",
+                                     "PrivateSymbols", "SeatCore", "WindowServerListing", "Memory"]),
         // The foreground command line: windows, scene, act, memory. What a model host does, by hand.
         .executableTarget(
             name: "mecum",
@@ -385,7 +392,8 @@ let package = Package(
                            "ScreenCapture", "Engine", "EngineCore", "HIDActuation", "AccessibilityActions",
                            "WorkspaceActivation", "Memory", "FileKnowledge", "LiveScenes",
                            "SeatDriving", "SeatCore", "SeatSession", "PrivateSymbols", "AutomationRuntime",
-                           "ChatCore", "CLIProviders", "FileConversations", "LocalMCP", "AutomationMCP", "SceneOverlay", "InteractionListener", "InteractionObservation"].map { .target(name: $0) },
+                           "ChatCore", "CLIProviders", "FileConversations", "LocalMCP", "AutomationMCP", "SceneOverlay",
+                           "SQLiteLivingMemory", "BrowserCore", "ChromeBrowser", "BrowserMCP", "InteractionListener", "InteractionObservation"].map { .target(name: $0) },
             path: "Tools/Engine/mecum",
             swiftSettings: facility
         ),
@@ -414,19 +422,24 @@ let package = Package(
 
         // MARK: Engine tests
         .testTarget(name: "ChatTests", dependencies: ["ChatCore", "CLIProviders", "FileConversations", "LocalMCP",
-                                                    "AutomationMCP", "AutomationRuntime", "EngineCore", "PerceptionCore"],
+                                                    "AutomationMCP", "AutomationRuntime", "EngineCore", "PerceptionCore",
+                                                    "Memory", "SQLiteLivingMemory", "BrowserCore"],
                     path: "Tests/Chat", resources: [.copy("Fixtures")], swiftSettings: facility),
         .testTarget(
             name: "MecumCLITests",
-            dependencies: ["mecum", "EngineCore", "PerceptionCore", "ChatCore", "AutomationRuntime", "Perception"],
+            dependencies: ["mecum", "Engine", "EngineCore", "PerceptionCore", "ChatCore", "AutomationRuntime",
+                           "Perception", "Memory", "SQLiteLivingMemory", "AutomationMCP", "LocalMCP", "FileKnowledge",
+                           "CLIProviders", "FileConversations"],
             path: "Tests/Engine/MecumCLITests",
             swiftSettings: facility
         ),
+        engineTests("Browser", ["BrowserCore", "ChromeBrowser", "BrowserMCP", "LocalMCP"]),
         engineTests("EngineCore", ["EngineCore", "PerceptionCore"]),
         engineTests("Engine", ["Engine", "EngineCore", "PerceptionCore"]),
         engineTests("Memory", ["Memory", "EngineCore", "PerceptionCore"],
                     resources: [.copy("Fixtures/route-corpus.json"), .copy("Fixtures/misfire-corpus.json"),
                                 .copy("Fixtures/misfire-corpus.md")]),
         engineTests("FileKnowledge", ["FileKnowledge", "Memory", "PerceptionCore"]),
+        engineTests("SQLiteLivingMemory", ["SQLiteLivingMemory", "Memory", "EngineCore", "PerceptionCore"]),
     ]
 )

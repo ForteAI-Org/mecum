@@ -6,7 +6,9 @@ import Darwin
 import FileConversations
 import Foundation
 import LocalMCP
+import Memory
 import PrivateSymbols
+import SQLiteLivingMemory
 
 /// ChatCommand composes the terminal, provider adapter, transcript store and one ephemeral MCP host.
 /// Provider processes may exit between turns; the Seat belongs to this process until release or shutdown.
@@ -66,17 +68,38 @@ enum ChatCommand {
         try transcript.save()
         let knowledge = options.knowledgeDirectory.map { URL(fileURLWithPath: ($0 as NSString).expandingTildeInPath) }
             ?? support.appendingPathComponent("Knowledge", isDirectory: true)
+        // One living memory for the whole chat, open before any Seat and after every /release. A store
+        // that cannot be opened is reported and left untouched; the chat then acts without learning.
+        let livingMemory: SQLiteLivingMemoryStore?
+        do {
+            let file = SQLiteLivingMemoryStore.file(inKnowledgeDirectory: knowledge)
+            livingMemory = try SQLiteLivingMemoryStore(file: file)
+        } catch {
+            print("memory: living memory unavailable, this chat will not learn (\(error))")
+            livingMemory = nil
+        }
         let tools = ChatTools(session: AutomationSession(knowledgeDirectory: knowledge,
-                                                        allowsDestructive: options.allowDestructive))
+                                                        allowsDestructive: options.allowDestructive,
+                                                        livingMemory: livingMemory))
         tools.record = { text in
             print("  \(text.prefix(240))")
             try transcript.append(.tool, text)
+        }
+        // Each turn consults recall as data, collects typed tool events, and writes its one memory event
+        // once the turn has ended and drained. A failed write is shown and kept; the action is not redone.
+        let cycle = TurnCycle(tools: tools, livingMemory: livingMemory)
+        let report: (TurnCycle.End?) -> Void = { end in
+            guard let outcome = end?.recording, let notice = outcome.notice else { return }
+            print(notice)
+            guard case .failed = outcome else { return }
+            do { try transcript.append(.tool, notice) }
+            catch { fputs("mecum: transcript save failed: \(error)\n", stderr) }
         }
         if options.allowUnvalidated {
             FacilityGate.researchOptInForUnvalidatedBuilds = true
             print("seat: research opt-in for an unvalidated macOS build")
         }
-        let router = MCPRouter(tools: ChatTools.definitions) { name, arguments in
+        let router = MCPRouter(tools: ChatTools.definitions, instructions: ChatInstructions.standard) { name, arguments in
             try await tools.call(name, arguments)
         }
         let host = LocalMCPHost(router: router)
@@ -96,13 +119,20 @@ enum ChatCommand {
         try JSONEncoder().encode(endpoint).write(to: connectionFile, options: .atomic)
         try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: connectionFile.path)
         let provider = CLIProvider()
+        tools.onStalled = { _ in
+            router.pause()
+            provider.cancel()
+        }
         var shutdown: Task<Void, Never>?
         let signals = ChatSignals {
             router.pause()
             provider.cancel()
             shutdown = Task {
                 await router.drain()
+                report(await cycle.end(.interrupted))
                 await tools.session.close()
+                do { try await tools.closeBrowser() }
+                catch { fputs("mecum: browser cleanup failed: \(error)\n", stderr) }
                 await provider.waitUntilStopped()
                 do { try transcript.append(.interrupted, "Interrupted. Inspect the current app state before continuing.") }
                 catch { fputs("mecum: transcript save failed: \(error)\n", stderr) }
@@ -142,6 +172,8 @@ enum ChatCommand {
                 }
                 if message == "/release" {
                     await tools.session.close()
+                    do { try await tools.closeBrowser() }
+                    catch { fputs("mecum: browser cleanup failed: \(error)\n", stderr) }
                     try transcript.append(.tool, "User released the Seat. Any previous session ID is now stale.")
                     print("Seat released.")
                     continue
@@ -153,35 +185,61 @@ enum ChatCommand {
                 }
                 if message.hasPrefix("/") { print("Unknown command. Use /help."); continue }
                 try transcript.append(.user, message)
+                let start = try await cycle.begin(message, sessionIsOpen: tools.session.id != nil)
+                let memory = start.memory
+                if let failure = memory?.failure {
+                    print("memory: the living memory could not be read; this turn has no memory context (\(failure))")
+                }
+                if let failure = memory?.decisionFailure {
+                    print("memory: the recall decision was not saved (\(failure))")
+                }
+                if let line = memory?.briefing?.contextLine {
+                    print(line)
+                    try transcript.append(.tool, line)
+                }
                 let turn = ProviderTurn(
                     provider: selected.provider, model: transcript.conversation.model,
-                    sessionID: transcript.conversation.providerSessionID, prompt: message,
-                    instructions: ChatTools.instructions, bridgeExecutable: executablePath,
+                    sessionID: transcript.conversation.providerSessionID,
+                    prompt: start.prompt,
+                    instructions: ChatInstructions.standard, bridgeExecutable: executablePath,
                     connectionFile: connectionFile.path, workingDirectory: working.path
                 )
                 do {
                     try await provider.run(turn, executable: executable) { event in try transcript.event(event) }
+                    await router.drain()
+                    if let reason = tools.stalledReason { throw AutomationFailure(reason) }
+                    report(await cycle.end(.completed))
                 } catch {
                     if let shutdown { await shutdown.value; return }
                     router.pause()
                     await router.drain()
+                    report(await cycle.end(.failed))
                     await tools.session.close()
+                    do { try await tools.closeBrowser() }
+                    catch { fputs("mecum: browser cleanup failed: \(error)\n", stderr) }
                     router.resume()
-                    try transcript.append(.error, error.localizedDescription)
-                    print("Chat error: \(error.localizedDescription)")
-                    if !interactive { throw error }
+                    let failure = tools.stalledReason.map(AutomationFailure.init) ?? error
+                    let reason = tools.stalledReason ?? error.localizedDescription
+                    try transcript.append(.error, reason)
+                    print("Chat error: \(reason)")
+                    if !interactive { throw failure }
                 }
                 if options.once { break }
             }
             router.pause()
             await router.drain()
             await tools.session.close()
+            do { try await tools.closeBrowser() }
+            catch { fputs("mecum: browser cleanup failed: \(error)\n", stderr) }
             try transcript.save()
         } catch {
             if let shutdown { await shutdown.value; return }
             router.pause()
             await router.drain()
+            report(await cycle.end(.failed))
             await tools.session.close()
+            do { try await tools.closeBrowser() }
+            catch { fputs("mecum: browser cleanup failed: \(error)\n", stderr) }
             throw error
         }
     }

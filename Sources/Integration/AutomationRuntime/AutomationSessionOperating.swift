@@ -9,13 +9,18 @@ import PerceptionCore
 public protocol AutomationSessionOperating: AnyObject {
     var id: UUID? { get }
     func open(application: String, window: String?) async throws -> SceneSnapshot
+    func menus(application: String) throws -> MenuCatalog
+    func openRecent(application: String, path: [String]) async throws -> ActOutcome
+    func menus() throws -> MenuCatalog
+    func resolveAction(_ query: String) async throws -> ActionRoute
+    func menu(path: [String], expectingWindow: String) async throws -> ActOutcome
     func observe() async throws -> SceneSnapshot
     func act(target: String, verb: ActionVerb, section: String?, desiredState: ControlState?) async throws -> ActOutcome
     func select(control: String, item: String) async throws -> ActOutcome
     /// Types, presses a key, scrolls, drags or chooses a contextual menu item, resolved and verified.
     func deliver(_ input: InputRequest.Input, section: String?) async throws -> ActOutcome
     /// Lists or presses an item of the held application's menu bar by a path such as "File > Close".
-    func menu(path: String) async throws -> ActOutcome
+    func menu(path: [String]) async throws -> ActOutcome
     /// Presses a button of the held application's dialog or alert in front, by its title.
     func press(button: String) async throws -> ActOutcome
     func close() async
@@ -25,9 +30,23 @@ public protocol AutomationSessionOperating: AnyObject {
 }
 
 public extension AutomationSessionOperating {
+    func menus(application: String) throws -> MenuCatalog {
+        try RecentDocumentRuntime.catalog(application: application)
+    }
+    func openRecent(application: String, path: [String]) async throws -> ActOutcome {
+        throw MenuFailure("Recent-document startup is unavailable in this session.")
+    }
+    func menus() throws -> MenuCatalog { throw MenuFailure("Native menus are unavailable in this session.") }
+    func resolveAction(_ query: String) async throws -> ActionRoute {
+        throw MenuFailure("Action routing is unavailable in this session.")
+    }
+    func menu(path: [String], expectingWindow: String) async throws -> ActOutcome {
+        throw MenuFailure("Native menus are unavailable in this session.")
+    }
+
 
     /// A session with no application to read a menu bar of.
-    func menu(path: String) async throws -> ActOutcome {
+    func menu(path: [String]) async throws -> ActOutcome {
         throw AutomationFailure("The menu bar is not available in this session.")
     }
 

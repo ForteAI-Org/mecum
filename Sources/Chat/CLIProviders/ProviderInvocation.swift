@@ -47,7 +47,8 @@ public struct ProviderInvocation: Sendable {
             if let model = turn.model { arguments += ["--model", model] }
             if let effort = turn.effort { arguments += ["-c", "model_reasoning_effort=\(try Self.quote(effort))"] }
             // Codex exec has no /compact: a limit below any session's size makes it compact before answering.
-            if turn.isCompaction { arguments += ["-c", "model_auto_compact_token_limit=1000"] }
+            let contextLimit = turn.isCompaction ? 1000 : ChatContextBudget.preferredTokens
+            arguments += ["-c", "model_auto_compact_token_limit=\(contextLimit)"]
             if let session = turn.sessionID { arguments += ["resume", session] }
             arguments += ["-"]
         }

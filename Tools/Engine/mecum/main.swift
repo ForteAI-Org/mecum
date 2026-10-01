@@ -39,6 +39,7 @@ application.setActivationPolicy(.prohibited)
 Task { @MainActor in
     do {
         switch command {
+            case "browser": try await BrowserCommand.run(arguments: Array(normalizedArguments.dropFirst()))
             case "chat": try await ChatCommand.run(arguments: Array(normalizedArguments.dropFirst()))
             case "peek": try await PeekCommand.run(arguments: Array(normalizedArguments.dropFirst()))
             case "watch": try await WatchCommand.run(arguments: Array(normalizedArguments.dropFirst()))
@@ -47,6 +48,7 @@ Task { @MainActor in
                     throw UsageError.missing("mcp-bridge --connection <private connection file>")
                 }
                 try await MCPStdioBridge.run(connectionFile: URL(fileURLWithPath: normalizedArguments[2]))
+            case "menus", "resolve", "menu", "open-recent": try await MenuBarCommand.run(invocation)
             case "windows": try await WindowsCommand.run(invocation)
             case "scene"  : try await SceneCommand.run(invocation)
             case "act"    : try await ActCommand.run(invocation)

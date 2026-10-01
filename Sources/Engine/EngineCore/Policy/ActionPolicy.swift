@@ -29,6 +29,12 @@ public enum ActionPolicy {
         return destructiveTerms.contains { lowered.contains($0) }
     }
 
+    /// Checks command components, excluding the top-level menu category. A bar item
+    /// such as Format is navigation; destructive submenus such as Delete still count.
+    public static func isDestructive(menuPath: [String]) -> Bool {
+        menuPath.dropFirst().contains { isDestructive(label: $0) }
+    }
+
     /// True for Command with Q or W, whatever else is held: they quit or close what the agent is
     /// driving, so they are refused even when the person allowed destructive actions.
     public static func closesTheTarget(_ chord: KeyChord) -> Bool {

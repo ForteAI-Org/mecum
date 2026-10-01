@@ -10,7 +10,7 @@ import Synchronization
 /// no titles and takes no lock another thread holds for more than a copy or a swap. A consumer thread
 /// drains the queue, resolves titles and yields `events`; a refresher thread lists windows only when the
 /// pointer enters another surface, after clicks, a drag's end, focus changes and stale attributions. Pressure degrades into
-/// counted coalescing and gap events instead of failing the stream; tap loss still fails it explicitly.
+/// counted coalescing and gap events. Tap loss and an overflowing bounded event stream fail explicitly.
 /// Call stop() and await it before releasing the owner; cancellation uses the same joined teardown.
 /// No perception runs inside a callback.
 @MainActor
@@ -20,11 +20,13 @@ public final class PassiveInteractionListener {
     private var activation: (any NSObjectProtocol)?
     private var isStopped = false
 
-    public init(hover: Bool = true) throws {
+    /// A bounded host stops with consumerTooSlow rather than silently dropping events.
+    /// The CLI keeps its existing unbounded diagnostic stream when no limit is supplied.
+    public init(hover: Bool = true, eventBufferLimit: Int? = nil) throws {
         guard CGPreflightListenEventAccess() else { throw ListenerFailure.inputMonitoringDenied }
-        // ponytail: an unbounded hop, so a stalled stream reader grows this buffer instead of degrading
-        // the queue; bound it if a slow reader must shed input rather than memory.
-        let pair = AsyncThrowingStream<InteractionEvent, any Error>.makeStream(bufferingPolicy: .unbounded)
+        let policy: AsyncThrowingStream<InteractionEvent, any Error>.Continuation.BufferingPolicy =
+            eventBufferLimit.map { .bufferingOldest(max(1, $0)) } ?? .unbounded
+        let pair = AsyncThrowingStream<InteractionEvent, any Error>.makeStream(bufferingPolicy: policy)
         events = pair.stream
         context = TapContext(continuation: pair.continuation, hover: hover, excludedPID: getpid())
         let owner = context
@@ -376,7 +378,7 @@ final class TapContext: @unchecked Sendable {
     func consume() {
         let deliver = { (record: InputRecord) in
             if let event = InteractionWindowReader.event(for: record, excluding: self.excludedPID) {
-                self.continuation.yield(event)
+                self.publish(event)
             }
         }
         while true {
@@ -393,6 +395,19 @@ final class TapContext: @unchecked Sendable {
             continuation.finish()
         }
         leave()
+    }
+
+    /// The consumer owns this boundary. Overflow ends continuity explicitly.
+    func publish(_ event: InteractionEvent) {
+        switch continuation.yield(event) {
+        case .enqueued: break
+        case .dropped:
+            fail(.consumerTooSlow)
+            continuation.finish(throwing: ListenerFailure.consumerTooSlow)
+            requestStop()
+        case .terminated: requestStop()
+        @unknown default: requestStop()
+        }
     }
 
     /// Keeps the queue single-producer: its retry runs on the tap thread, never here.

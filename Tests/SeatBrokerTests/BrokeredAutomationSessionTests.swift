@@ -8,6 +8,7 @@
 import AppKit
 import AutomationMCP
 import AutomationRuntime
+import EngineCore
 import Foundation
 import LocalMCP
 import PerceptionCore
@@ -97,7 +98,7 @@ struct BrokeredAutomationSessionTests {
         let dock = try #require(NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.dock")
             .first?.processIdentifier)
         let scene = SceneSnapshot(bundleID: "test.process", appName: "Test", windowTitle: "Test",
-                                  viewportPixelSize: ViewportPixelSize(width: 10, height: 10), elements: [])
+                                  viewportPixelSize: ViewportPixelSize(width: 800, height: 600), elements: [])
         let waitIdle: BrokeredAutomationSession.IdleWaiting = if let idle {
             { await idle.wait($0) }
         } else {
@@ -123,6 +124,28 @@ struct BrokeredAutomationSessionTests {
     /// Long enough for a task about to suspend on the queue to get there.
     private static func letTheWaitBegin() async {
         try? await Task.sleep(for: .milliseconds(60))
+    }
+
+    @Test func tinyInitialCaptureReleasesTheLeaseInsteadOfReportingReady() async throws {
+        let broker = SeatBroker()
+        let tiny = SceneSnapshot(bundleID: "test.process", appName: "Test", windowTitle: "Window",
+                                 viewportPixelSize: .init(width: 66, height: 20), elements: [])
+        let desktop = Self.session(broker, perceiving: { _, _ in tiny }) { _, _, _ in
+            (TargetApp(pid: getpid(), bundleID: "test.process", name: "Test", bundleURL: nil, windows: []), SeatTarget())
+        }
+        await #expect(throws: (any Error).self) { try await desktop.open(application: "Test", window: nil) }
+        #expect(desktop.id == nil)
+        #expect(broker.queue.entries.isEmpty)
+    }
+
+    @Test func recentOpeningRefusalDoesNotStrandTheLease() async throws {
+        let broker = SeatBroker()
+        let desktop = Self.session(broker) { _, _, _ in throw Opened() }
+        let result = try await desktop.openRecent(application: "No Such Application 5f0c",
+                                                  path: ["File", "Open Recent", "/Projects/Example.prproj"])
+        #expect(result.kind == .refused)
+        #expect(desktop.id == nil)
+        #expect(broker.queue.entries.isEmpty)
     }
 
     @Test("the open holds the seat while it runs, a failed open gives it back, and a double close is nothing")

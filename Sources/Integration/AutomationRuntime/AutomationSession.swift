@@ -15,19 +15,27 @@ import WindowServerListing
 /// AutomationSession owns one application's Seat across model turns. It contains no MCP, provider,
 /// terminal or transcript code. Its caller serializes operations and drains them before closing.
 /// Every action captures again through the same EngineRuntime used by ordinary terminal commands.
+/// Every scene it already holds, observed or returned by an action, goes through one `SceneIntake`;
+/// memory never causes a capture.
 @MainActor
 public final class AutomationSession: AutomationSessionOperating {
     private let knowledgeDirectory: URL
     private let allowsDestructive: Bool
+    private let livingMemory: (any LivingMemoryStoring)?
     private var target: SeatTarget?
     private var runtime: EngineRuntime?
     private var application: NSRunningApplication?
     private var closing: Task<Void, Never>?
+    private var openingRecent = false
     public private(set) var id: UUID?
 
-    public init(knowledgeDirectory: URL, allowsDestructive: Bool = false) {
+    /// - Parameter livingMemory: where sightings are recorded; owned by the composition and shared
+    ///   across sessions. Nil records none.
+    public init(knowledgeDirectory: URL, allowsDestructive: Bool = false,
+                livingMemory: (any LivingMemoryStoring)? = nil) {
         self.knowledgeDirectory = knowledgeDirectory
         self.allowsDestructive = allowsDestructive
+        self.livingMemory = livingMemory
     }
 
     public func open(application word: String, window title: String?) async throws -> SceneSnapshot {
@@ -68,18 +76,52 @@ public final class AutomationSession: AutomationSessionOperating {
                                    title: selected.title ?? "")
             runtime = EngineRuntime(knowledgeDirectory: knowledgeDirectory, seat: target)
             id = UUID()
-            return try await observe()
+            let scene = try await observe()
+            try RecentDocumentRuntime.validateOpening(scene)
+            return scene
         } catch {
             await close()
             throw error
         }
     }
 
+    public func openRecent(application word: String, path: [String]) async throws -> ActOutcome {
+        guard target == nil, closing == nil, !openingRecent else {
+            throw AutomationFailure("Close the current session before opening a recent document.")
+        }
+        openingRecent = true
+        defer { openingRecent = false }
+        let outcome = await RecentDocumentRuntime.open(application: word, path: path, validateOwnership: {
+            guard self.openingRecent, self.closing == nil else { throw CancellationError() }
+        }, adopt: { title in
+            try await self.open(application: word, window: title)
+        })
+        if outcome.scene == nil { await close() }
+        return outcome
+    }
+
+    public func menus() throws -> MenuCatalog {
+        let (application, runtime, _) = try current()
+        return try runtime.menuCatalog(processID: application.processIdentifier)
+    }
+
+    public func resolveAction(_ query: String) async throws -> ActionRoute {
+        let (application, runtime, _) = try current()
+        return try await runtime.resolveAction(query, processID: application.processIdentifier)
+    }
+
+    public func menu(path: [String], expectingWindow: String) async throws -> ActOutcome {
+        let (application, runtime, _) = try current()
+        let outcome = await runtime.performMenu(path: path, expectingWindow: expectingWindow,
+                                               processID: application.processIdentifier,
+                                               allowsDestructive: allowsDestructive)
+        return await runtime.learn(outcome, in: livingMemory)
+    }
+
     public func observe() async throws -> SceneSnapshot {
         let (application, runtime, _) = try current()
         let perceived = try await runtime.scenes.currentScene(of: application.processIdentifier)
-        _ = try await runtime.memory.observe(perceived.scene)
-        return await runtime.memory.enrich(perceived.scene)
+        return try await runtime.learn(perceived.scene, in: livingMemory)
     }
 
     public func act(target: String, verb: ActionVerb, section: String?, desiredState: ControlState?) async throws -> ActOutcome {
@@ -99,7 +141,8 @@ public final class AutomationSession: AutomationSessionOperating {
             appName: application.localizedName ?? "application",
             target: target, verb: verb, section: section, desiredState: desiredState
         )
-        return await runtime.engine(allowsDestructive: allowsDestructive).act(request)
+        let outcome = await runtime.engine(allowsDestructive: allowsDestructive).act(request)
+        return await runtime.learn(outcome, in: livingMemory)
     }
 
     public func deliver(_ input: InputRequest.Input, section: String?) async throws -> ActOutcome {
@@ -119,16 +162,18 @@ public final class AutomationSession: AutomationSessionOperating {
         return await runtime.engine(allowsDestructive: allowsDestructive).deliver(request)
     }
 
-    public func menu(path: String) async throws -> ActOutcome {
-        let (application, _, seat) = try current()
+    public func menu(path: [String]) async throws -> ActOutcome {
+        let (application, runtime, seat) = try current()
         if case .refuse(let sentence) = try await SeatAdmission.awaited(
             seat.agentSeat(),
             application: application.localizedName ?? "the application"
         ) {
             throw AutomationFailure(sentence)
         }
+        guard let menus = runtime.menus else { throw MenuFailure("Native menus require a Seat.") }
         return try await MenuBarCommand.perform(
             path,
+            menus            : menus,
             processID        : application.processIdentifier,
             allowsDestructive: allowsDestructive,
             observe          : { try await self.observe() }
@@ -152,8 +197,15 @@ public final class AutomationSession: AutomationSessionOperating {
     }
 
     public func select(control: String, item: String) async throws -> ActOutcome {
-        let (application, _, target) = try current()
-        let selector = SeatDropdownSelector(target: target, pipeline: ScenePipeline(text: VisionTextRecognizer()))
+        let (application, runtime, target) = try current()
+        // Menus are read in pixels as ever; the window before and after with its accessibility tree, as this
+        // chat's scenes are, so the dropdown is found by its name or value and read back by its own value.
+        let selector = SeatDropdownSelector(
+            target        : target,
+            pipeline      : ScenePipeline(text: VisionTextRecognizer()),
+            windowPipeline: ProductionPerception.pipeline(),
+            windows       : runtime.windows
+        )
         let result = try await selector.select(
             control: control, item: item,
             identity: SeatDriving.ApplicationIdentity(
@@ -163,10 +215,11 @@ public final class AutomationSession: AutomationSessionOperating {
             permissions: ActionPermissions(allowsDestructive: allowsDestructive),
             dryRun: false
         )
-        return result.outcome
+        return await runtime.learn(result.outcome, in: livingMemory)
     }
 
     public func close() async {
+        openingRecent = false
         if let closing { await closing.value; return }
         let runtime = self.runtime
         let target = self.target

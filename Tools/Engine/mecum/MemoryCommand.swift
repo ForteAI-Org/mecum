@@ -13,17 +13,31 @@ import Memory
 import PerceptionCore
 
 /// MemoryCommand prints what memory holds for an application: the brain's size and clock, its most
-/// established anchors with what they do, its groups, and its routes with their standing.
+/// established anchors with what they do, its groups, and its routes with their standing; then the
+/// living memory's sightings, experiences and recall decisions. The two are read independently, so
+/// a missing or unreadable brain file never hides the living memory. Read only.
 enum MemoryCommand {
 
     static func run(_ invocation: Invocation) async throws {
         let application = try ApplicationLookup.running(try invocation.positional(0, "<app>"))
         let runtime = Runtime(invocation: invocation)
         let bundleID = application.bundleIdentifier ?? "pid.\(application.processIdentifier)"
-        guard let knowledge = try await runtime.store.load(bundleID: bundleID) else {
-            print("nothing remembered about \(bundleID) under \(await runtime.store.directory.path)")
-            return
+        let directory = await runtime.store.directory
+        do {
+            if let knowledge = try await runtime.store.load(bundleID: bundleID) {
+                printBrain(knowledge, bundleID: bundleID)
+            } else {
+                print("brain: nothing remembered about \(bundleID) under \(directory.path)")
+            }
+        } catch {
+            print("brain: could not be read: \(error)")
         }
+        for line in await LivingMemoryReport.lines(bundleID: bundleID, knowledgeDirectory: directory) {
+            print(line)
+        }
+    }
+
+    private static func printBrain(_ knowledge: AppKnowledge, bundleID: String) {
         let brain = knowledge.brain
         print("\(bundleID): \(brain.objects.count) anchors, \(brain.groups.count) groups, "
             + "\(brain.transitions.count) transitions, \(knowledge.windows.count) window states "

@@ -134,16 +134,17 @@ public struct UIBrain: Sendable, Equatable, Codable {
         Self.doesSummary(transitions.filter { $0.anchorKey == anchorKey })
     }
 
-    /// The summary over pre-bucketed transitions: the strongest trusted edge per trigger.
+    /// The summary over pre-bucketed transitions: the strongest trusted edge per producer, a stored
+    /// click of unknown verb apart from every verb.
     static func doesSummary(_ transitions: [LearnedTransition]) -> String? {
         let trusted = transitions.filter(\.isTrusted)
         guard !trusted.isEmpty else { return nil }
-        var byTrigger: [TransitionTrigger: LearnedTransition] = [:]
-        for transition in trusted where (byTrigger[transition.trigger]?.evidence ?? 0) < transition.evidence {
-            byTrigger[transition.trigger] = transition
+        var byProducer: [String: LearnedTransition] = [:]
+        for transition in trusted where (byProducer[transition.producer]?.evidence ?? 0) < transition.evidence {
+            byProducer[transition.producer] = transition
         }
-        return byTrigger.values.sorted { $0.trigger.rawValue < $1.trigger.rawValue }
-            .map { "\($0.trigger.rawValue): \($0.summary)" }
+        return byProducer.values.sorted { $0.producer < $1.producer }
+            .map { "\($0.producer): \($0.summary)" }
             .joined(separator: " · ")
     }
 
@@ -209,7 +210,7 @@ public struct UIBrain: Sendable, Equatable, Codable {
                     context.append("states " + anchor.statesSeen.keys.sorted().joined(separator: "/"))
                 }
                 for edge in edges.sorted(by: { $0.evidence > $1.evidence }).prefix(2) {
-                    context.append("\(edge.trigger.rawValue)→\(edge.summary) ×\(edge.evidence)")
+                    context.append("\(edge.producer)→\(edge.summary) ×\(edge.evidence)")
                 }
                 if !anchor.aliases.isEmpty { context.append("aka " + anchor.aliases.prefix(3).joined(separator: "/")) }
                 context.append(String(format: "at %.2f,%.2f", anchor.boundsTypical.x, anchor.boundsTypical.y))

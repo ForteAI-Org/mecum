@@ -1,0 +1,231 @@
+//
+//  DropdownEvidenceTests.swift
+//  Mecum
+//
+//  Created by Tommaso Mazzarini on 24/09/2026.
+//
+
+import EngineCore
+import PerceptionCore
+import Testing
+
+/// Invented scenes shaped like a routing dialog: one dropdown reading "All Busses" whose menu offers
+/// "Output Busses". No real application was captured.
+@Suite("Dropdown selection evidence")
+struct DropdownEvidenceTests {
+
+    private let control = NormalizedRect(x: 0.40, y: 0.20, width: 0.20, height: 0.05)
+
+    private func element(_ label: String, _ bounds: NormalizedRect) -> SceneElement {
+        SceneElement(id: "control|\(label)", kind: .control, label: label, bounds: bounds)
+    }
+
+    private func scene(_ elements: [SceneElement]) -> SceneSnapshot {
+        SceneSnapshot(bundleID: "test.synthetic", appName: "Synthetic Mixer", windowTitle: "Synthetic Routing",
+                      viewportPixelSize: ViewportPixelSize(width: 800, height: 600), elements: elements)
+    }
+
+    private func evidence(before: String = "All Busses", item: String = "Output Busses",
+                          _ readback: DropdownReadback) -> DropdownEvidence {
+        DropdownEvidence(
+            bundleID          : "test.synthetic",
+            windowTitle       : "Synthetic Routing",
+            control           : before,
+            controlRole       : "AXPopUpButton",
+            section           : nil,
+            valueBefore       : before,
+            requestedItem     : item,
+            readback          : readback,
+            menuClosedByChoice: true
+        )
+    }
+
+    @Test("a value that really changed is verified evidence of a change")
+    func changedValue() {
+        let elsewhere = NormalizedRect(x: 0.1, y: 0.6, width: 0.1, height: 0.05)
+        let after = scene([element("Output Busses", control), element("Input", elsewhere)])
+        let readback = DropdownReadback.atControl(control, in: after, windowSizeKept: true)
+        #expect(readback == .window("Output Busses"))
+        let outcome = ActOutcome.dropdownSelection(evidence(readback), menuWindowNumber: 4242, scene: after)
+        #expect(outcome.kind == .foundActed)
+        #expect(outcome.verifiedDropdown?.change == .changed)
+    }
+
+    @Test("a control that already read the item is verified but is not a change")
+    func alreadySetValue() {
+        let after = scene([element("Output Busses", control)])
+        let readback = DropdownReadback.atControl(control, in: after, windowSizeKept: true)
+        let outcome = ActOutcome.dropdownSelection(evidence(before: "Output Busses", readback), menuWindowNumber: 4242,
+                                           scene: after)
+        #expect(outcome.kind == .foundActed)
+        #expect(outcome.verifiedDropdown?.change == .alreadySet)
+    }
+
+    @Test("a control that still reads its old value is unverified, and says what it reads")
+    func unchangedValue() {
+        let after = scene([element("All Busses", control)])
+        let readback = DropdownReadback.atControl(control, in: after, windowSizeKept: true)
+        #expect(readback == .window("All Busses"))
+        let outcome = ActOutcome.dropdownSelection(evidence(readback), menuWindowNumber: 4242, scene: after)
+        #expect(outcome.kind == .actedUnverified)
+        #expect(outcome.dropdown?.change == .unverified)
+        #expect(outcome.verifiedDropdown == nil)
+    }
+
+    @Test("a missing reading is unreadable with its reason, never a value")
+    func missingReading() {
+        let empty = scene([])
+        #expect(DropdownReadback.atControl(control, in: empty, windowSizeKept: true)
+                == .unreadable(.nothingAtControl))
+        let resized = scene([element("Output Busses", control)])
+        #expect(DropdownReadback.atControl(control, in: resized, windowSizeKept: false)
+                == .unreadable(.windowResized))
+        #expect(DropdownReadback.inCrop(nil, windowSizeKept: true)
+                == .unreadable(.cropUnavailable))
+        let outcome = ActOutcome.dropdownSelection(evidence(.unreadable(.nothingAtControl)), menuWindowNumber: 4242,
+                                           scene: empty)
+        #expect(outcome.kind == .actedUnverified)
+        #expect(outcome.verifiedDropdown == nil)
+    }
+
+    @Test("an ambiguous item is chosen from no menu and reads as no value at the control")
+    func ambiguousItem() {
+        // The selector chooses only an item the menu resolves uniquely; two rows of one name do not.
+        let menu = scene([element("Output Busses", NormalizedRect(x: 0.1, y: 0.1, width: 0.5, height: 0.1)),
+                          element("Output Busses", NormalizedRect(x: 0.1, y: 0.5, width: 0.5, height: 0.1))])
+        #expect(menu.resolve(target: "Output Busses") == .ambiguous(2))
+        let twoAtControl = scene([element("Input", control), element("Bus", control)])
+        #expect(DropdownReadback.atControl(control, in: twoAtControl, windowSizeKept: true)
+                == .unreadable(.severalAtControl))
+        #expect(DropdownReadback.inCrop(menu, windowSizeKept: true)
+                == .unreadable(.severalAtControl))
+    }
+
+    @Test("readings of different values at the control stay uncertain, even when one reads the requested item")
+    func overlappingReadingsAreNotAttributed() {
+        let lower = NormalizedRect(x: 0.42, y: 0.21, width: 0.18, height: 0.05)
+        let window = scene([element("Output Busses", control), element("All Busses", lower)])
+        let readback = DropdownReadback.atControl(control, in: window, windowSizeKept: true)
+        #expect(readback == .unreadable(.severalAtControl))
+        let outcome = ActOutcome.dropdownSelection(evidence(readback), menuWindowNumber: 4242, scene: window)
+        #expect(outcome.kind == .actedUnverified)
+        #expect(outcome.verifiedDropdown == nil)
+        #expect(outcome.dropdown?.change == .unverified)
+        let twoPlaces = scene([element("Output Busses", NormalizedRect(x: 0.40, y: 0.20, width: 0.08, height: 0.05)),
+                               element("Output Busses", NormalizedRect(x: 0.52, y: 0.20, width: 0.08, height: 0.05))])
+        #expect(DropdownReadback.atControl(control, in: twoPlaces, windowSizeKept: true)
+                == .unreadable(.severalAtControl))
+
+        let crop = scene([element("Output Busses", NormalizedRect(x: 0, y: 0, width: 1, height: 0.5)),
+                          element("All Busses", NormalizedRect(x: 0, y: 0.5, width: 1, height: 0.5))])
+        #expect(DropdownReadback.inCrop(crop, windowSizeKept: true)
+                == .unreadable(.severalAtControl))
+    }
+
+    @Test("a neighbour's value that only grazes the control's place is not its readback")
+    func grazingNeighbourIsNoReading() {
+        // The control spans x 0.40-0.60 and is not perceived after the menu closes; the next strip's
+        // dropdown, already on the requested item, spans x 0.599-0.799.
+        let neighbour = element("Output Busses", NormalizedRect(x: 0.599, y: 0.20, width: 0.20, height: 0.05))
+        let alone = DropdownReadback.atControl(control, in: scene([neighbour]), windowSizeKept: true)
+        #expect(alone == .unreadable(.nothingAtControl))
+        let outcome = ActOutcome.dropdownSelection(evidence(alone), menuWindowNumber: 4242, scene: scene([neighbour]))
+        #expect(outcome.kind == .actedUnverified)
+        #expect(outcome.verifiedDropdown == nil)
+        // Beside the control, which still reads its old value, the neighbour is not a second reading.
+        let beside = DropdownReadback.atControl(control, in: scene([element("All Busses", control), neighbour]),
+                                                windowSizeKept: true)
+        #expect(beside == .window("All Busses"))
+    }
+
+    @Test("the control's own value is read at its place: its text inside it, or the control repainted wider or moved")
+    func valueAtItsPlace() {
+        for bounds in [NormalizedRect(x: 0.42, y: 0.205, width: 0.12, height: 0.04),
+                       NormalizedRect(x: 0.40, y: 0.20, width: 0.26, height: 0.05),
+                       NormalizedRect(x: 0.41, y: 0.202, width: 0.20, height: 0.05)] {
+            let window = scene([element("Output Busses", bounds)])
+            #expect(DropdownReadback.atControl(control, in: window, windowSizeKept: true) == .window("Output Busses"),
+                    "\(bounds)")
+        }
+    }
+
+    /// TextEdit, 28/09/2026: the style dropdown is the accessibility element "stile" whose value is the style
+    /// shown; the text painted inside it reads the same value. The selector read pixels alone and found
+    /// nothing at the control after a selection that had happened.
+    @Test("an accessibility element reads its value at the control, and must agree with the text painted there")
+    func accessibilityValueAtTheControl() {
+        func popup(_ value: String?, _ bounds: NormalizedRect? = nil) -> SceneElement {
+            SceneElement(id: "ax|stile", kind: .control, label: "stile", bounds: bounds ?? control,
+                         role: "AXPopUpButton", value: value, container: "Formattazione")
+        }
+        let text = NormalizedRect(x: 0.42, y: 0.205, width: 0.10, height: 0.04)
+        #expect(DropdownReadback.atControl(control, in: scene([popup("Grassetto"), element("Grassetto", text)]),
+                                           windowSizeKept: true) == .window("Grassetto"))
+        #expect(DropdownReadback.atControl(control, in: scene([popup("Grassetto")]), windowSizeKept: true)
+                == .window("Grassetto"))
+        #expect(DropdownReadback.atControl(control, in: scene([popup("Grassetto"), element("Regolare", text)]),
+                                           windowSizeKept: true) == .unreadable(.severalAtControl))
+        #expect(DropdownReadback.atControl(control, in: scene([popup(nil), element("Grassetto", text)]),
+                                           windowSizeKept: true) == .window("Grassetto"))
+        #expect(DropdownReadback.atControl(control, in: scene([popup(nil)]), windowSizeKept: true)
+                == .unreadable(.nothingAtControl))
+        let neighbour = popup("Output Busses", NormalizedRect(x: 0.599, y: 0.20, width: 0.20, height: 0.05))
+        #expect(DropdownReadback.atControl(control, in: scene([neighbour]), windowSizeKept: true)
+                == .unreadable(.nothingAtControl))
+        let outcome = ActOutcome.dropdownSelection(
+            evidence(before: "Regolare", item: "Grassetto", .window("Grassetto")), menuWindowNumber: 4242,
+            scene: scene([popup("Grassetto")]))
+        #expect(outcome.verifiedDropdown?.change == .changed)
+    }
+
+    @Test("facets of one reading at the control are one reading, whatever the number of elements")
+    func facetsOfOneReading() {
+        let chevron = SceneElement(id: "icon|chevron", kind: .icon, label: "icon 7",
+                                   bounds: NormalizedRect(x: 0.56, y: 0.20, width: 0.04, height: 0.05),
+                                   isUnlabeled: true)
+        let text = SceneElement(id: "text|Output Busses", kind: .text, label: "Output Busses", bounds: control)
+        let twice = scene([element("Output Busses", control), text, chevron])
+        #expect(DropdownReadback.atControl(control, in: twice, windowSizeKept: true)
+                == .window("Output Busses"))
+        let oldValue = scene([element("All Busses", control), chevron])
+        #expect(DropdownReadback.atControl(control, in: oldValue, windowSizeKept: true)
+                == .window("All Busses"))
+        let whole = NormalizedRect(x: 0, y: 0, width: 1, height: 1)
+        let cropChevron = SceneElement(id: "icon|chevron", kind: .icon, label: "icon 1",
+                                       bounds: NormalizedRect(x: 0.8, y: 0, width: 0.2, height: 1), isUnlabeled: true)
+        #expect(DropdownReadback.inCrop(scene([element("All Busses", whole), cropChevron]),
+                                        windowSizeKept: true) == .controlCrop("All Busses"))
+        #expect(DropdownReadback.inCrop(scene([element("Output Busses", whole), cropChevron]),
+                                        windowSizeKept: true) == .controlCrop("Output Busses"))
+    }
+
+    @Test("a label recalled from memory is not a reading of the control's value")
+    func recalledLabelIsNoReading() {
+        let recalled = SceneElement(id: "icon|output", kind: .icon, label: "Output Busses", bounds: control,
+                                    isRecalled: true)
+        #expect(DropdownReadback.atControl(control, in: scene([recalled]), windowSizeKept: true)
+                == .unreadable(.nothingAtControl))
+        #expect(DropdownReadback.inCrop(scene([recalled]), windowSizeKept: true)
+                == .unreadable(.nothingAtControl))
+    }
+
+    @Test("found_acted without evidence, or with unverified evidence, is not a verified selection")
+    func foundActedWithoutEvidence() {
+        #expect(ActOutcome(.foundActed, "synthetic selection").verifiedDropdown == nil)
+        let unverified = evidence(.window("All Busses"))
+        #expect(ActOutcome(.foundActed, "synthetic selection", evidence: .dropdown(unverified)).verifiedDropdown == nil)
+    }
+
+    @Test("a result that depends on the control crop carries that crop's reading to the caller")
+    func cropEvidenceReachesTheCaller() {
+        let crop = scene([element("Output Busses", NormalizedRect(x: 0, y: 0, width: 1, height: 1))])
+        let readback = DropdownReadback.inCrop(crop, windowSizeKept: true)
+        #expect(readback == .controlCrop("Output Busses"))
+        let fullWindow = scene([])
+        let outcome = ActOutcome.dropdownSelection(evidence(readback), menuWindowNumber: 4242, scene: fullWindow)
+        #expect(outcome.kind == .foundActed)
+        #expect(outcome.verifiedDropdown?.readback == .controlCrop("Output Busses"))
+        #expect(outcome.verifiedDropdown?.change == .changed)
+        #expect(!String(describing: outcome.dropdown).contains("4242"))
+    }
+}

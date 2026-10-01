@@ -92,14 +92,16 @@ public enum DialogButtonPress {
                 return outcome
             case .press(let button, let title):
                 let before = MenuBarCommand.windowSignature(of: processID)
+                try Task.checkCancellation()
                 let error  = AXUIElementPerformAction(button, kAXPressAction as CFString)
-                // A button that opens a modal can keep the reply past the timeout: it was pressed.
+                // A modal can outlive the AX reply. A timeout leaves delivery uncertain.
                 guard error == .success || error == .cannotComplete else {
                     return ActOutcome(.actedUnverified, "Pressing '\(title)' failed with AXError \(error.rawValue).")
                 }
                 try? await Task.sleep(for: .milliseconds(400))
                 let scene   = try await observe()
-                let changed = MenuBarCommand.windowSignature(of: processID) != before
+                let changed = error == .success && MenuBarCommand.windowsChanged(
+                    before: before, after: MenuBarCommand.windowSignature(of: processID))
                 return changed
                     ? ActOutcome(.foundActed, "pressed '\(title)': a window of the application opened, closed or "
                         + "was retitled", scene: scene)
@@ -120,7 +122,7 @@ public enum DialogButtonPress {
                 var enabled: CFTypeRef?
                 AXUIElementCopyAttributeValue(node, kAXEnabledAttribute as CFString, &enabled)
                 found.append(Button(title: string(node, kAXTitleAttribute) ?? "",
-                                    isEnabled: (enabled as? Bool) ?? true,
+                                    isEnabled: (enabled as? Bool) ?? false,
                                     element: node))
             }
             guard depth < 10 else { continue }

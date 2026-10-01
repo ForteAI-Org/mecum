@@ -29,7 +29,7 @@ struct ProviderWebSearchTests {
                             effort: "high", isCompaction: isCompaction)
     }
 
-    /// The arguments before web search existed, word for word.
+    /// The restricted arguments when web search is disabled, including the context budget.
     private static let claudeToday = [
         "-p", "--output-format", "stream-json", "--verbose", "--strict-mcp-config", "--mcp-config",
         #"{"mcpServers":{"mecum":{"args":["mcp-bridge","--connection","\/c"],"command":"\/b"}}}"#,
@@ -48,7 +48,8 @@ struct ProviderWebSearchTests {
         "-c", #"web_search="disabled""#, "-c", #"developer_instructions="i""#,
         "-c", #"mcp_servers.mecum={command="/b",args=["mcp-bridge","--connection","/c"],required=true,"#
             + #"tool_timeout_sec=120,default_tools_approval_mode="approve"}"#,
-        "--model", "m", "-c", #"model_reasoning_effort="high""#, "resume", "s", "-",
+        "--model", "m", "-c", #"model_reasoning_effort="high""#,
+        "-c", "model_auto_compact_token_limit=64000", "resume", "s", "-",
     ]
 
     @Test

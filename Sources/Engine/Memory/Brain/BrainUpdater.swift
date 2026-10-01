@@ -5,6 +5,7 @@
 //  Created by Ronaldo Zefi on 18/09/2026.
 //
 
+import EngineCore
 import Foundation
 import PerceptionCore
 
@@ -12,12 +13,35 @@ import PerceptionCore
 /// way it learns: by evidence. Every entry point takes the clock as a value.
 public enum BrainUpdater {
 
-    /// IngestStats counts what one ingest did.
+    /// IngestStats counts what one ingest did, and names the anchors it accepted for this scene.
     public struct IngestStats: Sendable, Equatable {
         public var created = 0
         public var updated = 0
         public var skippedAmbiguous = 0
+        /// One entry per interactive detection the ingest matched or anchored, in detection order.
+        /// Each anchor appears at most once, the ingest's own "claimable once per scene" rule; an
+        /// ambiguous detection has no entry. Never the brain's other, historical anchors.
+        public var accepted: [AcceptedAnchor] = []
+        /// The brain's observation clock for the scene's window after the ingest opened, the value
+        /// the accepted anchors were stamped with: one block of activity, not one frame.
+        public var observationBlock = 0
+        /// The instant the ingest was stamped with.
+        public var observedAt: Date?
         public init() {}
+    }
+
+    /// AcceptedAnchor is one detection of the ingested scene and the anchor it now belongs to, with
+    /// the anchor's canonical name and provenance after the ingest.
+    public struct AcceptedAnchor: Sendable, Equatable {
+        public let anchorKey: String
+        public let kind: ElementKind
+        /// The anchor's canonical label, empty when it has none.
+        public let label: String
+        public let labelSource: LabelSource?
+        /// What this frame read for the detection.
+        public let detectedLabel: String
+        /// True when this ingest created the anchor.
+        public let isNew: Bool
     }
 
     /// The smallest normalized size an anchor may have; slivers (scrollbar thumbs, dividers) move and
@@ -40,6 +64,7 @@ public enum BrainUpdater {
         }
         let texts = detections.filter { $0.kind == .text }
         var anchorFor: [Int: String] = [:]
+        var createdKeys = Set<String>()
         // A substantial scene (three or more interactive detections) is an observation; a lone upsert is not.
         let advanced = brain.beginIngest(now: now, window: window, substantial: interactive.count >= 3)
         let epoch = brain.ingestEpoch
@@ -79,6 +104,7 @@ public enum BrainUpdater {
                     )
                     if let state = detection.state { fresh.statesSeen[state.rawValue] = 1 }
                     anchorFor[i] = fresh.anchorKey
+                    createdKeys.insert(fresh.anchorKey)
                     brain.objects.append(fresh)
                     stats.created += 1
             }
@@ -96,6 +122,14 @@ public enum BrainUpdater {
             mergeGroup(candidate, members: members, interactive: interactive, into: &brain, now: now, epoch: epoch)
         }
         if advanced { decay(&brain, now: now) }
+        stats.observationBlock = stamp
+        stats.observedAt       = now
+        stats.accepted = anchorFor.keys.sorted().compactMap { i in
+            guard let key = anchorFor[i], let anchor = brain.object(withKey: key) else { return nil }
+            return AcceptedAnchor(anchorKey: key, kind: anchor.kind, label: anchor.label,
+                                  labelSource: anchor.labelSource, detectedLabel: interactive[i].label,
+                                  isNew: createdKeys.contains(key))
+        }
         return stats
     }
 
@@ -239,25 +273,28 @@ public enum BrainUpdater {
         return true
     }
 
-    /// Records a learned transition. The same anchor, trigger and effect add evidence; consumers trust a
+    /// Records a learned transition of `verb`. The same anchor, verb and effect add evidence, a stored
+    /// right-click's included; a stored click of unknown verb is never added to. Consumers trust a
     /// state effect only at evidence two or more. Returns the evidence after recording.
     public static func recordTransition(
         anchorKey : String,
-        trigger   : TransitionTrigger,
+        verb      : ActionVerb,
         effect    : String,
         into brain: inout UIBrain,
         now       : Date
     ) -> Int {
         if let i = brain.transitions.firstIndex(where: {
-            $0.anchorKey == anchorKey && $0.trigger == trigger && $0.effect == effect
+            $0.anchorKey == anchorKey && $0.attributedVerb == verb && $0.effect == effect
         }) {
+            brain.transitions[i].verb              = verb
             brain.transitions[i].evidence          += 1
             brain.transitions[i].lastObserved      = now
             brain.transitions[i].lastObservedEpoch = brain.ingestEpoch
             return brain.transitions[i].evidence
         }
-        brain.transitions.append(LearnedTransition(anchorKey: anchorKey, trigger: trigger, effect: effect,
-                                                   lastObserved: now, lastObservedEpoch: brain.ingestEpoch))
+        brain.transitions.append(LearnedTransition(anchorKey: anchorKey, trigger: TransitionTrigger(verb), verb: verb,
+                                                   effect: effect, lastObserved: now,
+                                                   lastObservedEpoch: brain.ingestEpoch))
         return 1
     }
 

@@ -25,8 +25,9 @@ public actor BrainMemory: EffectExpecting, ActionObserving {
 
     // MARK: EffectExpecting
 
-    /// The strongest trusted transition of the element's anchor under the verb's trigger, decoded, or
-    /// nil when the brain has no opinion or the store cannot be read.
+    /// The strongest trusted transition of the element's anchor that is evidence of this verb, decoded,
+    /// or nil when the brain has no opinion or the store cannot be read. A stored click of unknown
+    /// verb gives no expectation to any verb, and one verb's edges never answer for another.
     public func expectedEffect(
         of verb    : ActionVerb,
         on element : SceneElement,
@@ -35,9 +36,8 @@ public actor BrainMemory: EffectExpecting, ActionObserving {
         guard let knowledge = try? await store.load(bundleID: bundleID) else { return nil }
         let brain = knowledge.brain
         guard case .found(let key) = BrainMatcher.match(BrainDetection(element), in: brain) else { return nil }
-        let trigger = TransitionTrigger(verb)
         return brain.transitions
-            .filter { $0.anchorKey == key && $0.trigger == trigger && $0.isTrusted }
+            .filter { $0.anchorKey == key && $0.attributedVerb == verb && $0.isTrusted }
             .max { $0.evidence < $1.evidence }?
             .sceneEffect
     }
@@ -52,7 +52,6 @@ public actor BrainMemory: EffectExpecting, ActionObserving {
         guard let effect = record.effect else { return }
         let now = clock()
         let detection = BrainDetection(record.element)
-        let trigger = TransitionTrigger(record.verb)
         do {
             try await store.mutate(bundleID: record.bundleID) { knowledge in
                 var key: String?
@@ -62,7 +61,7 @@ public actor BrainMemory: EffectExpecting, ActionObserving {
                     if case .found(let found) = BrainMatcher.match(detection, in: knowledge.brain) { key = found }
                 }
                 guard let key else { return }
-                _ = BrainUpdater.recordTransition(anchorKey: key, trigger: trigger, effect: effect.encoded,
+                _ = BrainUpdater.recordTransition(anchorKey: key, verb: record.verb, effect: effect.encoded,
                                                   into: &knowledge.brain, now: now)
             }
         } catch {
@@ -88,7 +87,7 @@ public actor BrainMemory: EffectExpecting, ActionObserving {
         guard let knowledge = try? await store.load(bundleID: scene.bundleID) else { return scene }
         let elements = knowledge.brain.enrich(scene.elements)
         guard elements != scene.elements else { return scene }
-        return SceneSnapshot(
+        var enriched = SceneSnapshot(
             bundleID         : scene.bundleID,
             appName          : scene.appName,
             windowTitle      : scene.windowTitle,
@@ -97,5 +96,7 @@ public actor BrainMemory: EffectExpecting, ActionObserving {
             sections         : scene.sections,
             commands         : scene.commands
         )
+        enriched.coverage = scene.coverage
+        return enriched
     }
 }

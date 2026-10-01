@@ -28,6 +28,7 @@ struct MenuBarCommandTests {
         Node("Apple", [Node("Restart...")]),
         Node("Photoshop 2026", [Node("Hide Photoshop"), Node("Quit Photoshop")]),
         Node("File", [Node("New..."), Node("Close"), Node("Save", enabled: false), Node(""), Node("Save As...")]),
+        Node("Format", [Node("Font", [Node("Show Fonts")])]),
         Node("Layer", [Node("New", [Node("Layer..."), Node("Group...")]), Node("Delete", [Node("Layer", enabled: false)])]),
     ])
 
@@ -41,6 +42,9 @@ struct MenuBarCommandTests {
     func anItemIsPressed() {
         guard case .press(let node, let path) = resolve("layer > new > layer") else {
             Issue.record("the item was not pressed"); return
+        }
+        guard case .press(_, "Format > Font > Show Fonts") = resolve("Format > Font > Show Fonts") else {
+            Issue.record("a menu category was mistaken for a destructive command"); return
         }
         #expect(node.title == "Layer...")
         #expect(path == "Layer > New > Layer...")

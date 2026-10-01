@@ -22,6 +22,12 @@ struct ActionPolicyTests {
         #expect(!ActionPolicy.isDestructive(label: nil))
     }
 
+    @Test func menuCategoriesAndDestructiveSubmenusAreDistinct() {
+        #expect(!ActionPolicy.isDestructive(menuPath: ["Format", "Font", "Show Fonts"]))
+        #expect(ActionPolicy.isDestructive(menuPath: ["File", "Format Disk"]))
+        #expect(ActionPolicy.isDestructive(menuPath: ["Layer", "Delete", "Layer"]))
+    }
+
     @Test("activation is skipped in front or while a pop-up is open")
     func activation() {
         #expect(ActivationPolicy.needsActivation(target: 5, frontmost: 7, isPopupOpen: false))

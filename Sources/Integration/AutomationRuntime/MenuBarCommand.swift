@@ -10,29 +10,20 @@ import ApplicationServices
 import EngineCore
 import PerceptionCore
 
-/// MenuBarCommand reaches one item of an application's menu bar through accessibility, which
-/// answers for an application in the background: nothing is clicked, nothing is activated.
-///
-/// Measured on 30/09/2026 with Photoshop 27.10 behind the person's application: its whole menu
-/// bar read, enabled states included, and `AXPress` on Layer > New > Layer... returned success
-/// and opened the New Layer dialog while the person's application stayed in front. A window
-/// that shows no control for a command (Photoshop's document tab has no × in the scene) still
-/// has the command in its menu.
-///
-/// A path that ends on a menu lists its items and presses nothing; one that ends on an item
-/// presses it. The Apple menu is the system's and is refused, and so are an item that is
-/// disabled, one that hides the application, and one on a path `ActionPolicy` reads as
-/// destructive at any step unless the person allowed that.
+/// MenuBarCommand lists or invokes a native path through the session's shared menu adapter.
+/// General commands retain Elio's window-change readback. Only the explicit expected-window
+/// route supplies typed memory evidence. A disabled Adobe menu may be refreshed before delivery;
+/// the native command itself is requested at most once and remains bound to the Seat observation.
 @MainActor
 public enum MenuBarCommand {
 
     /// One item of a menu as the walk reads it.
     public struct Item<Element> {
         public let title    : String
-        public let isEnabled: Bool
+        public let isEnabled: Bool?
         public let element  : Element
 
-        public init(title: String, isEnabled: Bool, element: Element) {
+        public init(title: String, isEnabled: Bool?, element: Element) {
             self.title     = title
             self.isEnabled = isEnabled
             self.element   = element
@@ -50,7 +41,7 @@ public enum MenuBarCommand {
 
     /// The items `path` passes through, split on ">".
     public static func steps(of path: String) -> [String] {
-        path.split(separator: ">").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        path.split(separator: ">", omittingEmptySubsequences: false).map { $0.trimmingCharacters(in: .whitespaces) }
     }
 
     /// The walk, over any tree: `items` answers a node's items, the menu bar's first.
@@ -61,7 +52,7 @@ public enum MenuBarCommand {
         items            : (Element) -> [Item<Element>]
     ) -> Resolution<Element> {
 
-        guard !steps.isEmpty else {
+        guard (1...8).contains(steps.count), steps.allSatisfy({ !normalized($0).isEmpty }) else {
             return .outcome(ActOutcome(.honestMiss, "Name a menu path such as \"File > Save As...\"."))
         }
         var level = items(root)
@@ -69,10 +60,14 @@ public enum MenuBarCommand {
         var chosen: Item<Element>?
         for (index, wanted) in steps.enumerated() {
             let shown = level.map(\.title).filter { !$0.isEmpty }
-            guard let position = level.firstIndex(where: { normalized($0.title) == normalized(wanted) }) else {
+            let positions = level.indices.filter { normalized(level[$0].title) == normalized(wanted) }
+            guard let position = positions.first else {
                 let place = trail.isEmpty ? "the menu bar" : trail.joined(separator: " > ")
                 return .outcome(ActOutcome(.honestMiss, "No item '\(wanted)' in \(place). It holds: "
                     + shown.prefix(40).joined(separator: ", ") + "."))
+            }
+            guard positions.count == 1 else {
+                return .outcome(ActOutcome(.ambiguous, "Menu component '\(wanted)' is ambiguous."))
             }
             // The Apple menu is the bar's first item in every language.
             if index == 0, position == 0 {
@@ -87,14 +82,17 @@ public enum MenuBarCommand {
         guard let chosen else { return .outcome(ActOutcome(.honestMiss, "Name a menu path.")) }
         guard level.isEmpty else {
             return .list(path: path, items: level.filter { !$0.title.isEmpty }.map { item in
-                item.title + (item.isEnabled ? "" : " (disabled)") + (items(item.element).isEmpty ? "" : " >")
+                item.title + (item.isEnabled == true ? "" : item.isEnabled == false ? " (disabled)" : " (unknown)") + (items(item.element).isEmpty ? "" : " >")
             })
         }
         // Before the enabled state, so the answer does not depend on it. Every step counts: Layer > Delete > Layer is destructive in its middle, not at its end.
-        if !allowsDestructive, trail.contains(where: { ActionPolicy.isDestructive(label: $0) }) {
+        if !allowsDestructive, ActionPolicy.isDestructive(menuPath: trail) {
             return .outcome(ActOutcome(.refused, "\(path) reads as destructive, and the person has not allowed it."))
         }
-        guard chosen.isEnabled else { return .disabled(path: path) }
+        if chosen.isEnabled == false { return .disabled(path: path) }
+        guard chosen.isEnabled == true else {
+            return .outcome(ActOutcome(.refused, "\(path) has unknown availability."))
+        }
         if normalized(chosen.title).hasPrefix("hide") {
             return .outcome(ActOutcome(.refused, "\(path) would hide the application's windows."))
         }
@@ -123,111 +121,82 @@ public enum MenuBarCommand {
             + "command is unavailable, and use a control in the window if there is one.")
     }
 
-    public static func run(
-        _ path           : String,
-        processID        : pid_t,
-        allowsDestructive: Bool
-    ) -> (pressed: String?, outcome: ActOutcome, disabled: Bool) {
-
-        let application = AXUIElementCreateApplication(processID)
-        AXUIElementSetMessagingTimeout(application, 1)
-        guard let bar = element(application, kAXMenuBarAttribute) else {
-            return (nil, ActOutcome(.honestMiss, "This application shows no menu bar to accessibility."), false)
-        }
-        switch resolve(steps(of: path), from: bar, allowsDestructive: allowsDestructive, items: menuItems) {
-            case .outcome(let outcome):
-                return (nil, outcome, false)
-            case .disabled(let path):
-                return (nil, disabledRefusal(path), true)
-            case .list(let path, let items):
-                return (nil, ActOutcome(.actedNoop, "\(path) holds: \(items.joined(separator: ", ")). "
-                    + "Nothing was pressed: name one of them to press it."), false)
-            case .press(let item, let path):
-                let error = AXUIElementPerformAction(item, kAXPressAction as CFString)
-                // An item that opens a modal can keep the reply past the timeout: it was pressed.
-                guard error == .success || error == .cannotComplete else {
-                    return (nil, ActOutcome(.actedUnverified, "Pressing \(path) failed with AXError \(error.rawValue)."),
-                            false)
-                }
-                return (path, ActOutcome(.foundActed, "pressed \(path)"), false)
-        }
-    }
-
-    /// Runs `path` and, when it pressed an item, observes the scene after it. Pressing is verified
-    /// by the application's windows: a dialog, a closed document or a new title moved them.
-    ///
-    /// `refresh` is what an application whose menus go stale in the background is given:
-    /// a moment in front, so it recomputes them. It runs once, only for an item that read
-    /// disabled, and the item is read again after it.
+    /// Resolves once, optionally refreshes a disabled catalog before any delivery, then invokes
+    /// the same Seat-bound adapter used by the strict expected-window route. Uncertain delivery
+    /// never becomes success merely because the window list changes.
     public static func perform(
-        _ path           : String,
+        _ path           : [String],
+        menus            : any ApplicationMenuOperating,
         processID        : pid_t,
         allowsDestructive: Bool,
         refresh          : (() async -> Bool)? = nil,
+        readWindows      : (() -> [String]?)? = nil,
+        settle           : () async throws -> Void = { try await Task.sleep(for: .milliseconds(400)) },
         observe          : () async throws -> SceneSnapshot
     ) async throws -> ActOutcome {
-
-        let before = windowSignature(of: processID)
-        var (pressed, outcome, disabled) = run(path, processID: processID, allowsDestructive: allowsDestructive)
-        if disabled, let refresh, await refresh() {
-            (pressed, outcome, disabled) = run(path, processID: processID, allowsDestructive: allowsDestructive)
+        func resolveCatalog() throws -> Resolution<[String]> {
+            let catalog = try menus.catalog(processID: processID)
+            guard catalog.isComplete else {
+                return .outcome(ActOutcome(.refused, "The menu catalog is incomplete; observe before choosing a command."))
+            }
+            return resolve(path, from: [], allowsDestructive: allowsDestructive) { parent in
+                catalog.items.filter { Array($0.path.dropLast()) == parent }.map { item in
+                    Item(title: item.path.last ?? "", isEnabled: item.isEnabled, element: item.path)
+                }
+            }
         }
-        guard let pressed else { return outcome }
-        try? await Task.sleep(for: .milliseconds(400))
-        let scene   = try await observe()
-        let changed = windowSignature(of: processID) != before
-        return changed
-            ? ActOutcome(.foundActed, "pressed \(pressed): a window of the application opened, closed or was retitled",
-                         scene: scene)
-            : ActOutcome(.actedUnverified, "pressed \(pressed): no window opened, closed or was retitled; "
-                         + "the scene shows whether it took effect. Do not press it again blind.", scene: scene)
+        var resolution = try resolveCatalog()
+        if case .disabled = resolution, let refresh, await refresh() {
+            try Task.checkCancellation()
+            resolution = try resolveCatalog()
+        }
+        switch resolution {
+        case .outcome(let outcome): return outcome
+        case .disabled(let path): return disabledRefusal(path)
+        case .list(let path, let items):
+            return ActOutcome(.actedNoop, "\(path) holds: \(items.joined(separator: ", ")). Nothing was pressed.")
+        case .press(let components, let title):
+            let windows = readWindows ?? { windowSignature(of: processID) }
+            let before = windows()
+            try Task.checkCancellation()
+            let delivery = try await menus.invoke(path: components, processID: processID)
+            do {
+                try await settle()
+                let scene = try await observe()
+                if case .uncertain(let reason) = delivery {
+                    return ActOutcome(.actedUnverified, reason + " Observe; do not replay.", scene: scene)
+                }
+                let changed = windowsChanged(before: before, after: windows())
+                return ActOutcome(changed ? .foundActed : .actedUnverified,
+                    "Requested \(title): " + (changed
+                        ? "an application window opened, closed or was retitled. This is not typed goal evidence."
+                        : "no complete window change was verified. Observe; do not replay."), scene: scene)
+            } catch is CancellationError { throw CancellationError() }
+            catch {
+                return ActOutcome(.actedUnverified, "Menu was requested but readback failed: \(error). Do not replay.")
+            }
+        }
+    }
+
+    /// Requires two complete inventories. Reordering alone is not a window change.
+    public static func windowsChanged(before: [String]?, after: [String]?) -> Bool {
+        guard let before, let after else { return false }
+        return before.sorted() != after.sorted()
     }
 
     /// What says a command changed the application's windows: every accessibility window's role,
     /// subrole and title, in order. A dialog opening or closing, or a document retitling, moves it.
-    public static func windowSignature(of processID: pid_t) -> [String] {
+    public static func windowSignature(of processID: pid_t) -> [String]? {
         let application = AXUIElementCreateApplication(processID)
         AXUIElementSetMessagingTimeout(application, 1)
         var value: CFTypeRef?
         guard AXUIElementCopyAttributeValue(application, kAXWindowsAttribute as CFString, &value) == .success,
               let windows = value as? [AXUIElement]
-        else { return [] }
+        else { return nil }
         return windows.map { window in
             [kAXRoleAttribute, kAXSubroleAttribute, kAXTitleAttribute]
                 .map { string(window, $0) ?? "" }.joined(separator: "|")
         }
-    }
-
-    /// A menu bar item's or menu item's items: the children of its one `AXMenu`, or the menu
-    /// bar's own children for the bar.
-    private static func menuItems(of node: AXUIElement) -> [Item<AXUIElement>] {
-        var children = elements(node, kAXChildrenAttribute)
-        if string(node, kAXRoleAttribute) != (kAXMenuBarRole as String) {
-            guard let menu = children.first(where: { string($0, kAXRoleAttribute) == (kAXMenuRole as String) })
-            else { return [] }
-            children = elements(menu, kAXChildrenAttribute)
-        }
-        return children.map { child in
-            var enabled: CFTypeRef?
-            AXUIElementCopyAttributeValue(child, kAXEnabledAttribute as CFString, &enabled)
-            return Item(title: string(child, kAXTitleAttribute) ?? "",
-                        isEnabled: (enabled as? Bool) ?? true,
-                        element: child)
-        }
-    }
-
-    private static func element(_ node: AXUIElement, _ name: String) -> AXUIElement? {
-        var value: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(node, name as CFString, &value) == .success, let value,
-              CFGetTypeID(value) == AXUIElementGetTypeID()
-        else { return nil }
-        return unsafeDowncast(value, to: AXUIElement.self)
-    }
-
-    private static func elements(_ node: AXUIElement, _ name: String) -> [AXUIElement] {
-        var value: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(node, name as CFString, &value) == .success else { return [] }
-        return (value as? [AXUIElement]) ?? []
     }
 
     private static func string(_ node: AXUIElement, _ name: String) -> String? {

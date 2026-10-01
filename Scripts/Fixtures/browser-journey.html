@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><title>Mecum synthetic journey</title>
+<style>body{font:18px system-ui;margin:32px;max-width:800px}button,input{font:inherit;padding:10px;margin:8px}
+[role=dialog],[role=listbox]{border:2px solid #567;padding:16px}.choice{padding:12px;cursor:pointer} [hidden]{display:none}</style>
+<h1>Synthetic journey form</h1><p>This page uses invented places. No booking or external request is made.</p>
+<label>Origin <input id="origin" aria-label="Origin" value="Northport" readonly></label>
+<label>Destination <input id="destination" aria-label="Destination" role="combobox" aria-expanded="false" aria-controls="suggestions" autocomplete="off"></label>
+<div id="suggestions" role="listbox" hidden></div>
+<button id="tripType" aria-expanded="false" onclick="show('tripDialog',this)">Trip type: return</button>
+<div id="tripDialog" role="dialog" aria-label="Trip type" hidden>
+<div class="choice" onclick="state.trip='one way';tripType.textContent='Trip type: one way';hide('tripDialog',tripType)"><span>Solo andata</span></div>
+<div class="choice" onclick="state.trip='return';tripType.textContent='Trip type: return';hide('tripDialog',tripType)"><span>Return trip</span></div></div>
+<button id="date" onclick="show('dateDialog',this)">Departure date</button>
+<div id="dateDialog" role="dialog" aria-label="Departure calendar" hidden>
+<button onclick="state.date='tomorrow evening';date.textContent='Departure: tomorrow evening';hide('dateDialog',date)">Tomorrow evening</button></div>
+<button id="travelers" onclick="show('travelersDialog',this)">Travelers: 1 adult</button>
+<div id="travelersDialog" role="dialog" aria-label="Travelers" hidden>
+<p id="count">Adults: 1</p><button onclick="state.adults++;count.textContent='Adults: '+state.adults">Add adult</button>
+<button onclick="travelers.textContent='Travelers: '+state.adults+' adults';hide('travelersDialog',travelers)">Done</button></div>
+<button onclick="search()">Search synthetic trips</button><p id="result" role="status">No search yet</p><p id="searchCount">Search submissions: 0</p>
+<script>
+const state={destination:null,trip:'return',date:null,adults:1,searches:0};
+function show(id,button){document.querySelectorAll('[role=dialog]').forEach(d=>d.hidden=true);document.getElementById(id).hidden=false;button.setAttribute('aria-expanded','true');}
+function hide(id,button){document.getElementById(id).hidden=true;button.setAttribute('aria-expanded','false');}
+let generation=0;
+destination.addEventListener('input',()=>{const current=++generation;state.destination=null;suggestions.hidden=true;destination.setAttribute('aria-expanded','false');
+setTimeout(()=>{if(current!==generation||destination.value!=='Southhaven')return;
+suggestions.innerHTML='<div role="option" class="choice">Southhaven (SHV)</div>';suggestions.hidden=false;destination.setAttribute('aria-expanded','true');
+suggestions.firstChild.onclick=()=>{state.destination='Southhaven';destination.value='Southhaven (SHV)';suggestions.hidden=true;destination.setAttribute('aria-expanded','false');};},150);});
+function search(){searchCount.textContent='Search submissions: '+(++state.searches);result.textContent=state.destination&&state.date?'Trip confirmed: Northport to '+state.destination+', '+state.trip+', '+state.date+', '+state.adults+' adults.':'Incomplete form';}
+</script></html>

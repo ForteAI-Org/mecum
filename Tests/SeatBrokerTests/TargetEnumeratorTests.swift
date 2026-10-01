@@ -19,6 +19,21 @@ private func windowInfo(
     ]
 }
 
+@Test func elevatedDialogRequiresAnAttestedNativeWindow() throws {
+    let frame = CGRect(x: 10, y: 20, width: 1_069, height: 694)
+    let row = windowInfo(layer: 8, frame: frame)
+    var readings = 0
+    let windows = TargetEnumerator.onScreenWindows(in: [row], minimumSize: 120) { pid, number in
+        #expect(pid == 42 && number == 7)
+        readings += 1
+        return frame
+    }
+    #expect(windows[42]?.first?.windowNumber == 7)
+    #expect(readings == 1)
+    let unqualified = TargetEnumerator.onScreenWindows(in: [row], minimumSize: 120) { _, _ in nil }
+    #expect(unqualified.isEmpty)
+}
+
 @Test func ordinaryWindowDoesNotResolveANativeFrame() throws {
     var resolutionCount = 0
     let serverFrame = CGRect(x: 10, y: 20, width: 800, height: 600)
@@ -70,10 +85,10 @@ private func windowInfo(
     }
 }
 
-@Test func nonLayerZeroWindowNeverResolvesANativeFrame() {
+@Test func nonApplicationLayerNeverResolvesANativeFrame() {
     var resolutionCount = 0
     let windows = TargetEnumerator.onScreenWindows(
-        in: [windowInfo(layer: 1, frame: CGRect(x: 0, y: 0, width: 121, height: 117))],
+        in: [windowInfo(layer: 25, frame: CGRect(x: 0, y: 0, width: 121, height: 117))],
         minimumSize: 120
     ) { _, _ in
         resolutionCount += 1

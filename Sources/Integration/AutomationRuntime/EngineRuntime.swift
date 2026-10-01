@@ -31,16 +31,19 @@ public struct EngineRuntime {
     public let controls: any ControlPressing
     public let activation: (any ApplicationActivating)?
     public let store: FileKnowledgeStore
+    public let menus: (any ApplicationMenuOperating)?
     public let memory: BrainMemory
 
     public init(knowledgeDirectory: URL, seat: SeatTarget? = nil) {
         if let seat {
+            menus = SeatApplicationMenus(target: seat)
             scenes = SeatSceneProvider(target: seat, pipeline: ProductionPerception.pipeline(), windows: windows,
                                        identity: { RunningApplicationLookup.identity(of: $0) })
             actuator   = SeatActuator(target: seat)
             controls   = SeatControls()
             activation = nil
         } else {
+            menus = nil
             scenes = ProductionPerception.foregroundScenes()
             actuator   = HIDActuator()
             controls   = AccessibilityController()

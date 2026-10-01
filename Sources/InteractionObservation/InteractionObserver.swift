@@ -27,7 +27,8 @@ public final class InteractionObserver {
     public func run(
         listener: PassiveInteractionListener,
         report: @escaping @MainActor (InteractionReport) -> Void,
-        diagnostic: @escaping @MainActor (String) -> Void
+        diagnostic: @escaping @MainActor (String) -> Void,
+        status: @escaping @MainActor (InteractionObserverStatus) -> Void = { _ in }
     ) async throws {
         let refresh = Task { [self] in
             var lastDiagnostic: String?
@@ -40,12 +41,20 @@ public final class InteractionObserver {
                             let count = sample.scene.elements.count
                             let coverage = count == 0 ? "no perceived elements" : "\(count) elements"
                             let message = "ready: window #\(window.number) \"\(window.title ?? "")\", \(coverage)"
-                            if message != lastDiagnostic { diagnostic(message); lastDiagnostic = message }
+                            if message != lastDiagnostic {
+                                diagnostic(message)
+                                status(.ready(window: window, elements: count))
+                                lastDiagnostic = message
+                            }
                         }
                     } catch is CancellationError { break }
                     catch {
                         let message = "perception unavailable: \(error)"
-                        if message != lastDiagnostic { diagnostic(message); lastDiagnostic = message }
+                        if message != lastDiagnostic {
+                            diagnostic(message)
+                            status(.perceptionUnavailable(String(describing: error)))
+                            lastDiagnostic = message
+                        }
                     }
                 }
                 do { try await Task.sleep(for: interval) } catch { break }

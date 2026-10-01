@@ -47,13 +47,13 @@ enum SeatRuntime {
             throw UsageError.noSuchApplication("\(application.localizedName ?? "?"): no interaction window to adopt")
         }
         let target = SeatTarget(configuration: SeatHostConfiguration(
-            followsNewWindows: invocation.command == "act", restoresUserFocus: true
+            followsNewWindows: ["act", "menu"].contains(invocation.command), restoresUserFocus: true
         ))
         try await target.start()
         do {
             // Focus recovery requires every working window of the driven app on the Seat.
             // Adopt companions first so the requested interaction window is selected last.
-            if ["select", "act", "batch"].contains(invocation.command) {
+            if ["select", "act", "batch", "menu", "resolve"].contains(invocation.command) {
                 for row in rows.reversed() where row.number != interaction.number
                     && WindowSurfaceClassifier.isWindowLayer(row.layer)
                     && WindowSurfaceClassifier.isSubstantialWindow(row.frame) {

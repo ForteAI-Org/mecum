@@ -5,6 +5,7 @@
 //  Created by Ronaldo Zefi on 18/09/2026.
 //
 
+import EngineCore
 import Foundation
 @testable import Memory
 import PerceptionCore
@@ -258,8 +259,8 @@ struct UIBrainTests {
                                           seenCount: 40, firstSeen: t0, lastSeen: t0))
         brain.objects.append(ObjectAnchor(anchorKey: "cold", kind: .icon, label: "", boundsTypical: Fixtures.rect(0.6, 0.6, 0.02, 0.02),
                                           seenCount: 1, firstSeen: t0, lastSeen: t0))
-        _ = BrainUpdater.recordTransition(anchorKey: "hot", trigger: .click, effect: "menuOpened:A|B", into: &brain, now: t0)
-        _ = BrainUpdater.recordTransition(anchorKey: "hot", trigger: .click, effect: "menuOpened:A|B", into: &brain, now: t0)
+        _ = BrainUpdater.recordTransition(anchorKey: "hot", verb: .click, effect: "menuOpened:A|B", into: &brain, now: t0)
+        _ = BrainUpdater.recordTransition(anchorKey: "hot", verb: .click, effect: "menuOpened:A|B", into: &brain, now: t0)
         let opportunities = brain.namingOpportunities(limit: 5)
         #expect(opportunities.first?.anchor.anchorKey == "hot")
         #expect(opportunities.first?.context.contains("menu") == true)
@@ -271,8 +272,8 @@ struct UIBrainTests {
         var brain = UIBrain()
         _ = BrainUpdater.ingest(scene(["Platform", "Files", "Edit"]), into: &brain, now: t0)
         let platform = brain.objects[0].anchorKey
-        _ = BrainUpdater.recordTransition(anchorKey: platform, trigger: .click, effect: "menuOpened:Desktop|Mobile|Web", into: &brain, now: t0)
-        _ = BrainUpdater.recordTransition(anchorKey: platform, trigger: .click, effect: "elementsAppeared:Desktop", into: &brain, now: t0)
+        _ = BrainUpdater.recordTransition(anchorKey: platform, verb: .click, effect: "menuOpened:Desktop|Mobile|Web", into: &brain, now: t0)
+        _ = BrainUpdater.recordTransition(anchorKey: platform, verb: .click, effect: "elementsAppeared:Desktop", into: &brain, now: t0)
         #expect(brain.does(anchorKey: platform) == "click: opens menu(Desktop|Mobile|Web)")
         let revealers = brain.revealers(of: "desktop")
         #expect(revealers.count == 1)
@@ -490,8 +491,8 @@ struct UIBrainTests {
         var brain = UIBrain()
         _ = BrainUpdater.ingest(scene(["File", "Edit", "View"]), into: &brain, now: t0)
         let file = try #require(brain.objects.first { $0.label == "File" }).anchorKey
-        _ = BrainUpdater.recordTransition(anchorKey: file, trigger: .click, effect: "menuOpened:New|Open|Save", into: &brain, now: t0)
-        _ = BrainUpdater.recordTransition(anchorKey: file, trigger: .click, effect: "elementsAppeared:Tooltip", into: &brain, now: t0)
+        _ = BrainUpdater.recordTransition(anchorKey: file, verb: .click, effect: "menuOpened:New|Open|Save", into: &brain, now: t0)
+        _ = BrainUpdater.recordTransition(anchorKey: file, verb: .click, effect: "elementsAppeared:Tooltip", into: &brain, now: t0)
         for i in 1...40 {
             _ = BrainUpdater.ingest(scene(["File", "Edit", "View"]), into: &brain, now: t0.addingTimeInterval(Double(i) * UIBrain.observationBlock))
         }

@@ -109,9 +109,12 @@ public enum DropdownOpening {
         func visit(_ node: AXUIElement, _ depth: Int) {
             guard depth < 10 else { return }
             let role = value(node, kAXRoleAttribute) as? String ?? ""
+            // The names a scene may show the control by: its title, its description ("stile" in TextEdit's
+            // format bar) and the value it shows.
             if [kAXPopUpButtonRole, kAXComboBoxRole].contains(role),
-               (value(node, kAXTitleAttribute) as? String)?.caseInsensitiveCompare(label) == .orderedSame
-                || (value(node, kAXValueAttribute) as? String)?.caseInsensitiveCompare(label) == .orderedSame {
+               [kAXTitleAttribute, kAXDescriptionAttribute, kAXValueAttribute].contains(where: {
+                   (value(node, $0) as? String)?.caseInsensitiveCompare(label) == .orderedSame
+               }) {
                 controls.append(node)
                 return
             }

@@ -22,7 +22,8 @@ import SeatSession
 /// the union of the window and the pop-up: the scene then holds the pop-up's rows and the returned
 /// frame is that union. Accessibility geometry is never mixed in; the augmenter's trust rule drops
 /// frames that do not intersect the captured rectangle, and on the Seat the application's own child
-/// frames still point at the window's old place.
+/// frames still point at the window's old place. The scene's `coverage` says which of the two
+/// shapes it is, so a consumer never mistakes the pop-up's rows for the window's own controls.
 public struct SeatSceneProvider: SceneProviding {
 
     private let target: SeatTarget
@@ -81,14 +82,22 @@ public struct SeatSceneProvider: SceneProviding {
             frame = union
             observedWindow = try await target.currentWindow()
         }
+        // The window server's title of the window captured, not the adopted one: a window the Seat followed
+        // after it opened is adopted untitled, and a window renamed since its adoption shows its new name.
+        // Capture can finish following a newly born window. The pre-capture census may not contain it.
+        let capturedRows = try windows.windows(ownedBy: processID)
+        let title = WindowRow.title(ofWindow: observedWindow.reference.windowNumber, in: capturedRows,
+                                    fallback: observedWindow.title)
         let window = ScenePipeline.Window(
             bundleID : application.bundleID,
             appName  : application.name,
-            title    : observedWindow.title,
+            title    : title,
             processID: processID,
-            frame    : frame
+            frame    : frame,
+            windowNumber: Int(observedWindow.reference.windowNumber)
         )
-        let scene = try await pipeline.perceive(image, of: window)
+        var scene = try await pipeline.perceive(image, of: window)
+        scene.coverage = popups.isEmpty ? .window : .windowAndPopups
         return PerceivedWindow(scene: scene, frame: frame)
     }
 }

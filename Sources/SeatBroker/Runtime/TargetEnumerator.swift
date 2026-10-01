@@ -2,11 +2,12 @@ import AppKit
 import ApplicationServices
 import CoreGraphics
 import CoreServices
+import PerceptionCore
 import SeatCore
 import WindowPlacement
 
 /// Installed applications merged with the running ones and their on-screen,
-/// normal-layer windows. The seat driver attests a window later; this only
+/// application windows, including attested floating dialogs. The seat driver attests a window later; this only
 /// lists candidates.
 enum TargetEnumerator {
     private static let applicationFolders = [
@@ -191,7 +192,7 @@ enum TargetEnumerator {
     /// The windows a process currently has on screen, or, when it has none,
     /// the ones it keeps in native fullscreen on a Space that is not on screen.
     @MainActor
-    static func windows(of pid: pid_t, minimumSize: CGFloat = 120, maximumLayer: Int = 0) -> [TargetWindow] {
+    static func windows(of pid: pid_t, minimumSize: CGFloat = 120, maximumLayer: Int = 20) -> [TargetWindow] {
         windows(
             of            : pid,
             onScreen      : onScreenWindows(minimumSize: minimumSize, maximumLayer: maximumLayer)[pid] ?? [],
@@ -423,7 +424,7 @@ enum TargetEnumerator {
         }
     }
 
-    private static func onScreenWindows(minimumSize: CGFloat, maximumLayer: Int = 0) -> [pid_t: [TargetWindow]] {
+    private static func onScreenWindows(minimumSize: CGFloat, maximumLayer: Int = 20) -> [pid_t: [TargetWindow]] {
         let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID)
             as? [[String: Any]] ?? []
         return onScreenWindows(
@@ -435,25 +436,27 @@ enum TargetEnumerator {
     }
 
     /// Stage Manager can publish a small on-screen thumbnail for a full-size
-    /// application window. Keep the ordinary WindowServer-only path cheap,
-    /// and consult Accessibility only for a layer-zero row below the minimum.
+    /// application window. Elevated application dialogs also need a native-window
+    /// witness: their layer alone does not distinguish them from overlays or menus.
+    /// Ordinary full-size layer-zero windows keep the cheap WindowServer-only path.
     static func onScreenWindows(
         in list: [[String: Any]],
         minimumSize: CGFloat,
-        maximumLayer: Int = 0,
+        maximumLayer: Int = 20,
         resolveNativeFrame: (pid_t, Int) -> CGRect?
     ) -> [pid_t: [TargetWindow]] {
         var windowsByPID: [pid_t: [TargetWindow]] = [:]
         for info in list {
             guard let pid = info[kCGWindowOwnerPID as String] as? pid_t,
                   let number = info[kCGWindowNumber as String] as? Int,
-                  (0...maximumLayer).contains(info[kCGWindowLayer as String] as? Int ?? 0),
+                  let layer = info[kCGWindowLayer as String] as? Int,
+                  (0...maximumLayer).contains(layer),
                   let boundsDict = info[kCGWindowBounds as String] as? NSDictionary,
                   let bounds = CGRect(dictionaryRepresentation: boundsDict)
             else { continue }
 
             let frame: CGRect
-            if bounds.width >= minimumSize, bounds.height >= minimumSize {
+            if layer == 0, bounds.width >= minimumSize, bounds.height >= minimumSize {
                 frame = bounds
             } else {
                 guard let nativeFrame = resolveNativeFrame(pid, number),

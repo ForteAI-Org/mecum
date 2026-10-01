@@ -35,12 +35,12 @@ BENCH_OUT := .build/bench
 REPORTS   := Documentation/Driver/compatibility
 
 # The unit tier runs unfiltered, so every test target in Package.swift reports
-# one summary line, the Driver's, the Engine's and the broker's alike: 28 after
-# InteractionTests joined the package. The app's own tests remain in MecumTests.
+# Every package test target must report a summary: 30, including BrowserTests,
+# SQLiteLivingMemoryTests and InteractionTests. The app has its own test runner.
 # This is the bundle count, not a test count, because test counts move with every
 # ticket (987 to 1018 in one day) and a number nobody updates stops meaning
 # anything, while a new test target is rare and worth failing over.
-UNIT_BUNDLES := 28
+UNIT_BUNDLES := 30
 
 # The seat cycle, alone in its own process.
 HOST_CYCLE_TESTS := 1

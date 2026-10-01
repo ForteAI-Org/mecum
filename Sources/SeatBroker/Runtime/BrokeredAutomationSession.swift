@@ -81,6 +81,7 @@ public final class BrokeredAutomationSession: AutomationSessionOperating {
     @ObservationIgnored private let label: String
     @ObservationIgnored private let knowledgeDirectory: URL
     @ObservationIgnored private let allowsDestructive: Bool
+    @ObservationIgnored private let livingMemory: (any LivingMemoryStoring)?
     @ObservationIgnored private let missingGrant: @MainActor () -> PermissionKind?
     @ObservationIgnored private let requestGrants: @MainActor () -> Void
     @ObservationIgnored private let seating: Seating
@@ -104,13 +105,15 @@ public final class BrokeredAutomationSession: AutomationSessionOperating {
         broker            : SeatBroker,
         workerID          : UUID,
         knowledgeDirectory: URL,
-        allowsDestructive : Bool = false
+        allowsDestructive : Bool = false,
+        livingMemory      : (any LivingMemoryStoring)? = nil
     ) {
         self.init(
             broker            : broker,
             workerID          : workerID,
             knowledgeDirectory: knowledgeDirectory,
             allowsDestructive : allowsDestructive,
+            livingMemory      : livingMemory,
             missingGrant      : { Permissions.firstMissing(of: [.screenRecording, .accessibility, .postEvent]) },
             requestGrants     : { _ = broker.requestMissingPermissions() },
             seating           : Self.seatedByTheBroker,
@@ -125,11 +128,10 @@ public final class BrokeredAutomationSession: AutomationSessionOperating {
         return (opened, try session.borrowedSeatTarget())
     }
 
-    /// Ron's scene provider over the borrowed target, observed and enriched by the Brain.
+    /// Captures over the borrowed target; observe applies the shared Brain and memory intake.
     static let perceivedThroughTheEngine: Perceiving = { runtime, pid in
         let perceived = try await runtime.scenes.currentScene(of: pid)
-        _ = try await runtime.memory.observe(perceived.scene)
-        return await runtime.memory.enrich(perceived.scene)
+        return perceived.scene
     }
 
     init(
@@ -137,6 +139,7 @@ public final class BrokeredAutomationSession: AutomationSessionOperating {
         workerID          : UUID,
         knowledgeDirectory: URL,
         allowsDestructive : Bool,
+        livingMemory      : (any LivingMemoryStoring)? = nil,
         missingGrant      : @escaping @MainActor () -> PermissionKind?,
         requestGrants     : @escaping @MainActor () -> Void,
         seating           : @escaping Seating,
@@ -148,6 +151,7 @@ public final class BrokeredAutomationSession: AutomationSessionOperating {
         self.label              = workerID.uuidString
         self.knowledgeDirectory = knowledgeDirectory
         self.allowsDestructive  = allowsDestructive
+        self.livingMemory       = livingMemory
         self.missingGrant       = missingGrant
         self.requestGrants      = requestGrants
         self.seating            = seating
@@ -237,6 +241,7 @@ public final class BrokeredAutomationSession: AutomationSessionOperating {
             phase = .holding(application: seated.opened.name)
             id = UUID()
             let scene = try await observe()
+            try RecentDocumentRuntime.validateOpening(scene)
             watchQueue(for: lease)
             return scene
         } catch {
@@ -269,10 +274,70 @@ public final class BrokeredAutomationSession: AutomationSessionOperating {
         }
     }
 
+    public func openRecent(application word: String, path: [String]) async throws -> ActOutcome {
+        await closing?.value
+        guard phase == .idle, closing == nil else {
+            throw AutomationFailure("Close the current session before opening a recent document.")
+        }
+        if let missing = missingGrant() {
+            requestGrants()
+            throw AutomationFailure(Self.refusal(missing: missing))
+        }
+        phase = .waiting
+        let lease: SeatLease
+        do { lease = try await broker.queue.acquire(label) }
+        catch { phase = .idle; throw error }
+        self.lease = lease
+        phase = .holding(application: nil)
+        let outcome = await RecentDocumentRuntime.open(application: word, path: path, validateOwnership: {
+            guard self.lease === lease, lease.session.isOpen, self.closing == nil else {
+                throw CancellationError()
+            }
+        }, adopt: { title in
+            try Task.checkCancellation()
+            guard self.lease === lease, lease.session.isOpen else { throw CancellationError() }
+            let seated = try await self.seating(lease.session, word, title)
+            self.target = seated.target
+            let runtime = EngineRuntime(knowledgeDirectory: self.knowledgeDirectory, seat: seated.target)
+            self.runtime = runtime
+            guard let pid = seated.opened.pid, let running = NSRunningApplication(processIdentifier: pid) else {
+                throw AutomationFailure("The application ended during document opening.")
+            }
+            self.application = running
+            self.phase = .holding(application: seated.opened.name)
+            self.id = UUID()
+            let scene = try await self.observe()
+            try RecentDocumentRuntime.validateOpening(scene)
+            self.watchQueue(for: lease)
+            return scene
+        })
+        if outcome.scene == nil { await close() }
+        return outcome
+    }
+
+    public func menus() throws -> MenuCatalog {
+        let (application, runtime, _) = try current()
+        return try runtime.menuCatalog(processID: application.processIdentifier)
+    }
+
+    public func resolveAction(_ query: String) async throws -> ActionRoute {
+        let (application, runtime, _) = try current()
+        return try await runtime.resolveAction(query, processID: application.processIdentifier)
+    }
+
+    public func menu(path: [String], expectingWindow: String) async throws -> ActOutcome {
+        let (application, runtime, _) = try current()
+        let outcome = await runtime.performMenu(path: path, expectingWindow: expectingWindow,
+                                               processID: application.processIdentifier,
+                                               allowsDestructive: allowsDestructive)
+        return await runtime.learn(outcome, in: livingMemory)
+    }
+
     public func observe() async throws -> SceneSnapshot {
         let (application, runtime, _) = try current()
         do {
-            return try await perceiving(runtime, application.processIdentifier)
+            let scene = try await perceiving(runtime, application.processIdentifier)
+            return try await runtime.learn(scene, in: livingMemory)
         } catch {
             throw Self.refusal(for: error)
         }
@@ -296,10 +361,11 @@ public final class BrokeredAutomationSession: AutomationSessionOperating {
             appName: application.localizedName ?? "application",
             target: target, verb: verb, section: section, desiredState: desiredState
         )
-        return await runtime.engine(
+        let outcome = await runtime.engine(
             allowsDestructive           : allowsDestructive,
             contextMenusOnTextFieldsOnly: Self.drawsMenusUnderThePointer(application)
         ).act(request)
+        return await runtime.learn(outcome, in: livingMemory)
     }
 
     public func deliver(_ input: InputRequest.Input, section: String?) async throws -> ActOutcome {
@@ -323,8 +389,8 @@ public final class BrokeredAutomationSession: AutomationSessionOperating {
         ).deliver(request)
     }
 
-    public func menu(path: String) async throws -> ActOutcome {
-        let (application, _, seat) = try current()
+    public func menu(path: [String]) async throws -> ActOutcome {
+        let (application, runtime, seat) = try current()
         if case .refuse(let sentence) = try await SeatAdmission.awaited(
             seat.agentSeat(),
             application: application.localizedName ?? "the application"
@@ -337,8 +403,10 @@ public final class BrokeredAutomationSession: AutomationSessionOperating {
             bundleURL       : application.bundleURL,
             bundleIdentifier: application.bundleIdentifier
         ) == .adobeUXP
+        guard let menus = runtime.menus else { throw MenuFailure("Native menus require a Seat.") }
         return try await MenuBarCommand.perform(
             path,
+            menus            : menus,
             processID        : processID,
             allowsDestructive: allowsDestructive,
             refresh          : stale
@@ -365,8 +433,11 @@ public final class BrokeredAutomationSession: AutomationSessionOperating {
     }
 
     public func select(control: String, item: String) async throws -> ActOutcome {
-        let (application, _, target) = try current()
-        let selector = SeatDropdownSelector(target: target, pipeline: ScenePipeline(text: VisionTextRecognizer()))
+        let (application, runtime, target) = try current()
+        let selector = SeatDropdownSelector(
+            target: target, pipeline: ScenePipeline(text: VisionTextRecognizer()),
+            windowPipeline: ProductionPerception.pipeline(), windows: runtime.windows
+        )
         let result = try await selector.select(
             control: control, item: item,
             identity: SeatDriving.ApplicationIdentity(
@@ -376,7 +447,7 @@ public final class BrokeredAutomationSession: AutomationSessionOperating {
             permissions: ActionPermissions(allowsDestructive: allowsDestructive),
             dryRun: false
         )
-        return result.outcome
+        return await runtime.learn(result.outcome, in: livingMemory)
     }
 
     /// Flushes the Brain, ends the borrow, finishes with the application and gives the seat back.

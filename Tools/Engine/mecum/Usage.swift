@@ -15,7 +15,10 @@ enum Usage {
                                               chat using your signed-in provider; --chat --help for options
       mecum --chat --resume <UUID|last>         continue a saved conversation
 
+      mecum open-recent <app> File "Open Recent" <absolute-path> --seat
+                                              open a recent document, verify it and adopt its window
       mecum windows <app>                      the window census: what would be driven, what is a pop-up
+      mecum browser [--mcp]                        Persistent Chrome engine (JSONL or MCP)
       mecum scene   <app> [--json]             perceive the interaction window and print the text map
       mecum peek    [--sections-only] [--labels]    live boxes over the frontmost app; peek --help for options
       mecum watch   [<app>] [--raw] [--json]    inspect manual input and resolved controls; watch --help
@@ -23,7 +26,11 @@ enum Usage {
       mecum select  <app> <dropdown> <item> --seat   open and select in one background menu operation
       mecum batch   <app> --window <title> --seat [options] -- <step> --then <step> ...
                                               run several steps in one Seat lifetime
-      mecum memory  <app>                      what the brain and the routes remember about the application
+      mecum menus   <app> [query]              read native menu paths and availability without opening them
+      mecum resolve <app> <label> --seat       compare UI and menu candidates without acting
+      mecum menu    <app> <top> <item> [...] --expect-window <title> --seat
+                                              invoke one native path and verify the newly opened window
+      mecum memory  <app>                      read-only: what the brain, routes and living memory remember
 
     <app> is a bundle id (com.adobe.PremierePro) or an application name (Premiere); the match is
     case-insensitive and a name may be a prefix.

@@ -115,8 +115,8 @@ struct ProviderTests {
         #expect(limit < (try #require(compaction.arguments.firstIndex(of: "resume"))))
         #expect(compaction.arguments.suffix(3) == ["resume", "thread-9", "-"])
         #expect(compaction.standardInput == "Reply only: ok")
-        #expect(!(try ProviderInvocation(turn(.codex, session: "thread-9")).arguments
-                  .contains(where: { $0.hasPrefix("model_auto_compact_token_limit") })))
+        #expect(try ProviderInvocation(turn(.codex, session: "thread-9")).arguments
+                  .contains("model_auto_compact_token_limit=64000"))
     }
 
     @Test

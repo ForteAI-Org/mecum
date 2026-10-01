@@ -14,7 +14,8 @@ public enum TransitionTrigger: String, Sendable, Codable {
     case click
     case rightClick = "rightclick"
 
-    /// The trigger an action verb produces; a toggle set is a click.
+    /// The trigger an action verb produces; a toggle set and a double-click are clicks. A transition
+    /// also keeps its verb, which the trigger alone cannot tell apart.
     public init(_ verb: ActionVerb) {
         switch verb {
             case .click, .doubleClick, .tripleClick, .setToggle: self = .click
