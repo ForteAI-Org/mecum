@@ -29,4 +29,14 @@ public struct WindowRow: Sendable, Equatable, Hashable {
     }
 
     var isUntitled: Bool { (title ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+
+    /// The title a scene of window `number` carries: what the window server calls it now, in `rows`, so
+    /// a renamed window and one adopted after it opened are named as they are shown; `fallback` when the
+    /// rows do not list that window with a title, as without the Screen Recording grant.
+    public static func title(ofWindow number: Int, in rows: [WindowRow], fallback: String) -> String {
+        guard let row = rows.first(where: { $0.number == number }), !row.isUntitled, let title = row.title else {
+            return fallback
+        }
+        return title
+    }
 }

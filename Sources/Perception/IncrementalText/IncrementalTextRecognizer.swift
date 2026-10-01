@@ -35,6 +35,7 @@ public final class IncrementalTextRecognizer: TextRecognizing {
         var grid    : TileGrid
         var runs    : [RecognizedText]
         var accuracy: TextRecognitionAccuracy
+        var scope: TextRecognitionScope?
     }
 
     private let inner : any TextRecognizing
@@ -55,12 +56,28 @@ public final class IncrementalTextRecognizer: TextRecognizing {
     }
 
     public func recognizeText(in image: CGImage, accuracy: TextRecognitionAccuracy) throws -> [RecognizedText] {
+        try read(image, accuracy: accuracy, scope: nil)
+    }
+
+    public func recognizeText(
+        in image: CGImage, accuracy: TextRecognitionAccuracy, scope: TextRecognitionScope
+    ) throws -> [RecognizedText] {
+        try read(image, accuracy: accuracy, scope: scope)
+    }
+
+    private func read(
+        _ image: CGImage, accuracy: TextRecognitionAccuracy, scope: TextRecognitionScope?
+    ) throws -> [RecognizedText] {
         let frame = CGRect(x: 0, y: 0, width: image.width, height: image.height)
         return try memory.withLock { retained -> [RecognizedText] in
+            if retained?.scope != scope { retained = nil }
+            var completed = false
+            defer { if !completed { retained = nil } }
 
             func readWholeFrame(retaining grid: TileGrid?) throws -> [RecognizedText] {
                 let runs = try inner.recognizeText(in: image, accuracy: accuracy)
-                retained = grid.map { Retained(grid: $0, runs: runs, accuracy: accuracy) }
+                retained = grid.map { Retained(grid: $0, runs: runs, accuracy: accuracy, scope: scope) }
+                completed = true
                 return runs
             }
 
@@ -72,7 +89,8 @@ public final class IncrementalTextRecognizer: TextRecognizing {
 
             // Not one tile moved: the answer is last frame's answer, and the recognizer is not asked.
             guard !dirty.isEmpty else {
-                retained = Retained(grid: grid, runs: previous.runs, accuracy: accuracy)
+                retained = Retained(grid: grid, runs: previous.runs, accuracy: accuracy, scope: scope)
+                completed = true
                 return previous.runs
             }
 
@@ -96,7 +114,8 @@ public final class IncrementalTextRecognizer: TextRecognizing {
                 }
             }
             let runs = kept + fresh
-            retained = Retained(grid: grid, runs: runs, accuracy: accuracy)
+            retained = Retained(grid: grid, runs: runs, accuracy: accuracy, scope: scope)
+            completed = true
             return runs
         }
     }

@@ -174,4 +174,23 @@ struct TargetResolutionTests {
         #expect(s.section(at: CGPoint(x: 0.5, y: 0.5))?.name == "region 1")
         #expect(s.section(at: CGPoint(x: 0.1, y: 0.1))?.name == "content")
     }
+
+    @Test("a container names a control's panel even when a section shares its name")
+    func containerBesideSameNamedSection() {
+        // Pro Tools, 28/09/2026: the name plate of Track 1 is a section called "Track 1", while each strip's
+        // Mute lies in the section "AUTO" with the container "Track 1" or "Track 2".
+        let plate = SceneElement(id: "plate", kind: .control, label: "Track name", bounds: rect(0.40, 0.88, 0.2, 0.02),
+                                 container: "Track 1", section: "Track 1")
+        let mute1 = SceneElement(id: "m1", kind: .control, label: "Mute", bounds: rect(0.52, 0.53, 0.05, 0.02),
+                                 container: "Track 1", section: "AUTO")
+        let mute2 = SceneElement(id: "m2", kind: .control, label: "Mute", bounds: rect(0.80, 0.53, 0.05, 0.02),
+                                 container: "Track 2", section: "AUTO")
+        var s = scene([plate, mute1, mute2])
+        s.sections = [SceneSection(name: "Track 1", bounds: rect(0.38, 0.88, 0.27, 0.12)),
+                      SceneSection(name: "AUTO", bounds: rect(0.38, 0.35, 0.6, 0.53))]
+        #expect(s.resolve(target: "Mute", section: "Track 1") == .found(mute1))
+        #expect(s.resolve(target: "Mute", section: "Track 2") == .found(mute2))
+        #expect(s.resolve(target: "Mute", section: "AUTO") == .ambiguous(2))
+        #expect(s.resolve(target: "Track name", section: "Track 1") == .found(plate))
+    }
 }

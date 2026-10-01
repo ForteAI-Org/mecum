@@ -45,13 +45,7 @@ nonisolated public struct FacilityGate: Sendable, Equatable {
         unvalidatedBuild: Bool
     ) {
         self.readiness        = readiness
-        // Release builds never refuse on the gate: the readiness still reports
-        // what the system answered, but every Facility acts as it does in debug.
-        #if DEBUG
         self.mayAct           = mayAct
-        #else
-        self.mayAct           = true
-        #endif
         self.unvalidatedBuild = unvalidatedBuild
     }
 

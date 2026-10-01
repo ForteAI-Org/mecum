@@ -89,6 +89,48 @@ struct CrossCheckedSurfaceReaderTests {
         #expect(CrossCheckedSurfaceReader.slotError(kCFNull) == nil)
     }
 
+    @Test("an operable layout area in AXWindows survives scope and joins its native window")
+    func layoutAreaWindowIsSelectable() throws {
+        #expect(CrossCheckedSurfaceReader.roleScopeOutcome(
+            of: kAXLayoutAreaRole as CFString,
+            processID: 77
+        ) == .success(kAXLayoutAreaRole as String))
+        let role = try #require(CrossCheckedSurfaceReader.role(
+            named: kAXLayoutAreaRole as String,
+            subrole: kAXDialogSubrole as String,
+            positionIsSettable: true,
+            actions: [kAXRaiseAction as String],
+            childCount: 6
+        ))
+        #expect(role == .interactivePanel)
+        let snapshot = CrossCheckedSurfaceReader.assemble(
+            windowServer: [surface(41, visible: true)],
+            accessibility: [record(41, role: role, minimised: false, modal: false, main: true)]
+        )
+        #expect(snapshot.inventory.completeness.isQualified)
+        #expect(snapshot.inventory.rows.map(\.surface.reference.windowNumber) == [41])
+        #expect(snapshot.claims.roles.first?.role == .interactivePanel)
+        #expect(snapshot.claims.visibilities.first?.state == .visibleInteractive)
+    }
+
+    @Test("a layout area needs children, a writable position and AXRaise")
+    func layoutAreaDecorationIsNotPromoted() {
+        for (movable, actions, children): (Bool, Set<String>, Int?) in [
+            (false, [kAXRaiseAction as String], 6),
+            (true, [], 6),
+            (true, [kAXRaiseAction as String], 0),
+            (true, [kAXRaiseAction as String], nil)
+        ] {
+            #expect(CrossCheckedSurfaceReader.role(
+                named: kAXLayoutAreaRole as String,
+                subrole: nil,
+                positionIsSettable: movable,
+                actions: actions,
+                childCount: children
+            ) == nil)
+        }
+    }
+
     @Test("an AXUnknown top-level movable raiseable window is an interactive panel")
     func operableUnknownWindowIsSelectable() {
         let role = CrossCheckedSurfaceReader.role(
@@ -186,7 +228,9 @@ struct CrossCheckedSurfaceReaderTests {
             of: "AXLayoutArea" as CFString,
             subrole: "AXUnknown" as CFString,
             processID: 51_304
-        ) == .failure(.notAWindow(.role("AXLayoutArea"))))
+        ) == .success(kAXLayoutAreaRole as String))
+        // A layout root without a window subrole is retained for the bounded
+        // identity and operability checks, not immediately made a dialog.
     }
 
     @Test("emptiness answers for every role the reader can answer, and not for AXDialog alone")

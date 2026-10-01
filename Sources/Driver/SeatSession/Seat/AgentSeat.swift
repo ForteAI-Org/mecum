@@ -2179,6 +2179,55 @@ public final class AgentSeat {
         fatalError("unavailable")
     }
 
+    /// Runs a native application-menu request under a current observation and Turn.
+    /// The adapter must call the supplied boundary check immediately before AXPress, after its
+    /// native lookup. That check consumes the observation even when AX reports uncertain delivery.
+    /// This is not a routed input receipt; the caller verifies the application effect separately.
+    public func performNativeMenuAction<Result: Sendable>(
+        observation: SeatObservationReference,
+        turn: Turn,
+        operation: @MainActor (WindowReference, @MainActor () throws -> Void) throws -> Result
+    ) async throws -> Result {
+        guard menuContext == nil else { throw ObservationAdmissionRefusal.menuContextRevoked }
+        let window = try admitOrdinary(observation)
+        var trace = InputTraceIdentity.submitted(
+            command: .text(""), window: window.reference, correlationID: turn.correlationID
+        )
+        _ = try preflight(window, turn: turn, traceContext: &trace)
+        guard sensing.menuWindows(ownedBy: window.reference.processID).isEmpty else {
+            throw SessionFailure.contextMenuAlreadyOpen(processID: window.reference.processID)
+        }
+        let previous = state
+        actionInFlight = true
+        transition(to: .acting, reason: .requested)
+        var crossedBoundary = false
+        defer {
+            actionInFlight = false
+            restoreActionState(previous, reason: .requested)
+            requestWindowFollow(through: crossedBoundary ? .seconds(2) : .zero)
+        }
+        try await commandGate?.prepare(correlationID: turn.correlationID)
+        return try operation(window.reference) {
+            guard !crossedBoundary else { throw SessionFailure.turnRequired }
+            try Task.checkCancellation()
+            try self.commandGate?.check()
+            guard !self.isTearingDown, self.state == .acting, self.turns.current == turn else {
+                throw SessionFailure.seatNotReady(self.state)
+            }
+            _ = try self.admitOrdinary(observation)
+            guard let record = self.session[window.id] else {
+                throw SessionFailure.windowNotAdopted(windowNumber: window.id)
+            }
+            let issues = self.currentIssues(for: record)
+            guard issues.isEmpty else {
+                self.report(issues)
+                throw SeatInterruption(issues: issues)
+            }
+            crossedBoundary = true
+            self.noteObservationConsumed()
+        }
+    }
+
     // MARK: The contextual menu
 
     /// Runs a native dropdown inside one Turn. The caller supplies native actions and an

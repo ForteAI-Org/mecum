@@ -18,22 +18,38 @@ public struct WindowServerWindowListing: WindowListing {
     public init() {}
 
     public func windows(ownedBy processID: pid_t) throws -> [WindowRow] {
-        guard let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID)
+        try rows(ownedBy: processID, options: [.optionOnScreenOnly, .excludeDesktopElements])
+    }
+
+    public func allWindows(ownedBy processID: pid_t) throws -> [WindowRow]? {
+        try rows(ownedBy: processID, options: .optionAll)
+    }
+
+    private func rows(ownedBy processID: pid_t, options: CGWindowListOption) throws -> [WindowRow] {
+        guard let list = CGWindowListCopyWindowInfo(options, kCGNullWindowID)
                 as? [[String: Any]] else {
             throw WindowListingFailure.windowServerUnavailable
         }
         var rows: [WindowRow] = []
         for info in list {
-            guard (info[kCGWindowOwnerPID as String] as? pid_t) == processID,
-                  let layer = info[kCGWindowLayer as String] as? Int,
-                  let bounds = info[kCGWindowBounds as String] as? [String: Any] else { continue }
+            guard let owner = info[kCGWindowOwnerPID as String] as? pid_t else {
+                throw WindowListingFailure.windowServerUnavailable
+            }
+            guard owner == processID else { continue }
+            guard let layer = info[kCGWindowLayer as String] as? Int,
+                  let bounds = info[kCGWindowBounds as String] as? [String: Any],
+                  let number = info[kCGWindowNumber as String] as? Int, number > 0 else {
+                throw WindowListingFailure.windowServerUnavailable
+            }
             var frame = CGRect.zero
-            guard CGRectMakeWithDictionaryRepresentation(bounds as CFDictionary, &frame) else { continue }
+            guard CGRectMakeWithDictionaryRepresentation(bounds as CFDictionary, &frame) else {
+                throw WindowListingFailure.windowServerUnavailable
+            }
             rows.append(WindowRow(
                 layer : layer,
                 frame : frame,
                 title : info[kCGWindowName as String] as? String,
-                number: (info[kCGWindowNumber as String] as? Int) ?? 0
+                number: number
             ))
         }
         return rows

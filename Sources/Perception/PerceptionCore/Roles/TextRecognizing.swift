@@ -35,4 +35,18 @@ public enum TextRecognitionAccuracy: Sendable, Equatable {
 public protocol TextRecognizing: Sendable {
 
     func recognizeText(in image: CGImage, accuracy: TextRecognitionAccuracy) throws -> [RecognizedText]
+
+    /// Reads pixels in a capture scope. Stateful adapters invalidate retained OCR when this changes.
+    func recognizeText(
+        in image: CGImage, accuracy: TextRecognitionAccuracy, scope: TextRecognitionScope
+    ) throws -> [RecognizedText]
+}
+
+extension TextRecognizing {
+    /// A stateless recognizer needs no scope and performs its ordinary fresh read.
+    public func recognizeText(
+        in image: CGImage, accuracy: TextRecognitionAccuracy, scope: TextRecognitionScope
+    ) throws -> [RecognizedText] {
+        try recognizeText(in: image, accuracy: accuracy)
+    }
 }

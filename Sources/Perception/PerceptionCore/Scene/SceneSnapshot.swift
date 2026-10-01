@@ -25,6 +25,8 @@ public struct SceneSnapshot: Sendable, Equatable, Hashable {
     /// Known menu paths, such as "File > Export...".
     public var commands: [String]
     public var token: SceneToken
+    /// Which surfaces the pixels came from; set by the provider, never encoded.
+    public var coverage: SceneCoverage = .unattributed
 
     /// Builds a scene, computing the token from the content when none is supplied.
     public init(

@@ -12,4 +12,12 @@ import Foundation
 public protocol WindowListing: Sendable {
 
     func windows(ownedBy processID: pid_t) throws -> [WindowRow]
+
+    /// Complete process window inventory, including hidden and minimized windows. Nil means this
+    /// adapter cannot attest completeness; absence in `windows` alone never proves destruction.
+    func allWindows(ownedBy processID: pid_t) throws -> [WindowRow]?
+}
+
+extension WindowListing {
+    public func allWindows(ownedBy processID: pid_t) throws -> [WindowRow]? { nil }
 }

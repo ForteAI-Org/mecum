@@ -17,16 +17,16 @@ private final class RecordingRecognizer: TextRecognizing, @unchecked Sendable {
 
     private(set) var sizes: [CGSize] = []
     /// Answers runs for one image, given its size and how many calls came before.
-    private let script: (CGSize) -> [RecognizedText]
+    private let script: (CGSize) throws -> [RecognizedText]
 
-    init(script: @escaping (CGSize) -> [RecognizedText]) {
+    init(script: @escaping (CGSize) throws -> [RecognizedText]) {
         self.script = script
     }
 
     func recognizeText(in image: CGImage, accuracy: TextRecognitionAccuracy) throws -> [RecognizedText] {
         let size = CGSize(width: image.width, height: image.height)
         sizes.append(size)
-        return script(size)
+        return try script(size)
     }
 }
 
@@ -40,6 +40,36 @@ final class IncrementalTextRecognizerTests: XCTestCase {
 
     private func frame(paint: (CGContext) -> Void = { _ in }) throws -> CGImage {
         try tileImage(width: 400, height: 300, paint: paint)
+    }
+
+    func testFailedChangedFrameDropsTheRetainedOCR() throws {
+        let inner = RecordingRecognizer { [whole, lineA] size in
+            guard size == whole else { throw NSError(domain: "Synthetic OCR failure", code: 1) }
+            return [lineA]
+        }
+        let recognizer = IncrementalTextRecognizer(inner: inner)
+        let original = try frame()
+        _ = try recognizer.recognizeText(in: original, accuracy: .accurate)
+        let changed = try frame { context in
+            context.setFillColor(CGColor(gray: 0, alpha: 1))
+            context.fill(CGRect(x: 30, y: 300 - 20 - 4, width: 4, height: 4))
+        }
+        XCTAssertThrowsError(try recognizer.recognizeText(in: changed, accuracy: .accurate))
+        _ = try recognizer.recognizeText(in: original, accuracy: .accurate)
+        XCTAssertEqual(inner.sizes.count, 3)
+        XCTAssertEqual(inner.sizes.last, whole)
+    }
+
+    func testOwnerAndWindowScopeChangesForceWholeReads() throws {
+        let inner = RecordingRecognizer { [lineA] _ in [lineA] }
+        let recognizer = IncrementalTextRecognizer(inner: inner)
+        let image = try frame()
+        let first = TextRecognitionScope(application: "one", processID: 1, windowNumber: 1, title: "A", frame: nil)
+        _ = try recognizer.recognizeText(in: image, accuracy: .accurate, scope: first)
+        _ = try recognizer.recognizeText(in: image, accuracy: .accurate, scope: first)
+        let changed = TextRecognitionScope(application: "two", processID: 2, windowNumber: 1, title: "A", frame: nil)
+        _ = try recognizer.recognizeText(in: image, accuracy: .accurate, scope: changed)
+        XCTAssertEqual(inner.sizes, [whole, whole])
     }
 
     func testAnUnchangedFrameAnswersTheRetainedRunsWithoutReadingAgain() throws {

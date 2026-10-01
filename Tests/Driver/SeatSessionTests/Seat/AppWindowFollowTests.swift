@@ -768,7 +768,8 @@ struct AppWindowFollowTests {
         let movesBefore = placing.moves.count
         await Self.pass(seat)
 
-        await log.drain()
+        // The stream reader may run after the follow pass returns.
+        #expect(await MultiWindowTests.EventLog.settle(until: { !Self.refusals(log).isEmpty }, within: 2))
         #expect(Self.refusals(log).first?.1 == .tooLarge)
         #expect(placing.moves.count == movesBefore, "a window that does not fit is not moved")
         #expect(seat.adoptedWindows.count == 1)

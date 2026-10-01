@@ -37,6 +37,17 @@ struct BestEffortTextRecognizer: TextRecognizing {
 
     private let vision = IncrementalTextRecognizer(inner: VisionTextRecognizer())
 
+    func recognizeText(
+        in image: CGImage, accuracy: TextRecognitionAccuracy, scope: TextRecognitionScope
+    ) throws -> [RecognizedText] {
+        do {
+            return try vision.recognizeText(in: image, accuracy: accuracy, scope: scope)
+        } catch {
+            Self.log.error("text recognition unavailable: \(error.localizedDescription, privacy: .public)")
+            return []
+        }
+    }
+
     func recognizeText(in image: CGImage, accuracy: TextRecognitionAccuracy) throws -> [RecognizedText] {
         do {
             return try vision.recognizeText(in: image, accuracy: accuracy)

@@ -36,6 +36,8 @@ public struct ScenePipeline: Sendable {
         /// the right tree and to judge its frames. Nil skips augmentation for this window.
         public var processID: pid_t?
         public var frame: CGRect?
+        /// Stable WindowServer number when the capture source knows it.
+        public var windowNumber: Int?
 
         public init(
             bundleID    : String,
@@ -44,7 +46,8 @@ public struct ScenePipeline: Sendable {
             commands    : [String] = [],
             sectionRects: [NormalizedRect] = [],
             processID   : pid_t? = nil,
-            frame       : CGRect? = nil
+            frame       : CGRect? = nil,
+            windowNumber: Int? = nil
         ) {
             self.bundleID     = bundleID
             self.appName      = appName
@@ -53,6 +56,7 @@ public struct ScenePipeline: Sendable {
             self.sectionRects = sectionRects
             self.processID    = processID
             self.frame        = frame
+            self.windowNumber = windowNumber
         }
     }
 
@@ -93,7 +97,9 @@ public struct ScenePipeline: Sendable {
     public func perceive(_ image: CGImage, of window: Window) async throws -> SceneSnapshot {
         try Task.checkCancellation()
         let text = self.text, regions = self.regions, sections = self.sections, accuracy = self.accuracy
-        async let recognized = text.recognizeText(in: image, accuracy: accuracy)
+        let scope = TextRecognitionScope(application: window.bundleID, processID: window.processID,
+            windowNumber: window.windowNumber, title: window.title, frame: window.frame)
+        async let recognized = text.recognizeText(in: image, accuracy: accuracy, scope: scope)
         async let segmented = regions?.segments(in: image) ?? []
         async let harvested = augmentationElements(for: window)
         let (runs, segments) = try await (recognized, segmented)

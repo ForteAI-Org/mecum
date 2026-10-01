@@ -721,10 +721,9 @@ nonisolated package enum CrossCheckedSurfaceReader {
         case unreadable(CrossCheckedSurfaceReadFailure)
     }
 
-    /// The three AXRole values an `AXWindows` entry can carry and stay in the
-    /// application's scope: exactly the roles
-    /// `role(named:subrole:positionIsSettable:actions:childCount:)` can answer
-    /// for, so an entry outside this set could never have carried a role anyway.
+    /// Native window roles and custom layout roots admitted from AXWindows or
+    /// AXFocusedWindow. A layout root still needs a WindowServer identity and
+    /// readable operability traits before it can become a selected surface.
     private static let windowRoles: Set<String> = [
         kAXWindowRole as String,
         kAXSheetRole  as String,
@@ -774,10 +773,13 @@ nonisolated package enum CrossCheckedSurfaceReader {
             case .failure(let failure): return .failure(.unreadable(failure))
         }
         if windowRoles.contains(roleName) { return .success(roleName) }
-        guard let named = subrole as? String, windowSubroles.contains(named) else {
-            return .failure(.notAWindow(.role(roleName)))
+        if let named = subrole as? String, windowSubroles.contains(named) {
+            return .success(kAXWindowRole as String)
         }
-        return .success(kAXWindowRole as String)
+        // A known window subrole wins. Other layout roots still need native
+        // identity, children and operability traits before they can be selected.
+        if roleName == (kAXLayoutAreaRole as String) { return .success(roleName) }
+        return .failure(.notAWindow(.role(roleName)))
     }
 
     /// What one identity reading means for the application's scope.
@@ -963,14 +965,18 @@ nonisolated package enum CrossCheckedSurfaceReader {
             ))
         }
 
-        let subrole: String
-        switch requiredSlot(
-            slots[kAXSubroleAttribute],
-            processID: processID,
-            attribute: kAXSubroleAttribute
-        ) as Result<String, CrossCheckedSurfaceReadFailure> {
-            case .success(let value): subrole = value
-            case .failure(let failure): return .failure(failure)
+        let subrole: String?
+        if roleName == (kAXWindowRole as String) {
+            switch requiredSlot(
+                slots[kAXSubroleAttribute],
+                processID: processID,
+                attribute: kAXSubroleAttribute
+            ) as Result<String, CrossCheckedSurfaceReadFailure> {
+                case .success(let value): subrole = value
+                case .failure(let failure): return .failure(failure)
+            }
+        } else {
+            subrole = nil
         }
         let knownRole = role(
             named: roleName,
@@ -981,7 +987,8 @@ nonisolated package enum CrossCheckedSurfaceReader {
             isModal: isModal
         )
         if let knownRole { return facts(knownRole) }
-        guard subrole == "AXUnknown" else { return facts(nil) }
+        guard subrole == "AXUnknown" || roleName == (kAXLayoutAreaRole as String)
+        else { return facts(nil) }
 
         let movable: Bool
         switch positionIsSettable(
@@ -1036,6 +1043,12 @@ nonisolated package enum CrossCheckedSurfaceReader {
     /// operating target for a window it detected: this reader narrows what may
     /// be selected, and deciding what is driven is not its job.
     ///
+    /// **A custom layout root needs those same traits.** Premiere 26 exposes
+    /// its project window as AXLayoutArea with AXDialog subrole and AXModal
+    /// false. Only roots reached through the application's window slots enter
+    /// this path; their native identity is cross-checked before selection.
+    /// Their subrole does not establish modality, which remains a separate read.
+    ///
     /// **An unknown subrole needs the two operability traits**, a writable
     /// position and raise, which admits DaVinci's main window without turning
     /// every unknown AX surface into a document.
@@ -1073,6 +1086,10 @@ nonisolated package enum CrossCheckedSurfaceReader {
         guard isModal == true || (childCount ?? 0) > 0 else { return nil }
         if role == (kAXSheetRole as String) { return .dialog }
         if role == (kAXDrawerRole as String) { return .interactivePanel }
+        if role == (kAXLayoutAreaRole as String) {
+            return positionIsSettable && actions.contains(kAXRaiseAction as String)
+                ? .interactivePanel : nil
+        }
         guard role == (kAXWindowRole as String), let subrole else { return nil }
         if subrole == (kAXStandardWindowSubrole as String) { return .document }
         if subrole == (kAXDialogSubrole as String)

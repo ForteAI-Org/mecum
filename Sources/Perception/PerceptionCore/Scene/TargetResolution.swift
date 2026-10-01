@@ -27,6 +27,9 @@ extension SceneSnapshot {
     /// state, which is what a toggle verb wants. `section` restricts the search to one panel.
     /// `preferNativeControls` distinguishes a click target from a plain-text caption only when
     /// accessibility supplies an interactive role. Multiple matching controls remain ambiguous.
+    /// An element is in `section` when its section is that one, or when its container, the panel the
+    /// scene shows in braces, has that name: a section and a container may share a name, as a track's
+    /// name plate and the strip it heads do, and each still names its own elements.
     public func resolve(
         target: String,
         preferStateful: Bool = false,
@@ -37,7 +40,7 @@ extension SceneSnapshot {
         func inSection(_ element: SceneElement) -> Bool {
             guard let section, !section.isEmpty else { return true }
             return element.section?.caseInsensitiveCompare(resolvedSection ?? section) == .orderedSame
-                || (resolvedSection == nil && element.container?.caseInsensitiveCompare(section) == .orderedSame)
+                || element.container?.caseInsensitiveCompare(section) == .orderedSame
         }
         let byID = Self.collapseSameRow(elements.filter { $0.id == target && inSection($0) })
         if byID.count > 1 { return .ambiguous(byID.count) }
@@ -88,15 +91,25 @@ extension SceneSnapshot {
     public func resolveSection(named query: String) -> SceneSection? {
         let exact = sections.filter { $0.name.caseInsensitiveCompare(query) == .orderedSame }
         if exact.count == 1 { return exact[0] }
-        func barRole(_ name: String) -> String? {
-            let lower = name.lowercased()
-            return ["top bar", "bottom bar"].first {
-                lower == $0 || (lower.hasPrefix($0 + " (") && lower.hasSuffix(")"))
-            }
-        }
-        guard let role = barRole(query) else { return nil }
-        let matches = sections.filter { barRole($0.name) == role || $0.name.lowercased().hasPrefix(role + " #") }
+        guard Self.barRole(query) != nil else { return nil }
+        let matches = sections.filter { Self.section(named: $0.name, answers: query) }
         return matches.count == 1 ? matches[0] : nil
+    }
+
+    /// Whether a section called `name` is one `query` may name: the same name, or the same decorative
+    /// bar by role. `resolveSection` also requires the answer to be the scene's only one; a caller
+    /// comparing a request with the section a resolution already chose needs only this.
+    public static func section(named name: String, answers query: String) -> Bool {
+        if name.caseInsensitiveCompare(query) == .orderedSame { return true }
+        guard let role = barRole(query) else { return false }
+        return barRole(name) == role || name.lowercased().hasPrefix(role + " #")
+    }
+
+    private static func barRole(_ name: String) -> String? {
+        let lower = name.lowercased()
+        return ["top bar", "bottom bar"].first {
+            lower == $0 || (lower.hasPrefix($0 + " (") && lower.hasSuffix(")"))
+        }
     }
 
     /// The elements a target matches by label, for a disambiguation message that lists them.
