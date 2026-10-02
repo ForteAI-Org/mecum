@@ -32,7 +32,8 @@ struct WorkerAgentHostTests {
     its other visible windows move to the seat's display too: if the person may be using it, ask first.
     Pass one of their window titles only when they ask for that window.
     Session IDs refer only to this running Mecum host. Saved chats may contain stale IDs and old screen state.
-    Keep the Seat open across turns unless the user asks to release it or the task requires a different app.
+    Never call close_session because a task is done: Mecum releases the Seat by itself when it is no longer
+    needed. Call it only when the person asks you to release the Seat, or before calling open_session again.
     Follow newly opened dialogs by observing again. select needs the CURRENT dropdown label/value.
     Prefer set_toggle with explicit on/off over blindly clicking checkboxes.
     On ambiguous, inspect the candidates and disambiguate. On acted_unverified or transport failure, observe;
