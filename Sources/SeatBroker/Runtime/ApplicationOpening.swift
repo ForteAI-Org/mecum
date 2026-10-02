@@ -5,6 +5,7 @@
 //  Created by Eliomar Alejandro Rodriguez Ferrer on 17/09/2026.
 //
 
+import AutomationRuntime
 import Foundation
 
 /// The name a planner wrote, turned into one application the seat can adopt,
@@ -148,14 +149,7 @@ enum ApplicationOpening {
     /// language. They differ for many applications: Visual Studio Code's bundle calls it "Code", and
     /// on an Italian Mac Calculator reads "Calcolatrice". Its bundle identifier is matched as well.
     static func names(of app: TargetApp) -> [String] {
-        var names = [app.name, app.bundleName ?? ""]
-        if let url = app.bundleURL {
-            names.append(url.deletingPathExtension().lastPathComponent)
-            let shown = FileManager.default.displayName(atPath: url.path)
-            names.append(shown.lowercased().hasSuffix(".app") ? String(shown.dropLast(4)) : shown)
-        }
-        var seen = Set<String>()
-        return names.filter { !$0.isEmpty && seen.insert($0.lowercased()).inserted }
+        RunningApplicationLookup.names(declared: app.name, bundleName: app.bundleName, bundleURL: app.bundleURL)
     }
 
     private static let comparison: String.CompareOptions = [.caseInsensitive, .diacriticInsensitive]

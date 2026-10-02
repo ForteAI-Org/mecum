@@ -37,12 +37,17 @@ public extension AutomationSessionOperating {
     }
 
     /// Running regular applications only, since that is all `RunningApplicationLookup` opens. A query
-    /// keeps the ones whose name or bundle ID contains it, ignoring case.
+    /// keeps the ones whose bundle ID or one of whose names contains it, ignoring case; the names are
+    /// those `RunningApplicationLookup.running` matches, so "Calculator" keeps "Calcolatrice".
     func applications(matching query: String?) async throws -> [ApplicationCandidate] {
         let wanted  = query?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let browser = WebBrowsers.defaultBundleID()
         return NSWorkspace.shared.runningApplications
             .filter { $0.activationPolicy == .regular }
+            .filter { app in
+                wanted.isEmpty || (app.bundleIdentifier ?? "").localizedCaseInsensitiveContains(wanted)
+                    || RunningApplicationLookup.names(of: app).contains { $0.localizedCaseInsensitiveContains(wanted) }
+            }
             .map { app in
                 ApplicationCandidate(name: app.localizedName ?? "", bundleID: app.bundleIdentifier ?? "",
                                      version: app.bundleURL.flatMap { Bundle(url: $0) }?
@@ -50,8 +55,6 @@ public extension AutomationSessionOperating {
                                      isRunning: true,
                                      isDefaultBrowser: app.bundleIdentifier != nil && app.bundleIdentifier == browser)
             }
-            .filter { wanted.isEmpty || $0.name.localizedCaseInsensitiveContains(wanted)
-                || $0.bundleID.localizedCaseInsensitiveContains(wanted) }
             .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
     }
 }
