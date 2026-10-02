@@ -195,6 +195,84 @@ nonisolated struct ToolStep: Sendable, Hashable {
         return steps.indices.filter { !dropped.contains($0) }.map { steps[$0] }
     }
 
+    // MARK: Copying
+
+    /// The longest a record runs in a detailed copy, before it is cut.
+    static let copiedRecordLimit = 300
+
+    /// The text a copy of a whole tool line gives. Plain, it is what the line
+    /// shows: the summary and, opened, its steps. Detailed, it is the records
+    /// in order, one per line, each made compact by `compacted(_:)`.
+    static func copyText(
+        of lines  : [String],
+        isExpanded: Bool,
+        ending    : TranscriptItem.TurnEnding?,
+        detailed  : Bool
+    ) -> String {
+        guard !detailed else { return lines.map(compacted).joined(separator: "\n") }
+        let read  = steps(from: lines)
+        let shown = [TranscriptWording.toolSummary(read, ending: ending)]
+            + (isExpanded ? TranscriptWording.toolSteps(read, ending: ending) : [])
+        return shown.joined(separator: "\n")
+    }
+
+    /// One record as a detailed copy gives it. A call loses its session, a
+    /// result its session, timing and observation, a scene all but its first
+    /// line and element count, and a batch's end the steps already recorded on
+    /// their own lines. A note, an error or a record that is not JSON stays as
+    /// it is, and every record is cut at `copiedRecordLimit` characters.
+    private static func compacted(_ line: String) -> String {
+        shortened(compactedJSON(line) ?? line, limit: copiedRecordLimit)
+    }
+
+    /// The record with its JSON compacted, or nil when it carries none.
+    private static func compactedJSON(_ line: String) -> String? {
+        let isCall = line.hasPrefix("→ ")
+        guard isCall || line.hasPrefix("← ") else { return nil }
+        let body = line.dropFirst(2)
+        let name = body.prefix { $0 != " " }
+        var rest = body.dropFirst(name.count).drop { $0 == " " }
+        let isBatchStep = !isCall && name == "batch" && rest.hasPrefix("step ")
+        if isBatchStep { rest = rest.dropFirst(5).drop { $0.isNumber }.drop { $0 == " " } }
+        guard var fields = object(rest) else { return nil }
+
+        if !isCall, name == "batch", !isBatchStep { fields["steps"] = nil }
+        let dropped: Set<String> = isCall ? ["session"] : ["session", "observedAt", "revision", "observation"]
+        do {
+            let data = try JSONSerialization.data(
+                withJSONObject: trimmed(fields, dropping: dropped),
+                options       : [.sortedKeys, .withoutEscapingSlashes]
+            )
+            return String(line[..<rest.startIndex]) + String(decoding: data, as: UTF8.self)
+        } catch {
+            return nil
+        }
+    }
+
+    /// `value` without `keys` at any depth, and with every scene shortened.
+    private static func trimmed(_ value: Any, dropping keys: Set<String>) -> Any {
+        if let list = value as? [Any] { return list.map { trimmed($0, dropping: keys) } }
+        guard let fields = value as? [String: Any] else { return value }
+        var kept: [String: Any] = [:]
+        for (key, field) in fields where !keys.contains(key) {
+            if key == "scene", let scene = field as? String {
+                kept[key] = sceneLine(scene)
+            } else {
+                kept[key] = trimmed(field, dropping: keys)
+            }
+        }
+        return kept
+    }
+
+    /// A scene's first line, followed by its element count when its text gives one.
+    private static func sceneLine(_ scene: String) -> String {
+        let first = String(scene.prefix { $0 != "\n" })
+        guard let mark  = scene.range(of: "elements ("),
+              let count = Int(scene[mark.upperBound...].prefix { $0.isNumber })
+        else { return first }
+        return "\(first) · \(count) elements"
+    }
+
     // MARK: Reading records
 
     private static func action(_ name: String, _ arguments: [String: Any], lastApp: String?) -> Action {

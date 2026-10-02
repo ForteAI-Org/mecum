@@ -118,11 +118,18 @@ nonisolated struct TranscriptItem: Sendable, Hashable, Identifiable {
         if case .message(let id) = id { id } else { nil }
     }
 
-    /// The text a copy of the whole row gives.
+    /// The text a copy of the whole row gives. A tool line gives what it
+    /// shows, and in a Debug build its records, compacted.
     var copyText: String {
         switch kind {
         case .personMessage(let text, _, _), .workerReply(let text, _): text
-        case .toolRun(let lines, _, _):                                  lines.joined(separator: "\n")
+        case .toolRun(let lines, let isExpanded, let ending):
+            ToolStep.copyText(
+                of        : lines,
+                isExpanded: isExpanded,
+                ending    : ending,
+                detailed  : Self.copiesToolRecords
+            )
         case .daySeparator(let label):                                label
         case .contextSeparator(let change):                           TranscriptWording.context(change, at: date)
         case .executionFailed(let reason):                            reason
@@ -131,6 +138,13 @@ nonisolated struct TranscriptItem: Sendable, Hashable, Identifiable {
         case .thinking:                                               ""
         }
     }
+
+    /// True when a copied tool line gives its records rather than its words.
+    #if DEBUG
+    private static let copiesToolRecords = true
+    #else
+    private static let copiesToolRecords = false
+    #endif
 
     /// The same row with another kind or grouping, and the same identity.
     func with(kind: Kind? = nil, continuesGroup: Bool? = nil) -> TranscriptItem {
