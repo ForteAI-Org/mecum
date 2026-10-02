@@ -64,6 +64,13 @@ nonisolated public enum InputEndpointEvidence: Sendable, Equatable {
     /// other window named by its descendants: an out of process sheet's
     /// content, whose own controls carry no window.
     case remoteContentOfSurface
+
+    /// The surface the seat already holds, for content it draws itself and
+    /// accessibility gives no Window ID, such as a web page. The node under the
+    /// point, or the focused control, belongs to the assigned process, and so
+    /// does every node between it and the nearest one naming a window, which is
+    /// the surface. Only for a surface with no attested modal relation (ADR 0014).
+    case windowlessContentOfSurface
 }
 
 /// InputEndpointRelation is the endpoint's relation to the logical surface the

@@ -39,6 +39,9 @@ struct DialogEndpointResolverTests {
         var children : [Int: [Int]]  = [:]
         var windows  : [Int: Int]    = [:]
         var processes: [Int: Int32]  = [:]
+        var parents  : [Int: Int]    = [:]
+        var unreadableWindows : Set<Int> = []
+        var unreadableChildren: Set<Int> = []
     }
 
     private final class Answers {
@@ -127,7 +130,11 @@ struct DialogEndpointResolverTests {
         return DialogEndpointResolver<Node>(
             nodeAtPoint: { _ in tree.hit.map(Node.init) },
             focusedNode: { tree.focused.map(Node.init) },
-            children   : { .children((tree.children[$0.id] ?? []).map(Node.init)) },
+            children   : {
+                tree.unreadableChildren.contains($0.id)
+                    ? .unreadable
+                    : .children((tree.children[$0.id] ?? []).map(Node.init))
+            },
             nodeFrame  : { tree.frames[$0.id] },
             nodeWindow : { tree.windows[$0.id] },
             nodeProcess: { tree.processes[$0.id] },
@@ -138,7 +145,12 @@ struct DialogEndpointResolverTests {
                 return sequence[answers.identityCalls]
             },
             geometry   : { window, _ in geometries[window] },
-            now        : { now }
+            now        : { now },
+            parent     : { tree.parents[$0.id].map(Node.init) },
+            windowReading: { node in
+                if tree.unreadableWindows.contains(node.id) { return .unreadable }
+                return tree.windows[node.id].map { .window($0) } ?? .windowless
+            }
         )
     }
 
@@ -414,6 +426,140 @@ struct DialogEndpointResolverTests {
         var tree = hostedPanelTree
         tree.focused = nil
         #expect(coherentResolver(tree: tree).focusedNodeWindowNumber() == nil)
+    }
+
+    // MARK: The windowless content of an ordinary window
+
+    private var ordinaryChain: DialogEndpointResolver<Node>.SurfaceChain {
+        .init(host: host, surface: host, surfaceFrame: Self.surfaceFrame)
+    }
+
+    /// The shape of a web page: the window names itself, while the web area
+    /// and every node under it name no window, all with the application's PID.
+    /// The hit test answers the link, whose text is the innermost node.
+    private var webPageTree: Tree {
+        Tree(
+            hit      : 3,
+            focused  : 4,
+            frames   : [
+                1: Self.surfaceFrame,
+                2: Self.contentFrame,
+                3: Self.buttonFrame,
+                4: Self.buttonFrame.insetBy(dx: 10, dy: 5),
+                5: CGRect(x: 400, y: 300, width: 600, height: 40)
+            ],
+            children : [1: [5, 2], 2: [3], 3: [4]],
+            windows  : [1: Self.hostWindow, 5: Self.hostWindow],
+            processes: [1: Self.hostProcessID, 2: Self.hostProcessID, 3: Self.hostProcessID,
+                        4: Self.hostProcessID, 5: Self.hostProcessID],
+            parents  : [2: 1, 3: 2, 4: 3, 5: 1]
+        )
+    }
+
+    private func pageResolver(_ tree: Tree) -> DialogEndpointResolver<Node> {
+        makeResolver(
+            tree      : tree,
+            identities: [Self.hostWindow: [host, host]],
+            geometries: [Self.hostWindow: observation(host, Self.surfaceFrame)]
+        )
+    }
+
+    private func windowless(
+        _ tree : Tree,
+        pointer: Bool,
+        within chain: DialogEndpointResolver<Node>.SurfaceChain? = nil
+    ) -> Result<ResolvedInputEndpoint, InputEndpointRefusal> {
+        pageResolver(tree).windowlessContentEndpoint(
+            at                 : pointer ? Self.pointOnCancel : nil,
+            within             : chain ?? ordinaryChain,
+            selectionGeneration: 6
+        )
+    }
+
+    @Test("a web page's node under the point, or its focused control, is the window's own content",
+          arguments: [true, false])
+    func windowlessContentIsTheSurfaces(pointer: Bool) throws {
+        // The discovery refuses this tree, which is the refusal the route answers.
+        let resolver = pageResolver(webPageTree)
+        let refused = pointer
+            ? resolver.pointerEndpoint(at: Self.pointOnCancel, within: ordinaryChain, selectionGeneration: 6)
+            : resolver.keyboardContext(within: ordinaryChain, selectionGeneration: 6)
+        #expect(refused == .failure(.subtreeUnreadable(surface: host)))
+
+        let endpoint = try windowless(webPageTree, pointer: pointer).get()
+        #expect(endpoint.identity == host)
+        #expect(endpoint.logicalSurface == host)
+        #expect(endpoint.relation == .logicalSurface)
+        #expect(endpoint.evidence == .windowlessContentOfSurface)
+        #expect(endpoint.kind == (pointer ? .pointer : .keyboardContext))
+        #expect(endpoint.focusedNodeWindowNumber == (pointer ? nil : Self.hostWindow))
+        #expect(endpoint.selectionGeneration == 6)
+    }
+
+    @Test("a node on the path that names another window refuses", arguments: [true, false])
+    func windowlessContentRefusesAForeignWindow(pointer: Bool) {
+        let refusal = Result<ResolvedInputEndpoint, InputEndpointRefusal>
+            .failure(.subtreeUnreadable(surface: host))
+        // Above the start, and at the innermost node: the focused control for keys.
+        for node in [2, 4] {
+            var tree = webPageTree
+            tree.windows[node] = Self.remoteWindow
+            #expect(windowless(tree, pointer: pointer) == refusal)
+        }
+        // The nearest node naming a window is another window of the same process.
+        var nested = webPageTree
+        nested.windows[2] = Self.sheetWindow
+        #expect(windowless(nested, pointer: pointer) == refusal)
+    }
+
+    @Test("a node on the path of another process refuses", arguments: [true, false])
+    func windowlessContentRefusesAnotherProcess(pointer: Bool) {
+        for node in [2, 4] {
+            var tree = webPageTree
+            tree.processes[node] = Self.remoteProcess
+            #expect(windowless(tree, pointer: pointer) == .failure(.subtreeUnreadable(surface: host)))
+        }
+    }
+
+    @Test("a read on the path that failed refuses", arguments: [true, false])
+    func windowlessContentRefusesAnUnreadableRead(pointer: Bool) {
+        let refusal = Result<ResolvedInputEndpoint, InputEndpointRefusal>
+            .failure(.subtreeUnreadable(surface: host))
+
+        var window = webPageTree
+        window.unreadableWindows = [2]
+        #expect(windowless(window, pointer: pointer) == refusal)
+
+        var parent = webPageTree
+        parent.parents[2] = nil
+        #expect(windowless(parent, pointer: pointer) == refusal)
+
+        var focus = webPageTree
+        focus.focused = nil
+        var children = webPageTree
+        children.unreadableChildren = [3]
+        #expect(windowless(pointer ? children : focus, pointer: pointer) == refusal)
+    }
+
+    @Test("a hosted surface, or a path past its budget, refuses", arguments: [true, false])
+    func windowlessContentRefusesAHostedSurfaceAndALongPath(pointer: Bool) throws {
+        #expect(windowless(webPageTree, pointer: pointer, within: chain)
+            == .failure(.subtreeUnreadable(surface: sheet)))
+
+        // A start node with `length` windowless ancestors before the window.
+        func path(_ length: Int) -> Tree {
+            var tree = webPageTree
+            tree.hit     = 100
+            tree.focused = 100
+            for node in 100..<(100 + length) {
+                tree.processes[node] = Self.hostProcessID
+                tree.parents[node]   = node + 1
+            }
+            tree.parents[100 + length - 1] = 1
+            return tree
+        }
+        _ = try windowless(path(60), pointer: pointer).get()
+        #expect(windowless(path(70), pointer: pointer) == .failure(.subtreeUnreadable(surface: host)))
     }
 
     // MARK: Retiring an endpoint

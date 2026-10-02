@@ -107,6 +107,15 @@ nonisolated package struct DialogEndpointResolver<Node> {
         case unreadable
     }
 
+    /// One `_AXUIElementGetWindow` answer with its three outcomes kept apart.
+    /// No Window ID is a positive fact a web page's nodes answer; a read that
+    /// failed is not, and refuses whatever route asked.
+    package enum WindowReading {
+        case window(Int)
+        case windowless
+        case unreadable
+    }
+
     /// The complete, typed facts an AX leaf must establish before the ordinary
     /// keyboard route may treat its private Window ID as decoration rather than
     /// remote content. Every optional answer is required: an absent, failed, or
@@ -188,6 +197,8 @@ nonisolated package struct DialogEndpointResolver<Node> {
     let windowNode   : (Int) -> Node?
     let inertWindowlessLeaf: (Node) -> Bool
     let descendantFocus: (Node) -> DescendantFocusReading
+    let parent       : (Node) -> Node?
+    let windowReading: (Node) -> WindowReading
 
     package init(
         nodeAtPoint : @escaping (CGPoint) -> Node?,
@@ -203,7 +214,9 @@ nonisolated package struct DialogEndpointResolver<Node> {
         focusedWindow: (() -> Node?)? = nil,
         windowNode   : @escaping (Int) -> Node? = { _ in nil },
         inertWindowlessLeaf: @escaping (Node) -> Bool = { _ in false },
-        descendantFocus: @escaping (Node) -> DescendantFocusReading = { _ in .unreadable }
+        descendantFocus: @escaping (Node) -> DescendantFocusReading = { _ in .unreadable },
+        parent       : @escaping (Node) -> Node? = { _ in nil },
+        windowReading: @escaping (Node) -> WindowReading = { _ in .unreadable }
     ) {
         self.nodeAtPoint = nodeAtPoint
         self.focusedNode = focusedNode
@@ -221,6 +234,8 @@ nonisolated package struct DialogEndpointResolver<Node> {
         self.windowNode    = windowNode
         self.inertWindowlessLeaf = inertWindowlessLeaf
         self.descendantFocus = descendantFocus
+        self.parent        = parent
+        self.windowReading = windowReading
     }
 
     /// Resolves window-level keys when AX explicitly reports no focused control.
@@ -436,6 +451,105 @@ nonisolated package struct DialogEndpointResolver<Node> {
             focusedNodeWindowNumber: nil,
             evidence               : .leafSurface
         )
+    }
+
+    /// The surface itself, for content an ordinary window draws and
+    /// accessibility gives no Window ID: a web page.
+    ///
+    /// Measured on 02/10/2026 against Safari on 27: its window, toolbar and
+    /// buttons answer the window's Window ID, while the `AXWebArea` and every
+    /// node under it answer `-25201` with Safari's own PID, so the discovery
+    /// refused every click and key on a page. A node of the surface's process
+    /// with no Window ID, whose nearest ancestor naming a window names the
+    /// surface, is drawn inside the surface, and the surface takes its events.
+    ///
+    /// A point proves it along the path it names: from the node the hit test
+    /// answered up to the surface, and down to the innermost node under the
+    /// point. No point proves it from the focused control up, and that control
+    /// must name no window itself. Every node on the path belongs to the
+    /// surface's process and names no window or the surface. A node naming
+    /// another window or of another process, a read that failed, more than 64
+    /// steps or 300 ms all refuse, and so does a hosted surface. The caller asks
+    /// this only of a surface with no attested modal relation, after its
+    /// discovery refused for an unreadable subtree (ADR 0014).
+    package func windowlessContentEndpoint(
+        at point           : CGPoint?,
+        within chain       : SurfaceChain,
+        selectionGeneration: UInt64
+    ) -> Result<ResolvedInputEndpoint, InputEndpointRefusal> {
+
+        let refusal = InputEndpointRefusal.subtreeUnreadable(surface: chain.surface)
+        let (deadline, overflow) = now().addingReportingOverflow(300_000_000)
+        guard !overflow, chain.host == chain.surface else { return .failure(refusal) }
+
+        let start: Node
+        if let point {
+            guard chain.surfaceFrame.contains(point) else { return .failure(.pointOutsideSurface) }
+            guard let seed = nodeAtPoint(point) ?? nodeAtPoint(point) else {
+                return .failure(.noNodeAtPoint)
+            }
+            start = seed
+        } else {
+            guard case .node(let focused) = focusedControl(),
+                  namesSurface(focused, within: chain) == false
+            else { return .failure(refusal) }
+            start = focused
+        }
+
+        var steps = 0
+        var node  = start
+        while true {
+            guard now() < deadline, steps <= 64,
+                  let reachedSurface = namesSurface(node, within: chain)
+            else { return .failure(refusal) }
+            if reachedSurface { break }
+            guard let above = parent(node) else { return .failure(refusal) }
+            node   = above
+            steps += 1
+        }
+        if let point {
+            node = start
+            descent: while true {
+                guard now() < deadline, steps <= 64 else { return .failure(refusal) }
+                switch children(node) {
+                    case .leaf: break descent
+                    case .unreadable: return .failure(refusal)
+                    case .children(let values):
+                        guard let below = smallestChild(of: values, containing: point) else { break descent }
+                        guard namesSurface(below, within: chain) != nil else { return .failure(refusal) }
+                        node   = below
+                        steps += 1
+                }
+            }
+        }
+        guard now() < deadline else { return .failure(refusal) }
+
+        let answer = endpoint(
+            kind                   : point == nil ? .keyboardContext : .pointer,
+            windowNumber           : chain.surface.windowNumber,
+            accessibilityProcessID : chain.surface.processID,
+            within                 : chain,
+            selectionGeneration    : selectionGeneration,
+            focusedNodeWindowNumber: point == nil ? chain.surface.windowNumber : nil,
+            evidence               : .windowlessContentOfSurface
+        )
+        if case .success(let resolved) = answer, resolved.identity != chain.surface {
+            return .failure(.identityChangedDuringDiscovery(windowNumber: chain.surface.windowNumber))
+        }
+        return answer
+    }
+
+    /// `true` for a node of the surface's process that names the surface,
+    /// `false` for one that names no window, nil for another window, another
+    /// process or a read that failed: the test every node of a windowless path
+    /// has to pass.
+    private func namesSurface(_ node: Node, within chain: SurfaceChain) -> Bool? {
+        guard nodeProcess(node) == chain.surface.processID else { return nil }
+        switch windowReading(node) {
+            case .window(let number): return number == chain.surface.windowNumber ? true : nil
+            case .windowless: return false
+            case .unreadable: return nil
+        }
     }
 
     /// The one remote content window of a modal surface, for keys, when the
@@ -811,22 +925,13 @@ nonisolated package struct DialogEndpointResolver<Node> {
         var windowNumber = nodeWindow(seed)
 
         for _ in 0..<Self.maximumDepth {
-            var innermost: Node?
-            var innermostArea = CGFloat.infinity
             let childNodes: [Node]
             switch children(node) {
             case .children(let values): childNodes = values
             case .leaf: return .success((node, windowNumber))
             case .unreadable: return .failure(.unreadable)
             }
-            for child in childNodes {
-                guard let frame = nodeFrame(child), frame.contains(point) else { continue }
-                let area = frame.width * frame.height
-                guard area.isFinite, area < innermostArea else { continue }
-                innermost     = child
-                innermostArea = area
-            }
-            guard let innermost else { break }
+            guard let innermost = smallestChild(of: childNodes, containing: point) else { break }
             node = innermost
             guard let found = nodeWindow(innermost) else {
                 guard let processID = nodeProcess(innermost) else { return .failure(.unreadable) }
@@ -835,6 +940,21 @@ nonisolated package struct DialogEndpointResolver<Node> {
             windowNumber = found
         }
         return .success((node, windowNumber))
+    }
+
+    /// The child with the smallest frame that contains `point`, nil when none
+    /// does. Both descents choose by area, for the reason given on `descend`.
+    private func smallestChild(of values: [Node], containing point: CGPoint) -> Node? {
+        var innermost: Node?
+        var innermostArea = CGFloat.infinity
+        for child in values {
+            guard let frame = nodeFrame(child), frame.contains(point) else { continue }
+            let area = frame.width * frame.height
+            guard area.isFinite, area < innermostArea else { continue }
+            innermost     = child
+            innermostArea = area
+        }
+        return innermost
     }
 }
 
@@ -935,7 +1055,17 @@ extension DialogEndpointResolver where Node == AXUIElement {
                 return window
             },
             inertWindowlessLeaf: Self.inertWindowlessLeaf,
-            descendantFocus: Self.descendantFocus(of:)
+            descendantFocus: Self.descendantFocus(of:),
+            parent: { Self.elementAttribute($0, kAXParentAttribute) },
+            windowReading: { node in
+                switch WindowRelocator.windowNumberReading(of: node, table: table) {
+                    case .number(let number): return .window(number)
+                    // Safari's web nodes answer -25201. A destroyed element does too,
+                    // and the parent or children read that follows it refuses.
+                    case .noWindow, .readFailed(.illegalArgument): return .windowless
+                    case .symbolUnavailable, .readFailed: return .unreadable
+                }
+            }
         )
     }
 

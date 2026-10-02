@@ -148,6 +148,15 @@ struct EndpointDiscovery {
         Int32, DialogEndpointResolver<AXUIElement>.SurfaceChain
     ) -> Int? = { _, _ in nil }
 
+    /// An ordinary window's own content with no Window ID, such as a web page,
+    /// takes its events itself: a point is proved from the node under it, no
+    /// point from the focused control. Asked only without a modal relation.
+    var windowlessContent: (
+        Int32, CGPoint?, DialogEndpointResolver<AXUIElement>.SurfaceChain, UInt64
+    ) -> Result<ResolvedInputEndpoint, InputEndpointRefusal> = { _, _, chain, _ in
+        .failure(.subtreeUnreadable(surface: chain.surface))
+    }
+
     /// The readings the shipping seat takes.
     static let shipping = EndpointDiscovery(
         pointer: { processID, point, chain, generation in
@@ -199,6 +208,11 @@ struct EndpointDiscovery {
             DialogEndpointResolver<AXUIElement>
                 .accessibility(assignedProcessID: processID)
                 .foreignContentWindow(within: chain)
+        },
+        windowlessContent: { processID, point, chain, generation in
+            DialogEndpointResolver<AXUIElement>
+                .accessibility(assignedProcessID: processID)
+                .windowlessContentEndpoint(at: point, within: chain, selectionGeneration: generation)
         }
     )
 }
@@ -720,6 +734,22 @@ extension AgentSeat {
                     )
             }
         }
+        if !hasAttestedModalRelation,
+           case .failure(.subtreeUnreadable) = outcome,
+           case .success(let content) = endpoints.windowlessContent(
+               instance.processID,
+               command.firstMouseScreenPoint,
+               chain,
+               observation.selectionGeneration
+           ) {
+            AgentSeat.observationLog.info("""
+                the \(content.kind == .pointer ? "node under the point" : "focused control", privacy: .public) \
+                on window \(sheet.windowNumber, privacy: .public) names no Window ID and is drawn inside \
+                it, so its events go to it: the discovery had answered \
+                \(String(describing: outcome), privacy: .public)
+                """)
+            outcome = .success(content)
+        }
         switch outcome {
             case .success(let endpoint):
                 return (endpoint, record.window)
@@ -927,6 +957,29 @@ extension AgentSeat {
                 else { return .focusedNodeChanged }
                 focused = current.focusedNodeWindowNumber
             }
+        } else if endpoint.kind == .keyboardContext, endpoint.evidence == .windowlessContentOfSurface {
+            // The focused control names no window, so the plain focus reading
+            // would answer nil: the same proof is taken again instead.
+            guard let instance = assignmentKit.lifecycle.current?.instance,
+                  case .success(let current) = endpoints.windowlessContent(
+                      instance.processID,
+                      nil,
+                      DialogEndpointResolver<AXUIElement>.SurfaceChain(
+                          host        : endpoint.logicalSurface,
+                          surface     : endpoint.logicalSurface,
+                          surfaceFrame: endpoint.geometry.window.frame
+                      ),
+                      selectionKit.selected?.generation ?? .max
+                  ),
+                  current.kind == .keyboardContext,
+                  current.evidence == .windowlessContentOfSurface,
+                  current.identity == endpoint.identity,
+                  current.geometry.window.frame == endpoint.geometry.window.frame,
+                  current.geometry.scaleFactor == endpoint.geometry.scaleFactor,
+                  current.selectionGeneration == endpoint.selectionGeneration,
+                  current.focusedNodeWindowNumber == endpoint.identity.windowNumber
+            else { return .focusedNodeChanged }
+            focused = current.focusedNodeWindowNumber
         } else {
             focused = endpoint.kind == .keyboardContext
                 ? assignmentKit.lifecycle.current
