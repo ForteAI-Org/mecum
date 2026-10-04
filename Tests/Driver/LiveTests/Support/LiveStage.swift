@@ -181,7 +181,12 @@ struct LiveStage {
             chromeHome   : chrome.map(\.originalFrame)
         )
 
-        try await body(stage)
+        var bodyFailure: (any Error)?
+        do {
+            try await body(stage)
+        } catch {
+            bodyFailure = error
+        }
 
         // MARK: the teardown every suite owes
 
@@ -209,6 +214,7 @@ struct LiveStage {
         )
         #expect(Set(try DisplayList.online()) == baselineOnline, "a display was left behind")
         #expect(CGMainDisplayID() == baselineMain)
+        if let bodyFailure { throw bodyFailure }
     }
 
     /// Gives a target's window back and puts it where it was found, when the
@@ -323,13 +329,47 @@ func openProbePage(
         frame       : reference.frame,
         title       : ""
     ))
-    if NSRunningApplication(processIdentifier: target.processID)?.isActive == true,
-       let previous = NSRunningApplication(processIdentifier: person.frontmostProcessID) {
-        previous.activate()
-        LivePump.run(for: 0.5)
+    do {
+        try handBackLiveFocus(
+            to      : person,
+            avoiding: target.processID
+        )
+    } catch {
+        owner.terminate()
+        throw error
     }
     print("chrome window \(target.windowNumber) of pid \(target.processID), \(target.diagnostics)")
     return (target, owner)
+}
+
+/// A launched browser may activate after its first NSRunningApplication read.
+/// Setup hands focus back regardless of that transient flag and requires
+/// three agreeing foreground reads before any test Command is attempted.
+@MainActor
+func handBackLiveFocus(
+    to person: UserSeatState,
+    avoiding target: Int32
+) throws {
+    guard person.frontmostProcessID != target,
+          let previous = NSRunningApplication(processIdentifier: person.frontmostProcessID),
+          !previous.isTerminated
+    else { throw LiveFailure.unsupported("The live setup lost its original foreground application") }
+    previous.activate()
+    var agreements = 0
+    let restored = LivePump.run(
+        until: {
+            if NSWorkspace.shared.frontmostApplication?.processIdentifier == person.frontmostProcessID {
+                agreements += 1
+            } else {
+                agreements = 0
+            }
+            return agreements >= 3
+        },
+        timeout: 3
+    )
+    guard restored else {
+        throw LiveFailure.unsupported("The live setup did not restore a stable foreground application")
+    }
 }
 
 

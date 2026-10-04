@@ -145,7 +145,7 @@ final class ChromeTarget: MatrixTarget {
     static let titleMark  = "AS c="
 
     let name     = "Chrome page"
-    let platform: any InputPlatform = ChromiumPlatform()
+    let platform: any InputPlatform
 
     let processID   : pid_t
     let windowNumber: Int
@@ -156,7 +156,11 @@ final class ChromeTarget: MatrixTarget {
 
     private var frame: CGRect
 
-    init(window: ChromeWindow) {
+    init(
+        window  : ChromeWindow,
+        platform: any InputPlatform = ChromiumPlatform()
+    ) {
+        self.platform = platform
         processID    = window.processID
         windowNumber = window.windowNumber
         frame        = window.frame
@@ -211,7 +215,7 @@ final class ChromeTarget: MatrixTarget {
         }
         return (named + byAccessibility)
             .sorted { $0.frame.width * $0.frame.height > $1.frame.width * $1.frame.height }
-            .map(ChromeTarget.init(window:))
+            .map { ChromeTarget(window: $0) }
     }
 
     var window: WindowReference {

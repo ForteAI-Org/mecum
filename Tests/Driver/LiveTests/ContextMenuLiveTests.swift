@@ -350,6 +350,123 @@ struct ContextMenuLiveTests {
 
     // MARK: One family
 
+    @Test(
+        "owned Chromium context-menu Select All, Undo and Redo have observed effects",
+        .enabled(
+            if: ProcessInfo.processInfo.environment["AGENTSEAT_CHROMIUM_TESTS"] == "1"
+                && liveSkipReason(needsChrome: true) == nil,
+            "Opt in with AGENTSEAT_CHROMIUM_TESTS=1 on the approved exclusive desktop"
+        )
+    )
+    func chromiumContextMenus() async throws {
+        try await LiveStage.run(
+            needsFixture : false,
+            needsChrome  : false,
+            configuration: SeatHostConfiguration(
+                restoresUserFocus            : true,
+                allowUnvalidatedFocusRecovery: true
+            )
+        ) { stage in
+            let browser = try OwnBrowserTarget.launched()
+            defer { browser.terminate() }
+            _ = try WindowReader.windowSnapshot(
+                processID   : browser.processID,
+                windowNumber: browser.windowNumber
+            )
+            let window = try await adopt(
+                browser.reference,
+                onto    : stage.seat,
+                platform: ChromiumPlatform(),
+                bounds  : stage.virtualBounds
+            )
+            try handBackLiveFocus(
+                to      : stage.personBefore,
+                avoiding: browser.processID
+            )
+            let issues = IssueLog()
+            let listening = Task { @MainActor in
+                for await event in stage.seat.events {
+                    if case .issueDetected(let issue, _) = event { issues.record(issue) }
+                }
+            }
+            defer { listening.cancel() }
+            let commands: [(name: String, titles: [String], seed: Bool, value: String, selection: Int?)] = [
+                ("Select All", ["Select All", "Seleziona tutto"], false, "menu%20probe", 10),
+                ("Undo", ["Undo", "Annulla"], true, "menu%20probe", nil),
+                ("Redo", ["Redo", "Ripristina"], false, "changed", nil),
+            ]
+            for command in commands {
+                let row = await measure(
+                    family  : "Chrome \(command.name)",
+                    seat    : stage.seat,
+                    fence   : stage.fence,
+                    bounds  : stage.virtualBounds,
+                    window  : browser.reference,
+                    platform: ChromiumPlatform(),
+                    issues  : issues,
+                    pointIn : { frame in browser.probePoint(within: frame) },
+                    stagedWindow: window,
+                    beforeMenu: { _ in
+                        guard command.seed else { return }
+                        let turn = try await stage.seat.acquire()
+                        let receipt = try await stage.seat.send(
+                            .insertText("changed"),
+                            observation: try await liveObservation(stage.seat),
+                            turn       : turn
+                        )
+                        let edited = LivePump.run(
+                            until: { Self.browserTitle(browser).contains(" v=changed - ") },
+                            timeout: 2
+                        )
+                        try stage.seat.confirm(
+                            receipt,
+                            edited ? .observed : .absent
+                        )
+                        _ = await stage.seat.concludeObservation()
+                        try stage.seat.release(turn)
+                        try #require(edited, "Undo requires a witnessed edit")
+                    },
+                    choose: { menu, processID, windowNumber in
+                        Self.readAndChoose(
+                            menu,
+                            processID   : processID,
+                            windowNumber: windowNumber,
+                            titles      : command.titles
+                        )
+                    }
+                )
+                let arrived = LivePump.run(
+                    until: {
+                        let title = Self.browserTitle(browser)
+                        guard title.contains(" v=\(command.value) - ") else { return false }
+                        return command.selection.map { title.hasPrefix("ASMENU s=\($0) ") } ?? true
+                    },
+                    timeout: 2
+                )
+                print("CHROMIUM_CONTEXT \(command.name) effect=\(arrived) title=\(Self.browserTitle(browser))")
+                print("CHROMIUM_CONTEXT \(row.line) \(row.reading) \(row.note)")
+                #expect(row.menuOpened)
+                #expect(row.insideDisplay)
+                #expect(row.closedBy == ContextMenuReceipt.Closure.chosenItem.rawValue)
+                #expect(row.physicalEvents == 0)
+                #expect(!row.cursorMoved)
+                #expect(!row.raisedTargetActivated)
+                #expect(row.frontmost.count == 1, "The context menu changed foreground")
+                #expect(
+                    row.frontmost.first?.contains("(\(stage.personBefore.frontmostProcessID))") == true,
+                    "The timeline's initial foreground was not the original user app"
+                )
+                try #require(arrived, "The selected context-menu item had no observed effect")
+            }
+            #expect(UserSeatState.capture() == stage.personBefore)
+            #expect(stage.seat.currentTurn == nil)
+            _ = await stage.seat.release(
+                window,
+                .returnToUserSeat
+            )
+        }
+    }
+
     private func measure(
         family  : String,
         seat    : AgentSeat,

@@ -228,6 +228,78 @@ struct InputMatrixLiveTests {
             fenceSnapshot = stage.fence.snapshot()
         }
         let snapshot = try #require(fenceSnapshot)
+        verify(
+            outcomes,
+            snapshot: snapshot
+        )
+    }
+
+    @Test(
+        "the Chromium input matrix runs independently of the AppKit fixture",
+        .timeLimit(.minutes(3)),
+        .enabled(
+            if: liveSkipReason(needsChrome: true) == nil,
+            Comment(rawValue: liveSkipReason(needsChrome: true) ?? "")
+        )
+    )
+    func chromiumInputMatrix() async throws {
+        var outcomes: [Outcome] = []
+        var snapshot: FenceSnapshot?
+        try await LiveStage.run(
+            needsFixture: false,
+            needsChrome : true,
+            configuration: SeatHostConfiguration(
+                restoresUserFocus            : true,
+                allowUnvalidatedFocusRecovery: true
+            )
+        ) { stage in
+            let target = try #require(stage.chrome)
+            let window = try await adopt(
+                target,
+                onto  : stage.seat,
+                bounds: stage.virtualBounds
+            )
+            target.refresh()
+            let reading = try WindowReader.windowSnapshot(
+                processID   : target.processID,
+                windowNumber: target.windowNumber
+            )
+            let hasWebArea = reading.axTree.contains { $0.role == "AXWebArea" }
+            print("CHROMIUM_MATRIX readiness nodes=\(reading.axTree.count) web-area=\(hasWebArea)")
+            try handBackLiveFocus(
+                to      : stage.personBefore,
+                avoiding: target.processID
+            )
+            for action in Action.all {
+                print("CHROMIUM_MATRIX -> \(action.name)")
+                let outcome = await perform(
+                    action,
+                    on    : target,
+                    seat  : stage.seat,
+                    window: window,
+                    fence : stage.fence
+                )
+                outcomes.append(outcome)
+                if outcome.turnStuck { break }
+            }
+            await stage.giveBack(
+                window,
+                of  : target,
+                home: stage.chromeHome
+            )
+            snapshot = stage.fence.snapshot()
+        }
+        #expect(outcomes.count == Action.all.count)
+        verify(
+            outcomes,
+            snapshot: try #require(snapshot)
+        )
+    }
+
+    private func verify(
+        _ outcomes: [Outcome],
+        snapshot  : FenceSnapshot
+    ) {
         print("\n| target         | action   | fx   | effect                                     | seat | detail")
         for outcome in outcomes {
             print(outcome.line)

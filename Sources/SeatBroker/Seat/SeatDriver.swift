@@ -337,6 +337,30 @@ final class SeatDriver {
         // acted on only once the adoption has come through.
         var previewRequest: (identity: WindowIdentity, frame: CGRect, pixelSize: CGSize)?
         do {
+            // Which recipe this one application is driven with. A process that
+            // answers nothing is the unmeasured case, which is the default.
+            let running = NSRunningApplication(processIdentifier: target.pid)
+            let choice = TargetPlatform.chosen(
+                bundleURL       : running?.bundleURL,
+                bundleIdentifier: running?.bundleIdentifier
+            )
+            Self.log.info("""
+                \(running?.localizedName ?? "pid \(target.pid)", privacy: .public) \
+                (\(running?.bundleIdentifier ?? "no bundle identifier", privacy: .public)) \
+                is driven with \(choice.platformName, privacy: .public): \
+                \(choice.reason, privacy: .public)
+                """)
+
+            if case .embeddedRenderer = choice {
+                let reading = try WindowReader.windowSnapshot(
+                    processID   : target.pid,
+                    windowNumber: target.windowNumber
+                )
+                guard reading.windowIdentity == server.identity else {
+                    throw SeatBrokerError.windowNotAttested(windowNumber: target.windowNumber)
+                }
+            }
+
             // The window's own frame, not the window server's. Stage Manager
             // publishes a stashed window to the server as its strip thumbnail:
             // measured on 26A428, a 1291x949 pt window reads as 164x180 pt at
@@ -373,20 +397,6 @@ final class SeatDriver {
             displayBounds = bounds
             // A window larger than the background display is the seat's to
             // adapt: it fits it, and returns the found frame on the release.
-
-            // Which recipe this one application is driven with. A process that
-            // answers nothing is the unmeasured case, which is the default.
-            let running = NSRunningApplication(processIdentifier: target.pid)
-            let choice = TargetPlatform.chosen(
-                bundleURL       : running?.bundleURL,
-                bundleIdentifier: running?.bundleIdentifier
-            )
-            Self.log.info("""
-                \(running?.localizedName ?? "pid \(target.pid)", privacy: .public) \
-                (\(running?.bundleIdentifier ?? "no bundle identifier", privacy: .public)) \
-                is driven with \(choice.platformName, privacy: .public): \
-                \(choice.reason, privacy: .public)
-                """)
 
             var adopted = try await seat.adopt(
                 reference,
