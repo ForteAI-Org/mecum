@@ -29,7 +29,7 @@ nonisolated package func requireNativeTextInputCommand(_ command: InputCommand) 
     else { throw InputFailure.nativeTextInputRefused(.commandUnsupported) }
 }
 
-/// Only a measured family owns a native input context.
+/// Ordinary Chromium policy reuse does not qualify another shell's input context.
 nonisolated package func nativeTextInputIsQualified(on platform: any InputPlatform) -> Bool {
-    platform is QtPlatform
+    platform is QtPlatform || (platform as? ChromiumPlatform)?.nativeTextInputIsQualified == true
 }

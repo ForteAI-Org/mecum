@@ -171,6 +171,18 @@ struct TargetPlatformTests {
         let flat = try Self.bundle(embedding: ["Row Framework.framework/Helpers/Row Helper (Renderer).app"])
         #expect(TargetPlatform.chosen(bundleURL: flat, bundleIdentifier: "com.google.Chrome")
             == .embeddedRenderer(.rendererHelper))
+        let qualified = TargetPlatform.chosen(
+            bundleURL       : flat,
+            bundleIdentifier: "com.google.Chrome"
+        ).platform(for: "com.google.Chrome")
+        #expect((qualified as? ChromiumPlatform)?.nativeTextInputIsQualified == true)
+        let otherShell = TargetPlatform.chosen(
+            bundleURL       : flat,
+            bundleIdentifier: "com.example.cef"
+        ).platform(for: "com.example.cef")
+        #expect((otherShell as? ChromiumPlatform)?.nativeTextInputIsQualified == false)
+        let unsupported = TargetPlatform.unmeasured.platform(for: "com.google.Chrome")
+        #expect(unsupported is AppKitPlatform)
 
         // The real layout: `Helpers` is a symlink to `Versions/Current/Helpers`.
         let linked    = try Self.bundle()

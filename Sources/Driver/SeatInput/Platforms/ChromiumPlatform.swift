@@ -31,11 +31,17 @@ import SeatCore
 /// costs two records, the settle, and a window that briefly believes it is key,
 /// and none of that buys anything for one character. Scroll passes too.
 ///
-/// It covers Electron and CEF, which are the same renderer with a different
-/// shell around it.
+/// Electron and CEF reuse this policy; they still require independent qualification.
+/// Native composition is an explicit qualification separate from ordinary Commands.
 nonisolated public struct ChromiumPlatform: InputPlatform {
 
-    public init() {}
+    public let nativeTextInputIsQualified: Bool
+
+    /// Enables the bounded native input scope only after a host is qualified.
+    /// The default does not infer composition support for Electron or CEF.
+    public init(nativeTextInputIsQualified: Bool = false) {
+        self.nativeTextInputIsQualified = nativeTextInputIsQualified
+    }
 
     /// The left button, a drag and the bulk insertion are prepared; the right
     /// button, a key press, a typed string and a scroll are not.

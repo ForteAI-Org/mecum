@@ -59,7 +59,7 @@ HOST_REST_TESTS := 29
 # they take a window in and out of fullscreen, which is the person's screen.
 # Includes the eight opt-in Adobe UXP rows. This assertion counts the reported
 # Live bundle, including intentionally skipped rows.
-LIVE_TESTS := 121
+LIVE_TESTS := 124
 UXP_LIVE_ROWS := dialogsInBackground documentsInBackground selectionInBackground pixelEditingInBackground layerEditingInBackground newLayerDialogInBackground newLayerTypedTextInBackground documentDragInBackground
 QT_LIVE_ROWS := discoverDaVinci adoptAndReturnDaVinci observeDaVinci \
                 clickDaVinciSearch openAndCancelDaVinciProjectDialog insertTextIntoDaVinciSearch \
@@ -93,7 +93,7 @@ help:
 	@echo 'make qt-ime-live-tests QT_PYTHON=<PySide6 Python>  Qt native composition and cleanup'
 	@echo 'make qt-panel-birth-live-tests QT_PYTHON=<PySide6 Python>  Strict native panel visibility'
 	@echo 'make qt-geometry-live-tests QT_PYTHON=<PySide6 Python>  Qt settled return geometry with Stage Manager'
-	@echo 'make chromium-live-tests  Owned Chrome matrix, two windows, native picker, menus and Print'
+	@echo 'make chromium-live-tests  Owned Chrome matrix, two windows, native picker, composition and Print'
 	@echo 'make bench          the measurements of spec section 8, each one a gate'
 	@echo 'make compat-report  runs the tiers and writes Documentation/Driver/compatibility/Build<build>.{md,json}'
 	@echo 'make promote-build BUILD=26A5425a   copies that draft into the ledger'
@@ -215,7 +215,7 @@ qt-fixture-live-tests:
 
 # Every row owns a disposable browser profile and closes it before the next row.
 chromium-live-tests:
-	@for row in InputMatrixLiveTests.chromiumInputMatrix KeyIsolationLiveTests.heldModifiersDoNotCrossTargetChanges ChromiumFixtureLiveTests.nativeFileDialog ContextMenuLiveTests.chromiumContextMenus UserFocusRecoveryLiveTests.printRestoresUserFocus; do \
+	@for row in InputMatrixLiveTests.chromiumInputMatrix KeyIsolationLiveTests.heldModifiersDoNotCrossTargetChanges ChromiumFixtureLiveTests.nativeFileDialog ChromiumNativeTextInputLiveTests.nativeComposition ChromiumNativeTextInputLiveTests.nativeDeadline ChromiumNativeTextInputLiveTests.nativeCancellation ContextMenuLiveTests.chromiumContextMenus UserFocusRecoveryLiveTests.printRestoresUserFocus; do \
 	    AGENTSEAT_LIVE_TESTS=1 AGENTSEAT_CHROMIUM_TESTS=1 $(TIER) "chromium-$$row" 1 $(SWIFT) test --filter "$$row" --no-parallel \
 	        || exit $$?; \
 	done

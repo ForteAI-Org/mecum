@@ -53,6 +53,19 @@ preserved User Seat. Exact commands and remaining IME limits are in
 [Qt.md](../Qt.md). Candidate-window IMEs and other application families require
 separate qualification before this scope is offered to them.
 
+Chrome 154.0.8037.58 reproduced an ordinary dead key without native preedit.
+The same scope then produced real browser composition events and exact `é`.
+Chrome is the second independently observed consumer. Its qualified own-window
+endpoint may be `windowlessContentOfSurface`, whose complete ancestry binds
+the focused page content to that same window. Other endpoint relations remain
+refused. `ChromiumPlatform` defaults native composition qualification to false;
+the app enables it only with renderer evidence and the qualified Chrome bundle
+identifier. Reusing that platform for Electron or CEF does not enable the scope.
+The admission regressions exercise both positive consumers and refuse ordinary
+Chromium policy without qualification. Native Chrome deadline and cancellation
+rows preserve the same cleanup and late-command contracts, including the
+isolated-accent effect of closing marked text. See [Chromium.md](../Chromium.md).
+
 The Seat also binds its callback to a task-local scope identity. Detached work
 has no admission, and an inherited child that outlives the callback retains a
 closed identity rather than falling back to ordinary posting. An offline

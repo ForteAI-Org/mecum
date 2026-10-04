@@ -531,7 +531,9 @@ public final class AgentSeat {
         let isOwnSurface = endpoint == nil || (
             endpoint?.identity == window.reference.identity
                 && endpoint?.relation == .logicalSurface
-                && endpoint?.evidence == .attestedSurfaceItself
+                && (endpoint?.evidence == .attestedSurfaceItself
+                    || (record.platform is ChromiumPlatform
+                        && endpoint?.evidence == .windowlessContentOfSurface))
         )
         guard attestedModalSurface(for: observation) == nil,
               isOwnSurface

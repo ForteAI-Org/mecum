@@ -112,14 +112,19 @@ struct NativeTextInputTests {
         return (seat, window)
     }
 
-    @Test("native composition preserves fresh observations, confirmation and Turn ownership")
-    func freshDecisions() async throws {
+    @Test(
+        "native composition preserves fresh observations, confirmation and Turn ownership",
+        arguments: ["Qt", "Chromium"]
+    )
+    func freshDecisions(family: String) async throws {
         let sender = PreparedTextInputSender()
+        let platform: any InputPlatform = family == "Qt"
+            ? QtPlatform() : ChromiumPlatform(nativeTextInputIsQualified: true)
         let (seat, _) = try await adopted(
             sensing : FakeSensing(),
             sender  : sender,
-            platform: QtPlatform(),
-            evidence: .attestedSurfaceItself
+            platform: platform,
+            evidence: family == "Qt" ? .attestedSurfaceItself : .windowlessContentOfSurface
         )
         let turn = try await seat.acquire()
         let entry = try await observedReference(seat)

@@ -145,9 +145,12 @@ enum TargetPlatform: Sendable, Equatable {
     }
 
     /// Selects measured host features only after positive family and bundle evidence.
-    /// Photoshop document preparation excludes attested modals; other UXP hosts
-    /// retain family policy.
+    /// Photoshop document preparation excludes attested modals. Chrome admits
+    /// bounded native input; other UXP and renderer hosts retain family policy.
     func platform(for bundleIdentifier: String?) -> any InputPlatform {
+        if case .embeddedRenderer = self, bundleIdentifier == "com.google.Chrome" {
+            return ChromiumPlatform(nativeTextInputIsQualified: true)
+        }
         guard self == .adobeUXP, bundleIdentifier == "com.adobe.Photoshop" else { return platform }
         return UXPPlatform().preparingLeftClicks.preparingDocumentShortcuts
     }

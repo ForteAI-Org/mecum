@@ -26,7 +26,7 @@ against it declines to act rather than guessing.
 | `TargetReader` | reads another application's accessibility tree and returns value types; it never acts, no facility depends on it, and what a reading means is the caller's |
 
 The [Chromium qualification guide](Chromium.md) records the app's renderer
-readiness and five owned-browser rows in
+readiness, bounded native composition and eight owned-browser rows in
 `make chromium-live-tests`, including known menu-equivalent effect failures.
 
 The [Qt driver guide](Qt.md) records the command policy and the live

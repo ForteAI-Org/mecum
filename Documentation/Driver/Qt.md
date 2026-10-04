@@ -267,7 +267,8 @@ separately from their cause, and failed restoration degrades the Seat.
 [ADR 0018](adr/Adr0018BoundNativeTextInputPreparation.md) records the contract.
 This qualifies the measured dead-key source on the owned Qt Quick surface.
 Candidate windows, CJK IMEs, other source layouts and additional application
-surfaces are still pending. The initial physical
+surfaces are still pending. Chrome has a separate qualification of the same
+bounded scope in the [Chromium guide](Chromium.md). The initial physical
 presentation of native Qt panels remains pending.
 The stale discovery geometry case has a current fix and a dedicated tier below;
 other Stage Manager geometries still need independent qualification.

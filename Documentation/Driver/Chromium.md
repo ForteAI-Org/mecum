@@ -29,13 +29,20 @@ this reading. The independent matrix with the reading observed an AXWebArea,
 then delivered the first physical key. This is a readiness change, not a retry
 of a posted or unconfirmed Command.
 
+The app selects native composition qualification only for positive renderer
+bundle evidence together with `com.google.Chrome`. Ordinary policy reuse
+alone does not enable it for another shell or another Chrome distribution.
+The composition operation still requires an explicit bounded
+`AgentSeat.withNativeTextInput` scope. Individual key tools do not implicitly
+start a composition lifetime.
+
 ## Repeatable local tier
 
 ```sh
 make chromium-live-tests SWIFT=swift
 ```
 
-Five independent rows own their browser process and temporary profile. Each
+Eight independent rows own their browser process and temporary profile. Each
 uses a synthetic local page; no personal browser profile is selected. The tier
 asserts one reported test per row and stops on failure. It covers:
 
@@ -44,6 +51,9 @@ asserts one reported test per row and stops on failure. It covers:
 | Input matrix | Page counters for key, bulk insertion, word navigation, HTML dialog cancellation, click, wheel and drag |
 | Two windows | Target change refused with Shift held, release on the original window, then a plain key on the second window without residual modifiers |
 | Native file picker | Attested hosted sheet contained in the Virtual Display, real Cancel click, DOM cancel event and no visible panel; zero selected files |
+| Native composition | Browser compositionstart/update/end events and exact `é` after physical key positions |
+| Composition deadline | Restoration while the callback waits, refusal of a freshly observed late key and no additional page effects |
+| Composition cancellation | Cancellation with actual preedit present and successful preparation cleanup |
 | Context-menu effects | Select All, a witnessed replacement, Undo to the original contents and Redo to the replacement |
 | Print recovery | Context menu Print action, return to the same user app and window, stable cursor and an attested cleanup ledger; no print is submitted |
 
@@ -77,6 +87,25 @@ possible earlier exposure.
 `LiveStage.run` awaits host teardown and its resource checks after a throwing
 row, then rethrows the original error. A failed body cannot skip the teardown
 verification merely by unwinding into an unawaited cleanup task.
+
+## Native composition limits
+
+Chrome's ordinary unprepared dead key produced no native preedit. The bounded
+scope maintains internal preparation across separately observed physical keys.
+No Unicode payload or scripted composition event is injected. The current
+Dvorak source resolves an Option dead key and commit key with Carbon;
+composition events and the textarea value provide the independent browser
+oracle. Closure restores preparation. On this source, deadline and
+cancellation commit a remaining isolated acute accent; they do not discard
+marked text or roll back an edit.
+
+Qualification requires `ChromiumPlatform(nativeTextInputIsQualified: true)`.
+The default refuses native composition admission. An own-window endpoint is
+required; qualified windowless page content can name that same recipient.
+Remote endpoints, modals, held keys, pointer Commands, Command/Control
+shortcuts and bulk text remain outside the scope. Task ownership, per-command
+admission and the five-second ceiling are shared with the Qt implementation.
+See [ADR 0018](adr/Adr0018BoundNativeTextInputPreparation.md).
 
 ## Remaining qualification
 
