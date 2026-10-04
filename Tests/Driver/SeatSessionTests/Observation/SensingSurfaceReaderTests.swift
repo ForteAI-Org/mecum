@@ -34,7 +34,7 @@ private final class ScriptedNativePass: @unchecked Sendable {
     ) -> Result<AssignedSurfaceSnapshot, CrossCheckedSurfaceReadFailure> {
 
         retainedPerPass.append(retained.map(\.windowNumber).sorted())
-        guard !fails else { return .failure(.windowServerUnavailable) }
+        guard !fails else { return .failure(.windowServerReadFailed(.listUnavailable)) }
         return .success(CrossCheckedSurfaceReader.assemble(
             windowServer : serverWindowNumbers.map { surface($0) },
             accessibility: scopeWindowNumbers.map {

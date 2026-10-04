@@ -98,7 +98,7 @@ final native Live matrix.
 
 The content clock and the ordinary application-window inventory now have
 production adapters. The inventory is accepted only when `AXWindows` and an
-identity-attested WindowServer `.optionAll` pass agree on every AX-scoped
+identity-attested WindowServer reading of the requested IDs agree on every AX-scoped
 application window. Additional same-process WindowServer surfaces remain outside
 that positive scope; a missing AX counterpart still leaves containment
 unverified. The final cross-application Live matrix is intentionally deferred to

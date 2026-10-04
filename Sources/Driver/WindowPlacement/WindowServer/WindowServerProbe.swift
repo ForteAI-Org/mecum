@@ -40,6 +40,31 @@ nonisolated public enum WindowServerProbe {
         case refused
     }
 
+    /// SurfaceReadFailure preserves the failing witness. A missing row is a
+    /// successful empty reading, whereas a rejected gate or identity is not.
+    package enum SurfaceReadFailure: Error, Sendable, Equatable, CustomStringConvertible {
+        case facilityUnavailable(FacilityReadiness)
+        case listUnavailable
+        case invalidWindowNumber(Int)
+        case invalidGeometry(windowNumber: Int)
+        case identityUnavailable(windowNumber: Int)
+
+        package var description: String {
+            switch self {
+                case .facilityUnavailable(let readiness):
+                    "WindowServer identity facility refused: \(readiness)"
+                case .listUnavailable:
+                    "WindowServer could not read the requested Window ID descriptions"
+                case .invalidWindowNumber(let number):
+                    "The requested Window ID \(number) is invalid"
+                case .invalidGeometry(let number):
+                    "WindowServer reported invalid geometry for Window ID \(number)"
+                case .identityUnavailable(let number):
+                    "WindowServer could not attest ownership of Window ID \(number)"
+            }
+        }
+    }
+
     /// The ownership reading keeps an absent public row separate from an
     /// unreadable ownership chain. Consumers deciding whether a panel closed
     /// must never turn an arbitrary failed identity read into destruction.
@@ -433,6 +458,7 @@ nonisolated public enum WindowServerProbe {
             allowUnvalidatedBuild: allowUnvalidatedBuild,
             table                : table
         )
+        guard gate.mayAct else { return nil }
         guard let descriptions = CGWindowListCopyWindowInfo(
             [.optionOnScreenOnly],
             kCGNullWindowID
@@ -492,55 +518,95 @@ nonisolated public enum WindowServerProbe {
         allowUnvalidatedBuild: Bool = false,
         table                : SymbolTable = .shared
     ) -> [WindowSurface]? {
+        try? surfaceReading(
+            matching             : windowNumbersByProcess,
+            allowUnvalidatedBuild: allowUnvalidatedBuild,
+            table                : table
+        ).get()
+    }
 
-        guard !windowNumbersByProcess.isEmpty else { return [] }
-
+    /// The scoped reading with its cause preserved for inventory diagnostics.
+    package static func surfaceReading(
+        matching windowNumbersByProcess: [Int32: Set<Int>],
+        allowUnvalidatedBuild: Bool = false,
+        table                : SymbolTable = .shared
+    ) -> Result<[WindowSurface], SurfaceReadFailure> {
         let gate = FacilityGate.current(
             facility             : .windowIdentity,
             allowUnvalidatedBuild: allowUnvalidatedBuild,
             table                : table
         )
-        // Unique: the same id asked for twice is answered twice, and two
-        // processes claiming one Window ID must stay one row for the caller.
+        var processes = OwnerProcesses()
+        return readSurfaces(
+            matching : windowNumbersByProcess,
+            gate     : gate,
+            read     : { descriptions(ofWindowIDs: $0) },
+            attesting: { processID, windowNumber, frame in
+                reference(
+                    processID       : processID,
+                    windowNumber    : windowNumber,
+                    frame           : frame,
+                    table           : table,
+                    validatedBy     : gate,
+                    memoizing       : &processes
+                )
+            }
+        )
+    }
+
+    /// The parsing boundary. Tests can distinguish a damaged reading from an
+    /// absent window without calling WindowServer or changing permissions.
+    static func readSurfaces(
+        matching windowNumbersByProcess: [Int32: Set<Int>],
+        gate     : FacilityGate,
+        read     : ([CGWindowID]) -> [[String: Any]]?,
+        attesting: (Int32, Int, CGRect) -> WindowReference?
+    ) -> Result<[WindowSurface], SurfaceReadFailure> {
+        guard gate.mayAct else { return .failure(.facilityUnavailable(gate.readiness)) }
+        guard !windowNumbersByProcess.isEmpty else { return .success([]) }
+
         var windowIDs: Set<CGWindowID> = []
         for numbers in windowNumbersByProcess.values {
-            for number in numbers where number != 0 {
-                if let windowID = CGWindowID(exactly: number) { windowIDs.insert(windowID) }
+            for number in numbers {
+                guard let windowID = CGWindowID(exactly: number), windowID != 0 else {
+                    return .failure(.invalidWindowNumber(number))
+                }
+                windowIDs.insert(windowID)
             }
         }
-        guard let descriptions = descriptions(ofWindowIDs: Array(windowIDs)) else { return nil }
+        guard let descriptions = read(Array(windowIDs)) else {
+            return .failure(.listUnavailable)
+        }
 
-        var processes = OwnerProcesses()
         var result: [WindowSurface] = []
         for description in descriptions {
             guard let processID = owner(of: description),
                   let requestedNumbers = windowNumbersByProcess[processID],
                   let windowNumber = number(of: description),
                   requestedNumbers.contains(windowNumber)
-            else {
-                continue
-            }
+            else { continue }
             guard let frame = frame(of: description),
-                  let reference = reference(
-                      processID       : processID,
-                      windowNumber    : windowNumber,
-                      frame           : frame,
-                      table           : table,
-                      validatedBy     : gate,
-                      memoizing       : &processes
-                  )
-            else { return nil }
-
-            result.append(
-                WindowSurface(
-                    reference: reference,
-                    level    : layer(of: description) ?? 0,
-                    isVisible: reportedOnScreen(description) == true && alpha(of: description) > 0
-                        && frame.width > 0 && frame.height > 0
-                )
-            )
+                  frame.origin.x.isFinite, frame.origin.y.isFinite,
+                  frame.size.width.isFinite, frame.size.height.isFinite,
+                  frame.size.width >= 0, frame.size.height >= 0
+            else {
+                return .failure(.invalidGeometry(windowNumber: windowNumber))
+            }
+            guard let reference = attesting(processID, windowNumber, frame),
+                  reference.processID == processID,
+                  reference.windowNumber == windowNumber,
+                  reference.frame == frame
+            else {
+                return .failure(.identityUnavailable(windowNumber: windowNumber))
+            }
+            result.append(WindowSurface(
+                reference: reference,
+                level    : layer(of: description) ?? 0,
+                isVisible: reportedOnScreen(description) == true && alpha(of: description) > 0
+                    && frame.width > 0 && frame.height > 0
+            ))
         }
-        return result
+        return .success(result)
     }
 
     /// The frontmost normal-layer window whose frame reaches a display. It is

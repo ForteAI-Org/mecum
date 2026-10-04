@@ -61,7 +61,7 @@ nonisolated package enum CrossCheckedSurfaceReadFailure: Error, Sendable, Equata
     case attributeUnavailable(processID: Int32, attribute: String, error: Int32)
     case windowIdentityPrimitiveUnavailable(processID: Int32, index: Int)
     case windowIdentityReadFailed(processID: Int32, index: Int, error: Int32)
-    case windowServerUnavailable
+    case windowServerReadFailed(WindowServerProbe.SurfaceReadFailure)
 
     package var description: String {
         switch self {
@@ -81,8 +81,8 @@ nonisolated package enum CrossCheckedSurfaceReadFailure: Error, Sendable, Equata
             case .windowIdentityReadFailed(let processID, let index, let error):
                 "Accessibility entry \(index) for process \(processID) refused its WindowServer "
                     + "identity read (AXError \(error))"
-            case .windowServerUnavailable:
-                "The WindowServer optionAll list could not be read"
+            case .windowServerReadFailed(let failure):
+                failure.description
         }
     }
 }
@@ -158,7 +158,7 @@ nonisolated package enum BoundedAccessibilityRead {
 
 /// Reads application windows through Accessibility and accepts a complete
 /// inventory only when every AX window has a matching identity-attested
-/// WindowServer `.optionAll` row for the same process lifetime.
+/// WindowServer row for the requested ID and the same process lifetime.
 ///
 /// AX supplies the positive scope plus role, minimisation, modality, parentage
 /// and the application's focused/main window. WindowServer supplies attested
@@ -273,8 +273,10 @@ nonisolated package enum CrossCheckedSurfaceReader {
         for identity in retained {
             requested[identity.processID, default: []].insert(identity.windowNumber)
         }
-        guard let serverSurfaces = WindowServerProbe.surfaces(matching: requested) else {
-            return .failure(.windowServerUnavailable)
+        let serverSurfaces: [WindowSurface]
+        switch WindowServerProbe.surfaceReading(matching: requested) {
+            case .success(let surfaces): serverSurfaces = surfaces
+            case .failure(let failure): return .failure(.windowServerReadFailed(failure))
         }
 
         return .success(assemble(
@@ -1471,7 +1473,7 @@ nonisolated package enum CrossCheckedSurfaceReader {
         func numbers(_ keys: Set<SurfaceKey>) -> String {
             keys.sorted().prefix(8).map { "\($0.processID):\($0.windowNumber)" }.joined(separator: ",")
         }
-        return "WindowServer optionAll did not attest every AXWindows row"
+        return "WindowServer did not attest every requested AXWindows row"
             + " (axOnly=[\(numbers(accessibilityOnly))],"
             + " serverDuplicates=[\(numbers(serverDuplicates))],"
             + " axDuplicates=[\(numbers(axDuplicates))],"
