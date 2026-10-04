@@ -325,6 +325,36 @@ struct ActionEngineTests {
         #expect(actuator.gestures == [.click(at: scene([export]).globalPoint(of: export), count: 3)])
     }
 
+    @Test("text selection prefers the real field when Search controls share its ID", arguments: ["AXTextField", "AXTextArea", "AXComboBox"])
+    func tripleClickSharedFieldID(role: String) async {
+        let field = SceneElement(id: "control|search", kind: .control, label: "Search #2",
+                                 bounds: rect(0.40, 0.16, 0.4, 0.04), role: role)
+        let toggle = SceneElement(id: field.id, kind: .control, label: "Search",
+                                  bounds: rect(0.80, 0.04), role: "AXCheckBox", state: .on)
+        let other = SceneElement(id: field.id, kind: .control, label: "Search #3",
+                                 bounds: rect(0.80, 0.30), role: "AXCheckBox", state: .off)
+        let before = scene([toggle, field, other])
+        let actuator = RecordingActuator()
+        let outcome = await engine(scenes: ScriptedScenes([before, before]), actuator: actuator)
+            .act(request(field.id, verb: .tripleClick))
+        #expect(outcome.kind == .actedUnverified)
+        #expect(outcome.message.hasPrefix("triple-clicked 'Search #2'"))
+        #expect(actuator.gestures == [.click(at: before.globalPoint(of: field), count: 3)])
+
+        let ordinary = RecordingActuator()
+        let clicked = await engine(scenes: ScriptedScenes([before]), actuator: ordinary).act(request(field.id))
+        #expect(clicked.kind == .ambiguous)
+        #expect(ordinary.gestures.isEmpty)
+
+        let second = SceneElement(id: field.id, kind: .control, label: field.label,
+                                  bounds: rect(0.4, 0.7), role: role)
+        let ambiguous = RecordingActuator()
+        let refused = await engine(scenes: ScriptedScenes([scene([toggle, field, second])]), actuator: ambiguous)
+            .act(request(field.id, verb: .tripleClick))
+        #expect(refused.kind == .ambiguous)
+        #expect(ambiguous.gestures.isEmpty)
+    }
+
     @Test("a dropdown opened by its own press action is not also clicked")
     func openedByPress() async {
         let combo = SceneElement(id: "control|48000", kind: .control, label: "48000", bounds: rect(0.3, 0.4), role: "AXComboBox")

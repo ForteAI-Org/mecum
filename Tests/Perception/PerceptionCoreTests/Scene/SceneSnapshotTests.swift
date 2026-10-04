@@ -103,6 +103,25 @@ struct SceneSnapshotTests {
         #expect(reordered.token == a.token)
     }
 
+    @Test("native text fields are distinguishable from a same-value visual control in both scene tiers")
+    func fieldsHaveVisibleReferences() {
+        let field = SceneElement(id: "native-name", kind: .control, label: "26.3",
+                                 bounds: rect(0.23, 0.11, 0.5, 0.04), role: "AXTextField",
+                                 value: "26.3", section: "content")
+        let version = SceneElement(id: "version-row", kind: .control, label: "26.3",
+                                   bounds: rect(0.27, 0.4, 0.1, 0.04), section: "content")
+        let scene = SceneSnapshot(bundleID: "test", appName: "Test", windowTitle: "New Instance",
+                                  viewportPixelSize: .init(width: 730, height: 586),
+                                  elements: [version, field],
+                                  sections: [SceneSection(name: "content", bounds: rect(0, 0, 1, 1))])
+        for rendering in [scene.text(), scene.mapText()] {
+            #expect(rendering.contains("[field] 26.3 id:'native-name'"))
+            #expect(!rendering.contains("[field] 26.3 id:'version-row'"))
+        }
+        #expect(scene.resolve(target: "26.3") == .ambiguous(2))
+        #expect(scene.resolve(target: "native-name") == .found(field))
+    }
+
     @Test("identity keys are position-free when labeled and coarse when not")
     func identityKeys() {
         #expect(SceneIdentity.key(kind: .control, label: "Audio 6", bounds: rect(0.1, 0.2, 0.1, 0.1), isUnlabeled: false) == "control|audio6")

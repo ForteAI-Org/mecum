@@ -82,6 +82,19 @@ struct TargetResolutionTests {
         #expect(tab.id == "tab")
     }
 
+    @Test("a shared ID diagnostic names its field and toggle candidates")
+    func sharedIDDisambiguation() {
+        let field = SceneElement(id: "control|search", kind: .control, label: "Search #2",
+                                 bounds: rect(0.40, 0.16, 0.4, 0.04), role: "AXTextField")
+        let toggle = SceneElement(id: field.id, kind: .control, label: "Search",
+                                  bounds: rect(0.8, 0.04, 0.1, 0.02), role: "AXCheckBox", state: .on)
+        let s = scene([field, toggle])
+        #expect(s.candidates(target: field.id) == [field, toggle])
+        let hint = s.disambiguation(target: field.id)
+        #expect(hint.contains("Search #2") && hint.contains("AXTextField"))
+        #expect(hint.contains("AXCheckBox") && hint.contains("@0.80,0.04"))
+    }
+
     @Test("grep finds the goal through recognizer junk and filler")
     func grepThroughJunkAndFiller() throws {
         let s = scene([
@@ -130,6 +143,25 @@ struct TargetResolutionTests {
         #expect(scene([]).resolve(target: "nope") == .none)
     }
 
+    @Test("text entry chooses a native field over a same-name version row while clicks, IDs and scopes remain explicit",
+          arguments: ["AXTextField", "AXTextArea", "AXComboBox"])
+    func textEntryOverVersionRow(role: String) {
+        let row = SceneElement(id: "version", kind: .control, label: "26.3",
+                               bounds: rect(0.27, 0.4, 0.1, 0.04), section: "versions")
+        let field = SceneElement(id: "name", kind: .control, label: "26.3",
+                                 bounds: rect(0.23, 0.11, 0.5, 0.04), role: role, section: "header")
+        let s = scene([row, field])
+        #expect(s.resolve(target: "26.3", preferNativeControls: true) == .ambiguous(2))
+        #expect(s.resolve(target: "26.3", preferNativeControls: true, preferTextEntry: true) == .found(field))
+        #expect(s.resolve(target: row.id, preferTextEntry: true) == .found(row))
+        #expect(s.resolve(target: "26.3", section: "versions", preferTextEntry: true) == .found(row))
+        var other = field
+        other.id = "other-name"
+        other.bounds.x = 0.8
+        #expect(scene([row, field, other]).resolve(target: "26.3", preferTextEntry: true) == .ambiguous(2))
+        #expect(scene([row]).resolve(target: "26.3", preferTextEntry: true) == .found(row))
+    }
+
     @Test("click preference uses native controls but keeps explicit IDs and section filters")
     func nativeControlOverCaption() {
         let caption = SceneElement(id: "text|create", kind: .text, label: "Create",
@@ -141,6 +173,22 @@ struct TargetResolutionTests {
         #expect(s.resolve(target: "Create", preferNativeControls: true) == .found(button))
         #expect(s.resolve(target: caption.id, preferNativeControls: true) == .found(caption))
         #expect(s.resolve(target: "Create", section: "sentence", preferNativeControls: true) == .found(caption))
+    }
+
+    @Test("text entry resolves a shared field and version-row ID without discarding another real field",
+          arguments: ["AXTextField", "AXTextArea", "AXComboBox"])
+    func textEntryWithSharedID(role: String) {
+        let row = SceneElement(id: "control|263", kind: .control, label: "26.3",
+                               bounds: rect(0.27, 0.4, 0.1, 0.04), section: "versions")
+        let field = SceneElement(id: row.id, kind: .control, label: "26.3",
+                                 bounds: rect(0.23, 0.11, 0.5, 0.04), role: role, section: "header")
+        let s = scene([row, field])
+        #expect(s.resolve(target: row.id, preferTextEntry: true) == .found(field))
+        #expect(s.resolve(target: row.id) == .ambiguous(2))
+        #expect(s.resolve(target: row.id, section: "versions", preferTextEntry: true) == .found(row))
+        var other = field
+        other.bounds.y = 0.8
+        #expect(scene([row, field, other]).resolve(target: row.id, preferTextEntry: true) == .ambiguous(2))
     }
 
     @Test("two native buttons remain ambiguous even with a same-name caption")

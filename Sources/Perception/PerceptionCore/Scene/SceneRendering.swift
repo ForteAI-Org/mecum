@@ -38,7 +38,9 @@ extension SceneSnapshot {
                 let details = Self.liveDetails(element)
                 let does  = element.does.map { ": \($0)" } ?? ""
                 let label = element.isUnlabeled ? "(unlabeled icon: target id '\(element.id)')" : element.label
-                out += "    \(label)\(state)\(details)\(does)\n"
+                let field = AccessibilityAugmentation.textEntryRoles.contains(element.role ?? "")
+                let reference = field ? "[field] \(label) id:'\(element.id)'" : label
+                out += "    \(reference)\(state)\(details)\(does)\n"
             }
             if showable.count > shown.count {
                 out += "    … +\(showable.count - shown.count) more (describe_section)\n"
@@ -91,8 +93,9 @@ extension SceneSnapshot {
     private static func elementLine(_ element: SceneElement, indent: String) -> String {
         let position = String(format: "%.2f,%.2f", element.bounds.x, element.bounds.y)
         let state    = element.state.map { " [\($0.rawValue)]" } ?? ""
-        let tag      = element.isUnlabeled ? "\(element.kind.rawValue)?" : element.kind.rawValue
-        let identity = element.isUnlabeled ? " id:'\(element.id)'" : ""
+        let field    = AccessibilityAugmentation.textEntryRoles.contains(element.role ?? "")
+        let tag      = field ? "field" : (element.isUnlabeled ? "\(element.kind.rawValue)?" : element.kind.rawValue)
+        let identity = element.isUnlabeled || field ? " id:'\(element.id)'" : ""
         let group    = element.group.map { " (\($0))" } ?? ""
         let recalled = element.isRecalled ? " ~recalled" : ""
         let does     = element.does.map { ": \($0)" } ?? ""

@@ -46,8 +46,11 @@ public enum AccessibilityAugmentation {
     /// Roles whose accessibility answer is authoritative over a pixel guess: right state, right role,
     /// a real click target.
     public static let interactiveRoles: Set<String> = [
-        "AXCheckBox", "AXRadioButton", "AXComboBox", "AXButton", "AXMenuButton", "AXTextField", "AXPopUpButton",
+        "AXCheckBox", "AXRadioButton", "AXComboBox", "AXButton", "AXMenuButton", "AXTextField", "AXTextArea", "AXPopUpButton",
     ]
+
+    /// Native roles that accept text. A pixel-inferred control does not establish this fact.
+    public static let textEntryRoles: Set<String> = ["AXTextField", "AXTextArea", "AXComboBox"]
 
     private static let tableRoles: Set<String> = ["AXTable", "AXOutline", "AXList", "AXGrid"]
     private static let clippingRoles: Set<String> = ["AXScrollArea", "AXList", "AXOutline", "AXTable", "AXGrid"]

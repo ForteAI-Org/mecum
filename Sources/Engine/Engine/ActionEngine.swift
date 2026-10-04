@@ -138,7 +138,8 @@ public struct ActionEngine: Sendable {
             element = try resolved(
                 request.target, section: request.section, in: scene, appName: request.appName,
                 preferStateful: request.verb == .setToggle,
-                preferNativeControls: [.click, .doubleClick, .tripleClick].contains(request.verb)
+                preferNativeControls: [.click, .doubleClick, .tripleClick].contains(request.verb),
+                preferTextEntry: request.verb == .tripleClick
             )
         } catch {
             return error.outcome
@@ -561,7 +562,7 @@ public struct ActionEngine: Sendable {
         do throws(Unresolved) {
             element = try resolved(
                 field, section: request.section, in: perceived.scene, appName: request.appName,
-                preferNativeControls: true
+                preferNativeControls: true, preferTextEntry: true
             )
         } catch {
             return error.outcome
@@ -840,11 +841,12 @@ public struct ActionEngine: Sendable {
         in scene            : SceneSnapshot,
         appName             : String,
         preferStateful      : Bool = false,
-        preferNativeControls: Bool = false
+        preferNativeControls: Bool = false,
+        preferTextEntry      : Bool = false
     ) throws(Unresolved) -> SceneElement {
         let resolution = scene.resolve(
             target: target, preferStateful: preferStateful, section: section,
-            preferNativeControls: preferNativeControls
+            preferNativeControls: preferNativeControls, preferTextEntry: preferTextEntry
         )
         switch resolution {
             case .found(let found):

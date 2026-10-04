@@ -5,6 +5,18 @@ import Testing
 
 @Suite("Accessibility audit regressions")
 struct AccessibilityAuditTests {
+    @Test("a native multiline editor upgrades its matching pixel caption and remains a text target")
+    func textAreaKeepsItsNativeRole() {
+        let bounds = NormalizedRect(x: 0.2, y: 0.2, width: 0.5, height: 0.4)
+        let caption = SceneElement(id: "pixel-body", kind: .text, label: "Body", bounds: bounds)
+        let editor = SceneElement(id: "native-body", kind: .control, label: "Body", bounds: bounds,
+                                  role: "AXTextArea", value: "Seed")
+        let merged = AccessibilityAugmentation.merge(pixels: [caption], accessibility: [editor])
+        #expect(merged == [editor])
+        let scene = SceneSnapshot(bundleID: "test", appName: "Test", windowTitle: "Editor",
+                                  viewportPixelSize: .init(width: 800, height: 600), elements: merged)
+        #expect(scene.resolve(target: "native-body") == .found(editor))
+    }
     @Test("a renamed OCR value still merges a later native facet by its new name")
     func renamedValueKeysStayCurrent() {
         let rect = NormalizedRect(x: 0.1, y: 0.1, width: 0.2, height: 0.05)

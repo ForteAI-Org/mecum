@@ -10,7 +10,7 @@ import Foundation
 
 /// TargetResolution finds the one element a target string names, or says precisely why it cannot.
 ///
-/// An id wins outright. A label must be unique after three tolerant tiers: exact, display
+/// An id must identify one target. A label must be unique after three tolerant tiers: exact, display
 /// annotations stripped, then the junk-free core. Facets of one widget on one row collapse to one
 /// target; the same name in two rows stays ambiguous, because those are two places.
 extension SceneSnapshot {
@@ -27,11 +27,13 @@ extension SceneSnapshot {
     /// state, which is what a toggle verb wants. `section` restricts the search to one panel.
     /// `preferNativeControls` distinguishes a click target from a plain-text caption only when
     /// accessibility supplies an interactive role. Multiple matching controls remain ambiguous.
+    /// `preferTextEntry` narrows shared IDs and labels to native text fields; two fields still refuse.
     public func resolve(
         target: String,
         preferStateful: Bool = false,
         section: String? = nil,
-        preferNativeControls: Bool = false
+        preferNativeControls: Bool = false,
+        preferTextEntry: Bool = false
     ) -> Resolution {
         let resolvedSection = section.flatMap { resolveSection(named: $0)?.name }
         func inSection(_ element: SceneElement) -> Bool {
@@ -39,7 +41,14 @@ extension SceneSnapshot {
             return element.section?.caseInsensitiveCompare(resolvedSection ?? section) == .orderedSame
                 || (resolvedSection == nil && element.container?.caseInsensitiveCompare(section) == .orderedSame)
         }
-        let byID = Self.collapseSameRow(elements.filter { $0.id == target && inSection($0) })
+        func preferringTextEntry(_ candidates: [SceneElement]) -> [SceneElement] {
+            guard preferTextEntry, candidates.count > 1 else { return candidates }
+            let fields = candidates.filter {
+                $0.kind == .control && AccessibilityAugmentation.textEntryRoles.contains($0.role ?? "")
+            }
+            return fields.isEmpty ? candidates : fields
+        }
+        let byID = Self.collapseSameRow(preferringTextEntry(elements.filter { $0.id == target && inSection($0) }))
         if byID.count > 1 { return .ambiguous(byID.count) }
         if let match = byID.first { return .found(match) }
 
@@ -64,6 +73,7 @@ extension SceneSnapshot {
                     && AccessibilityAugmentation.interactiveRoles.contains($0.role ?? "")
             }
         }
+        byLabel = preferringTextEntry(byLabel)
         if preferStateful, byLabel.count > 1 {
             let stateful = byLabel.filter { $0.state != nil }
             if !stateful.isEmpty { byLabel = stateful }
@@ -101,6 +111,8 @@ extension SceneSnapshot {
 
     /// The elements a target matches by label, for a disambiguation message that lists them.
     public func candidates(target: String) -> [SceneElement] {
+        let identified = elements.filter { $0.id == target }
+        if !identified.isEmpty { return identified }
         let exact = elements.filter { $0.label.caseInsensitiveCompare(target) == .orderedSame }
         if !exact.isEmpty { return exact }
         let cleaned = LabelText.strippingDisplayAnnotations(target)
@@ -114,7 +126,8 @@ extension SceneSnapshot {
         candidates(target: target).prefix(limit).map { element in
             let position = String(format: "@%.2f,%.2f", element.bounds.x, element.bounds.y)
             let selector = (element.container ?? element.section).map { "section:'\($0)'" } ?? "id:'\(element.id)'"
-            return "\(selector) \(position)"
+            let role = element.role.map { " role:'\($0)'" } ?? ""
+            return "\(selector) label:'\(element.label)'\(role) \(position)"
         }.joined(separator: " OR ")
     }
 

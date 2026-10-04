@@ -97,6 +97,32 @@ struct InputDeliveryTests {
 
     // MARK: type_text
 
+    @Test("typing into a same-value native field uses its measured point rather than a version row")
+    func textEntryUsesTheField() async {
+        var name = field(value: "26.3")
+        name.label = "26.3"
+        let version = SceneElement(id: "version-row", kind: .control, label: "26.3",
+                                   bounds: NormalizedRect(x: 0.27, y: 0.7, width: 0.1, height: 0.03))
+        let actuator = RecordingActuator()
+        let controls = FakeControls()
+        controls.focused = "Mecum Qt é 🧪"
+        let outcome = await engine(scenes: ScriptedScenes([scene([version, name])]),
+                                   actuator: actuator, controls: controls)
+            .deliver(request(.typeText("Mecum Qt é 🧪", into: "26.3", replacing: true)))
+        #expect(outcome.kind == .foundActed, Comment(rawValue: outcome.message))
+        #expect(actuator.gestures == [.click(at: fieldPoint)] + selectAll + [.insert("Mecum Qt é 🧪")])
+        #expect(actuator.confirmations == [.observed])
+
+        var other = name
+        other.id = "other-field"
+        other.bounds.x = 0.7
+        let ambiguous = RecordingActuator()
+        let refusal = await engine(scenes: ScriptedScenes([scene([version, name, other])]), actuator: ambiguous)
+            .deliver(request(.typeText("Mecum Qt é 🧪", into: "26.3", replacing: true)))
+        #expect(refusal.kind == .ambiguous)
+        #expect(ambiguous.gestures.isEmpty)
+    }
+
     @Test("replacing clicks the field, selects what it holds, types, and the value read back decides")
     func replaceIsVerifiedByTheValue() async {
         let actuator = RecordingActuator()

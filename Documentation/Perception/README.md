@@ -65,6 +65,12 @@ scene.resolve(target: "Export")               // .found, .ambiguous(n) or .none
   a menu-layer window one row tall is a pop-up; every verdict carries the clause that decided it.
 - Empty multiline editors are harvested as `AXTextArea`. Their AX identifier can supply a handle
   when title and description are absent, as in TextEdit's `First Text View`; frame trust still applies.
+- Native text-entry controls appear as `[field]` with their current element ID in both text tiers.
+  This distinguishes an editable value from a same-name visual caption or version row. Typing
+  prefers native text-entry matches for a shared label, while two fields remain ambiguous;
+  explicit IDs and section filters keep their original scope. Matching multiline editors retain
+  their native interactive role when upgrading pixel text. This changes no frame trust or input
+  recipient requirements and does not infer a label-to-field relationship from proximity.
 - Short `AXStaticText` values supplement missing OCR as read-only text. Their native value and
   trusted frame remain attached; a description such as `Edit field` does not replace the value.
   Static descendants of interactive controls are excluded. Controls take the element budget first,
