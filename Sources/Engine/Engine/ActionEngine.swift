@@ -535,7 +535,11 @@ public struct ActionEngine: Sendable {
             : nil
         let typed   = kept.map { text + "." + $0 } ?? text
         let keeping = kept.map { " (kept the extension .\($0))" } ?? ""
-        let inserts = typed.count > Self.typedTextLimit
+        // Short per-character events lose supplementary Unicode in Qt and renderers. Bulk payloads
+        // preserve it and line breaks, without replaying a partially delivered edit.
+        let inserts = typed.count > Self.typedTextLimit || typed.unicodeScalars.contains {
+            $0.value > 0xFFFF || $0 == "\n" || $0 == "\r"
+        }
         if request.isDryRun {
             return ActOutcome(.dryRun, "would click '\(element.label)' at \(Int(point.x)),\(Int(point.y)), "
                 + (replacing ? "select what it holds" : "move to its end") + " and "
@@ -558,8 +562,7 @@ public struct ActionEngine: Sendable {
             ?? after?.elements.first(where: { $0.id == element.id })?.value
         let wanted = replacing ? typed : element.value.map { $0 + text }
         await dependencies.actuator.confirm(readBack != nil && readBack == wanted ? .observed : .unknown, in: pid)
-        let composing = inserts ? " A long text goes in as one event, which a field composing with an input "
-            + "method drops." : ""
+        let composing = inserts ? " This text is inserted as one event; an active input method may reject it." : ""
         switch (readBack, wanted) {
             case (.some(let value), .some(let wanted)) where value == wanted:
                 return ActOutcome(.foundActed, "typed into '\(element.label)'\(keeping): the field reads "

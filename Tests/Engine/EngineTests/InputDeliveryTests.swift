@@ -202,6 +202,14 @@ struct InputDeliveryTests {
         }
     }
 
+    @Test("supplementary Unicode and line breaks use one intact text payload", arguments: ["🧪", "Mecum é 🧪", "Prima\nSeconda", "Prima\r\nSeconda"])
+    func richTextInserts(text: String) async {
+        let actuator = RecordingActuator()
+        _ = await engine(scenes: ScriptedScenes([scene([field(value: "")])]), actuator: actuator)
+            .deliver(request(.typeText(text, into: "Project Name", replacing: true)))
+        #expect(actuator.gestures.last == .insert(text))
+    }
+
     @Test("appending moves to the field's end instead of selecting, and expects the old value first")
     func appendKeepsTheValue() async {
         let actuator = RecordingActuator()

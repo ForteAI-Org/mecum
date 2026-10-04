@@ -105,6 +105,13 @@ transitions recorded from two verified clicks.
 
 ## Driving on the Seat
 
+Text containing supplementary Unicode or line breaks uses one intact insertion
+payload, even below the 128-character typing threshold. App-flow checks found
+per-character input dropping emoji in Qt, Chrome and Electron, while insertion
+preserved it. Field selection and exact readback still decide the result; no
+unconfirmed edit is automatically replayed. See the
+[application flow checks](../Driver/ApplicationFlowChecks.md).
+
 For clicks, a native interactive control wins over a same-name plain-text caption. In Pro Tools'
 New Paths dialog, `act "Pro Tools" "Create" --window "New Paths"` therefore chooses the Create
 button rather than the word at the start of the sentence. Two matching native controls remain
