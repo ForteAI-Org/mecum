@@ -245,13 +245,26 @@ public enum MenuBarCommand {
         processID        : pid_t,
         allowsDestructive: Bool
     ) -> (pressed: String?, outcome: ActOutcome, disabled: String?) {
+        run(resolve(path, processID: processID, allowsDestructive: allowsDestructive)) {
+            AXUIElementPerformAction($0, kAXPressAction as CFString)
+        }
+    }
 
+    private static func resolve(
+        _ path: String, processID: pid_t, allowsDestructive: Bool
+    ) -> Resolution<AXUIElement> {
         let application = AXUIElementCreateApplication(processID)
         AXUIElementSetMessagingTimeout(application, 1)
         guard let bar = element(application, kAXMenuBarAttribute) else {
-            return (nil, ActOutcome(.honestMiss, "This application shows no menu bar to accessibility."), nil)
+            return .outcome(ActOutcome(.honestMiss, "This application shows no menu bar to accessibility."))
         }
-        switch resolve(steps(of: path), from: bar, allowsDestructive: allowsDestructive, items: { menuItems(of: $0) }) {
+        return resolve(steps(of: path), from: bar, allowsDestructive: allowsDestructive, items: { menuItems(of: $0) })
+    }
+
+    private static func run<Element>(
+        _ resolution: Resolution<Element>, press: (Element) -> AXError
+    ) -> (pressed: String?, outcome: ActOutcome, disabled: String?) {
+        switch resolution {
             case .outcome(let outcome):
                 return (nil, outcome, nil)
             case .disabled(let path):
@@ -260,7 +273,7 @@ public enum MenuBarCommand {
                 return (nil, ActOutcome(.actedNoop, "\(path) holds: \(items.joined(separator: ", ")). "
                     + "Nothing was pressed: name one of them to press it."), nil)
             case .press(let item, let path):
-                let error = AXUIElementPerformAction(item, kAXPressAction as CFString)
+                let error = press(item)
                 // An item that opens a modal can keep the reply past the timeout: it was pressed.
                 guard error == .success || error == .cannotComplete else {
                     return (nil, ActOutcome(.actedUnverified, "Pressing \(path) failed with AXError \(error.rawValue)."),
@@ -270,28 +283,33 @@ public enum MenuBarCommand {
         }
     }
 
-    /// Runs `path` and, when it pressed an item, observes the scene after it. Pressing is verified
-    /// by the application's windows: a dialog, a closed document or a new title moved them.
-    ///
-    /// `refresh` is what an application whose menus go stale in the background is given:
-    /// a moment in front, so it recomputes them. It runs once, only for an item that read
-    /// disabled. The item is read again after it when it answers `readAgain`; for an open dialog
-    /// the refusal becomes the dialog's; otherwise the disabled refusal stands, with the reason it
-    /// gives appended.
-    public static func perform(
-        _ path           : String,
-        processID        : pid_t,
-        allowsDestructive: Bool,
-        refresh          : (() async -> Refresh)? = nil,
-        observe          : () async throws -> SceneSnapshot
-    ) async throws -> ActOutcome {
-
-        let before = windowSignature(of: processID)
-        var (pressed, outcome, disabled) = run(path, processID: processID, allowsDestructive: allowsDestructive)
-        if let disabledPath = disabled, let refresh {
+    /// Prepares a command before its only dispatch, then resolves its current
+    /// item again. Listing and refused paths never request preparation.
+    static func runPrepared<Element>(
+        preparesEnabledItems: Bool,
+        read: () -> Resolution<Element>,
+        press: (Element) -> AXError,
+        refresh: (() async -> Refresh)?
+    ) async -> (pressed: String?, outcome: ActOutcome, disabled: String?) {
+        var resolution = read()
+        var didRefresh = false
+        if preparesEnabledItems, case .press(_, let path) = resolution, let refresh {
+            didRefresh = true
             switch await refresh() {
                 case .readAgain:
-                    (pressed, outcome, disabled) = run(path, processID: processID, allowsDestructive: allowsDestructive)
+                    resolution = read()
+                case .stillDisabled(let reason):
+                    let message = "\(path) was not dispatched because menu preparation did not complete."
+                    return (nil, ActOutcome(.refused, message + (reason.map { " " + $0 } ?? "")), nil)
+                case .blockedByDialog:
+                    return (nil, dialogRefusal(path), nil)
+            }
+        }
+        var (pressed, outcome, disabled) = run(resolution, press: press)
+        if !didRefresh, let disabledPath = disabled, let refresh {
+            switch await refresh() {
+                case .readAgain:
+                    (pressed, outcome, disabled) = run(read(), press: press)
                 case .stillDisabled(let reason?):
                     outcome = ActOutcome(outcome.kind, outcome.message + " " + reason)
                 case .stillDisabled(nil):
@@ -300,9 +318,100 @@ public enum MenuBarCommand {
                     outcome = dialogRefusal(disabledPath)
             }
         }
+        return (pressed, outcome, disabled)
+    }
+
+    /// Resolves an admitted command again inside its bounded foreground scope.
+    /// Listings, misses and policy refusals never enter the scope. `withFront`
+    /// invokes its callback at most once and returns any readiness or handback
+    /// failure. A dispatched command retains that failure as a possible partial
+    /// effect; it is never pressed again after the scope ends.
+    static func runInFront<Element>(
+        read     : @escaping () -> Resolution<Element>,
+        press    : @escaping (Element) -> AXError,
+        withFront: (@escaping @MainActor () -> Void) async -> String?
+    ) async -> (pressed: String?, outcome: ActOutcome, disabled: String?) {
+        let initial = read()
+        switch initial {
+            case .press, .disabled: break
+            case .list, .outcome: return run(initial, press: press)
+        }
+        var result: (pressed: String?, outcome: ActOutcome, disabled: String?)?
+        let issue = await withFront {
+            guard result == nil else { return }
+            result = run(read(), press: press)
+        }
+        guard let result else {
+            return (nil, ActOutcome(.refused, issue ?? "Menu preparation did not dispatch the command."), nil)
+        }
+        guard let issue else { return result }
+        let mayHaveActed = result.pressed != nil || result.outcome.kind == .actedUnverified
+        return (result.pressed, ActOutcome(
+            mayHaveActed ? .actedUnverified : .refused,
+            result.outcome.message + " " + issue + (mayHaveActed ? " Do not repeat it blind." : "")
+        ), result.disabled)
+    }
+
+    /// Performs an admitted Adobe command once during the consumer-supplied
+    /// foreground scope, then observes its effect after handback. Input is
+    /// separate from readiness, and cleanup failure stays in the outcome.
+    public static func performInFront(
+        _ path           : String,
+        processID        : pid_t,
+        allowsDestructive: Bool,
+        withFront        : (@escaping @MainActor () -> Void) async -> String?,
+        observe          : () async throws -> SceneSnapshot
+    ) async throws -> ActOutcome {
+        let before = windowSignature(of: processID)
+        let (pressed, outcome, _) = await runInFront(
+            read: { resolve(path, processID: processID, allowsDestructive: allowsDestructive) },
+            press: { AXUIElementPerformAction($0, kAXPressAction as CFString) },
+            withFront: withFront
+        )
+        return try await observedOutcome(pressed, outcome: outcome, processID: processID, before: before, observe: observe)
+    }
+
+    /// Runs `path` and, when it pressed an item, observes the scene after it. Pressing is verified
+    /// by the application's windows: a dialog, a closed document or a new title moved them.
+    ///
+    /// `refresh` is what an application whose menus go stale in the background is given:
+    /// a moment in front, so it recomputes them. It runs once, only for an item that read
+    /// disabled, or before an enabled command when `preparesEnabledItems` is true.
+    /// The item is read again after it when it answers `readAgain`; for an open dialog
+    /// the refusal becomes the dialog's; otherwise the disabled refusal stands, with the reason it
+    /// gives appended.
+    public static func perform(
+        _ path           : String,
+        processID        : pid_t,
+        allowsDestructive: Bool,
+        refresh          : (() async -> Refresh)? = nil,
+        preparesEnabledItems: Bool = false,
+        observe          : () async throws -> SceneSnapshot
+    ) async throws -> ActOutcome {
+
+        let before = windowSignature(of: processID)
+        let (pressed, outcome, _) = await runPrepared(
+            preparesEnabledItems: preparesEnabledItems,
+            read: { resolve(path, processID: processID, allowsDestructive: allowsDestructive) },
+            press: { AXUIElementPerformAction($0, kAXPressAction as CFString) },
+            refresh: refresh
+        )
+        return try await observedOutcome(pressed, outcome: outcome, processID: processID, before: before, observe: observe)
+    }
+
+    private static func observedOutcome(
+        _ pressed: String?,
+        outcome  : ActOutcome,
+        processID: pid_t,
+        before   : [String],
+        observe  : () async throws -> SceneSnapshot
+    ) async throws -> ActOutcome {
         guard let pressed else { return outcome }
         try? await Task.sleep(for: .milliseconds(400))
         let scene   = try await observe()
+        if outcome.kind == .actedUnverified {
+            return ActOutcome(.actedUnverified, outcome.message, scene: scene)
+        }
         let changed = windowSignature(of: processID) != before
         return changed
             ? ActOutcome(.foundActed, "pressed \(pressed): a window of the application opened, closed or was retitled",

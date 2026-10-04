@@ -358,26 +358,41 @@ public final class BrokeredAutomationSession: AutomationSessionOperating {
         ) {
             throw AutomationFailure(sentence)
         }
-        // An Adobe UXP application recomputes its menus only when it is in front (ADR 0013).
         let processID = application.processIdentifier
-        let stale = TargetPlatform.chosen(
+        let isAdobe = TargetPlatform.chosen(
             bundleURL       : application.bundleURL,
             bundleIdentifier: application.bundleIdentifier
         ) == .adobeUXP
+        if isAdobe {
+            return try await MenuBarCommand.performInFront(
+                path,
+                processID: processID,
+                allowsDestructive: allowsDestructive,
+                withFront: { command in
+                    let outcome = await agentSeat.performMenuCommandBrieflyInFront(
+                        when: { MenuBarCommand.isEnabled(path, processID: processID) },
+                        performOnce: command
+                    )
+                    if case .ready = outcome { return nil }
+                    return Self.briefMenuFailure(outcome)
+                },
+                observe: { try await self.observe() }
+            )
+        }
         return try await MenuBarCommand.perform(
             path,
             processID        : processID,
             allowsDestructive: allowsDestructive,
-            refresh          : stale
-                ? {
-                    let outcome = await agentSeat.bringTargetBrieflyInFront(
-                        until: { MenuBarCommand.isEnabled(path, processID: processID) }
-                    )
-                    return Self.refresh(after: outcome)
-                }
-                : nil,
             observe          : { try await self.observe() }
         )
+    }
+
+    private static func briefMenuFailure(_ outcome: BriefActivationOutcome) -> String {
+        switch refresh(after: outcome) {
+            case .stillDisabled(let reason): return reason ?? "The admitted menu command was not dispatched."
+            case .blockedByDialog: return "A dialog is open; answer it before another menu command."
+            case .readAgain: return "The admitted menu command was not dispatched."
+        }
     }
 
     /// What a moment in front answered, as the menu command reads it: the item is read again only

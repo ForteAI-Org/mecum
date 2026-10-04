@@ -230,4 +230,27 @@ struct BriefActivationTests {
         let (seat, _) = try await MultiWindowTests.seat()
         #expect(await seat.bringTargetBrieflyInFront(until: { true }) == .refused(.noFocusRecovery))
     }
+
+    @Test("a withdrawn modal is not open even when its WindowServer identity survives")
+    func retainedWithdrawnModalIsNotOpen() async throws {
+        let sensing = FakeSensing()
+        let (seat, windows) = try await MultiWindowTests.seat(
+            sensing: sensing, also: [MultiWindowTests.secondWindowNumber]
+        )
+        let dialog = try #require(windows.last?.reference.identity)
+        seat.selectionKit.declareModal(ModalRelationClaim(
+            modal: dialog, scope: .application, provenance: .qualifiedModalAttestation
+        ))
+        #expect(seat.openDialogs == [dialog])
+        seat.selectionKit.observeVisibility(SurfaceVisibilityClaim(
+            surface: dialog, state: .withdrawnEstablished, provenance: .qualifiedVisibilityAttestation
+        ))
+        #expect(sensing.windowGeometry(of: dialog.windowNumber)?.identity == dialog)
+        #expect(seat.openDialogs.isEmpty)
+        seat.selectionKit.observeVisibility(SurfaceVisibilityClaim(
+            surface: dialog, state: .uncertain, provenance: .qualifiedVisibilityAttestation
+        ))
+        #expect(seat.openDialogs == [dialog], "an unreadable presentation continues to block activation")
+    }
+
 }

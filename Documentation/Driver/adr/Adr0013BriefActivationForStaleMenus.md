@@ -61,6 +61,12 @@ refused before any request: that is the application's own reason for a disabled
 item, and with Photoshop's "Save changes?" alert up two seconds in front changed
 nothing.
 
+The 2026-10-04 qualification candidate in
+[ADR 0020](Adr0020PrepareEnabledAdobeMenuCommands.md) extends preparation to an
+admitted enabled Adobe command after three complete-path dispatches produced
+no observed effect. It retains this Seat operation, deadline, refusals and
+handback checks. Enabled-menu qualification remains separately recorded.
+
 [ADR 0023](Adr0023BriefHandbackVerificationLimit.md) records the later
 one-second brief-handback verification candidate after signed-app diagnostics
 show native settling beyond the original 250 ms. Ordinary recovery keeps its
@@ -68,7 +74,12 @@ original verification window; native command qualification remains required.
 
 ## What this does not authorize
 
-Not the clipboard, not a paste, not a key equivalent and not input delivery: ADR
+The later [ADR 0024](Adr0024DispatchAdmittedAdobeMenuBeforeHandback.md) records
+the measured candidate extension for one admitted Adobe AX menu command before
+handback. Its input callback is separate from this public readiness operation;
+command effect and handback failure remain independently visible.
+
+Not the clipboard, not a paste, not a key equivalent or other input delivery: ADR
 0012 measured those and stands unchanged. Not a general way to raise a target for
 another platform or another symptom. A new use needs its own measurement and its
 own record.

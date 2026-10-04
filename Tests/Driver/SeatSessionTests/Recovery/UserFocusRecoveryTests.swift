@@ -1036,6 +1036,77 @@ struct UserFocusRecoveryTests {
         fixture.recovery.stop()
     }
 
+    @Test("An admitted menu command runs once on the target foreground before handback")
+    func aScopedMenuCommandRunsBeforeHandback() async {
+        let fixture = Harness()
+        fixture.requiresPausedGate = false
+        fixture.onRestore = { [unowned fixture] in fixture.bringInFront($0) }
+        var commands = 0
+        let run = await fixture.recovery.bringBrieflyInFront(
+            FakeGeometry.adoptedWindow,
+            until: { true },
+            atMost: 1_000_000_000,
+            performOnce: {
+                commands += 1
+                #expect(fixture.sensing.frontmostProcessID == FakeGeometry.targetPID)
+                #expect(fixture.requested == [FakeGeometry.adoptedWindow])
+                return true
+            }
+        )
+        #expect(commands == 1)
+        #expect(run.outcome == .ready(afterMilliseconds: 0))
+        #expect(fixture.requested == [FakeGeometry.adoptedWindow, Self.user])
+        #expect(fixture.sensing.frontmostProcessID == Self.user.processID)
+        #expect(fixture.reports.isEmpty)
+        fixture.recovery.stop()
+    }
+
+    @Test("Readiness losing the adopted identity or foreground cannot dispatch a command",
+          arguments: [false, true])
+    func aScopedCommandNeedsItsLiveIdentityAndForeground(_ losesForeground: Bool) async {
+        let fixture = Harness()
+        fixture.requiresPausedGate = false
+        fixture.onRestore = { [unowned fixture] in fixture.bringInFront($0) }
+        var commands = 0
+        let run = await fixture.recovery.bringBrieflyInFront(
+            FakeGeometry.adoptedWindow,
+            until: {
+                if losesForeground { fixture.bringInFront(Self.other) }
+                else { fixture.targets = [] }
+                return true
+            },
+            atMost: 1_000_000_000,
+            performOnce: { commands += 1; return true }
+        )
+        #expect(commands == 0)
+        guard case .notReady = run.outcome else { Issue.record("False readiness: \(run.outcome)"); return }
+        #expect(fixture.sensing.frontmostProcessID == (losesForeground ? Self.other.processID : Self.user.processID))
+        #expect(fixture.requested.count == (losesForeground ? 1 : 2))
+        fixture.recovery.stop()
+    }
+
+    @Test("A dispatched command is not replayed or erased by an unverified handback")
+    func aScopedCommandSurvivesHandbackFailure() async {
+        let fixture = Harness()
+        fixture.requiresPausedGate = false
+        fixture.onRestore = { [unowned fixture] in
+            fixture.bringInFront($0)
+            if $0.processID == Self.user.processID { fixture.sensing.focusedUserWindow = nil }
+        }
+        var commands = 0
+        let run = await fixture.recovery.bringBrieflyInFront(
+            FakeGeometry.adoptedWindow,
+            until: { true },
+            atMost: 1_000_000_000,
+            performOnce: { commands += 1; return true }
+        )
+        #expect(commands == 1)
+        #expect(run.outcome == .handbackNotVerified)
+        #expect(fixture.requested == [FakeGeometry.adoptedWindow, Self.user])
+        #expect(fixture.reports.isEmpty)
+        fixture.recovery.stop()
+    }
+
     @Test("a brief activation brings the target in front and gives the front back, reporting nothing")
     func briefActivationGivesTheFrontBack() async {
         let fixture = Harness()

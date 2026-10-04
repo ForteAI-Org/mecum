@@ -4115,6 +4115,25 @@ public final class AgentSeat {
         until isReady: @MainActor () -> Bool,
         atMost bound : Duration = .seconds(2)
     ) async -> BriefActivationOutcome {
+        await withBriefTargetActivation(until: isReady, atMost: bound, performOnce: nil)
+    }
+
+    /// Performs one admitted Adobe menu command after readiness, before the
+    /// verified handback (ADR 0024). The synchronous callback is never retried;
+    /// a handback failure does not undo or disprove its possible effect.
+    /// Other input remains on its existing background route.
+    package func performMenuCommandBrieflyInFront(
+        when isReady: @MainActor () -> Bool,
+        performOnce : @escaping @MainActor () -> Void
+    ) async -> BriefActivationOutcome {
+        await withBriefTargetActivation(until: isReady, atMost: .seconds(2), performOnce: performOnce)
+    }
+
+    private func withBriefTargetActivation(
+        until isReady: @MainActor () -> Bool,
+        atMost bound : Duration,
+        performOnce  : (@MainActor () -> Void)?
+    ) async -> BriefActivationOutcome {
 
         guard let recovery = focusRecovery else {
             return refuseBriefActivation(.noFocusRecovery, "no focus recovery is installed")
@@ -4145,10 +4164,22 @@ public final class AgentSeat {
             // What the application did while it was in front is looked for now.
             requestWindowFollow()
         }
+        var scopedCommand: (@MainActor () -> Bool)?
+        if let command = performOnce {
+            scopedCommand = { [self] in
+                let selected = session.currentTarget?.window.reference
+                guard !isTearingDown, !recovery.isPaused, openDialogs.isEmpty,
+                      selected?.hasSameIdentity(as: target) == true
+                else { return false }
+                command()
+                return true
+            }
+        }
         let run = await recovery.bringBrieflyInFront(
             target,
             until : isReady,
-            atMost: UInt64(clamping: bound.wholeNanoseconds)
+            atMost: UInt64(clamping: bound.wholeNanoseconds),
+            performOnce: scopedCommand
         )
         if case .refused(let refusal) = run.outcome, refusal != .frontRequestRefused {
             return refuseBriefActivation(refusal, run.summary)
@@ -4181,6 +4212,7 @@ public final class AgentSeat {
         var seen: Set<WindowIdentity> = []
         return (adopted + blocking).filter { dialog in
             seen.insert(dialog).inserted
+                && selectionKit.core.facts[dialog]?.visibility != .withdrawnEstablished
                 && sensing.windowGeometry(of: dialog.windowNumber)?.identity == dialog
         }
     }

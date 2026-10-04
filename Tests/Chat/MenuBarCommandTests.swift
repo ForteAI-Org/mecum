@@ -5,7 +5,8 @@
 //  Created by Eliomar Alejandro Rodriguez Ferrer on 30/09/2026.
 //
 
-import AutomationRuntime
+import ApplicationServices
+@testable import AutomationRuntime
 import EngineCore
 import Testing
 
@@ -99,6 +100,156 @@ struct MenuBarCommandTests {
         #expect(!isEnabled("Layer > Delete > Layer"), "disabled, whatever the destructive policy says")
         #expect(!isEnabled("File > Export"), "missing")
         #expect(!isEnabled("File"), "a menu is not an item")
+    }
+
+    @Test("An enabled Adobe command is prepared once and resolves its current item before dispatch")
+    func anEnabledCommandNeedsItsPreparedItem() async {
+        let stale = Node("New...")
+        let current = Node("New...")
+        var prepared = false
+        var effect = false
+        var trace: [String] = []
+        let result = await MenuBarCommand.runPrepared(
+            preparesEnabledItems: true,
+            read: {
+                trace.append("read")
+                return .press(prepared ? current : stale, path: "File > New...")
+            },
+            press: {
+                trace.append("press")
+                effect = prepared && $0 === current
+                return .success
+            },
+            refresh: { trace.append("prepare"); prepared = true; return .readAgain }
+        )
+        #expect(trace == ["read", "prepare", "read", "press"])
+        #expect(effect)
+        #expect(result.pressed == "File > New...")
+    }
+
+    @Test("An enabled command is never dispatched when preparation or handback refuses", arguments: [
+        MenuBarCommand.Refresh.stillDisabled(reason: nil),
+        .stillDisabled(reason: "The person's focus did not return."),
+        .blockedByDialog
+    ])
+    func aPreparationRefusalPostsNothing(_ refusal: MenuBarCommand.Refresh) async {
+        var presses = 0
+        var preparations = 0
+        let result = await MenuBarCommand.runPrepared(
+            preparesEnabledItems: true,
+            read: { .press(Node("New..."), path: "File > New...") },
+            press: { _ in presses += 1; return .success },
+            refresh: { preparations += 1; return refusal }
+        )
+        #expect(presses == 0)
+        #expect(preparations == 1)
+        #expect(result.pressed == nil)
+        #expect(result.outcome.kind == .refused)
+    }
+
+    @Test("Listing a menu and refusing a destructive path never request foreground preparation")
+    func nonCommandsNeverPrepare() async {
+        for path in ["File", "Layer > Delete > Layer"] {
+            let result = await MenuBarCommand.runPrepared(
+                preparesEnabledItems: true, read: { resolve(path) },
+                press: { _ in Issue.record("No command is admitted"); return .success },
+                refresh: { Issue.record("A listing or refusal must not activate"); return .readAgain }
+            )
+            #expect(result.pressed == nil)
+        }
+    }
+
+    @Test("A command disabled after preparation refuses without a second preparation or press")
+    func aChangedMenuCannotAuthorizeASecondPreparation() async {
+        var preparations = 0
+        let result = await MenuBarCommand.runPrepared(
+            preparesEnabledItems: true,
+            read: {
+                preparations == 0 ? .press(Node("New..."), path: "File > New...")
+                    : .disabled(path: "File > New...")
+            },
+            press: { _ in Issue.record("The refreshed item is disabled"); return .success },
+            refresh: { preparations += 1; return .readAgain }
+        )
+        #expect(preparations == 1)
+        #expect(result.pressed == nil)
+        #expect(result.outcome.kind == .refused)
+    }
+
+    @Test("An admitted menu is resolved and pressed once during foreground, including an AX timeout",
+          arguments: [AXError.success, .cannotComplete])
+    func aScopedCommandUsesItsFreshItem(_ answer: AXError) async {
+        let stale = Node("New...")
+        let fresh = Node("New...")
+        var inFront = false
+        var presses = 0
+        var reads = 0
+        let result = await MenuBarCommand.runInFront(
+            read: { reads += 1; return .press(inFront ? fresh : stale, path: "File > New...") },
+            press: { item in
+                #expect(inFront)
+                #expect(item === fresh)
+                presses += 1
+                return answer
+            },
+            withFront: { command in
+                inFront = true
+                command()
+                command()
+                inFront = false
+                return nil
+            }
+        )
+        #expect(reads == 2)
+        #expect(presses == 1)
+        #expect(result.pressed == "File > New...")
+        #expect(result.outcome.kind == .foundActed)
+    }
+
+    @Test("A scope refusal dispatches nothing; a failure after dispatch retains its possible effect",
+          arguments: [false, true])
+    func aScopedFailureRetainsDelivery(_ dispatches: Bool) async {
+        var presses = 0
+        let result = await MenuBarCommand.runInFront(
+            read: { .press(Node("New..."), path: "File > New...") },
+            press: { _ in presses += 1; return .success },
+            withFront: { command in
+                if dispatches { command() }
+                return "The person's attested window was not verified."
+            }
+        )
+        #expect(presses == (dispatches ? 1 : 0))
+        #expect(result.outcome.kind == (dispatches ? .actedUnverified : .refused))
+        #expect(result.pressed == (dispatches ? "File > New..." : nil))
+        #expect(result.outcome.message.contains("not verified"))
+        #expect(!dispatches || result.outcome.message.contains("Do not repeat"))
+    }
+
+    @Test("A listing, missing path and destructive refusal never enter an input scope",
+          arguments: ["File", "File > Missing", "Layer > Delete > Layer"])
+    func aNonCommandNeverEntersTheScope(_ path: String) async {
+        let result = await MenuBarCommand.runInFront(
+            read: { self.resolve(path) },
+            press: { _ in Issue.record("No admitted command"); return .success },
+            withFront: { _ in Issue.record("No foreground scope is allowed"); return nil }
+        )
+        #expect(result.pressed == nil)
+    }
+
+    @Test("A menu disabled after readiness cannot dispatch or repeat the scope")
+    func aScopedMenuMustStillBeEnabled() async {
+        var scopes = 0
+        let result = await MenuBarCommand.runInFront(
+            read: {
+                scopes == 0 ? .press(Node("New..."), path: "File > New...")
+                    : .disabled(path: "File > New...")
+            },
+            press: { _ in Issue.record("The fresh item is disabled"); return .success },
+            withFront: { command in scopes += 1; command(); return nil }
+        )
+        #expect(scopes == 1)
+        #expect(result.pressed == nil)
+        #expect(result.outcome.kind == .refused)
     }
 
     /// A browser's menu bar around the File menu given, the Apple and application menus first.

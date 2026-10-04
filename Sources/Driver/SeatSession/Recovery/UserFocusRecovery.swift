@@ -523,10 +523,15 @@ final class UserFocusRecovery {
     /// `bound` is capped at two seconds. `isReady` runs on the main actor
     /// between two sleeps and holds the actor while it reads, so it has to
     /// answer quickly. A cancelled caller stops the poll and still hands back.
+    /// `performOnce` is the package's admitted Adobe menu scope (ADR 0024),
+    /// separate from readiness. It runs at most once before handback, only
+    /// while the exact adopted identity and both foreground witnesses agree.
+    /// Its effect survives an unverified handback and must never be replayed.
     func bringBrieflyInFront(
         _ target     : WindowReference,
         until isReady: @MainActor () -> Bool,
-        atMost bound : UInt64
+        atMost bound : UInt64,
+        performOnce  : (@MainActor () -> Bool)? = nil
     ) async -> (outcome: BriefActivationOutcome, summary: String) {
         guard !isPaused else { return (.refused(.seatNotReady), "the focus recovery is paused") }
         rememberUserWindow()
@@ -553,6 +558,14 @@ final class UserFocusRecovery {
         if frontRefusal == nil {
             readyAfter = await pollInFront(target, until: isReady, from: start, bound: bound)
         }
+        if readyAfter != nil, let performOnce {
+            let current = sensing.windowGeometry(of: target.windowNumber)
+            let canPerform = current?.hasSameIdentity(as: target) == true
+                && adopted().contains(where: { $0.hasSameIdentity(as: target) })
+                && now() < start &+ bound && !Task.isCancelled && !isPaused
+                && isFrontmost(target.processID) && sensing.frontmostProcessID == target.processID
+            if !canPerform || !performOnce() { readyAfter = nil }
+        }
 
         let inFront = now() &- start
         let outcome: BriefActivationOutcome = frontRefusal != nil
@@ -573,7 +586,7 @@ final class UserFocusRecovery {
             return (readyAfter == nil ? outcome : .handbackNotVerified, summary)
         }
         let handbackStart = now()
-        let handback = await giveFrontBack(to: person, targets: targets)
+        let handback = await giveFrontBack(to: person, targets: adopted())
         let handbackDuration = now() &- handbackStart
         endExpectedActivation()
         guard handback.verified else {
