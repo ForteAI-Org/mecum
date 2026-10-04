@@ -212,8 +212,11 @@ enum TargetEnumerator {
             onScreen      : onScreen,
             readFullScreen: { fullScreenReadings(of: pid) },
             readRows      : serverRows,
-            readOffscreen : {
-                offscreenWindows(of: pid, minimumSize: minimumSize, maximumLayer: maximumLayer)
+            readOffscreen : { offscreenWindows(of: pid, minimumSize: minimumSize, maximumLayer: maximumLayer) },
+            readDialogs   : {
+                offscreenWindows(of: pid, minimumSize: minimumSize,
+                                 maximumLayer: max(maximumLayer, NSWindow.Level.modalPanel.rawValue),
+                                 onlyModalDialogs: true)
             }
         )
     }
@@ -232,18 +235,32 @@ enum TargetEnumerator {
     /// nonminimized standard AX windows with matching attested server identities.
     /// A server row alone remains insufficient. Adoption attests identity again.
     ///
-    /// Visible ordinary windows bypass fullscreen and native fallback reads.
+    /// Positively identified native modal dialogs are also listed beside an
+    /// onscreen document. A dialog kept offscreen can still block that document;
+    /// listing it permits an explicit selection without substituting identities.
+    ///
+    /// Visible ordinary windows bypass fullscreen and ordinary native fallback
+    /// reads. A separate bounded modal query supplements each result, preserving
+    /// the original window when both sources report the same window number.
     static func windows(
         of pid        : pid_t,
         onScreen      : [TargetWindow],
         readFullScreen: () -> [Int: Bool],
         readRows      : ([Int]) -> [[String: Any]],
-        readOffscreen : () -> [TargetWindow] = { [] }
+        readOffscreen : () -> [TargetWindow] = { [] },
+        readDialogs   : () -> [TargetWindow] = { [] }
     ) -> [TargetWindow] {
-        guard onScreen.isEmpty else { return onScreen }
+        let dialogs = readDialogs()
+        func includingDialogs(_ ordinary: [TargetWindow]) -> [TargetWindow] {
+            var numbers = Set(ordinary.map(\.windowNumber))
+            return ordinary + dialogs.filter {
+                $0.pid == pid && numbers.insert($0.windowNumber).inserted
+            }
+        }
+        guard onScreen.isEmpty else { return includingDialogs(onScreen) }
         let fullScreen = readFullScreen().filter(\.value).keys.sorted()
-        guard !fullScreen.isEmpty else { return readOffscreen() }
-        return readRows(fullScreen).compactMap { info in
+        guard !fullScreen.isEmpty else { return includingDialogs(readOffscreen()) }
+        let ordinary: [TargetWindow] = readRows(fullScreen).compactMap { info in
             guard info[kCGWindowOwnerPID as String] as? pid_t == pid,
                   let number = info[kCGWindowNumber as String] as? Int,
                   fullScreen.contains(number),
@@ -258,27 +275,45 @@ enum TargetEnumerator {
                 frame       : bounds
             )
         }
+        return includingDialogs(ordinary)
     }
 
     struct OffscreenWindowReading {
         let windowNumber: Int
         let subrole: String?
         let isMinimized: Bool?
+        let isModal: Bool?
 
-        var qualifies: Bool { isMinimized == false && subrole == "AXStandardWindow" }
+        init(windowNumber: Int, subrole: String?, isMinimized: Bool?, isModal: Bool? = nil) {
+            self.windowNumber = windowNumber
+            self.subrole = subrole
+            self.isMinimized = isMinimized
+            self.isModal = isModal
+        }
+
+        func qualifies(onlyModalDialogs: Bool) -> Bool {
+            guard isMinimized == false else { return false }
+            return onlyModalDialogs
+                ? subrole == "AXDialog" && isModal == true
+                : subrole == "AXStandardWindow"
+        }
     }
 
-    /// Requires explicit native subrole and nonminimized state. A thumbnail's
-    /// server rectangle is metadata, not the body's routing frame.
+    /// Requires explicit native subrole and nonminimized state. The separate
+    /// dialog query additionally requires `AXModal` true on an `AXDialog`.
+    /// A thumbnail's server rectangle is metadata, not the body's routing frame.
     static func offscreenWindows(
         of pid: pid_t,
         readings: [OffscreenWindowReading],
         in list: [[String: Any]],
         minimumSize: CGFloat,
         maximumLayer: Int = 0,
+        onlyModalDialogs: Bool = false,
         resolveNativeFrame: (pid_t, Int) -> CGRect?
     ) -> [TargetWindow] {
-        let numbers = Set(readings.filter(\.qualifies).map(\.windowNumber))
+        let numbers = Set(readings.filter {
+            $0.qualifies(onlyModalDialogs: onlyModalDialogs)
+        }.map(\.windowNumber))
         return list.compactMap { info in
             guard info[kCGWindowOwnerPID as String] as? pid_t == pid,
                   let number = info[kCGWindowNumber as String] as? Int,
@@ -298,24 +333,35 @@ enum TargetEnumerator {
 
     @MainActor
     private static func offscreenWindows(
-        of pid: pid_t, minimumSize: CGFloat, maximumLayer: Int
+        of pid: pid_t, minimumSize: CGFloat, maximumLayer: Int, onlyModalDialogs: Bool = false
     ) -> [TargetWindow] {
         let application = AXUIElementCreateApplication(pid)
+        let deadline = ContinuousClock.now + .milliseconds(150)
+        if onlyModalDialogs {
+            guard AXUIElementSetMessagingTimeout(application, 0.025) == .success else { return [] }
+        }
         guard let windows = attribute(application, kAXWindowsAttribute) as? [AXUIElement] else { return [] }
         let readings = windows.compactMap { element -> OffscreenWindowReading? in
+            guard !onlyModalDialogs || ContinuousClock.now < deadline else { return nil }
+            if onlyModalDialogs {
+                guard AXUIElementSetMessagingTimeout(element, 0.025) == .success else { return nil }
+            }
             let subrole = attribute(element, kAXSubroleAttribute) as? String
-            guard subrole == "AXStandardWindow" else { return nil }
+            guard subrole == (onlyModalDialogs ? "AXDialog" : "AXStandardWindow") else { return nil }
             guard let number = WindowRelocator.windowNumber(of: element) else { return nil }
             return OffscreenWindowReading(
                 windowNumber: number,
                 subrole: subrole,
-                isMinimized: (attribute(element, kAXMinimizedAttribute) as? NSNumber)?.boolValue
+                isMinimized: (attribute(element, kAXMinimizedAttribute) as? NSNumber)?.boolValue,
+                isModal: onlyModalDialogs
+                    ? (attribute(element, kAXModalAttribute) as? NSNumber)?.boolValue : nil
             )
         }
-        let eligible = readings.filter(\.qualifies)
+        let eligible = readings.filter { $0.qualifies(onlyModalDialogs: onlyModalDialogs) }
         return offscreenWindows(of: pid, readings: eligible,
                                 in: serverRows(Set(eligible.map(\.windowNumber)).sorted()),
                                 minimumSize: minimumSize, maximumLayer: maximumLayer,
+                                onlyModalDialogs: onlyModalDialogs,
                                 resolveNativeFrame: nativeFrame)
     }
 

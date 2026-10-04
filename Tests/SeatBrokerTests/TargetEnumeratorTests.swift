@@ -400,3 +400,61 @@ func anOnScreenApplicationIsUnchanged() {
     #expect(windows == [shown])
     #expect(reads == 0)
 }
+
+@Test("A positively identified offscreen modal stays discoverable beside its document")
+func anOffscreenModalIsListedBesideItsDocument() {
+    let document = TargetWindow(pid: 42, windowNumber: 49_839, title: "Owned document",
+                                frame: CGRect(x: 0, y: 33, width: 1512, height: 949))
+    let dialog = TargetWindow(pid: 42, windowNumber: 93_277, title: "Open",
+                              frame: CGRect(x: 310, y: 159, width: 891, height: 448))
+    let foreign = TargetWindow(pid: 43, windowNumber: 93_278, title: "Foreign",
+                               frame: dialog.frame)
+    let windows = TargetEnumerator.windows(
+        of: 42, onScreen: [document],
+        readFullScreen: { Issue.record("No fullscreen fallback needed"); return [:] },
+        readRows: { _ in Issue.record("No fullscreen row read needed"); return [] },
+        readOffscreen: { Issue.record("No ordinary offscreen fallback needed"); return [] },
+        readDialogs: { [document, dialog, foreign] }
+    )
+    #expect(windows == [document, dialog])
+}
+
+@Test("An offscreen dialog requires positive modality and its attested native body")
+func anOffscreenDialogNeedsPositiveNativeEvidence() throws {
+    let thumbnail = CGRect(x: 16, y: 549, width: 124, height: 104)
+    let body = CGRect(x: 310, y: 159, width: 891, height: 448)
+    let windows = TargetEnumerator.offscreenWindows(
+        of: 42,
+        readings: [.init(windowNumber: 7, subrole: "AXDialog", isMinimized: false, isModal: true)],
+        in: [windowInfo(layer: NSWindow.Level.modalPanel.rawValue, frame: thumbnail),
+             windowInfo(pid: 43, frame: thumbnail),
+             windowInfo(layer: NSWindow.Level.modalPanel.rawValue + 1, frame: thumbnail)],
+        minimumSize: 120, maximumLayer: NSWindow.Level.modalPanel.rawValue, onlyModalDialogs: true
+    ) { pid, number in
+        #expect(pid == 42 && number == 7)
+        return body
+    }
+    #expect(windows.count == 1)
+    #expect(try #require(windows.first).frame == body)
+}
+
+@Test("A modal flag alone cannot make an offscreen sheet or unknown window discoverable")
+func anOffscreenDialogRefusesIncompleteNativeEvidence() {
+    let readings: [TargetEnumerator.OffscreenWindowReading] = [
+        .init(windowNumber: 7, subrole: "AXDialog", isMinimized: false, isModal: nil),
+        .init(windowNumber: 7, subrole: "AXDialog", isMinimized: false, isModal: false),
+        .init(windowNumber: 7, subrole: "AXDialog", isMinimized: nil, isModal: true),
+        .init(windowNumber: 7, subrole: "AXDialog", isMinimized: true, isModal: true),
+        .init(windowNumber: 7, subrole: "AXSheet", isMinimized: false, isModal: true),
+        .init(windowNumber: 7, subrole: "AXStandardWindow", isMinimized: false, isModal: true),
+        .init(windowNumber: 7, subrole: nil, isMinimized: false, isModal: true),
+    ]
+    for reading in readings {
+        let windows = TargetEnumerator.offscreenWindows(
+            of: 42, readings: [reading],
+            in: [windowInfo(frame: CGRect(x: 16, y: 549, width: 124, height: 104))],
+            minimumSize: 120, onlyModalDialogs: true
+        ) { _, _ in Issue.record("Ineligible dialog geometry must not be read"); return nil }
+        #expect(windows.isEmpty)
+    }
+}
