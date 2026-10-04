@@ -32,6 +32,8 @@ struct WorkerAgentHostTests {
     its other visible windows move to the seat's display too: if the person may be using it, ask first.
     Pass one of their window titles only when they ask for that window.
     Session IDs refer only to this running Mecum host. Saved chats may contain stale IDs and old screen state.
+    If an observation ends the session, use status and discover current windows before explicitly opening
+    the intended window. Never observe the ended ID or replay the input that preceded its disappearance.
     Never call close_session because a task is done: Mecum releases the Seat by itself when it is no longer
     needed. Call it only when the person asks you to release the Seat, or before calling open_session again.
     Follow newly opened dialogs by observing again. select needs the CURRENT dropdown label/value.

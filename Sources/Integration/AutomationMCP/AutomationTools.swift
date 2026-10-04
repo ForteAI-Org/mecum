@@ -31,6 +31,8 @@ public final class AutomationTools {
     its other visible windows move to the seat's display too: if the person may be using it, ask first.
     Pass one of their window titles only when they ask for that window.
     Session IDs refer only to this running Mecum host. Saved chats may contain stale IDs and old screen state.
+    If an observation ends the session, use status and discover current windows before explicitly opening
+    the intended window. Never observe the ended ID or replay the input that preceded its disappearance.
     Never call close_session because a task is done: Mecum releases the Seat by itself when it is no longer
     needed. Call it only when the person asks you to release the Seat, or before calling open_session again.
     Follow newly opened dialogs by observing again. select needs the CURRENT dropdown label/value.
@@ -176,7 +178,10 @@ public final class AutomationTools {
         do {
             return try await dispatch(name, arguments)
         } catch {
-            try record?("← \(name) error: \(error). Observe before any retry.")
+            let guidance = session.id == nil
+                ? "Use status and list current windows before opening a new session."
+                : "Observe before any retry."
+            try record?("← \(name) error: \(error). \(guidance)")
             throw error
         }
     }
@@ -250,8 +255,11 @@ public final class AutomationTools {
                 let result: ActOutcome
                 do { result = try await perform(step) }
                 catch {
+                    let guidance = session.id == nil
+                        ? "Earlier effects remain. Use status and list current windows before opening a new session."
+                        : "Earlier effects remain. Observe before deciding the next step."
                     let failed: JSONValue = .object(["status": .string("error"), "message": .string(String(describing: error)),
-                        "guidance": .string("Earlier effects remain. Observe before deciding the next step.")])
+                        "guidance": .string(guidance)])
                     results.append(failed)
                     try record?("← batch step \(index + 1) error: \(error)")
                     complete = false

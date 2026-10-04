@@ -283,9 +283,21 @@ public final class BrokeredAutomationSession: AutomationSessionOperating {
 
     public func observe() async throws -> SceneSnapshot {
         let (application, runtime, _) = try current()
+        let observingSession = id
         do {
-            return try await perceiving(runtime, application.processIdentifier)
+            let scene = try await perceiving(runtime, application.processIdentifier)
+            guard id == observingSession else {
+                throw AutomationFailure("The session changed while observing. Use status and observe the current session.")
+            }
+            return scene
         } catch {
+            if error as? ObservationUnavailable == .notAssigned, id == observingSession {
+                await close()
+                let message = "The observed session ended because it has no assigned application. "
+                    + "Use status and list current windows; open the intended window explicitly before continuing. "
+                    + "Earlier effects may remain. Do not replay input automatically."
+                throw AutomationFailure(message + (closeWarning.map { " " + $0 } ?? ""))
+            }
             throw Self.refusal(for: error)
         }
     }
@@ -437,6 +449,7 @@ public final class BrokeredAutomationSession: AutomationSessionOperating {
         idleRelease?.cancel()
         idleRelease = nil
         if let closing { await closing.value; return }
+        guard phase != .idle else { return }
         closeWarning = nil
         let runtime = self.runtime
         let target  = self.target

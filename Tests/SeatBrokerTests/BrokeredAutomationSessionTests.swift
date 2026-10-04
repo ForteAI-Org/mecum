@@ -190,6 +190,137 @@ struct BrokeredAutomationSessionTests {
         #expect(broker.queue.entries.isEmpty)
     }
 
+    @Test("a lost assignment closes the worker session and gives its lease back")
+    func aLostAssignmentEndsTheWorkerSession() async throws {
+        let broker = SeatBroker()
+        let dock = try #require(NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.dock")
+            .first?.processIdentifier)
+        let target = SeatTarget()
+        var observations = 0
+        let scene = SceneSnapshot(bundleID: "test.process", appName: "Test", windowTitle: "Test",
+                                  viewportPixelSize: ViewportPixelSize(width: 10, height: 10), elements: [])
+        let desktop = Self.session(broker, perceiving: { _, _ in
+            observations += 1
+            guard observations == 1 else { throw ObservationUnavailable.notAssigned }
+            return scene
+        }) { _, _, _ in
+            (TargetApp(pid: dock, bundleID: "test.process", name: "Test", bundleURL: nil, windows: []), target)
+        }
+        _ = try await desktop.open(application: "Test", window: nil)
+        #expect(desktop.id != nil)
+
+        do {
+            _ = try await desktop.observe()
+            Issue.record("An absent assignment cannot return a scene")
+        } catch {
+            #expect(error is AutomationFailure)
+            let message = String(describing: error)
+            #expect(message.contains("session ended"))
+            #expect(message.contains("Use status"))
+            #expect(message.contains("current windows"))
+        }
+
+        #expect(desktop.id == nil)
+        #expect(desktop.activity == nil)
+        #expect(!desktop.holdsComputer)
+        #expect(!desktop.hasScreen)
+        #expect(broker.queue.entries.isEmpty)
+        #expect(throws: SeatDrivingFailure.notAdopted) { try target.agentSeat() }
+        await desktop.close()
+        #expect(broker.queue.entries.isEmpty)
+    }
+
+    @Test("a recoverable observation refusal preserves the current worker session", arguments: [
+        ObservationUnavailable.noSelectedTarget,
+        .suspended([.noEligibleTarget]),
+        .captureDeadlineExpired(attemptsSpent: 1),
+        .captureFailed(reason: "controlled transient capture failure")
+    ])
+    func anObservationRefusalKeepsTheWorkerSession(_ failure: ObservationUnavailable) async throws {
+        let broker = SeatBroker()
+        let dock = try #require(NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.dock")
+            .first?.processIdentifier)
+        var observations = 0
+        let scene = SceneSnapshot(bundleID: "test.process", appName: "Test", windowTitle: "Test",
+                                  viewportPixelSize: ViewportPixelSize(width: 10, height: 10), elements: [])
+        let desktop = Self.session(broker, perceiving: { _, _ in
+            observations += 1
+            guard observations != 2 else { throw failure }
+            return scene
+        }) { _, _, _ in
+            (TargetApp(pid: dock, bundleID: "test.process", name: "Test", bundleURL: nil, windows: []), SeatTarget())
+        }
+        _ = try await desktop.open(application: "Test", window: nil)
+        let identity = try #require(desktop.id)
+
+        await #expect(throws: AutomationFailure.self) { try await desktop.observe() }
+
+        #expect(desktop.id == identity)
+        #expect(desktop.holdsComputer)
+        #expect(broker.queue.entries.count == 1)
+        _ = try await desktop.observe()
+        await desktop.close()
+        #expect(broker.queue.entries.isEmpty)
+    }
+
+    @Test("an idempotent close preserves cleanup warnings without retrying the quit request")
+    func aSecondCloseKeepsTheCleanupWarning() async throws {
+        let owned: pid_t = 900_003
+        var asked: [pid_t] = []
+        let ledger = LaunchLedger(terminate: { asked.append($0) }, isTerminated: { _ in false })
+        ledger.record(.openedByAgent, for: owned)
+        let broker = SeatBroker(configuration: .init(), ledger: ledger)
+        let desktop = try Self.seated(broker, holding: owned)
+        _ = try await desktop.open(application: "Test", window: nil)
+
+        await desktop.close()
+        let warning = try #require(desktop.closeWarning)
+        #expect(warning.contains("still running after the quit request"))
+        await desktop.close()
+
+        #expect(desktop.closeWarning == warning)
+        #expect(asked == [owned])
+        #expect(desktop.id == nil)
+        #expect(broker.queue.entries.isEmpty)
+    }
+
+    @Test("a late observation cannot affect a newer worker session", arguments: [true, false])
+    func anOldObservationCannotAffectTheNewSession(_ losesAssignment: Bool) async throws {
+        let broker = SeatBroker()
+        let dock = try #require(NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.dock")
+            .first?.processIdentifier)
+        var observations = 0
+        var resumeOldObservation: CheckedContinuation<Void, Never>?
+        let scene = SceneSnapshot(bundleID: "test.process", appName: "Test", windowTitle: "Test",
+                                  viewportPixelSize: ViewportPixelSize(width: 10, height: 10), elements: [])
+        let desktop = Self.session(broker, perceiving: { _, _ in
+            observations += 1
+            if observations == 2 {
+                await withCheckedContinuation { resumeOldObservation = $0 }
+                if losesAssignment { throw ObservationUnavailable.notAssigned }
+            }
+            return scene
+        }) { _, _, _ in
+            (TargetApp(pid: dock, bundleID: "test.process", name: "Test", bundleURL: nil, windows: []), SeatTarget())
+        }
+        _ = try await desktop.open(application: "Test", window: nil)
+        let oldObservation = Task { try await desktop.observe() }
+        await Self.until { resumeOldObservation != nil }
+        let continuation = try #require(resumeOldObservation)
+        await desktop.close()
+        _ = try await desktop.open(application: "Test", window: nil)
+        let newIdentity = try #require(desktop.id)
+
+        continuation.resume()
+        await #expect(throws: AutomationFailure.self) { try await oldObservation.value }
+
+        #expect(desktop.id == newIdentity)
+        #expect(desktop.holdsComputer)
+        #expect(broker.queue.entries.count == 1)
+        await desktop.close()
+        #expect(broker.queue.entries.isEmpty)
+    }
+
     @Test("a turn stopped while its open waits for the computer leaves the queue")
     func aStoppedTurnWaitingForTheComputerLeavesTheQueue() async throws {
         let broker = SeatBroker()

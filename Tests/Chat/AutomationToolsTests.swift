@@ -9,6 +9,30 @@ import Testing
 
 @Suite("Automation MCP application boundary")
 struct AutomationToolsTests {
+    @Test("Observation guidance follows the remaining session, without replaying a terminal failure", arguments: [true, false])
+    func observationGuidanceMatchesSessionLifetime(_ ends: Bool) async throws {
+        let session = SyntheticSession()
+        session.observationFailure = AutomationFailure("Synthetic observation refusal.")
+        session.endsWhenObserved = ends
+        let id = try #require(session.id)
+        var records: [String] = []
+        let tools = AutomationTools(session: session)
+        tools.record = { records.append($0) }
+        await #expect(throws: AutomationFailure.self) {
+            try await tools.call("observe", .object(["session": .string(id.uuidString)]))
+        }
+        #expect(session.calls == ["observe"])
+        let record = try #require(records.last)
+        if ends {
+            #expect(session.id == nil)
+            #expect(!record.contains("Observe before any retry"))
+            #expect(record.contains("Use status"))
+        } else {
+            #expect(session.id == id)
+            #expect(record.contains("Observe before any retry"))
+        }
+    }
+
     @Test
     func staleSessionCannotReachTheDriver() async throws {
         let session = SyntheticSession()
@@ -67,6 +91,27 @@ struct AutomationToolsTests {
         #expect(session.calls == ["First", "Second"])
         #expect(result["structuredContent"]["verifiedSteps"] == .number(1))
         #expect(result["structuredContent"]["steps"].array?.last?["status"].string == "error")
+    }
+
+    @Test("A terminal batch failure keeps prior effects and never advises observing its ended ID")
+    func aTerminalBatchFailureNeedsDiscovery() async throws {
+        let session = SyntheticSession()
+        session.throwOnTarget = "Second"
+        session.endsWhenActFails = true
+        let tools = AutomationTools(session: session)
+        let id = try #require(session.id)
+        let result = try await tools.call("batch", .object([
+            "session": .string(id.uuidString), "steps": .array(["First", "Second", "Third"].map {
+                .object(["operation": .string("act"), "target": .string($0)])
+            })
+        ]))
+        #expect(session.calls == ["First", "Second"])
+        #expect(session.id == nil)
+        #expect(result["structuredContent"]["verifiedSteps"] == .number(1))
+        let guidance = try #require(result["structuredContent"]["steps"].array?.last?["guidance"].string)
+        #expect(guidance.contains("Earlier effects remain"))
+        #expect(guidance.contains("Use status"))
+        #expect(!guidance.contains("Observe before"))
     }
 
     @Test
@@ -332,6 +377,9 @@ private final class SyntheticSession: AutomationSessionOperating {
     var calls: [String] = []
     var results: [ActOutcomeKind] = []
     var throwOnTarget: String?
+    var observationFailure: AutomationFailure?
+    var endsWhenObserved = false
+    var endsWhenActFails = false
     var inputs: [InputRequest.Input] = []
     var sections: [String?] = []
     var discoveryRows: [WindowRow] = []
@@ -346,7 +394,14 @@ private final class SyntheticSession: AutomationSessionOperating {
         return scene
     }
 
-    func observe() async throws -> SceneSnapshot { calls.append("observe"); return scene }
+    func observe() async throws -> SceneSnapshot {
+        calls.append("observe")
+        if let observationFailure {
+            if endsWhenObserved { id = nil }
+            throw observationFailure
+        }
+        return scene
+    }
 
     func windowCandidates(ownedBy processID: pid_t) throws -> [WindowRow] {
         discoveryReads.append(processID)
@@ -355,7 +410,10 @@ private final class SyntheticSession: AutomationSessionOperating {
 
     func act(target: String, verb: ActionVerb, section: String?, desiredState: ControlState?) async throws -> ActOutcome {
         calls.append(target)
-        if target == throwOnTarget { throw AutomationFailure("Synthetic transport failure after an earlier effect.") }
+        if target == throwOnTarget {
+            if endsWhenActFails { id = nil }
+            throw AutomationFailure("Synthetic transport failure after an earlier effect.")
+        }
         return ActOutcome(results.isEmpty ? .foundActed : results.removeFirst(), "synthetic result", scene: scene)
     }
 
