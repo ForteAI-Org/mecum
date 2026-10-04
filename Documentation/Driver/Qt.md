@@ -176,6 +176,35 @@ make qt-fixture-live-tests SWIFT=swift QT_PYTHON=/absolute/path/to/pyside6/pytho
 make qt-live-tests SWIFT=swift
 ```
 
+## Geometry at adoption
+
+`make qt-geometry-live-tests QT_PYTHON=/absolute/path/to/pyside6/python`
+requires Stage Manager already enabled and starts the owned widget fixture at
+`QT_INITIAL_POSITION`, default `1082,776`. It deliberately keeps the discovery
+reference from before display creation. On 26A434 that body changed from
+`(1082, 776, 700, 652)` to `(812, 330, 700, 652)` before adoption. Recording the
+old rectangle made release alternate between the old destination and the
+virtual frame, then refuse. A temporary full-preparation control did not fix
+that alternation. Window-relocator tracing found no Driver move back to the
+virtual frame; native Qt geometry notifications reported both positions.
+These diagnostic overrides were removed.
+
+For an explicit Qt adoption, the Seat now reads the current AX body before
+recording its return obligation. WindowServer identity brackets the read,
+and a replaced identity refuses before any write. A thumbnail does not supply
+the body size. An unreadable AX body retains the existing placement path;
+invalid readable geometry refuses. In-place adoption, an explicit restoration
+frame and a completed fullscreen exit retain their existing contracts.
+
+The retained live row passed with the original stale discovery reference:
+its recorded home was `(812, 330, 700, 652)`, release returned, and three later
+AX readings retained the exact home. The row preserved foreground/cursor with
+zero physical input and removed its display/fence. Two offline regressions
+verify the current return destination and refusal on identity replacement.
+This qualifies this settled-home case, not every Stage Manager transition or
+restoration to an arbitrary offscreen rectangle. It records where ownership
+begins, rather than promising reversal of changes made before adoption.
+
 ## Native panel visibility
 
 A posted Qt click now keeps the window follower awake for at most one second.

@@ -1477,6 +1477,11 @@ struct QtFixtureLiveTests {
             processID: processID, allowUnvalidatedBuild: true
         )
         try #require(original.windowTitle == "Mecum Qt Probe")
+        let verifiesSettledHome = ProcessInfo.processInfo.environment["AGENTSEAT_QT_INITIAL_POSITION"] != nil
+        if verifiesSettledHome {
+            try #require(MultiWindowLiveTests.stageManagerIsEnabled,
+                         "The Qt geometry tier requires Stage Manager already enabled")
+        }
 
         func state() throws -> [String: Any] {
             let data = try Data(contentsOf: URL(fileURLWithPath: statePath))
@@ -1506,6 +1511,14 @@ struct QtFixtureLiveTests {
                 personBefore.frontmostProcessID != processID,
                 "The Qt fixture must be in the background before the seat adopts it"
             )
+            let currentHome = try WindowReader.windowSnapshot(
+                processID            : processID,
+                windowNumber         : original.reference.windowNumber,
+                allowUnvalidatedBuild: true
+            ).reference
+            if verifiesSettledHome {
+                print("QT_GEOMETRY discovered=\(original.reference.frame) current-home=\(currentHome.frame)")
+            }
             var adopted: AdoptedWindow?
             do {
                 adopted = try await stage.seat.adopt(
@@ -1515,6 +1528,13 @@ struct QtFixtureLiveTests {
                     adopted = try await stage.seat.stage(window)
                 }
                 let window = try #require(adopted)
+                if verifiesSettledHome {
+                    #expect(VirtualWindowPlacementCheck.framesMatch(
+                        window.originalFrame,
+                        currentHome.frame
+                    ))
+                    print("QT_GEOMETRY owed=\(window.originalFrame)")
+                }
                 print("QT6 after-stage=\(UserSeatState.capture())"
                     + " recovery=\(String(describing: stage.seat.lastFocusRecovery))")
                 let geometryReady = LivePump.run(until: {
@@ -1676,6 +1696,7 @@ struct QtFixtureLiveTests {
                 print("QT6 user-seat-before=\(personBefore) after=\(personAfter)"
                     + " physical-events=\(physicalEvents)")
                 if physicalEvents == 0 { #expect(personAfter == personBefore) }
+                if verifiesSettledHome { #expect(physicalEvents == 0) }
             } catch {
                 failure = error
             }
@@ -1684,6 +1705,21 @@ struct QtFixtureLiveTests {
                 let outcome = await stage.seat.release(adopted, .returnToUserSeat)
                 print("QT6 release=\(outcome)")
                 #expect(outcome == .returned)
+                if verifiesSettledHome, outcome == .returned {
+                    for _ in 0..<3 {
+                        try await Task.sleep(for: .milliseconds(100))
+                        let body = try WindowReader.windowSnapshot(
+                            processID            : processID,
+                            windowNumber         : adopted.id,
+                            allowUnvalidatedBuild: true
+                        ).reference.frame
+                        #expect(VirtualWindowPlacementCheck.framesMatch(
+                            body,
+                            currentHome.frame
+                        ))
+                        print("QT_GEOMETRY returned-body=\(body)")
+                    }
+                }
                 if outcome == .returned && failure == nil {
                     do {
                         try stage.seat.releaseAssignedApplication()

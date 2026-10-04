@@ -78,7 +78,7 @@ QT_PYTHON ?= $(shell command -v python3)
 BENCH ?= fence-callback fence-clamp input-trace-overhead send-click display-lifecycle \
          monitor-60 monitor-120 stage seat-idle window-watch focus-refresh recovery
 
-.PHONY: all test native-test-runner host-tests live-tests uxp-live-tests qt-live-tests qt-editor-live-tests qt-fixture-live-tests qt-panel-birth-live-tests bench compat-report promote-build clean help
+.PHONY: all test native-test-runner host-tests live-tests uxp-live-tests qt-live-tests qt-editor-live-tests qt-fixture-live-tests qt-panel-birth-live-tests qt-geometry-live-tests bench compat-report promote-build clean help
 
 all: test
 
@@ -91,6 +91,7 @@ help:
 	@echo 'make qt-editor-live-tests  Qt editor tier: open the disposable New Project 1 project'
 	@echo 'make qt-fixture-live-tests QT_PYTHON=<PySide6 Python>  Qt 6 controlled fixture tier'
 	@echo 'make qt-panel-birth-live-tests QT_PYTHON=<PySide6 Python>  Strict native panel visibility'
+	@echo 'make qt-geometry-live-tests QT_PYTHON=<PySide6 Python>  Qt settled return geometry with Stage Manager'
 	@echo 'make bench          the measurements of spec section 8, each one a gate'
 	@echo 'make compat-report  runs the tiers and writes Documentation/Driver/compatibility/Build<build>.{md,json}'
 	@echo 'make promote-build BUILD=26A5425a   copies that draft into the ledger'
@@ -184,6 +185,13 @@ qt-editor-live-tests:
 qt-panel-birth-live-tests:
 	@AGENTSEAT_LIVE_TESTS=1 AGENTSEAT_QT_PANEL_BIRTH_TESTS=1 AGENTSEAT_QT_PYTHON="$(QT_PYTHON)" \
 	    $(TIER) qt-panel-birth 1 $(SWIFT) test --filter QtFixtureLiveTests.nativeFileDialog --no-parallel
+
+# Discovery deliberately precedes display creation. The owned window starts
+# partly outside the physical display and may settle before adoption.
+QT_INITIAL_POSITION ?= 1082,776
+qt-geometry-live-tests:
+	@AGENTSEAT_LIVE_TESTS=1 AGENTSEAT_QT_INITIAL_POSITION="$(QT_INITIAL_POSITION)" AGENTSEAT_QT_PYTHON="$(QT_PYTHON)" \
+	    $(TIER) qt-geometry 1 $(SWIFT) test --filter QtFixtureLiveTests.widgetCommands --no-parallel
 
 # An owned Qt 6 widget target is launched and stopped inside each row. Its
 # Python interpreter must contain PySide6-Essentials; no fixture remains after

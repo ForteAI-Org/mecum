@@ -119,6 +119,9 @@ fails closed to an explicit target choice only when AX reports no unique focused
 or main window, or reports contradictory current-window state. The Live campaign
 has not yet been run.
 
+Qt reads its return geometry at adoption, as recorded in
+[ADR 0019](adr/Adr0019QtAdoptionGeometry.md).
+
 ## Unqualified builds and Adobe UXP checks
 
 Build and hardware coverage in the Ledger describe evidence. They no longer

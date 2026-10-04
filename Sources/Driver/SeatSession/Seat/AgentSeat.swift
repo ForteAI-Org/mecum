@@ -817,6 +817,31 @@ public final class AgentSeat {
         return reading.frame
     }
 
+    /// freshQtAdoptionBody records the body Qt exposes when ownership begins.
+    /// Display creation and Stage Manager may settle a previously discovered
+    /// window elsewhere. Its old frame is then an invalid return destination.
+    /// WindowServer identity brackets the AX read; a thumbnail never supplies
+    /// the body size. Missing AX geometry retains the existing placement path.
+    private func freshQtAdoptionBody(for window: WindowReference) throws -> WindowReference {
+        guard let before = sensing.windowGeometry(of: window.windowNumber) else {
+            throw SeatInterruption(issues: [.windowUnavailable])
+        }
+        guard before.hasSameIdentity(as: window) else {
+            throw SeatInterruption(issues: [.identityChanged])
+        }
+        guard let body = try placing.frame(of: window) else { return window }
+        guard rectangleIsUsable(body) else {
+            throw SeatInterruption(issues: [.windowUnavailable])
+        }
+        guard let after = sensing.windowGeometry(of: window.windowNumber) else {
+            throw SeatInterruption(issues: [.windowUnavailable])
+        }
+        guard after.hasSameIdentity(as: window) else {
+            throw SeatInterruption(issues: [.identityChanged])
+        }
+        return window.replacingFrame(body)
+    }
+
     private func adoptionTransaction(
         _ inbound  : WindowReference,
         platform   : any InputPlatform,
@@ -838,6 +863,9 @@ public final class AgentSeat {
         let prepared      = try await leaveFullScreenForAdoption(inbound)
         var window        = prepared.window
         let wasFullScreen = prepared.wasFullScreen
+        if platform is QtPlatform, !takenInPlace, restoringTo == nil, !wasFullScreen {
+            window = try freshQtAdoptionBody(for: window)
+        }
         let homeDisplay   = displayContaining(window.frame)
         let bounds        = sensing.virtualDisplayBounds
 

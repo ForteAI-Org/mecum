@@ -362,6 +362,10 @@ measured_widgets.update({
 })
 publish()
 window.show()
+initial_position = os.environ.get("AGENTSEAT_QT_INITIAL_POSITION")
+if initial_position:
+    initial_x, initial_y = (int(value) for value in initial_position.split(","))
+    window.move(initial_x, initial_y)
 timer = QTimer()
 timer.timeout.connect(update_geometry)
 timer.start(100)
