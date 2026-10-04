@@ -173,8 +173,16 @@ public struct ActionEngine: Sendable {
             try? await dependencies.actuator.perform(.key(code: Key.escape), in: pid)
             await pause(timing.popupDismiss)
             let after = await perceive(pid)?.scene
-            let dismissed = !(await self.surfaces(pid)).hasOpenPopup
+            let dismissed = (try? dependencies.windows.windows(ownedBy: pid)).map {
+                !WindowSurfaceClassifier.classify($0).hasOpenPopup
+            } ?? false
             await dependencies.actuator.confirm(dismissed ? .observed : .unknown, in: pid)
+            guard dismissed else {
+                return ActOutcome(.actedUnverified,
+                    "could not confirm the pop-up menu's closure after Escape; it may be still open. "
+                        + "'\(element.label)' was not clicked. Observe before deciding what to do next.",
+                    scene: after)
+            }
             return ActOutcome(.actedNoop, "a pop-up menu was open and '\(element.label)' is NOT one of its items: "
                 + "closed the menu instead of clicking through it. The scene below is current; act '\(element.label)' "
                     + "again now.",

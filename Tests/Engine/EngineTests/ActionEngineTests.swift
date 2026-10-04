@@ -46,9 +46,14 @@ struct ActionEngineTests {
 
     final class ScriptedWindows: WindowListing, @unchecked Sendable {
         var queue: [[WindowRow]]
+        var readsUntilFailure: Int?
         init(_ rows: [[WindowRow]]) { queue = rows }
         func windows(ownedBy processID: pid_t) throws -> [WindowRow] {
-            queue.count > 1 ? queue.removeFirst() : (queue.first ?? [])
+            if let remaining = readsUntilFailure {
+                guard remaining > 0 else { throw Unavailable() }
+                readsUntilFailure = remaining - 1
+            }
+            return queue.count > 1 ? queue.removeFirst() : (queue.first ?? [])
         }
     }
 
@@ -364,9 +369,42 @@ struct ActionEngineTests {
     func popupOutside() async {
         let actuator = RecordingActuator()
         let outcome = await engine(scenes: ScriptedScenes([listScene, scene([export])]), actuator: actuator,
-                                   windows: ScriptedWindows([[popupWindow, mainWindow]])).act(request("Export"))
+                                   windows: ScriptedWindows([[popupWindow, mainWindow], [mainWindow]])).act(request("Export"))
         #expect(outcome.kind == .actedNoop)
         #expect(outcome.message.contains("closed the menu"))
+        #expect(actuator.gestures == [.key(code: Key.escape)])
+    }
+
+    @Test("a menu still visible after Escape is reported unverified without clicking through", arguments: [false, true])
+    func popupDismissalUnconfirmed(deliveryFails: Bool) async {
+        let actuator = RecordingActuator()
+        if deliveryFails { actuator.failure = Unavailable() }
+        let outcome = await engine(
+            scenes  : ScriptedScenes([listScene]),
+            actuator: actuator,
+            windows : ScriptedWindows([[popupWindow, mainWindow]])
+        ).act(request("Export"))
+        #expect(outcome.kind == .actedUnverified)
+        #expect(outcome.message.contains("still open"))
+        #expect(!outcome.message.contains("closed the menu"))
+        #expect(!outcome.message.contains("again now"))
+        #expect(actuator.confirmations == [.unknown])
+        #expect(actuator.gestures == (deliveryFails ? [] : [.key(code: Key.escape)]))
+    }
+
+    @Test("a failed window census cannot prove a menu was dismissed")
+    func popupDismissalCensusUnavailable() async {
+        let actuator = RecordingActuator()
+        let windows = ScriptedWindows([[popupWindow, mainWindow]])
+        windows.readsUntilFailure = 1
+        let outcome = await engine(
+            scenes  : ScriptedScenes([listScene, scene([export])]),
+            actuator: actuator,
+            windows : windows
+        ).act(request("Export"))
+        #expect(outcome.kind == .actedUnverified)
+        #expect(!outcome.message.contains("closed the menu"))
+        #expect(actuator.confirmations == [.unknown])
         #expect(actuator.gestures == [.key(code: Key.escape)])
     }
 
