@@ -72,6 +72,13 @@ public struct SeatDropdownSelector {
     ) async throws -> (outcome: ActOutcome, receipt: PopupMenuReceipt?) {
         let beforeDelivery = try await target.observe()
         let beforeStill = beforeDelivery.frame
+        let capturedWindow = beforeDelivery.geometry.window
+        let nativeWindow = DropdownOpening.Window(
+            processID: capturedWindow.processID,
+            number: capturedWindow.windowNumber,
+            frame: capturedWindow.frame,
+            resolveNumber: { WindowRelocator.windowNumber(of: $0) }
+        )
         let before = try await perceive(
             beforeStill, identity: identity, title: window.title,
             stage: "before", onCapture: onCapture
@@ -83,7 +90,7 @@ public struct SeatDropdownSelector {
             opener = element
         } else if case .none = resolution,
                   beforeStill.geometry.windowObservation != nil,
-                  let frame = try? DropdownOpening.frame(control: control, window: window.title, processID: window.reference.processID),
+                  let frame = try? DropdownOpening.frame(control: control, in: nativeWindow),
                   before.frame.contains(frame),
                   let bounds = AccessibilityFrameTrust.normalized(frame, in: before.frame),
                   let scoped = try await controlScene(beforeStill, bounds: bounds, identity: identity, title: window.title),
@@ -140,11 +147,11 @@ public struct SeatDropdownSelector {
             return element
         }
         let receipt: PopupMenuReceipt
-        if try DropdownOpening.canShow(control: opener.label, window: window.title, processID: window.reference.processID) {
+        if try DropdownOpening.canShow(control: opener.label, in: nativeWindow) {
             receipt = try await seat.useNativePopupMenu(
                 of: window, turn: turn,
                 opening: {
-                    try DropdownOpening.show(control: opener.label, window: window.title, processID: window.reference.processID)
+                    try DropdownOpening.show(control: opener.label, in: nativeWindow)
                 }
             ) { menu in
                 guard try await readItem(menu, fromDisplay: false) != nil else { return false }
@@ -170,10 +177,11 @@ public struct SeatDropdownSelector {
                     ofProcess : window.reference.processID,
                     popupFrame: menu.frame
                 ) ?? []
-                let route = PopupRowPick.plan(rows: named, currentValue: opener.label, target: element.label)
+                let currentValue = opener.value ?? opener.label
+                let route = PopupRowPick.plan(rows: named, currentValue: currentValue, target: element.label)
                     ?? PopupRowPick.plan(
                         rows        : PopupRowPick.rows(in: scene, windowFrame: menu.frame, popupFrame: menu.frame),
-                        currentValue: opener.label,
+                        currentValue: currentValue,
                         target      : element,
                         wraps       : false
                     )
@@ -199,14 +207,9 @@ public struct SeatDropdownSelector {
                     && after.frame.size == before.frame.size
             } else { verified = false }
         } else {
-            verified = after.scene.elements.contains { element in
-                let original = opener.bounds.cgRect
-                let current = element.bounds.cgRect
-                let overlap = original.intersection(current)
-                return LabelText.normalize(element.label) == LabelText.normalize(item)
-                    && !overlap.isNull && overlap.width > 0
-                    && overlap.height > min(original.height, current.height) * 0.5
-            }
+            verified = DropdownValueVerification.verifies(
+                item: item, control: opener, after: after.scene.elements
+            )
         }
         let message = verified
             ? "selected '\(item)' in menu window #\(receipt.menu.window.windowNumber); the dropdown now reads '\(item)'"
@@ -243,7 +246,12 @@ public struct SeatDropdownSelector {
         try onCapture(stage, image)
         let frame = still.geometry.screenRect
         let scene = try await pipeline.perceive(image, of: ScenePipeline.Window(
-            bundleID: identity.bundleID, appName: identity.name, title: title
+            bundleID: identity.bundleID,
+            appName: identity.name,
+            title: title,
+            processID: still.geometry.windowObservation?.window.processID,
+            frame: frame,
+            windowNumber: still.geometry.windowObservation?.window.windowNumber
         ))
         return PerceivedWindow(scene: scene, frame: frame)
     }

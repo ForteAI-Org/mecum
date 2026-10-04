@@ -442,7 +442,7 @@ public final class BrokeredAutomationSession: AutomationSessionOperating {
 
     public func select(control: String, item: String) async throws -> ActOutcome {
         let (application, _, target) = try current()
-        let selector = SeatDropdownSelector(target: target, pipeline: ScenePipeline(text: VisionTextRecognizer()))
+        let selector = SeatDropdownSelector(target: target, pipeline: ProductionPerception.pipeline())
         let result = try await selector.select(
             control: control, item: item,
             identity: SeatDriving.ApplicationIdentity(

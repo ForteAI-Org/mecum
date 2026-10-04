@@ -184,7 +184,7 @@ returned New Paths to the user, and did not execute its following Cancel step. `
 covers whole-plan validation, ordered execution, all rejected outcomes, thrown errors and
 cancellation between steps; `ActionEngineTests` also passes after sharing command execution.
 
-`select` resolves the current dropdown label in fresh pixels, requests its native `AXShowMenu`,
+`select` resolves the current dropdown in a fresh captured scene, requests its native `AXShowMenu`,
 and observes the separate menu window through the Driver's WindowServer sensing. It captures
 that attested menu alone, requires a unique visible item, and invokes `AXPress` only on a unique
 matching menu item whose accessibility rectangle lies inside the observed popup. The native
@@ -194,6 +194,11 @@ and errors. No global click or foreground fallback is used.
 
 Success requires the requested value to appear at the original dropdown in a fresh capture after
 the menu closes. `--evidence /tmp/mecum-dropdown` saves local `before.png`, `menu.png` and `after.png`.
+Full-window scenes and native opener lookup use the captured process, window number and geometry.
+An AX title need not equal the WindowServer title. Missing identity or stale geometry refuses;
+titles and focus do not provide another candidate. Native popup/combo values drive arrow routing
+and effect verification when available; a matching editor or neighbouring value proves nothing.
+See [ADR 0027](../Driver/adr/Adr0027BindDropdownLookupToCapture.md).
 The command prints the menu window ID, cleanup method, and observed focus/cursor changes. It adopts
 companion app windows before the requested window and returns the requested window last.
 `act` also adopts companions, back to front, and enables the Driver's new-window following. When
