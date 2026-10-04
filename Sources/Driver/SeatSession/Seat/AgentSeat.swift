@@ -1033,6 +1033,13 @@ public final class AgentSeat {
         pendingAdoptions[window.windowNumber] = pending
         adoptionRestorations[window.windowNumber] = nil
         do {
+            let beforeMovement = sensing.windowGeometry(of: window.windowNumber)
+            let wasStashed = beforeMovement.map {
+                $0.hasSameIdentity(as: window) && SeatWindowSession.readsAsThumbnail(
+                    serverSize: $0.frame.size,
+                    fullSize  : window.frame.size
+                )
+            } ?? false
             // A window born on the display is already at `origin`, so the one
             // write this transaction makes is the one it does not need.
             if !takenInPlace {
@@ -1045,7 +1052,8 @@ public final class AgentSeat {
                 of            : window,
                 expectedOrigin: origin,
                 within        : bounds,
-                takenInPlace  : takenInPlace
+                takenInPlace  : takenInPlace,
+                wasStashed    : wasStashed
             )
             let placed = confirmation.reference
             if takenInPlace, restoringTo == nil, !wasFullScreen,
@@ -4412,7 +4420,8 @@ public final class AgentSeat {
         of window     : WindowReference,
         expectedOrigin: CGPoint,
         within bounds : CGRect,
-        takenInPlace  : Bool
+        takenInPlace  : Bool,
+        wasStashed    : Bool
     ) async throws -> (reference: WindowReference, body: CGRect) {
 
         var previous    : WindowReference?
@@ -4495,6 +4504,21 @@ public final class AgentSeat {
                     refusedRaise = failure
                 }
                 try checkAdoptionMayContinue()
+                previous = nil
+                previousBody = nil
+                continue
+            }
+
+            // Stage Manager can pause at full size before its move finishes.
+            // Confirm the requested position as well as the complete body.
+            let requestedFrame = CGRect(origin: expectedOrigin, size: fullBody.size)
+            guard VirtualWindowPlacementCheck.sizesMatchAcrossSources(reading.frame.size, fullBody.size),
+                  takenInPlace || !(wasStashed || didAttemptStage)
+                    || VirtualWindowPlacementCheck.framesMatch(
+                      reading.frame,
+                      requestedFrame,
+                      tolerance: VirtualWindowPlacementCheck.crossSourceTolerance
+                  ) else {
                 previous = nil
                 previousBody = nil
                 continue

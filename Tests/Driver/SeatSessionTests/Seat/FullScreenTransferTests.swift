@@ -138,6 +138,14 @@ struct FullScreenTransferTests {
         let placing = FakePlacing()
         let window  = Self.fullScreenWindow(placing, sensing)
         placing.fullScreenStates[window.windowNumber] = .unreadable(.attributeUnsupported)
+        // No exit was requested in this row, so moving must not substitute
+        // the normal-size body that the fullscreen-exit fake usually supplies.
+        placing.bodyFrame = window.frame
+        placing.onMove = { origin in
+            let moved = CGRect(origin: origin, size: window.frame.size)
+            placing.bodyFrame = moved
+            sensing.geometry = window.replacingFrame(moved)
+        }
         let seat = Self.seat(sensing, placing)
 
         // Unreadable is not fullscreen either: the seat does not invent a state
@@ -145,6 +153,24 @@ struct FullScreenTransferTests {
         _ = try await seat.adopt(window, platform: AppKitPlatform())
         #expect(placing.fullScreenRequests.isEmpty)
         #expect(seat.adoptedWindows[0].wasFullScreen == false)
+        #expect(seat.session[window.windowNumber]?.operationalSize == window.frame.size)
+    }
+
+    @Test("an unreadable fullscreen attribute does not admit an unrequested size change")
+    func anUnreadableAttributeDoesNotAuthorizeResizing() async throws {
+        let sensing = FakeSensing()
+        let placing = FakePlacing()
+        let window = Self.fullScreenWindow(placing, sensing)
+        placing.fullScreenStates[window.windowNumber] = .unreadable(.attributeUnsupported)
+        let seat = Self.seat(sensing, placing)
+
+        await #expect(throws: DisplayFailure.self) {
+            try await seat.adopt(window, platform: AppKitPlatform())
+        }
+
+        #expect(placing.fullScreenRequests.isEmpty)
+        #expect(seat.adoptedWindows.isEmpty)
+        #expect(seat.lastAdoptionFailure != nil)
     }
 
     // MARK: The Space gate

@@ -17,6 +17,61 @@ import VirtualScreens
 @Suite("Window adoption rollback")
 @MainActor
 struct WindowAdoptionTests {
+    @Test("a full-size intermediate stage position does not complete adoption")
+    func intermediateStagePosition() async throws {
+        let sensing  = FakeSensing()
+        let placing  = FakePlacing()
+        let original = FakeGeometry.userSeatWindow
+        let settled  = FakeGeometry.adoptedWindow
+        let thumbnail = original.replacingFrame(
+            CGRect(x: 16, y: 174, width: 39, height: 105)
+        )
+        let intermediate = settled.replacingFrame(
+            settled.frame.offsetBy(dx: -218, dy: -124)
+        )
+        var stagedReadings = 0
+        sensing.windowGeometryOverride = { number in
+            guard number == original.windowNumber else { return nil }
+            guard placing.stages > 0 else { return thumbnail }
+            stagedReadings += 1
+            return stagedReadings <= 6 ? intermediate : settled
+        }
+        let seat = makeSeat(sensing: sensing, placing: placing)
+        let adopted = try await seat.adopt(original)
+        #expect(adopted.reference.frame == settled.frame)
+        #expect(placing.stages == 1)
+        #expect(placing.moves.count == 1)
+    }
+
+    @Test("a staged window that never reaches its requested position is rolled back")
+    func misplacedStageRollsBack() async throws {
+        let sensing  = FakeSensing()
+        let placing  = FakePlacing()
+        let original = FakeGeometry.userSeatWindow
+        let misplaced = FakeGeometry.adoptedWindow.replacingFrame(
+            FakeGeometry.adoptedWindow.frame.offsetBy(dx: -218, dy: -124)
+        )
+        let thumbnail = original.replacingFrame(
+            CGRect(x: 16, y: 174, width: 39, height: 105)
+        )
+        var returnedHome = false
+        placing.onMove = { origin in returnedHome = origin == original.frame.origin }
+        sensing.windowGeometryOverride = { number in
+            guard number == original.windowNumber else { return nil }
+            if returnedHome { return original }
+            return placing.stages == 0 ? thumbnail : misplaced
+        }
+        let seat = makeSeat(sensing: sensing, placing: placing)
+        await #expect {
+            try await seat.adopt(original)
+        } throws: { error in
+            guard case .placementNotConfirmed? = error as? DisplayFailure else { return false }
+            return true
+        }
+        #expect(seat.adoptedWindows.isEmpty)
+        #expect(placing.moves.last == original.frame.origin)
+    }
+
     @Test("a window stashed before adoption is staged before waiting for placement")
     func stashedBeforeAdoption() async throws {
         let sensing = FakeSensing()

@@ -354,6 +354,32 @@ struct AppWindowFollowTests {
         #expect(seat.state == .ready)
     }
 
+    @Test("a stable thumbnail after staging does not confirm adoption")
+    func aThumbnailAfterStagingRemainsUnconfirmed() async throws {
+        let sensing = FakeSensing()
+        let placing = FakePlacing()
+        let (seat, first) = try await Self.followingSeat(sensing: sensing, placing: placing)
+        let initial = CGRect(x: FakeGeometry.virtual.minX + 300, y: FakeGeometry.virtual.minY + 200,
+                             width: 700, height: 500)
+        let thumbnail = CGRect(origin: initial.origin, size: CGSize(width: 140, height: 100))
+        let born = Self.offer(Self.secondWindowNumber, to: sensing, placing, frame: initial)
+        let stagesBefore = placing.stages
+        sensing.windowGeometryOverride = { number in
+            if number == born.windowNumber, seat.state == .starting {
+                return born.replacingFrame(thumbnail)
+            }
+            return number == FakeGeometry.windowNumber ? sensing.geometry : sensing.additionalWindows[number]
+        }
+        defer { sensing.windowGeometryOverride = nil }
+
+        await Self.pass(seat)
+
+        #expect(placing.stages == stagesBefore + 1)
+        #expect(seat.adoptedWindows.map(\.id) == [first.id])
+        #expect(seat.session[born.windowNumber] == nil)
+        #expect(seat.currentTarget?.id == first.id)
+    }
+
     @Test("observation settles an outside popup through the owned transfer path")
     func observationSettlesOutsidePopup() async throws {
 

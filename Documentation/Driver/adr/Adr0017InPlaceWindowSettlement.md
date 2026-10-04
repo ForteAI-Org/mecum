@@ -15,7 +15,11 @@ within the existing placement tolerance. Missing or changed identity remains
 a refusal. There is no wider tolerance or fixed Photoshop dimension.
 
 A smaller server frame whose AX body is still full size remains a thumbnail
-and takes the existing staging path. An adoption that moves a physical window
+and takes the existing staging path. A stage request does not establish that
+the thumbnail became the full window: confirmation still requires the fresh
+server size to agree with the body on two successive rounds. A stable
+thumbnail after staging exhausts the same confirmation budget and rolls back.
+An adoption that moves a physical window
 retains its original frame and resize obligation. Explicit restoration frames
 and fullscreen provenance also retain their existing obligations.
 

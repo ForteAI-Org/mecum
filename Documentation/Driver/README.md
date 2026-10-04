@@ -201,6 +201,13 @@ watchdog can combine the fence's latched signals with the display's geometry.
 
 ## Selection while containing preexisting windows
 
+When adoption begins from an attested thumbnail, or confirmation needs
+staging, two agreeing full-size readings must also reach the requested
+position. Stage Manager can otherwise pause at an intermediate position and
+move again after adoption. The existing deadline and rollback apply; ordinary
+full-size and in-place windows retain their confirmation rules. See
+[ADR 0025](adr/Adr0025ConfirmStashedPlacementPosition.md).
+
 Moving another already-open window into the seat can change the application's
 front order. The identity currently placed by an adoption transaction is
 excluded from application recency, while its geometry, visibility and modal
