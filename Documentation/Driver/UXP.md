@@ -422,6 +422,29 @@ remain unqualified. A passing modal or view-control row cannot close this failur
 
 ## Inventory and qualification
 
+The signed Mecum application flow on 3 October 2026 reached Photoshop 27.10.0's
+New Layer and New Document dialogs through the app's tool path. It exposed
+additional integration limits: replacing the layer name left existing text,
+opaque fields prevented exact Unicode readback, and background Undo/Redo menu
+items remained disabled after the modal. The created test layer was not
+removed by that flow. Its claimed New Document cancellation was incorrect:
+independent WindowServer title and Window menu inspection confirm an additional
+`Untitled-1` alongside the owned seed. Scene metadata now reads the current
+title of the exact captured window instead of its adoption title; that corrects
+the stale document evidence, not the modal action itself. The
+[application flow checks](ApplicationFlowChecks.md) retain these failures.
+They do not extend the direct Driver rows or qualify the complete workflow.
+
+A later offscreen repeat found two discovery defects: the broker admitted only
+onscreen/fullscreen candidates, and the `windows` tool read a separate onscreen
+inventory. Nonminimized standard AX windows now have a native fallback with
+matching server identity and attested body geometry, and the tool delegates to
+that discovery. The rebuilt app lists
+the same owned Photoshop window without manual foreground activation. Its
+separate adoption succeeded, but the first New Layer shortcut was refused with
+`geometryChanged` before delivery; no modal appeared. Canvas controls were not
+unambiguously named, so the subsequent editing sequence was not attempted.
+
 AXWindows requests Window IDs; WindowServer independently attests geometry and
 owner lifetime. Refused facilities, unavailable lists, malformed geometry and
 failed attestation retain their cause. None becomes successful absence. Partial

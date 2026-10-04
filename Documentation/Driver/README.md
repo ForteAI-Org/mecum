@@ -33,6 +33,10 @@ The [Qt driver guide](Qt.md) records the command policy and the live
 qualification of DaVinci Resolve's Project Manager, including the commands
 whose target-side effect still needs a witness.
 
+The [Mecum application flow checks](ApplicationFlowChecks.md) record effects,
+failures and corrections from the full app path across AppKit, UXP, Qt,
+Chromium, Electron and an unqualified hybrid CEF candidate.
+
 There is no umbrella module: every consumer writes the imports it uses, so the
 boundaries are visible at the top of the file rather than hidden behind one
 name. Link the `MecumDriver` library product to use these modules, including
