@@ -119,6 +119,14 @@ preserved it. Field selection and exact readback still decide the result; no
 unconfirmed edit is automatically replayed. See the
 [application flow checks](../Driver/ApplicationFlowChecks.md).
 
+`insert_text` exposes the same single payload through the CLI chat and Mecum
+app tools, at a focus and selection the caller has already established. It
+sends no focusing click or selection keys, which preserves a modal's initially
+selected name. `expected_value` is the complete resulting value; only matching
+native focused-field readback verifies it. An opaque field remains
+`acted_unverified`, even when OCR looks right. Observe before more input and
+verify any committed effect independently; never replay an uncertain insertion.
+
 For clicks, a native interactive control wins over a same-name plain-text caption. In Pro Tools'
 New Paths dialog, `act "Pro Tools" "Create" --window "New Paths"` therefore chooses the Create
 button rather than the word at the start of the sentence. Two matching native controls remain

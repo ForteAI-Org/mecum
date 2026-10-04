@@ -196,6 +196,8 @@ nonisolated enum TranscriptWording {
             return replace
                 ? forms("Typed", "type", "Typing", "“\(label(text))” into \(label(field))")
                 : forms("Added", "add", "Adding", "“\(label(text))” to \(label(field))")
+        case .insertText(let text):
+            return forms("Inserted", "insert", "Inserting", "“\(label(text))” into the focused field")
         case .key(let name, let modifiers, let count):
             let key   = keyName(
                 name,

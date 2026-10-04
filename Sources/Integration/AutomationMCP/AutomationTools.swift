@@ -42,6 +42,10 @@ public final class AutomationTools {
     user to fix macOS access; do not retry in another terminal or foreground route.
     The act verbs are click, double_click, triple_click, right_click and set_toggle; select picks a dropdown item.
     type_text clicks a field and types into it, replacing what it holds unless replace is false.
+    insert_text preserves the current focus and selection and inserts one payload. Use it only after
+    establishing that focus, such as a dialog's initially selected name. It does not select all or append
+    by itself. expected_value is the complete resulting field value, not just the inserted text.
+    An opaque field remains acted_unverified: observe, never replay; verify its committed effect separately.
     press_key presses return, tab, escape, space, delete, an arrow, a letter, a digit, / or ~, with optional modifiers.
     scroll turns the wheel up or down over a target or the window; there is no horizontal scroll.
     drag goes from one target to another or by an offset; context_menu right-clicks a target and picks an item.
@@ -85,6 +89,7 @@ public final class AutomationTools {
                                          "maximum": .number(Self.maximumOffset)])
         let inputs: [String: [String: JSONValue]] = [
             "type_text": ["target": text, "text": text, "section": text, "replace": .object(["type": .string("boolean")])],
+            "insert_text": ["text": text, "expected_value": text],
             "press_key": ["key": choice(KeyChord.Name.all),
                           "modifiers": .object(["type": .string("array"), "uniqueItems": .bool(true),
                                                 "items": choice(["cmd", "shift", "opt", "ctrl"])]),
@@ -95,7 +100,8 @@ public final class AutomationTools {
             "context_menu": ["target": text, "item": text, "section": text]
         ]
         let required: [String: [String]] = [
-            "type_text": ["target", "text"], "press_key": ["key"], "scroll": ["direction"], "drag": ["from"],
+            "type_text": ["target", "text"], "insert_text": ["text"], "press_key": ["key"],
+            "scroll": ["direction"], "drag": ["from"],
             "context_menu": ["target", "item"]
         ]
         func tool(_ name: String, _ description: String, _ properties: [String: JSONValue],
@@ -137,6 +143,10 @@ public final class AutomationTools {
             input("type_text", "Resolve a current field label or element ID, click it and type text into it. "
                   + "replace (default true) selects what the field holds first; false adds the text at its end. "
                   + "Verified by reading the field's value back. On acted_unverified observe; never retype blindly."),
+            input("insert_text", "Insert one intact text payload at the already established focus and selection. "
+                  + "Does not click, move the caret or select text. Optional expected_value is the complete resulting "
+                  + "field value, verified only by native focused-field readback. Opaque fields remain unverified; "
+                  + "observe and verify the committed effect separately. Never replay blindly."),
             input("press_key", "Press one key into the window, optionally with modifiers held and repeated count "
                   + "times. Command-Q and Command-W are refused. A shortcut a menu resolves (Command-C, Command-V, "
                   + "Command-A, Command-Z) does nothing on this background window: use menu, a control or context_menu. "
@@ -148,7 +158,7 @@ public final class AutomationTools {
             input("context_menu", "Right-click a target and choose the item titled item in the contextual menu it "
                   + "opens, by keyboard. Use the title as the app draws it, in its language. This is how Copy and "
                   + "Paste are reached. Destructive items are refused."),
-            tool("batch", "Run up to 20 steps of act, select, type_text, press_key, scroll, drag or context_menu in "
+            tool("batch", "Run up to 20 steps of act, select, type_text, insert_text, press_key, scroll, drag or context_menu in "
                  + "the current Seat. Stop on the first unsuccessful outcome. "
                  + "Earlier effects remain; no rollback or replay. Each step observes again.",
                  session.merging(["steps": .object(["type": .string("array"), "minItems": .number(1),
@@ -239,7 +249,7 @@ public final class AutomationTools {
             value = outcome(try await session.menu(path: string(arguments, "path")))
         case "press":
             value = outcome(try await session.press(button: string(arguments, "button")))
-        case "act", "select", "type_text", "press_key", "scroll", "drag", "context_menu":
+        case "act", "select", "type_text", "insert_text", "press_key", "scroll", "drag", "context_menu":
             let step = try Step(name, arguments)
             value = outcome(try await perform(step))
         case "batch":
@@ -354,7 +364,7 @@ public final class AutomationTools {
     }
 
     /// The tools that deliver an input through the engine, in the order they are listed.
-    private static let inputTools = ["type_text", "press_key", "scroll", "drag", "context_menu"]
+    private static let inputTools = ["type_text", "insert_text", "press_key", "scroll", "drag", "context_menu"]
 
     /// The largest drag offset, in points, on either axis: more than any display is wide.
     private static let maximumOffset = 5000.0
@@ -391,7 +401,7 @@ public final class AutomationTools {
         init(_ name: String, _ args: JSONValue) throws {
             guard (["act", "select"] + inputTools).contains(name),
                   let definition = AutomationTools.definitions.first(where: { $0["name"].string == name }) else {
-                throw AutomationFailure("batch supports act, select, type_text, press_key, scroll, drag and "
+                throw AutomationFailure("batch supports act, select, type_text, insert_text, press_key, scroll, drag and "
                                         + "context_menu only.")
             }
             let permitted = Set(definition["inputSchema"]["properties"].object?.keys.map { $0 } ?? [])
@@ -410,6 +420,11 @@ public final class AutomationTools {
                 }
                 self = .input(.typeText(text, into: try requiredString(args, "target"),
                                         replacing: args["replace"].bool ?? true), section: section)
+            case "insert_text":
+                guard let text = args["text"].string, !text.isEmpty else {
+                    throw AutomationFailure("text must be a nonempty string.")
+                }
+                self = .input(.insertText(text, expecting: try optionalString(args, "expected_value")), section: nil)
             case "press_key":
                 guard let key = KeyChord.Name(try requiredString(args, "key")) else {
                     throw AutomationFailure("key must be return, tab, escape, space, delete, an arrow, a letter, a digit, / or ~.")

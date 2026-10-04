@@ -80,15 +80,17 @@ A provider process disconnect between turns does not release the Seat.
 
 ## Tools and results
 
-`status`, `windows`, `open_session`, `observe`, `act`, `select`,
-`batch`, `close_session`.
+`status`, `windows`, `apps`, `open_session`, `observe`, `act`, `select`,
+`type_text`, `insert_text`, `press_key`, `scroll`, `drag`, `context_menu`,
+`menu`, `press`, `batch`, `close_session`. CLI chat and the signed Mecum app
+share these definitions and their validation.
 
 Action tools require the ephemeral session ID returned by open_session.
 Observations carry a revision, capture report time, and the current text scene.
 The existing engine observes afresh before acting; saved observations are not
 coordinates or authority for later input.
 
-Batch validates all steps before starting, executes at most 20 act/select steps,
+Batch validates all steps before starting, executes at most 20 act/select/input steps,
 and stops on the first failed/ambiguous/unverified result. Earlier effects remain.
 A verified toggle already in its desired state may continue. No action is
 automatically replayed after a provider failure.
@@ -98,9 +100,14 @@ tracking. Dropdown selection uses the same native/custom dropdown selector as
 the terminal command. Tool results preserve the Engine's outcome vocabulary,
 including honest_miss, ambiguous and acted_unverified.
 
-Typing, scrolling, keyboard shortcuts and menu-bar navigation are not yet in this
-chat surface. There is no foreground fallback. Multi-app concurrent control,
-remote ChatGPT connections, and a shipping application host are separate work.
+`type_text` resolves and focuses a named field. `insert_text` keeps a focus and
+selection already established, including a dialog's initially selected name,
+and inserts one intact payload. Only exact native focused-field readback against
+an explicit complete `expected_value` verifies that insertion. An opaque field
+remains unverified; batch stops before a subsequent Return. A separately
+authorized commit must be followed by verification of its actual effect.
+There is no foreground fallback. Multi-app concurrent control and remote
+ChatGPT connections remain separate work.
 
 ## Permissions and provider access
 

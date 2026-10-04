@@ -236,6 +236,77 @@ struct InputDeliveryTests {
         #expect(actuator.gestures.isEmpty)
     }
 
+    // MARK: insert_text
+
+    @Test("inserting preserves focus and selection, and exact native readback verifies the complete value")
+    func insertionKeepsTheExistingSelection() async {
+        let text = "Mecum-à-中-🙂\nSeconda\r\nTerza"
+        let actuator = RecordingActuator()
+        let controls = FakeControls(); controls.focused = text
+        let activation = FakeActivation(frontmost: 9999)
+        let result = await engine(
+            scenes: ScriptedScenes([scene([field(value: "Layer 1")])]), actuator: actuator,
+            controls: controls, activation: activation
+        ).deliver(request(.insertText(text, expecting: text)))
+        #expect(result.kind == .foundActed, Comment(rawValue: result.message))
+        #expect(actuator.gestures == [.insert(text)])
+        #expect(actuator.confirmations == [.observed])
+        #expect(activation.activated.isEmpty)
+    }
+
+    @Test("an unreadable focused value or a missing expectation cannot verify insertion",
+          arguments: [nil, "different", "Mecum"] as [String?])
+    func insertionNeedsNativeReadback(value: String?) async {
+        let actuator = RecordingActuator()
+        let controls = FakeControls(); controls.focused = value
+        let result = await engine(
+            scenes: ScriptedScenes([scene([field(value: "Mecum")])]), actuator: actuator, controls: controls
+        ).deliver(request(.insertText("Mecum", expecting: value == "Mecum" ? nil : "Mecum")))
+        #expect(result.kind == .actedUnverified)
+        #expect(actuator.gestures == [.insert("Mecum")])
+        #expect(actuator.confirmations == [.unknown])
+        #expect(result.message.contains("never insert again blindly"))
+    }
+
+    @Test("a complete value expectation can verify insertion into a partially selected field")
+    func insertionVerifiesTheWholeValue() async {
+        let actuator = RecordingActuator()
+        let controls = FakeControls(); controls.focused = "prefix Mecum suffix"
+        let result = await engine(
+            scenes: ScriptedScenes([scene([])]), actuator: actuator, controls: controls
+        ).deliver(request(.insertText("Mecum", expecting: "prefix Mecum suffix")))
+        #expect(result.kind == .foundActed)
+        #expect(actuator.gestures == [.insert("Mecum")])
+    }
+
+    @Test("dry run, empty text and missing initial scene never insert")
+    func insertionRequiresAnObservedSession() async {
+        let actuator = RecordingActuator()
+        let rehearsal = await engine(scenes: ScriptedScenes([scene([])]), actuator: actuator)
+            .deliver(request(.insertText("Mecum"), dryRun: true))
+        #expect(rehearsal.kind == .dryRun)
+        let empty = await engine(scenes: ScriptedScenes([scene([])]), actuator: actuator)
+            .deliver(request(.insertText("")))
+        #expect(empty.kind == .refused)
+        let missing = await engine(scenes: ScriptedScenes([]), actuator: actuator)
+            .deliver(request(.insertText("Mecum")))
+        #expect(missing.kind == .honestMiss)
+        #expect(actuator.gestures.isEmpty)
+        #expect(actuator.confirmations.isEmpty)
+    }
+
+    @Test("failed insertion delivery stays uncertain without fallback or replay")
+    func insertionDeliveryFailureIsNotRetried() async {
+        let actuator = RecordingActuator()
+        actuator.failure = CocoaError(.userCancelled)
+        let result = await engine(scenes: ScriptedScenes([scene([])]), actuator: actuator)
+            .deliver(request(.insertText("Mecum", expecting: "Mecum")))
+        #expect(result.kind == .actedUnverified)
+        #expect(result.message.contains("delivery failed"))
+        #expect(actuator.gestures.isEmpty)
+        #expect(actuator.confirmations == [.unknown])
+    }
+
     // MARK: press_key
 
     @Test("Command-Q and Command-W are refused before any event, even with destructive actions allowed")

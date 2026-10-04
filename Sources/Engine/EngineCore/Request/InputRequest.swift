@@ -13,11 +13,14 @@ import Foundation
 /// judged by perceiving again.
 public struct InputRequest: Sendable, Equatable {
 
-    /// What the request delivers. Each target is an element id or a label.
+    /// What the request delivers. Named targets are element ids or labels.
     public enum Input: Sendable, Equatable {
         /// Clicks the field `into` to focus it and types `text`: over everything it holds when
         /// `replacing`, else after it.
         case typeText(String, into: String, replacing: Bool)
+        /// Inserts one payload at the current focus and selection without clicking or selecting.
+        /// Only a readable focused value matching `expecting` can verify the result.
+        case insertText(String, expecting: String? = nil)
         /// Presses a key `times` times into the window, the chord's modifiers held around each press.
         case pressKey(KeyChord, times: Int)
         /// Turns the wheel by `lines`, positive up, over a target, or over the window's centre when nil.

@@ -88,6 +88,8 @@ struct ToolLineTests {
             "→ type_text {\"session\":\"s\",\"target\":\"Notes\",\"text\":\" more\",\"replace\":false}",
             "← type_text {\"status\":\"found_acted\"}",
             "→ press_key {\"session\":\"s\",\"key\":\"return\"}",
+            "→ insert_text {\"session\":\"s\",\"text\":\"Demo\"}",
+            "← insert_text {\"status\":\"found_acted\"}",
             "← press_key {\"status\":\"found_acted\"}",
             "→ press_key {\"session\":\"s\",\"key\":\"n\",\"modifiers\":[\"cmd\",\"shift\"]}",
             "← press_key {\"status\":\"found_acted\"}",
@@ -105,7 +107,8 @@ struct ToolLineTests {
             "← act {\"status\":\"found_acted\"}",
         ]
         #expect(Self.done(lines) == [
-            "Typed “Demo” into Project Name", "Added “ more” to Notes", "Pressed Return", "Pressed ⇧⌘N",
+            "Typed “Demo” into Project Name", "Added “ more” to Notes", "Pressed Return",
+            "Inserted “Demo” into the focused field", "Pressed ⇧⌘N",
             "Pressed ↓ 3 times", "Scrolled down in Media Pool", "Scrolled up in the window", "Dragged Clip to Timeline",
             "Selected Select All from Search’s menu", "Triple-clicked Name",
         ])
@@ -118,6 +121,8 @@ struct ToolLineTests {
             "← press_key {\"status\":\"acted_unverified\",\"message\":\"the window did NOT change\"}",
             "→ type_text {\"session\":\"s\",\"target\":\"Name\",\"text\":\"Demo\"}",
             "← type_text {\"status\":\"refused\",\"message\":\"no field\"}",
+            "→ insert_text {\"session\":\"s\",\"text\":\"Demo\"}",
+            "← insert_text {\"status\":\"acted_unverified\",\"message\":\"value unreadable\"}",
             "→ context_menu {\"session\":\"s\",\"target\":\"Row\",\"item\":\"Copy\"}",
         ]
         let steps = ToolStep.steps(from: lines)
@@ -125,6 +130,7 @@ struct ToolLineTests {
         #expect(TranscriptWording.toolSteps(steps, ending: .completed) == [
             "Tried to press Tab",
             "Tried to type “Demo” into Name",
+            "Tried to insert “Demo” into the focused field",
             "Selecting Copy from Row’s menu, did not finish",
         ])
         let drag = ToolStep.steps(from: ["→ drag {\"session\":\"s\",\"from\":\"Clip\",\"dx\":40}"])

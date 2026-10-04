@@ -206,6 +206,8 @@ public struct ActionEngine: Sendable {
         switch request.input {
             case .typeText(let text, let field, let replacing):
                 return await typeText(text, into: field, replacing: replacing, request, perceived: perceived)
+            case .insertText(let text, let expectedValue):
+                return await insertText(text, expecting: expectedValue, request)
             case .pressKey(let chord, let times):
                 return await pressKey(chord, times: times, request, perceived: perceived)
             case .scroll(let lines, let target):
@@ -516,6 +518,35 @@ public struct ActionEngine: Sendable {
     /// Said after a Command chord whose effect was not seen on a background window.
     static let menuShortcutNote = " A shortcut a menu resolves (Command-C, Command-V, Command-A, Command-Z…) "
         + "does nothing on this background window: use a visible control or the target's contextual menu."
+
+    /// Preserves a caller-established focus and selection. Pixel text alone cannot verify the
+    /// resulting value, and an uncertain insertion must never be replayed automatically.
+    private func insertText(
+        _ text        : String,
+        expecting     : String?,
+        _ request     : InputRequest
+    ) async -> ActOutcome {
+        guard !text.isEmpty else { return ActOutcome(.refused, "insert_text needs a nonempty text") }
+        if request.isDryRun {
+            return ActOutcome(.dryRun, "would insert \(text.count) characters at the current focus and selection")
+        }
+        let pid = request.processID
+        if let error = await send([.insert(text)], to: pid) {
+            return ActOutcome(.actedUnverified, "inserting text: delivery failed: \(error); observe before any retry")
+        }
+        await pause(timing.clickSettle)
+        let after = await perceive(pid)?.scene
+        let value = await dependencies.controls?.focusedFieldValue(in: pid)
+        let verified = expecting != nil && value != nil && value == expecting
+        await dependencies.actuator.confirm(verified ? .observed : .unknown, in: pid)
+        if verified, let value {
+            return ActOutcome(.foundActed, "inserted text: the focused field reads '\(Self.shortened(value))'",
+                              scene: after)
+        }
+        return ActOutcome(.actedUnverified,
+            "inserted text at the current focus and selection, but the exact resulting value is unconfirmed; "
+            + "observe its effect before further input and never insert again blindly", scene: after)
+    }
 
     private func typeText(
         _ text     : String,

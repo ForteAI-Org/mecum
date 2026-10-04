@@ -163,7 +163,8 @@ struct AutomationToolsTests {
     func inputToolsAreListedWithTheirSchemas() throws {
         let tools = Dictionary(uniqueKeysWithValues: AutomationTools.definitions.map { ($0["name"].string ?? "", $0) })
         let required: [String: [String]] = [
-            "type_text": ["session", "target", "text"], "press_key": ["session", "key"],
+            "type_text": ["session", "target", "text"], "insert_text": ["session", "text"],
+            "press_key": ["session", "key"],
             "scroll": ["session", "direction"], "drag": ["session", "from"],
             "context_menu": ["session", "target", "item"], "menu": ["session", "path"], "press": ["session", "button"]
         ]
@@ -182,11 +183,30 @@ struct AutomationToolsTests {
         #expect(verbs.contains("triple_click"))
         let steps = tools["batch"]?["inputSchema"]["properties"]["steps"]["items"]["oneOf"].array ?? []
         #expect(steps.compactMap { $0["properties"]["operation"]["const"].string }
-            == ["act", "select", "type_text", "press_key", "scroll", "drag", "context_menu"])
+            == ["act", "select", "type_text", "insert_text", "press_key", "scroll", "drag", "context_menu"])
         #expect(!AutomationTools.instructions.contains("Typing, scrolling, keyboard shortcuts"))
         #expect(AutomationTools.instructions.contains("A file panel that just opened has no field focused yet"))
         #expect(AutomationTools.instructions.contains("use the browser apps marks as the default"))
         #expect(AutomationTools.instructions.contains("its other visible windows move to the seat's display too"))
+    }
+
+    @Test
+    func insertionPreservesTheExistingFocusWithoutATarget() async throws {
+        let session = SyntheticSession()
+        let tools = AutomationTools(session: session)
+        let id = try #require(session.id).uuidString
+        let result = try await tools.call("insert_text", .object([
+            "session": .string(id), "text": .string("Mecum-à-中-🙂")
+        ]))
+        #expect(result["structuredContent"]["status"].string == "found_acted")
+        #expect(session.inputs.count == 1)
+        #expect(session.inputs == [.insertText("Mecum-à-中-🙂")])
+        #expect(session.sections == [nil])
+        _ = try await tools.call("insert_text", .object([
+            "session": .string(id), "text": .string("Mecum"),
+            "expected_value": .string("prefix Mecum suffix")
+        ]))
+        #expect(session.inputs.last == .insertText("Mecum", expecting: "prefix Mecum suffix"))
     }
 
     @Test
@@ -229,6 +249,10 @@ struct AutomationToolsTests {
         let tools = AutomationTools(session: session)
         let id = JSONValue.string(try #require(session.id).uuidString)
         let malformed: [(String, [String: JSONValue])] = [
+            ("insert_text", ["text": .string("")]),
+            ("insert_text", ["text": .string("x"), "target": .string("Name")]),
+            ("insert_text", ["text": .string("x"), "expected_value": .bool(true)]),
+            ("insert_text", ["text": .string("x"), "expected_value": .string("")]),
             ("press_key", ["key": .string("f13")]),
             ("press_key", ["key": .string("a"), "modifiers": .array([.string("hyper")])]),
             ("press_key", ["key": .string("a"), "count": .number(21)]),
@@ -246,6 +270,22 @@ struct AutomationToolsTests {
             } catch {}
         }
         #expect(session.calls.isEmpty)
+    }
+
+    @Test
+    func batchStopsBeforeReturnWhenInsertionIsUnverified() async throws {
+        let session = SyntheticSession()
+        session.results = [.actedUnverified, .foundActed]
+        let result = try await AutomationTools(session: session).call("batch", .object([
+            "session": .string(try #require(session.id).uuidString), "steps": .array([
+                .object(["operation": .string("insert_text"), "text": .string("Mecum")]),
+                .object(["operation": .string("press_key"), "key": .string("return")])
+            ])
+        ]))
+        #expect(session.inputs == [.insertText("Mecum")])
+        #expect(result["structuredContent"]["status"].string == "stopped")
+        #expect(result["structuredContent"]["attemptedSteps"] == .number(1))
+        #expect(result["structuredContent"]["verifiedSteps"] == .number(0))
     }
 
     @Test

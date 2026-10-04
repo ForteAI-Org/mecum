@@ -39,6 +39,9 @@ nonisolated struct ToolStep: Sendable, Hashable {
         /// Typed `text` into `field`, over what it held unless `replace` is false.
         case typeText(text: String, field: String, replace: Bool)
 
+        /// Inserted `text` at the existing focus and selection without refocusing.
+        case insertText(text: String)
+
         /// Pressed a key or a shortcut, `count` times.
         case key(name: String, modifiers: [String], count: Int)
 
@@ -109,6 +112,7 @@ nonisolated struct ToolStep: Sendable, Hashable {
         "act",
         "select",
         "type_text",
+        "insert_text",
         "press_key",
         "scroll",
         "drag",
@@ -299,6 +303,9 @@ nonisolated struct ToolStep: Sendable, Hashable {
                 field  : field,
                 replace: arguments["replace"] as? Bool ?? true
             )
+        case "insert_text":
+            guard let typed = text("text") else { return .other(name: name) }
+            return .insertText(text: typed)
         case "press_key":
             guard let key = text("key") else { return .other(name: name) }
             return .key(
