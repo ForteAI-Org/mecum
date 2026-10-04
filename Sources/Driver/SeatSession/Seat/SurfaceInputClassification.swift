@@ -44,9 +44,18 @@ nonisolated enum SurfaceInputClassification: Sendable, Equatable {
     /// family the seat already drives that application with applies.
     case drivenApplication
 
-    /// A modal of the driven application read as one accessibility leaf, which
-    /// is where a UXP application takes prepared keys.
+    /// A modal of the driven application read as one accessibility leaf.
+    /// A UXP leaf needs its own key window, without application activation.
     case leafSurfaceOfDrivenApplication
+
+    /// A UXP modal whose own complete subtree qualified its destination while
+    /// AX global focus named the blocked document or was absent. Make only
+    /// the attested modal key, without application activation.
+    case unfocusedModalOfDrivenApplication
+
+    /// A selected UXP document under a positively inert focus proxy requires
+    /// only its attested main window to become key.
+    case mainWindowUnderFocusProxyOfDrivenApplication
 
     /// The recipient is another process's window drawn inside the surface: the
     /// out of process panel, whose measured recipe prepares nothing.
@@ -82,6 +91,10 @@ nonisolated enum SurfaceInputClassification: Sendable, Equatable {
                 return .remotePanelContent
             case .logicalSurface where endpoint.evidence == .leafSurface:
                 return .leafSurfaceOfDrivenApplication
+            case .logicalSurface where endpoint.evidence == .unfocusedModalSurface:
+                return .unfocusedModalOfDrivenApplication
+            case .logicalSurface where endpoint.evidence == .mainWindowUnderFocusProxy:
+                return .mainWindowUnderFocusProxyOfDrivenApplication
             case .logicalSurface,
                  .remoteContent where endpoint.identity.process == endpoint.logicalSurface.process:
                 return .drivenApplication
@@ -100,16 +113,26 @@ nonisolated enum SurfaceInputClassification: Sendable, Equatable {
     func platform(
         for command        : InputCommand,
         ofDrivenApplication family: (any InputPlatform)?,
-        host               : WindowReference? = nil
+        host               : WindowReference? = nil,
+        recipient          : WindowReference? = nil,
+        isModalSurface     : Bool = false
     ) -> (any InputPlatform)? {
 
         switch self {
             case .drivenApplication:
+                if isModalSurface, let uxp = family as? UXPPlatform {
+                    return uxp.withoutDocumentPreparation
+                }
                 return family
 
             case .leafSurfaceOfDrivenApplication:
-                // Measured on a UXP application's leaf modal, and nowhere else.
-                return (family as? UXPPlatform)?.preparingKeys ?? family
+                guard let uxp = family as? UXPPlatform else { return family }
+                guard let recipient else { return nil }
+                return uxp.primingKeys(in: recipient)
+
+            case .unfocusedModalOfDrivenApplication, .mainWindowUnderFocusProxyOfDrivenApplication:
+                guard let recipient else { return nil }
+                return (family as? UXPPlatform)?.primingKeys(in: recipient)
 
             case .remotePanelContent:
                 // `AppKitPlatform` prepares nothing for every Command in the

@@ -88,7 +88,9 @@ struct OrdinaryKeyboardContextTests {
         focusedWindow: Int? = 1,
         windowNodes: [Int: Int] = [Self.hostWindow: 1],
         clock: Clock = .init(),
-        inertLeafFacts: [Int: DialogEndpointResolver<Node>.InertWindowlessLeafFacts] = [:]
+        inertLeafFacts: [Int: DialogEndpointResolver<Node>.InertWindowlessLeafFacts] = [:],
+        mainWindow: Int? = nil,
+        proxyFacts: [Int: DialogEndpointResolver<Node>.FocusProxyFacts] = [:]
     ) -> DialogEndpointResolver<Node> {
         let control: () -> DialogEndpointResolver<Node>.FocusedControlReading = {
             switch focusedControl {
@@ -122,7 +124,9 @@ struct OrdinaryKeyboardContextTests {
             inertWindowlessLeaf: { node in
                 guard let facts = inertLeafFacts[node.identifier] else { return false }
                 return DialogEndpointResolver<Node>.inertWindowlessLeaf(facts)
-            }
+            },
+            mainWindow: { mainWindow.map(Node.init(identifier:)) },
+            inertFocusProxy: { proxyFacts[$0.identifier].map(DialogEndpointResolver<Node>.isInertFocusProxy) ?? false }
         )
     }
 
@@ -208,6 +212,52 @@ struct OrdinaryKeyboardContextTests {
         )
         #expect(resolver(tree: leaf, focusedControl: .absent)
             .leafSurfaceEndpoint(kind: .pointer, within: hosted, selectionGeneration: 3) == .failure(refused))
+    }
+
+    @Test("a complete own-window modal qualifies a destination to prepare despite stale global focus")
+    func completeModalSubtreeQualifiesPreparedKeys() throws {
+        let endpoint = try resolver(tree: sameWindowTree(), focusedControl: .node(99), focusedWindow: nil)
+            .modalSurfaceKeyboardContext(within: chain, selectionGeneration: 3).get()
+        #expect(endpoint.identity == surface)
+        #expect(endpoint.relation == .logicalSurface)
+        #expect(endpoint.kind == .keyboardContext)
+        #expect(endpoint.evidence == .unfocusedModalSurface)
+        #expect(endpoint.focusedNodeWindowNumber == nil, "no observed focus was invented")
+    }
+
+    @Test("modal key preparation refuses foreign, windowless, incomplete or leaf-only content")
+    func incompleteModalSubtreeRefusesPreparedKeys() {
+        var unreadable = sameWindowTree()
+        unreadable.children[2] = .unreadable
+        var windowless = sameWindowTree()
+        windowless.windows[2] = nil
+        var foreignWindow = sameWindowTree()
+        foreignWindow.windows[2] = Self.otherWindow
+        var foreignProcess = sameWindowTree()
+        foreignProcess.processes[2] = 902
+        var leaf = sameWindowTree()
+        leaf.children[1] = .leaf
+        let refusal = InputEndpointRefusal.subtreeUnreadable(surface: surface)
+        for tree in [unreadable, windowless, foreignWindow, foreignProcess, leaf] {
+            #expect(resolver(tree: tree, focusedControl: .absent)
+                .modalSurfaceKeyboardContext(within: chain, selectionGeneration: 1) == .failure(refusal))
+        }
+        let hosted = DialogEndpointResolver<Node>.SurfaceChain(
+            host: identity(window: Self.otherWindow, process: Self.applicationProcess, connection: 7_001),
+            surface: surface, surfaceFrame: Self.surfaceFrame
+        )
+        #expect(resolver(tree: sameWindowTree(), focusedControl: .absent)
+            .modalSurfaceKeyboardContext(within: hosted, selectionGeneration: 1) == .failure(refusal))
+        #expect(resolver(tree: sameWindowTree(), focusedControl: .absent, windowNodes: [:])
+            .modalSurfaceKeyboardContext(within: chain, selectionGeneration: 1) == .failure(refusal))
+    }
+
+    @Test("a modal subtree that outlives its reading budget refuses")
+    func modalSubtreeDeadlineRefusesPreparedKeys() {
+        let clock = Clock([1_000_000, 1_000_000, 400_000_000])
+        #expect(resolver(tree: sameWindowTree(), focusedControl: .absent, clock: clock)
+            .modalSurfaceKeyboardContext(within: chain, selectionGeneration: 1)
+            == .failure(.subtreeUnreadable(surface: surface)))
     }
 
     @Test("only an explicit absent control is eligible")
@@ -451,4 +501,57 @@ struct OrdinaryKeyboardContextTests {
         .ordinaryKeyboardContext(within: chain, selectionGeneration: 1)
         == .failure(.subtreeUnreadable(surface: surface)))
     }
+    @Test("a positively inert UXP focus proxy permits only the selected main window's complete subtree")
+    func inertFocusProxyQualifiesMainWindow() throws {
+        var tree = sameWindowTree()
+        tree.windows[99] = Self.otherWindow
+        tree.processes[99] = Self.applicationProcess
+        let facts = DialogEndpointResolver<Node>.FocusProxyFacts(
+            role: "AXLayoutArea", subrole: "AXUnknown", isModal: false, childCount: 0
+        )
+        let reader = resolver(tree: tree, focusedControl: .absent, focusedWindow: 99,
+                              mainWindow: 1, proxyFacts: [99: facts])
+        #expect(reader.ordinaryKeyboardContext(within: chain, selectionGeneration: 1)
+            == .failure(.subtreeUnreadable(surface: surface)))
+        let endpoint = try reader.mainWindowUnderFocusProxyKeyboardContext(within: chain, selectionGeneration: 1).get()
+        #expect(endpoint.identity == surface)
+        #expect(endpoint.evidence == .mainWindowUnderFocusProxy)
+        #expect(endpoint.focusedNodeWindowNumber == nil)
+    }
+
+    @Test("modal, populated and unreadable focus proxies never lend the main window a route")
+    func focusProxyRequiresEveryFact() {
+        let invalid: [DialogEndpointResolver<Node>.FocusProxyFacts] = [
+            .init(role: nil, subrole: "AXUnknown", isModal: false, childCount: 0),
+            .init(role: "AXWindow", subrole: "AXUnknown", isModal: false, childCount: 0),
+            .init(role: "AXLayoutArea", subrole: "AXDialog", isModal: false, childCount: 0),
+            .init(role: "AXLayoutArea", subrole: nil, isModal: false, childCount: 0),
+            .init(role: "AXLayoutArea", subrole: "AXUnknown", isModal: true, childCount: 0),
+            .init(role: "AXLayoutArea", subrole: "AXUnknown", isModal: nil, childCount: 0),
+            .init(role: "AXLayoutArea", subrole: "AXUnknown", isModal: false, childCount: nil),
+            .init(role: "AXLayoutArea", subrole: "AXUnknown", isModal: false, childCount: 1)
+        ]
+        for facts in invalid { #expect(!DialogEndpointResolver<Node>.isInertFocusProxy(facts)) }
+        let valid = DialogEndpointResolver<Node>.FocusProxyFacts(
+            role: "AXLayoutArea", subrole: "AXUnknown", isModal: false, childCount: 0
+        )
+        var tree = sameWindowTree()
+        tree.windows[99] = Self.otherWindow
+        tree.processes[99] = Self.applicationProcess
+        let refusal = InputEndpointRefusal.subtreeUnreadable(surface: surface)
+        for control in [Focus.unreadable, .node(2)] {
+            #expect(resolver(tree: tree, focusedControl: control, focusedWindow: 99, mainWindow: 1, proxyFacts: [99: valid])
+                .mainWindowUnderFocusProxyKeyboardContext(within: chain, selectionGeneration: 1) == .failure(refusal))
+        }
+        #expect(resolver(tree: tree, focusedControl: .absent, focusedWindow: 99, mainWindow: nil, proxyFacts: [99: valid])
+            .mainWindowUnderFocusProxyKeyboardContext(within: chain, selectionGeneration: 1) == .failure(refusal))
+        tree.windows[99] = nil
+        #expect(resolver(tree: tree, focusedControl: .absent, focusedWindow: 99, mainWindow: 1, proxyFacts: [99: valid])
+            .mainWindowUnderFocusProxyKeyboardContext(within: chain, selectionGeneration: 1) == .failure(refusal))
+        tree.windows[99] = Self.otherWindow
+        tree.processes[99] = 902
+        #expect(resolver(tree: tree, focusedControl: .absent, focusedWindow: 99, mainWindow: 1, proxyFacts: [99: valid])
+            .mainWindowUnderFocusProxyKeyboardContext(within: chain, selectionGeneration: 1) == .failure(refusal))
+    }
+
 }

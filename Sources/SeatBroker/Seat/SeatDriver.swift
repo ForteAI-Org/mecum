@@ -390,7 +390,7 @@ final class SeatDriver {
 
             var adopted = try await seat.adopt(
                 reference,
-                platform: choice.platform,
+                platform: choice.platform(for: running?.bundleIdentifier),
                 title   : target.title
             )
             // Recorded before staging: `stage` throws with the window already

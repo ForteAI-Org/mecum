@@ -110,6 +110,14 @@ struct EndpointDiscovery {
         .failure(.subtreeUnreadable(surface: chain.surface))
     }
 
+    /// Only selected UXP documents may use the main window beneath a
+    /// positively empty, nonmodal accessibility focus proxy.
+    var mainWindowUnderFocusProxyKeyboardContext: (
+        Int32, DialogEndpointResolver<AXUIElement>.SurfaceChain, UInt64
+    ) -> Result<ResolvedInputEndpoint, InputEndpointRefusal> = { _, chain, _ in
+        .failure(.subtreeUnreadable(surface: chain.surface))
+    }
+
     /// A modal proxy may expose focus only on its descendants. The complete
     /// scoped reading must identify one keyboard window before it can be used.
     var focusedDescendantKeyboardContext: (
@@ -123,6 +131,14 @@ struct EndpointDiscovery {
     var leafSurface: (
         Int32, InputEndpointKind, DialogEndpointResolver<AXUIElement>.SurfaceChain, UInt64
     ) -> Result<ResolvedInputEndpoint, InputEndpointRefusal> = { _, _, chain, _ in
+        .failure(.subtreeUnreadable(surface: chain.surface))
+    }
+
+    /// A top-level UXP modal's complete own-window subtree can qualify the
+    /// modal as a keyboard destination to prepare despite stale document focus.
+    var modalSurfaceKeyboardContext: (
+        Int32, DialogEndpointResolver<AXUIElement>.SurfaceChain, UInt64
+    ) -> Result<ResolvedInputEndpoint, InputEndpointRefusal> = { _, chain, _ in
         .failure(.subtreeUnreadable(surface: chain.surface))
     }
 
@@ -184,6 +200,11 @@ struct EndpointDiscovery {
                 .accessibility(assignedProcessID: processID)
                 .ordinaryKeyboardContext(within: chain, selectionGeneration: generation)
         },
+        mainWindowUnderFocusProxyKeyboardContext: { processID, chain, generation in
+            DialogEndpointResolver<AXUIElement>
+                .accessibility(assignedProcessID: processID)
+                .mainWindowUnderFocusProxyKeyboardContext(within: chain, selectionGeneration: generation)
+        },
         focusedDescendantKeyboardContext: { processID, chain, generation in
             DialogEndpointResolver<AXUIElement>
                 .accessibility(assignedProcessID: processID)
@@ -193,6 +214,11 @@ struct EndpointDiscovery {
             DialogEndpointResolver<AXUIElement>
                 .accessibility(assignedProcessID: processID)
                 .leafSurfaceEndpoint(kind: kind, within: chain, selectionGeneration: generation)
+        },
+        modalSurfaceKeyboardContext: { processID, chain, generation in
+            DialogEndpointResolver<AXUIElement>
+                .accessibility(assignedProcessID: processID)
+                .modalSurfaceKeyboardContext(within: chain, selectionGeneration: generation)
         },
         remoteContentKeyboardContext: { processID, chain, generation in
             DialogEndpointResolver<AXUIElement>
@@ -734,6 +760,22 @@ extension AgentSeat {
                     )
             }
         }
+        // Containment alone can admit a blocked document's Stage Manager
+        // thumbnail. Modal eligibility remains authoritative for its recipient.
+        if case .success(let endpoint) = outcome,
+           endpoint.identity != sheet,
+           selectionKit.modals(blocking: endpoint.identity).contains(sheet) {
+            outcome = .failure(.recipientModallyBlocked(windowNumber: endpoint.identity.windowNumber))
+        }
+        if command.firstMouseScreenPoint == nil,
+           !hasAttestedModalRelation,
+           record.platform is UXPPlatform,
+           canPrimeOwnUXPDocument(sheet),
+           case .failure(.subtreeUnreadable) = outcome {
+            outcome = endpoints.mainWindowUnderFocusProxyKeyboardContext(
+                instance.processID, chain, observation.selectionGeneration
+            )
+        }
         if !hasAttestedModalRelation,
            case .failure(.subtreeUnreadable) = outcome,
            case .success(let content) = endpoints.windowlessContent(
@@ -776,6 +818,30 @@ extension AgentSeat {
                                 accessibility leaf either: \(String(describing: leaf), privacy: .public)
                                 """)
                     }
+                }
+                let mayPrimeModal: Bool
+                switch refusal {
+                    case .notContainedInSurface(let number), .recipientModallyBlocked(let number):
+                        let blocked = session[number]?.window.reference.identity
+                        mayPrimeModal = blocked?.process == sheet.process && blocked != sheet
+                    case .subtreeUnreadable(let surface) where surface == sheet:
+                        mayPrimeModal = endpoints.focusedWindowNumber(instance.processID) == nil
+                    default:
+                        mayPrimeModal = false
+                }
+                if kind == .keyboardContext,
+                   record.platform is UXPPlatform,
+                   canPrimeOwnUXPDialog(sheet),
+                   mayPrimeModal,
+                   case .success(let modal) = endpoints.modalSurfaceKeyboardContext(
+                       instance.processID, chain, observation.selectionGeneration
+                   ) {
+                    AgentSeat.observationLog.info("""
+                        UXP dialog window \(sheet.windowNumber, privacy: .public) has a complete \
+                        own-window subtree despite absent or blocked AX focus; \
+                        make only the modal key for input
+                        """)
+                    return (modal, record.window)
                 }
                 AgentSeat.observationLog.info("""
                     the input endpoint discovery refused: \
@@ -840,6 +906,28 @@ extension AgentSeat {
         return remote
     }
 
+    /// Qualifies the key-window recipe for an application modal, or for an
+    /// independently selected dialog whose AX modality is false. A document,
+    /// a hosted sheet and an unselected sibling cannot borrow this proof.
+    private func canPrimeOwnUXPDialog(_ surface: WindowIdentity) -> Bool {
+        guard selectionKit.selected?.surface == surface else { return false }
+        if selectionKit.isApplicationModal(surface) { return true }
+        return selectionKit.core.facts[surface]?.role == .dialog
+            && selectionKit.attachedHost(of: surface) == nil
+            && selectionKit.namedModalHost(of: surface) == nil
+    }
+
+    /// Restricts the inert-focus-proxy recipe to the selected standalone,
+    /// unblocked document. A modal relation cannot borrow that proof.
+    private func canPrimeOwnUXPDocument(_ surface: WindowIdentity) -> Bool {
+        selectionKit.selected?.surface == surface
+            && selectionKit.core.facts[surface]?.role == .document
+            && selectionKit.modals(blocking: surface).isEmpty
+            && !selectionKit.isApplicationModal(surface)
+            && selectionKit.attachedHost(of: surface) == nil
+            && selectionKit.namedModalHost(of: surface) == nil
+    }
+
     /// Why a resolved endpoint may no longer be used, read against the world as
     /// it is at the boundary before the driver builds.
     ///
@@ -857,10 +945,15 @@ extension AgentSeat {
     /// 30/09/2026, a UXP key resolved at .988 was refused as expired at .548,
     /// 60 ms past its 500 ms, with nothing in the world changed. Every other
     /// reading is still taken now.
+
     func endpointInvalidation(
         of endpoint    : ResolvedInputEndpoint,
         allowing grace : Duration = .zero
     ) -> InputEndpointInvalidation? {
+        if endpoint.identity != endpoint.logicalSurface,
+           selectionKit.modals(blocking: endpoint.identity).contains(endpoint.logicalSurface) {
+            return .relationNoLongerValid
+        }
         let focused: Int?
         if endpoint.evidence == .focusedSurfaceDescendant
             || endpoint.kind == .keyboardContext && endpoint.evidence == .remoteContentOfSurface {
@@ -912,6 +1005,69 @@ extension AgentSeat {
                   current.focusedNodeWindowNumber == endpoint.identity.windowNumber
             else { return .focusedNodeChanged }
             focused = current.focusedNodeWindowNumber
+        } else if endpoint.evidence == .unfocusedModalSurface {
+            guard let instance = assignmentKit.lifecycle.current?.instance,
+                  let record = session[endpoint.logicalSurface.windowNumber],
+                  record.platform is UXPPlatform,
+                  canPrimeOwnUXPDialog(endpoint.logicalSurface),
+                  record.window.reference.identity == endpoint.logicalSurface,
+                  let geometry = sensing.windowGeometryObservation(of: record.window.reference),
+                  geometry.window.identity == endpoint.logicalSurface,
+                  case .success(let current) = endpoints.modalSurfaceKeyboardContext(
+                      instance.processID,
+                      DialogEndpointResolver<AXUIElement>.SurfaceChain(
+                          host: endpoint.logicalSurface, surface: endpoint.logicalSurface,
+                          surfaceFrame: geometry.window.frame
+                      ),
+                      selectionKit.selected?.generation ?? .max
+                  ),
+                  current.evidence == .unfocusedModalSurface,
+                  current.kind == .keyboardContext,
+                  current.relation == .logicalSurface,
+                  current.focusedNodeWindowNumber == nil,
+                  current.identity == endpoint.identity,
+                  current.logicalSurface == endpoint.logicalSurface,
+                  current.geometry.window.frame == endpoint.geometry.window.frame,
+                  current.geometry.scaleFactor == endpoint.geometry.scaleFactor,
+                  current.selectionGeneration == endpoint.selectionGeneration
+            else { return .relationNoLongerValid }
+            focused = nil
+        } else if endpoint.evidence == .mainWindowUnderFocusProxy {
+            guard let instance = assignmentKit.lifecycle.current?.instance,
+                  let record = session[endpoint.logicalSurface.windowNumber],
+                  record.platform is UXPPlatform,
+                  canPrimeOwnUXPDocument(endpoint.logicalSurface),
+                  record.window.reference.identity == endpoint.logicalSurface,
+                  let geometry = sensing.windowGeometryObservation(of: record.window.reference),
+                  geometry.window.identity == endpoint.logicalSurface
+            else { return .relationNoLongerValid }
+            let chain = DialogEndpointResolver<AXUIElement>.SurfaceChain(
+                host: endpoint.logicalSurface, surface: endpoint.logicalSurface,
+                surfaceFrame: geometry.window.frame
+            )
+            let generation = selectionKit.selected?.generation ?? .max
+            var reading = endpoints.keyboardContext(instance.processID, chain, generation)
+            if case .failure = reading {
+                reading = endpoints.ordinaryKeyboardContext(instance.processID, chain, generation)
+            }
+            if case .failure = reading {
+                reading = endpoints.mainWindowUnderFocusProxyKeyboardContext(instance.processID, chain, generation)
+            }
+            // Exact key-window priming can replace the proxy with direct focus.
+            // Both proofs must still name this document and this observation.
+            guard case .success(let current) = reading,
+                  current.kind == .keyboardContext,
+                  current.relation == .logicalSurface,
+                  current.identity == endpoint.identity,
+                  current.logicalSurface == endpoint.logicalSurface,
+                  current.geometry.window.frame == endpoint.geometry.window.frame,
+                  current.geometry.scaleFactor == endpoint.geometry.scaleFactor,
+                  current.selectionGeneration == endpoint.selectionGeneration,
+                  (current.evidence == .mainWindowUnderFocusProxy && current.focusedNodeWindowNumber == nil)
+                    || ((current.evidence == .attestedSurfaceItself || current.evidence == .focusedWindowWithoutFocusedControl)
+                        && current.focusedNodeWindowNumber == endpoint.identity.windowNumber)
+            else { return .relationNoLongerValid }
+            focused = endpoint.focusedNodeWindowNumber
         } else if endpoint.evidence == .focusedWindowWithoutFocusedControl {
             guard let instance = assignmentKit.lifecycle.current?.instance else {
                 return .focusedNodeChanged

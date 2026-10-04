@@ -99,6 +99,29 @@ struct TargetPlatformTests {
         #expect(leaf.preparation(for: .text("mecum")) == .internalAppKitState)
     }
 
+    @Test("Photoshop's measured document clicks are enabled only on an attested UXP host")
+    func photoshopDocumentRecipe() throws {
+        let bundle = try Self.bundle(embedding: ["dvauxphost.framework"])
+        let choice = TargetPlatform.chosen(bundleURL: bundle, bundleIdentifier: "com.adobe.Photoshop")
+        let point = InputLocation(screenPoint: .zero, windowPointFromTop: .zero)
+        let platform = choice.platform(for: "com.adobe.Photoshop")
+        #expect(platform.preparation(for: .click(point)) == .internalAppKitState)
+        let selectAll = InputCommand.key(virtualKey: 0, text: "", modifiers: .command,
+            origin: CharacterShortcutOrigin(character: "a", effectiveModifiers: .command,
+                                            commandPlane: true, requiresShift: false))
+        #expect(platform.preparation(for: selectAll) == .internalAppKitState)
+        #expect(platform.preparation(for: .key(virtualKey: 36, text: "\r")) == .none)
+        #expect(platform.preparation(for: .insertText("100")) == .none)
+        #expect(platform.preparation(for: .key(virtualKey: 45, text: "", modifiers: [.command, .shift],
+            origin: CharacterShortcutOrigin(character: "n", effectiveModifiers: [.command, .shift],
+                                            commandPlane: true, requiresShift: false))) == .none)
+        #expect(platform.preparation(for: .click(point, button: .right)) == .none)
+        #expect(choice.platform(for: "com.adobe.InDesign").preparation(for: .click(point)) == .none)
+        #expect(choice.platform(for: nil).preparation(for: .click(point)) == .none)
+        #expect(TargetPlatform.unmeasured.platform(for: "com.adobe.Photoshop")
+            .preparation(for: .click(point)) == .none)
+    }
+
     @Test("an application nobody has measured is driven without preparation")
     func unknownApplicationIsAppKit() throws {
         let plain = try Self.bundle()

@@ -70,6 +70,8 @@ enum SeatErrorMapper {
         case .notContainedInSurface(let windowNumber):
             "Window \(windowNumber) is real and is not drawn inside this dialog, so it "
                 + "belongs to somebody else."
+        case .recipientModallyBlocked(let windowNumber):
+            "The selected modal blocks window \(windowNumber), so that window cannot receive this action."
         case .incoherentEndpoint(let windowNumber):
             "The readings about window \(windowNumber) do not describe one recipient."
         }

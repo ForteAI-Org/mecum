@@ -10,6 +10,7 @@
 #
 # 1. Both Host processes use a synchronous native entry point. Swift async main
 #    could exit during native capture before either process reported completion.
+#    Adobe UXP rows use the same runner, each in its own process.
 # 2. Every tier **asserts how many tests it reported**, because of the same
 #    defect: exit status 0 is not evidence that a run finished.
 # 3. The unit tier runs **serialized**. Every suite in it is `@MainActor`, and a
@@ -56,9 +57,10 @@ HOST_REST_TESTS := 29
 # third-party window watch row unless AGENTSEAT_FOLLOW_APP names a running
 # application, and the fullscreen rows unless AGENTSEAT_FULLSCREEN_PROBE=1 does:
 # they take a window in and out of fullscreen, which is the person's screen.
-# Verified by `xcrun swift test list | rg LiveTests` on 2026-09-21. This is an
-# assertion over the reported Live bundle, including intentionally skipped rows.
-LIVE_TESTS := 99
+# Includes the eight opt-in Adobe UXP rows. This assertion counts the reported
+# Live bundle, including intentionally skipped rows.
+LIVE_TESTS := 113
+UXP_LIVE_ROWS := dialogsInBackground documentsInBackground selectionInBackground pixelEditingInBackground layerEditingInBackground newLayerDialogInBackground newLayerTypedTextInBackground documentDragInBackground
 QT_LIVE_ROWS := discoverDaVinci adoptAndReturnDaVinci observeDaVinci \
                 clickDaVinciSearch openAndCancelDaVinciProjectDialog insertTextIntoDaVinciSearch \
                 openDaVinciSearchContextMenu
@@ -76,7 +78,7 @@ QT_PYTHON ?= $(shell command -v python3)
 BENCH ?= fence-callback fence-clamp input-trace-overhead send-click display-lifecycle \
          monitor-60 monitor-120 stage seat-idle window-watch focus-refresh recovery
 
-.PHONY: all test native-test-runner host-tests live-tests qt-live-tests qt-editor-live-tests qt-fixture-live-tests bench compat-report promote-build clean help
+.PHONY: all test native-test-runner host-tests live-tests uxp-live-tests qt-live-tests qt-editor-live-tests qt-fixture-live-tests bench compat-report promote-build clean help
 
 all: test
 
@@ -84,6 +86,7 @@ help:
 	@echo 'make test           unit tier: pure, serialized, no permission needed'
 	@echo 'make host-tests     host tier: TCC and a real display, two commands, counts asserted'
 	@echo 'make live-tests     live tier: real windows and a real browser'
+	@echo 'make uxp-live-tests UXP tier: Photoshop with only the named disposable PNG'
 	@echo 'make qt-live-tests  Qt tier: open DaVinci Project Manager, one process per row'
 	@echo 'make qt-editor-live-tests  Qt editor tier: open the disposable New Project 1 project'
 	@echo 'make qt-fixture-live-tests QT_PYTHON=<PySide6 Python>  Qt 6 controlled fixture tier'
@@ -143,6 +146,18 @@ live-tests: require-fixture
 	    AGENTSEAT_QT_FIXTURE_PID= AGENTSEAT_QT_FIXTURE_STATE= \
 	    AGENTSEAT_FIXTURE_APP="$(AGENTSEAT_FIXTURE_APP)" \
 	    $(TIER) live $(LIVE_TESTS) $(SWIFT) test --filter LiveTests --no-parallel
+
+# Photoshop must be open with only the disposable document named by the caller.
+# Each row owns its repeated cycles in one Host lifecycle. The native entry
+# point and count gate refuse a run without a completion summary.
+uxp-live-tests: native-test-runner
+	@status=0; for row in $(UXP_LIVE_ROWS); do \
+	    AGENTSEAT_LIVE_TESTS=1 AGENTSEAT_UXP_TESTS=1 \
+	        $(TIER) "adobe-uxp-$$row" 1 .build/native-driver-test-main \
+	        "$$($(SWIFT) build --show-bin-path)/LiveTests.xctest/Contents/MacOS/LiveTests" \
+	        --filter "UXPDriverLiveTests.$$row" --no-parallel \
+	        || status=1; \
+	done; exit $$status
 
 # Repeated virtual display creation can terminate one test process with a
 # successful exit status but no summary. Each Qt row therefore gets its own

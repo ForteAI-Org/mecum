@@ -195,6 +195,8 @@ public actor InputDriver {
                 through: DispatchTime.now().uptimeNanoseconds
             )
 
+            try await primeKeyWindow(platform.keyWindowPriming(for: command), trace: &traceContext)
+
             guard platform.preparation(for: command) == .internalAppKitState else {
                 try await beforeFirstPost()
                 let receipt = try engine.post(
@@ -227,8 +229,6 @@ public actor InputDriver {
                 from   : identityStart,
                 through: DispatchTime.now().uptimeNanoseconds
             )
-
-            try await primeKeyWindow(platform.keyWindowPriming(for: command))
 
             let preparationStart = DispatchTime.now().uptimeNanoseconds
             var rollbackTiming: AppKitStatePreparation.RollbackTiming?
@@ -408,11 +408,23 @@ public actor InputDriver {
     /// The key-window pair on a host window of another process, and the wait its
     /// owner takes to pass it on, before the recipient's own Preparation. See
     /// `RemoteKeyboardPlatform`. The pair is not undone, as the recipient's is not.
-    private func primeKeyWindow(_ priming: (host: WindowReference, settle: Duration)?) async throws {
+    private func primeKeyWindow(
+        _ priming: (host: WindowReference, settle: Duration)?,
+        trace    : inout InputTraceContext
+    ) async throws {
         guard let priming else { return }
-        let host = try engine.preparation.participant(for: priming.host)
-        try validate(host, against: try engine.identity(of: priming.host))
-        try engine.preparation.makeKey(host)
+        let preparationStart = DispatchTime.now().uptimeNanoseconds
+        do {
+            let host = try engine.preparation.participant(for: priming.host)
+            try validate(host, against: try engine.identity(of: priming.host))
+            try engine.preparation.makeKey(host)
+        } catch {
+            trace.recordPreparation(from: preparationStart, through: DispatchTime.now().uptimeNanoseconds)
+            throw error
+        }
+        trace.recordPreparation(from: preparationStart, through: DispatchTime.now().uptimeNanoseconds)
+        let settleStart = DispatchTime.now().uptimeNanoseconds
+        defer { trace.recordSettling(from: settleStart, through: DispatchTime.now().uptimeNanoseconds) }
         try await Task.sleep(for: priming.settle)
     }
 
@@ -544,6 +556,11 @@ public actor InputDriver {
                 traceContexts[index].recordPrerequisite(from: gateStart, through: gateEnd)
             }
 
+            try await primeKeyWindow(
+                commands.lazy.compactMap { platform.keyWindowPriming(for: $0) }.first,
+                trace: &traceContexts[0]
+            )
+
             if needsPreparation {
                 let identityStart = DispatchTime.now().uptimeNanoseconds
                 let expectedIdentity: WindowIdentity
@@ -566,10 +583,6 @@ public actor InputDriver {
                         through: identityEnd
                     )
                 }
-
-                try await primeKeyWindow(
-                    commands.lazy.compactMap { platform.keyWindowPriming(for: $0) }.first
-                )
 
                 let preparationStart = DispatchTime.now().uptimeNanoseconds
                 var rollbackTiming: AppKitStatePreparation.RollbackTiming?

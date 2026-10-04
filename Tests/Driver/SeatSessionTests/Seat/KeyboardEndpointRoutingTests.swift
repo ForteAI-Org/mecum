@@ -121,10 +121,13 @@ struct KeyboardEndpointRoutingTests {
         #expect(platform.preparationSettle(for: Self.escapeKey) == .milliseconds(50))
         // And the mouse's recipe on the same endpoint is untouched by it.
         #expect(AppKitPlatform().preparation(for: Self.escapeKey) == .none)
-        // The panel's host window is primed first: without its key-window pair
-        // the service beeps at every key, measured with DaVinci Resolve on 27.
-        #expect(platform.keyWindowPriming(for: Self.escapeKey)?.host.windowNumber
-            == observation.surface.windowNumber)
+        // Prime the modal that hosts the service, even when capture names its
+        // parent. Preparing the document instead does not prime the panel.
+        let priming = try #require(platform.keyWindowPriming(for: Self.escapeKey))
+        let modal = try #require(panel.sheet.reference.identity)
+        #expect(observation.role.attachedSheet == modal)
+        #expect(priming.host.identity == modal)
+        #expect(priming.host.windowNumber != GestureEndpointRoutingTests.remoteWindowNumber)
 
         try panel.seat.confirm(receipt, .unknown)
         try panel.seat.release(turn)

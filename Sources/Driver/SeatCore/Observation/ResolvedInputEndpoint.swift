@@ -11,16 +11,17 @@ import CoreGraphics
 /// because mouse and keyboard do not have the same contract.
 ///
 /// A pointer endpoint is decided by a point: the window the event has to land
-/// in is the one drawn under that point. A keyboard context is decided by the
-/// focused node of the topmost modal surface and by nothing the mouse did, so
-/// the two are resolved from different evidence and invalidated by different
-/// changes.
+/// in is the one drawn under that point. A keyboard context normally follows
+/// the focused node. A selected UXP dialog or document can instead qualify
+/// a destination to make key from its complete own-window subtree and the
+/// eligibility facts named by its evidence. No keyboard proof comes from a mouse point.
 nonisolated public enum InputEndpointKind: Sendable, Equatable {
 
     /// The window one mouse gesture is addressed to.
     case pointer
 
-    /// The window that owns the focused node keys are addressed to.
+    /// The observed keyboard window, or an attested UXP destination that
+    /// requires key preparation before posting.
     case keyboardContext
 }
 
@@ -44,6 +45,16 @@ nonisolated public enum InputEndpointEvidence: Sendable, Equatable {
     /// top-level modal whose whole interface accessibility sees nothing in, so
     /// nothing inside it can be another recipient.
     case leafSurface
+
+    /// An attested top-level UXP modal whose complete accessibility subtree
+    /// names only its own window. Global focus still names a blocked adopted
+    /// document; keys require preparation of this modal before posting.
+    case unfocusedModalSurface
+
+    /// The selected main window has a complete own-window subtree while an
+    /// inert UXP focus proxy is focused. No first responder is invented; the
+    /// caller must make the attested main window key and repeat this proof.
+    case mainWindowUnderFocusProxy
 
     /// AX names a focused window but no focused control. A complete bounded
     /// reading ties its input-bearing descendants to that window; only proven
@@ -172,7 +183,8 @@ nonisolated public struct ResolvedInputEndpoint: Sendable, Equatable {
     public let expiresAtNanoseconds: UInt64
 
     /// The observed keyboard window, from the focused control or the complete
-    /// focused-window proof named by `evidence`; `nil` for a pointer endpoint.
+    /// focused-window proof named by `evidence`; `nil` for a pointer endpoint
+    /// or a UXP destination that still needs key-window priming.
     /// A context whose focus moved elsewhere is retired even while its own
     /// window remains alive. The window-only proof is repeated before posting.
     public let focusedNodeWindowNumber: Int?

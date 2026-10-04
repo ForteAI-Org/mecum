@@ -48,6 +48,10 @@ nonisolated public enum InputEndpointRefusal: Error, Sendable, Equatable {
     /// exists, and it is somebody else's.
     case notContainedInSurface(windowNumber: Int)
 
+    /// Geometric containment cannot make a window blocked by this modal into
+    /// its recipient. A Stage Manager thumbnail can fit inside the dialog.
+    case recipientModallyBlocked(windowNumber: Int)
+
     /// The facts are complete and do not form one coherent recipient.
     case incoherentEndpoint(windowNumber: Int)
 }
@@ -195,6 +199,16 @@ nonisolated package struct DialogEndpointResolver<Node> {
     let focusedControl: () -> FocusedControlReading
     let focusedWindow: () -> Node?
     let windowNode   : (Int) -> Node?
+    package struct FocusProxyFacts {
+        let role      : String?
+        let subrole   : String?
+        let isModal   : Bool?
+        let childCount: Int?
+    }
+
+    let mainWindow: () -> Node?
+    let inertFocusProxy: (Node) -> Bool
+
     let inertWindowlessLeaf: (Node) -> Bool
     let descendantFocus: (Node) -> DescendantFocusReading
     let parent       : (Node) -> Node?
@@ -216,7 +230,9 @@ nonisolated package struct DialogEndpointResolver<Node> {
         inertWindowlessLeaf: @escaping (Node) -> Bool = { _ in false },
         descendantFocus: @escaping (Node) -> DescendantFocusReading = { _ in .unreadable },
         parent       : @escaping (Node) -> Node? = { _ in nil },
-        windowReading: @escaping (Node) -> WindowReading = { _ in .unreadable }
+        windowReading: @escaping (Node) -> WindowReading = { _ in .unreadable },
+        mainWindow   : @escaping () -> Node? = { nil },
+        inertFocusProxy: @escaping (Node) -> Bool = { _ in false }
     ) {
         self.nodeAtPoint = nodeAtPoint
         self.focusedNode = focusedNode
@@ -236,6 +252,36 @@ nonisolated package struct DialogEndpointResolver<Node> {
         self.descendantFocus = descendantFocus
         self.parent        = parent
         self.windowReading = windowReading
+        self.mainWindow = mainWindow
+        self.inertFocusProxy = inertFocusProxy
+    }
+
+    package static func isInertFocusProxy(_ facts: FocusProxyFacts) -> Bool {
+        facts.role == "AXLayoutArea"
+            && facts.subrole == kAXUnknownSubrole as String
+            && facts.isModal == false
+            && facts.childCount == 0
+    }
+
+    package func mainWindowUnderFocusProxyKeyboardContext(
+        within chain       : SurfaceChain,
+        selectionGeneration: UInt64
+    ) -> Result<ResolvedInputEndpoint, InputEndpointRefusal> {
+        ownWindowKeyboardContext(
+            within: chain, selectionGeneration: selectionGeneration,
+            evidence: .mainWindowUnderFocusProxy,
+            window: {
+                guard case .absent = focusedControl(),
+                      let proxy = focusedWindow(),
+                      nodeProcess(proxy) == chain.surface.processID,
+                      let proxyWindow = nodeWindow(proxy), proxyWindow > 0,
+                      proxyWindow != chain.surface.windowNumber,
+                      inertFocusProxy(proxy),
+                      let main = mainWindow()
+                else { return nil }
+                return main
+            }
+        )
     }
 
     /// Resolves window-level keys when AX explicitly reports no focused control.
@@ -248,12 +294,29 @@ nonisolated package struct DialogEndpointResolver<Node> {
         within chain: SurfaceChain,
         selectionGeneration: UInt64
     ) -> Result<ResolvedInputEndpoint, InputEndpointRefusal> {
+        ownWindowKeyboardContext(
+            within: chain, selectionGeneration: selectionGeneration,
+            evidence: .focusedWindowWithoutFocusedControl,
+            window: {
+                guard case .absent = focusedControl() else { return nil }
+                return focusedWindow()
+            }
+        )
+    }
+
+    /// Completes and brackets one own-window subtree under either exact AX
+    /// focus or the separately qualified UXP main-window proof.
+    private func ownWindowKeyboardContext(
+        within chain: SurfaceChain,
+        selectionGeneration: UInt64,
+        evidence: InputEndpointEvidence,
+        window readWindow: () -> Node?
+    ) -> Result<ResolvedInputEndpoint, InputEndpointRefusal> {
         let refusal = InputEndpointRefusal.subtreeUnreadable(surface: chain.surface)
         let (deadline, overflow) = now().addingReportingOverflow(300_000_000)
         guard !overflow else { return .failure(refusal) }
         guard chain.host == chain.surface,
-              case .absent = focusedControl(),
-              let window = focusedWindow(),
+              let window = readWindow(),
               nodeWindow(window) == chain.surface.windowNumber,
               nodeProcess(window) == chain.surface.processID,
               identity(chain.surface.windowNumber) == chain.surface
@@ -294,8 +357,7 @@ nonisolated package struct DialogEndpointResolver<Node> {
             }
         }
         guard now() < deadline,
-              case .absent = focusedControl(),
-              let finalWindow = focusedWindow(),
+              let finalWindow = readWindow(),
               nodeWindow(finalWindow) == chain.surface.windowNumber,
               nodeProcess(finalWindow) == chain.surface.processID
         else { return .failure(refusal) }
@@ -306,8 +368,9 @@ nonisolated package struct DialogEndpointResolver<Node> {
             accessibilityProcessID: chain.surface.processID,
             within: chain,
             selectionGeneration: selectionGeneration,
-            focusedNodeWindowNumber: chain.surface.windowNumber,
-            evidence: .focusedWindowWithoutFocusedControl
+            focusedNodeWindowNumber: evidence == .focusedWindowWithoutFocusedControl
+                ? chain.surface.windowNumber : nil,
+            evidence: evidence
         )
         guard now() < deadline else { return .failure(refusal) }
         if case .success(let resolved) = answer, resolved.identity != chain.surface {
@@ -451,6 +514,53 @@ nonisolated package struct DialogEndpointResolver<Node> {
             focusedNodeWindowNumber: nil,
             evidence               : .leafSurface
         )
+    }
+
+    /// The keyboard recipient of a top-level UXP modal when global AX focus
+    /// remains on its blocked document. The caller must attest that modal
+    /// relation and choose the prepared-key recipe. Every node in the complete
+    /// bounded subtree must name this exact window and application process:
+    /// foreign, windowless or unreadable content refuses. This is a destination
+    /// to prepare, not a claim that accessibility observed focus inside it.
+    package func modalSurfaceKeyboardContext(
+        within chain       : SurfaceChain,
+        selectionGeneration: UInt64
+    ) -> Result<ResolvedInputEndpoint, InputEndpointRefusal> {
+        let refusal = InputEndpointRefusal.subtreeUnreadable(surface: chain.surface)
+        let (deadline, overflow) = now().addingReportingOverflow(300_000_000)
+        guard !overflow, chain.host == chain.surface,
+              let window = windowNode(chain.surface.windowNumber),
+              focusedWindow(window, matches: chain),
+              case .children(let rootChildren) = children(window), !rootChildren.isEmpty
+        else { return .failure(refusal) }
+        var pending: [(Node, Int)] = [(window, 0)]
+        var visited = 0
+        while let (node, depth) = pending.popLast() {
+            guard now() < deadline, depth <= 64, visited < 1_024,
+                  nodeProcess(node) == chain.surface.processID,
+                  nodeWindow(node) == chain.surface.windowNumber
+            else { return .failure(refusal) }
+            visited += 1
+            switch children(node) {
+                case .leaf: break
+                case .unreadable: return .failure(refusal)
+                case .children(let values):
+                    guard values.count <= 1_024 - visited - pending.count else { return .failure(refusal) }
+                    pending.append(contentsOf: values.map { ($0, depth + 1) })
+            }
+        }
+        guard now() < deadline, focusedWindow(window, matches: chain) else { return .failure(refusal) }
+        let answer = endpoint(
+            kind                   : .keyboardContext,
+            windowNumber           : chain.surface.windowNumber,
+            accessibilityProcessID : chain.surface.processID,
+            within                 : chain,
+            selectionGeneration    : selectionGeneration,
+            focusedNodeWindowNumber: nil,
+            evidence               : .unfocusedModalSurface
+        )
+        guard now() < deadline else { return .failure(refusal) }
+        return answer
     }
 
     /// The surface itself, for content an ordinary window draws and
@@ -1065,8 +1175,26 @@ extension DialogEndpointResolver where Node == AXUIElement {
                     case .noWindow, .readFailed(.illegalArgument): return .windowless
                     case .symbolUnavailable, .readFailed: return .unreadable
                 }
-            }
+            },
+            mainWindow: { Self.elementAttribute(application, kAXMainWindowAttribute) },
+            inertFocusProxy: Self.inertFocusProxy
         )
+    }
+
+    /// A successful empty child count is required. AXChildren no-value alone
+    /// does not establish an inert proxy: opaque New Document dialogs answer it.
+    private static func inertFocusProxy(_ node: AXUIElement) -> Bool {
+        var count = 0
+        guard AXUIElementGetAttributeValueCount(
+            node, kAXChildrenAttribute as CFString, &count
+        ) == .success else { return false }
+        let modal: NSNumber? = attribute(node, kAXModalAttribute)
+        return isInertFocusProxy(.init(
+            role: attribute(node, kAXRoleAttribute),
+            subrole: attribute(node, kAXSubroleAttribute),
+            isModal: modal?.boolValue,
+            childCount: count
+        ))
     }
 
     /// Reads the exact positive facts that distinguish Electron's transient

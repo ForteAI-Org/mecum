@@ -802,10 +802,15 @@ struct GestureEndpointRoutingTests {
         #expect(SurfaceInputClassification.unknown
             .platform(for: key, ofDrivenApplication: host) == nil)
 
-        // Prepared keys belong to a UXP application's leaf modal only.
-        let leafKey = SurfaceInputClassification.leafSurfaceOfDrivenApplication
-            .platform(for: key, ofDrivenApplication: UXPPlatform())
-        #expect((leafKey as? UXPPlatform)?.preparation(for: key) == .internalAppKitState)
+        let modal = FakeGeometry.reference(frame: FakeGeometry.adoptedWindow.frame)
+        let leafKey = try #require(SurfaceInputClassification.leafSurfaceOfDrivenApplication
+            .platform(for: key, ofDrivenApplication: UXPPlatform(), recipient: modal))
+        #expect(leafKey.preparation(for: key) == .none)
+        #expect(leafKey.keyWindowPriming(for: key)?.host.identity == modal.identity)
+        #expect(leafKey.keyWindowPriming(for: key)?.settle == .milliseconds(300))
+        #expect(leafKey.keyWindowPriming(for: click) == nil)
+        #expect(SurfaceInputClassification.leafSurfaceOfDrivenApplication
+            .platform(for: key, ofDrivenApplication: UXPPlatform()) == nil)
         #expect(SurfaceInputClassification.drivenApplication
             .platform(for: key, ofDrivenApplication: UXPPlatform())?.preparation(for: key) == Preparation.none)
         #expect(SurfaceInputClassification.leafSurfaceOfDrivenApplication

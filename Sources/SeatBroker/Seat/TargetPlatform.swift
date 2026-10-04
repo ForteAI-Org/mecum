@@ -52,8 +52,9 @@ import SeatInput
 ///    whose bulk insertion is prepared for 150 ms, and which keeps the window
 ///    follower awake a second after a click for the native panels Qt opens late;
 ///    the bundle ships Adobe's UXP host, `dvauxphost.framework`, which Photoshop
-///    does: it is driven with `UXPPlatform`, whose keys and text are prepared,
-///    since its New Document took Return only after the whole preparation;
+///    does: it is driven with `UXPPlatform`, whose attested modal keys use
+///    recipient priming. Photoshop also selects the measured document-click
+///    recipe; the seat removes that recipe from modal surfaces;
 /// 3. the bundle identifier is Apple's, and Apple ships its applications in
 ///    AppKit, Finder included;
 /// 4. nothing is known, and nothing known is not a renderer: an application
@@ -140,6 +141,14 @@ enum TargetPlatform: Sendable, Equatable {
             case .adobeUXP                 : UXPPlatform()
             case .appleNative, .unmeasured : AppKitPlatform()
         }
+    }
+
+    /// Selects measured host features only after positive family and bundle evidence.
+    /// Photoshop document preparation excludes attested modals; other UXP hosts
+    /// retain family policy.
+    func platform(for bundleIdentifier: String?) -> any InputPlatform {
+        guard self == .adobeUXP, bundleIdentifier == "com.adobe.Photoshop" else { return platform }
+        return UXPPlatform().preparingLeftClicks.preparingDocumentShortcuts
     }
 
     /// The chosen platform's own name. Derived from `platform` rather than

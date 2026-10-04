@@ -2052,10 +2052,13 @@ public final class AgentSeat {
                 endpoints.qualifiedAppKitPanelService($0.identity)
             } ?? false
         )
+        let isModalSurface = attestedModalSurface(for: observation) != nil
         guard let resolved = platform ?? classification.platform(
             for                : routed,
             ofDrivenApplication: record.platform,
-            host               : window.reference
+            host               : window.reference,
+            recipient          : recipient,
+            isModalSurface     : isModalSurface
         ) else {
             sender.recordCompletedTrace(
                 traceContext.completed(at: DispatchTime.now().uptimeNanoseconds)
@@ -2064,6 +2067,26 @@ public final class AgentSeat {
                 windowNumber: observation.role.attachedSheet?.windowNumber
                     ?? recipient.windowNumber
             )
+        }
+        if isModalSurface, resolved is UXPPlatform,
+           resolved.preparation(for: routed) == .internalAppKitState {
+            sender.recordCompletedTrace(
+                traceContext.completed(at: DispatchTime.now().uptimeNanoseconds)
+            )
+            throw SessionFailure.surfaceFamilyUnclassified(windowNumber: recipient.windowNumber)
+        }
+        // UXP recipient proof requires its own key window. A caller override
+        // cannot omit priming, activate the app, or prime a different window.
+        if endpoint?.evidence == .unfocusedModalSurface
+            || endpoint?.evidence == .mainWindowUnderFocusProxy
+            || (endpoint?.evidence == .leafSurface && record.platform is UXPPlatform && !routed.hasMouseLocation),
+           !(resolved is UXPPlatform
+             && resolved.preparation(for: routed) == .none
+             && resolved.keyWindowPriming(for: routed)?.host.identity == recipient.identity) {
+            sender.recordCompletedTrace(
+                traceContext.completed(at: DispatchTime.now().uptimeNanoseconds)
+            )
+            throw SessionFailure.surfaceFamilyUnclassified(windowNumber: recipient.windowNumber)
         }
         // Where a Command went, never what it carried: a first key to a panel
         // that did nothing could not be told from one that went elsewhere.

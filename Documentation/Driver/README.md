@@ -119,13 +119,49 @@ fails closed to an explicit target choice only when AX reports no unique focused
 or main window, or reports contradictory current-window state. The Live campaign
 has not yet been run.
 
-## Unqualified builds
+## Unqualified builds and Adobe UXP checks
 
 Build and hardware coverage in the Ledger describe evidence. They no longer
 block use after runtime self checks and permission preflights pass. Receipts keep
 `unvalidatedBuild: true`; a successful run does not promote a Ledger entry.
 Debug and release apply the same checks. Legacy `allowUnvalidatedBuild` options
-remain accepted. See [ADR 0015](adr/Adr0015UnqualifiedBuildsRemainUsable.md).
+remain accepted. See [ADR 0015](adr/Adr0015UnqualifiedBuildsRemainUsable.md) and
+the [Adobe UXP qualification guide](UXP.md) for exact coverage and limitations.
+
+A selected UXP dialog with stale global focus, or a selected document behind a
+positively empty focus proxy, can qualify its own complete subtree as a
+recipient to make key. Only that window's key pair and settle are applied,
+without application activation. The proof repeats before the first post, and
+incompatible caller overrides refuse. See
+[ADR 0016](adr/Adr0016UXPModalKeysWithStaleFocus.md).
+
+`make uxp-live-tests` runs eight dedicated Photoshop modal, document and editing
+rows with `UXPPlatform`. Leave Photoshop in the background with only one
+disposable RGB PNG open in Pro Editor mode, on an approved desktop in exclusive use, and name
+its absolute path:
+
+```sh
+AGENTSEAT_UXP_DOCUMENT=/absolute/path/to/disposable.png make uxp-live-tests SWIFT=swift
+```
+
+The rows require automatic adoption, exact recipient selection, virtual
+containment, fresh capture and independently observed effects. AX menu setup
+can use the bounded refresh in ADR 0013 only with verified foreground handback.
+A scoped JSX fixture independently attests document IDs, active tab, complete
+count and seed URL; its bounded activation must hand foreground back.
+Typed absence of all AX main/focus attributes on the sole PNG fixture can use
+an identity-bound native make-key refresh before input qualification. Failed
+Seat cleanup retains an independent native activation and exact document guards.
+Cleanup touches the row's own dialogs and newly created Untitled tab; the named
+PNG is never closed or saved. Reported counts, idle physical modifiers/buttons,
+physical input, foreground, cursor and complete Host teardown gate the run.
+
+`AGENTSEAT_UXP_CYCLES=1..20` controls repetitions;
+`AGENTSEAT_UXP_ARTIFACTS=/existing/temporary/directory` retains PNGs for inspection;
+`AGENTSEAT_UXP_SETTLE_MS=0..1000` calibrates the default 300 ms modal priming wait.
+The [UXP guide](UXP.md) records each operation and environment actually verified,
+including control and drag limits. Timing includes setup and polling, not a
+subtracted microbenchmark.
 
 ## The fence is alive only while somebody holds it
 
@@ -179,10 +215,11 @@ defects to work around.
 
 **A green exit status from a tier is not evidence that the tier ran.** Native
 capture could return through Swift async main and exit before the test's
-completion summary. Both Host processes use a synchronous native runner
-around the same built Swift Testing bundle. The Host tier still keeps the
-seat cycle apart from the display suites. Every tier asserts its reported
-count. An incomplete run therefore fails even if the process exited zero.
+completion summary. Both Host processes and each Adobe UXP row use a synchronous native runner
+around the same built Swift Testing bundle. The Host tier still
+keeps the seat cycle apart from the display suites; UXP keeps each row in its
+own process. Every tier asserts its reported count. An incomplete run therefore
+fails even if the process exited zero.
 
 The Live tier runs `--no-parallel` for a second reason: its two suites drive the
 same browser, and in parallel one of them quits the window the other adopted.
