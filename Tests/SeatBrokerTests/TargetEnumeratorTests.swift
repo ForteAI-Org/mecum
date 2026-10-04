@@ -314,7 +314,78 @@ func noFullScreenWindowIsStillNoWindow() {
     #expect(degenerate.isEmpty)
 }
 
-@Test("An application with a window on screen is listed as before and reads no accessibility")
+@Test("A qualified nonminimized AX window can be discovered when Stage Manager hides every server row")
+func anOffscreenNativeWindowIsStillDiscoverable() {
+    let owned = TargetWindow(pid: 42, windowNumber: 8, title: "Owned document",
+                             frame: CGRect(x: 214, y: 73, width: 586, height: 488))
+    var reads = 0
+    let windows = TargetEnumerator.windows(
+        of            : 42,
+        onScreen      : [],
+        readFullScreen: { [8: false] },
+        readRows      : { _ in Issue.record("No fullscreen server row should be read"); return [] },
+        readOffscreen : { reads += 1; return [owned] }
+    )
+    #expect(windows == [owned])
+    #expect(reads == 1)
+}
+
+@Test("An offscreen thumbnail needs its exact owner, layer and attested native body")
+func offscreenDiscoveryUsesOnlyTheQualifiedBody() throws {
+    let body = CGRect(x: 214, y: 73, width: 586, height: 488)
+    let thumbnail = CGRect(x: -132, y: 459, width: 116, height: 97)
+    var resolutions = 0
+    let windows = TargetEnumerator.offscreenWindows(
+        of: 42,
+        readings: [.init(windowNumber: 7, subrole: "AXStandardWindow", isMinimized: false)],
+        in: [windowInfo(frame: thumbnail), windowInfo(pid: 43, frame: thumbnail),
+             windowInfo(number: 8, frame: thumbnail), windowInfo(layer: 1, frame: thumbnail)],
+        minimumSize: 120
+    ) { pid, number in
+        #expect(pid == 42 && number == 7)
+        resolutions += 1
+        return body
+    }
+    #expect(try #require(windows.first).frame == body)
+    #expect(windows.count == 1)
+    #expect(resolutions == 1)
+}
+
+@Test("Minimized, attached and unreadable native windows stay out of offscreen discovery")
+func offscreenDiscoveryRefusesMissingNativeEvidence() {
+    let readings: [TargetEnumerator.OffscreenWindowReading] = [
+        .init(windowNumber: 7, subrole: "AXStandardWindow", isMinimized: true),
+        .init(windowNumber: 7, subrole: "AXStandardWindow", isMinimized: nil),
+        .init(windowNumber: 7, subrole: nil, isMinimized: false),
+        .init(windowNumber: 7, subrole: "AXSheet", isMinimized: false),
+    ]
+    for reading in readings {
+        let windows = TargetEnumerator.offscreenWindows(
+            of: 42, readings: [reading],
+            in: [windowInfo(frame: CGRect(x: -132, y: 459, width: 116, height: 97))], minimumSize: 120
+        ) { _, _ in
+            Issue.record("An ineligible native window must not be resolved")
+            return CGRect(x: 214, y: 73, width: 586, height: 488)
+        }
+        #expect(windows.isEmpty)
+    }
+}
+
+@Test("An offscreen server row cannot replace missing or malformed attested native geometry")
+func offscreenDiscoveryRefusesUnqualifiedGeometry() {
+    let bodies: [CGRect?] = [nil, .zero, CGRect(x: 0, y: 0, width: 119, height: 488),
+                             CGRect(x: CGFloat.infinity, y: 73, width: 586, height: 488)]
+    for body in bodies {
+        let windows = TargetEnumerator.offscreenWindows(
+            of: 42, readings: [.init(windowNumber: 7, subrole: "AXStandardWindow", isMinimized: false)],
+            in: [windowInfo(frame: CGRect(x: -132, y: 459, width: 116, height: 97))], minimumSize: 120,
+            resolveNativeFrame: { _, _ in body }
+        )
+        #expect(windows.isEmpty)
+    }
+}
+
+@Test("Onscreen windows bypass fullscreen and ordinary native fallback")
 func anOnScreenApplicationIsUnchanged() {
     let shown = TargetWindow(pid: 42, windowNumber: 7, title: "w7",
                              frame: CGRect(x: 0, y: 0, width: 800, height: 600))
@@ -323,7 +394,8 @@ func anOnScreenApplicationIsUnchanged() {
         of            : 42,
         onScreen      : [shown],
         readFullScreen: { reads += 1; return [9: true] },
-        readRows      : { _ in reads += 1; return [] }
+        readRows      : { _ in reads += 1; return [] },
+        readOffscreen : { reads += 1; return [] }
     )
     #expect(windows == [shown])
     #expect(reads == 0)

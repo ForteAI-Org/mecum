@@ -2,6 +2,7 @@ import AppKit
 import EngineCore
 import Foundation
 import PerceptionCore
+import WindowServerListing
 
 /// AutomationSessionOperating is the application-session boundary consumed by tool adapters.
 /// Calls are serialized by the owner. close follows cancellation/draining and invalidates the session ID.
@@ -24,11 +25,17 @@ public protocol AutomationSessionOperating: AnyObject {
     /// The applications `open` can open that `query` names, best first, or all of them when it is nil.
     /// Read-only: it needs no open session and opens nothing.
     func applications(matching query: String?) async throws -> [ApplicationCandidate]
+    /// Read-only window candidates exposed by this session's discovery policy; no adoption or input.
+    func windowCandidates(ownedBy processID: pid_t) throws -> [WindowRow]
 }
 
 public extension AutomationSessionOperating {
 
     var closeWarning: String? { nil }
+
+    func windowCandidates(ownedBy processID: pid_t) throws -> [WindowRow] {
+        try WindowServerWindowListing().windows(ownedBy: processID)
+    }
 
     /// A session with no application to read a menu bar of.
     func menu(path: String) async throws -> ActOutcome {

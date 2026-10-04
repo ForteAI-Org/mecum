@@ -6,7 +6,6 @@ import LocalMCP
 import PerceptionCore
 import PrivateSymbols
 import SeatCore
-import WindowServerListing
 
 /// AutomationTools is the MCP adapter over AutomationSession. It validates a complete request before effects,
 /// requires the current ephemeral session ID, and records authoritative outcomes for the transcript.
@@ -212,7 +211,7 @@ public final class AutomationTools {
             if values["app"] != nil { apps = [try RunningApplicationLookup.running(try string(arguments, "app"))] }
             else { apps = NSWorkspace.shared.runningApplications.filter { $0.activationPolicy == .regular } }
             value = .object(["applications": .array(try apps.map { app in
-                let rows = try WindowServerWindowListing().windows(ownedBy: app.processIdentifier)
+                let rows = try session.windowCandidates(ownedBy: app.processIdentifier)
                 return .object(["name": .string(app.localizedName ?? ""),
                     "bundleID": .string(app.bundleIdentifier ?? ""), "pid": .number(Double(app.processIdentifier)),
                     "windows": .array(rows.map { .object(["id": .number(Double($0.number)),

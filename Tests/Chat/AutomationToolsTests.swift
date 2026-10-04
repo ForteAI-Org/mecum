@@ -99,6 +99,22 @@ struct AutomationToolsTests {
     }
 
     @Test
+    func windowsUsesTheSessionsDiscoveryWithoutOpeningASeat() async throws {
+        let finder = try #require(NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.finder").first)
+        let session = SyntheticSession()
+        session.discoveryRows = [WindowRow(layer: 0, frame: CGRect(x: 0, y: 0, width: 800, height: 600),
+                                           title: "Owned offscreen fixture", number: 987_654)]
+        let result = try await AutomationTools(session: session).call("windows", .object([
+            "app": .string("com.apple.finder")
+        ]))
+        #expect(session.discoveryReads == [finder.processIdentifier])
+        #expect(session.calls.isEmpty)
+        #expect(result["structuredContent"]["applications"].array?.first?["windows"] == .array([
+            .object(["id": .number(987_654), "title": .string("Owned offscreen fixture")])
+        ]))
+    }
+
+    @Test
     func inputToolsAreListedWithTheirSchemas() throws {
         let tools = Dictionary(uniqueKeysWithValues: AutomationTools.definitions.map { ($0["name"].string ?? "", $0) })
         let required: [String: [String]] = [
@@ -318,6 +334,8 @@ private final class SyntheticSession: AutomationSessionOperating {
     var throwOnTarget: String?
     var inputs: [InputRequest.Input] = []
     var sections: [String?] = []
+    var discoveryRows: [WindowRow] = []
+    var discoveryReads: [pid_t] = []
     private let scene = SceneSnapshot(bundleID: "test.synthetic", appName: "Synthetic Mixer",
                                       windowTitle: "Synthetic New Paths",
                                       viewportPixelSize: ViewportPixelSize(width: 400, height: 200), elements: [])
@@ -329,6 +347,11 @@ private final class SyntheticSession: AutomationSessionOperating {
     }
 
     func observe() async throws -> SceneSnapshot { calls.append("observe"); return scene }
+
+    func windowCandidates(ownedBy processID: pid_t) throws -> [WindowRow] {
+        discoveryReads.append(processID)
+        return discoveryRows
+    }
 
     func act(target: String, verb: ActionVerb, section: String?, desiredState: ControlState?) async throws -> ActOutcome {
         calls.append(target)

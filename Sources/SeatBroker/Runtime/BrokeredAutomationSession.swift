@@ -252,6 +252,12 @@ public final class BrokeredAutomationSession: AutomationSessionOperating {
         Self.candidates(ApplicationOpening.ranked(query, in: TargetEnumerator.targets()))
     }
 
+    public func windowCandidates(ownedBy processID: pid_t) throws -> [WindowRow] {
+        TargetEnumerator.windows(of: processID).map {
+            WindowRow(layer: 0, frame: $0.frame, title: $0.title, number: $0.windowNumber)
+        }
+    }
+
     /// `apps` as the worker reads them, in their order, each one's folder added only where two
     /// of them share a name, since the name alone would not say which is which. The application
     /// whose bundle ID is `defaultBrowser` is marked as the default browser.

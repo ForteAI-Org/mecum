@@ -5,9 +5,9 @@ import CoreServices
 import SeatCore
 import WindowPlacement
 
-/// Installed applications merged with the running ones and their on-screen,
-/// normal-layer windows. The seat driver attests a window later; this only
-/// lists candidates.
+/// Installed applications merged with running ones and their window candidates.
+/// Offscreen candidates require positive native evidence. The seat driver
+/// attests a window again before adoption.
 enum TargetEnumerator {
     private static let applicationFolders = [
         URL(fileURLWithPath: "/Applications"),
@@ -27,7 +27,10 @@ enum TargetEnumerator {
             pathByBundleID[app.bundleID] = app.id
         }
         for app in NSWorkspace.shared.runningApplications where app.processIdentifier != me {
-            let windows = windowsByPID[app.processIdentifier] ?? []
+            let shown = windowsByPID[app.processIdentifier] ?? []
+            let windows = app.activationPolicy == .regular
+                ? windows(of: app.processIdentifier, onScreen: shown, minimumSize: minimumSize, maximumLayer: 0)
+                : shown
             guard listable(app.activationPolicy, hasWindows: !windows.isEmpty) else { continue }
             // A process with no Dock presence is listed for as long as its
             // window is up and is gone with it, so it carries no bundle: it
@@ -188,20 +191,29 @@ enum TargetEnumerator {
         }
     }
 
-    /// The windows a process currently has on screen, or, when it has none,
-    /// the ones it keeps in native fullscreen on a Space that is not on screen.
+    /// Onscreen windows, or positively identified fullscreen/native windows
+    /// when Stage Manager or another Space keeps every candidate offscreen.
     @MainActor
     static func windows(of pid: pid_t, minimumSize: CGFloat = 120, maximumLayer: Int = 0) -> [TargetWindow] {
         windows(
+            of          : pid,
+            onScreen    : onScreenWindows(minimumSize: minimumSize, maximumLayer: maximumLayer)[pid] ?? [],
+            minimumSize : minimumSize,
+            maximumLayer: maximumLayer
+        )
+    }
+
+    @MainActor
+    private static func windows(
+        of pid: pid_t, onScreen: [TargetWindow], minimumSize: CGFloat, maximumLayer: Int
+    ) -> [TargetWindow] {
+        windows(
             of            : pid,
-            onScreen      : onScreenWindows(minimumSize: minimumSize, maximumLayer: maximumLayer)[pid] ?? [],
+            onScreen      : onScreen,
             readFullScreen: { fullScreenReadings(of: pid) },
-            readRows      : { numbers in
-                numbers.flatMap { number in
-                    CGWindowID(exactly: number).flatMap {
-                        CGWindowListCopyWindowInfo(.optionIncludingWindow, $0) as? [[String: Any]]
-                    } ?? []
-                }
+            readRows      : serverRows,
+            readOffscreen : {
+                offscreenWindows(of: pid, minimumSize: minimumSize, maximumLayer: maximumLayer)
             }
         )
     }
@@ -216,23 +228,21 @@ enum TargetEnumerator {
     /// running with no window, was asked to reopen one and was refused 20 s
     /// later for a window it had all along. The evidence has to be positive:
     /// `AXFullScreen` true on one of the application's accessibility windows.
-    /// False or unreadable is no window: a row the server lists and nothing
-    /// shows is not evidence of a window the seat can take. The rectangle and
-    /// title come from the server's row of that window number and owner, and
-    /// the adoption attests its identity anyway.
+    /// Without fullscreen evidence, a separate native fallback may supply
+    /// nonminimized standard AX windows with matching attested server identities.
+    /// A server row alone remains insufficient. Adoption attests identity again.
     ///
-    /// The readings are closures so that the cost stays where it belongs: an
-    /// application with a window on screen reads no accessibility at all, and
-    /// one with no fullscreen window reads no server row.
+    /// Visible ordinary windows bypass fullscreen and native fallback reads.
     static func windows(
         of pid        : pid_t,
         onScreen      : [TargetWindow],
         readFullScreen: () -> [Int: Bool],
-        readRows      : ([Int]) -> [[String: Any]]
+        readRows      : ([Int]) -> [[String: Any]],
+        readOffscreen : () -> [TargetWindow] = { [] }
     ) -> [TargetWindow] {
         guard onScreen.isEmpty else { return onScreen }
         let fullScreen = readFullScreen().filter(\.value).keys.sorted()
-        guard !fullScreen.isEmpty else { return [] }
+        guard !fullScreen.isEmpty else { return readOffscreen() }
         return readRows(fullScreen).compactMap { info in
             guard info[kCGWindowOwnerPID as String] as? pid_t == pid,
                   let number = info[kCGWindowNumber as String] as? Int,
@@ -247,6 +257,73 @@ enum TargetEnumerator {
                 title       : info[kCGWindowName as String] as? String ?? "",
                 frame       : bounds
             )
+        }
+    }
+
+    struct OffscreenWindowReading {
+        let windowNumber: Int
+        let subrole: String?
+        let isMinimized: Bool?
+
+        var qualifies: Bool { isMinimized == false && subrole == "AXStandardWindow" }
+    }
+
+    /// Requires explicit native subrole and nonminimized state. A thumbnail's
+    /// server rectangle is metadata, not the body's routing frame.
+    static func offscreenWindows(
+        of pid: pid_t,
+        readings: [OffscreenWindowReading],
+        in list: [[String: Any]],
+        minimumSize: CGFloat,
+        maximumLayer: Int = 0,
+        resolveNativeFrame: (pid_t, Int) -> CGRect?
+    ) -> [TargetWindow] {
+        let numbers = Set(readings.filter(\.qualifies).map(\.windowNumber))
+        return list.compactMap { info in
+            guard info[kCGWindowOwnerPID as String] as? pid_t == pid,
+                  let number = info[kCGWindowNumber as String] as? Int,
+                  numbers.contains(number),
+                  let layer = info[kCGWindowLayer as String] as? Int,
+                  layer >= 0, layer <= maximumLayer,
+                  let boundsDict = info[kCGWindowBounds as String] as? NSDictionary,
+                  let bounds = CGRect(dictionaryRepresentation: boundsDict),
+                  !bounds.isEmpty,
+                  let body = resolveNativeFrame(pid, number),
+                  usableNativeBody(body, minimumSize: minimumSize)
+            else { return nil }
+            return TargetWindow(pid: pid, windowNumber: number,
+                                title: info[kCGWindowName as String] as? String ?? "", frame: body)
+        }
+    }
+
+    @MainActor
+    private static func offscreenWindows(
+        of pid: pid_t, minimumSize: CGFloat, maximumLayer: Int
+    ) -> [TargetWindow] {
+        let application = AXUIElementCreateApplication(pid)
+        guard let windows = attribute(application, kAXWindowsAttribute) as? [AXUIElement] else { return [] }
+        let readings = windows.compactMap { element -> OffscreenWindowReading? in
+            let subrole = attribute(element, kAXSubroleAttribute) as? String
+            guard subrole == "AXStandardWindow" else { return nil }
+            guard let number = WindowRelocator.windowNumber(of: element) else { return nil }
+            return OffscreenWindowReading(
+                windowNumber: number,
+                subrole: subrole,
+                isMinimized: (attribute(element, kAXMinimizedAttribute) as? NSNumber)?.boolValue
+            )
+        }
+        let eligible = readings.filter(\.qualifies)
+        return offscreenWindows(of: pid, readings: eligible,
+                                in: serverRows(Set(eligible.map(\.windowNumber)).sorted()),
+                                minimumSize: minimumSize, maximumLayer: maximumLayer,
+                                resolveNativeFrame: nativeFrame)
+    }
+
+    private static func serverRows(_ numbers: [Int]) -> [[String: Any]] {
+        numbers.flatMap { number in
+            CGWindowID(exactly: number).flatMap {
+                CGWindowListCopyWindowInfo(.optionIncludingWindow, $0) as? [[String: Any]]
+            } ?? []
         }
     }
 

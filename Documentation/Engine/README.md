@@ -261,6 +261,10 @@ Driver offers is not yet turned on here.
   the Seat's own rule that an event that went out is never repeated.
 - `SceneProviding.currentScene` is a fresh perception at every call, never a cache: an action is
   resolved against this instant's positions.
+- The `windows` tool reads window candidates through `AutomationSessionOperating`.
+  The broker uses its adoption discovery policy, including qualified nonminimized
+  standard AX windows kept offscreen by Stage Manager. Listing opens no Seat and
+  grants no input authority; adoption still reattests the candidate.
 - A pop-up is a window of its own. A target inside an open pop-up is chosen with the keyboard from
   `PopupRowPick`'s plan over the scene's rows (the highlight starts on the control's value, the arrows
   wrap, Return chooses), verified by reading the control's value back; without a readable control the
