@@ -11,8 +11,8 @@ import PerceptionCore
 ///
 /// Success requires a structural effect: an element appeared, vanished, flipped, or the title
 /// changed. Identical tokens mean the window did not change at all. A token that differs with no
-/// attributable effect is animation or repaint, not the action landing; calling that success let a
-/// model burn rounds on a click that never happened.
+/// attributable effect leaves the result unverified: content may have changed, or a repaint may
+/// have occurred. That uncertainty proves neither successful delivery nor absence of an effect.
 public enum ActVerification {
 
     /// What the two scenes say about the gesture.
@@ -22,7 +22,7 @@ public enum ActVerification {
         case landed(SceneEffect, matchesExpectation: Bool)
         /// The scene is byte-identical: the window did not change.
         case ghost
-        /// Pixels changed, nothing structural did: likely repaint, not the action.
+        /// Pixels changed without a classified structural effect; the result remains unverified.
         case unattributable
     }
 
@@ -78,7 +78,7 @@ public enum ActVerification {
                 return ActOutcome(
                     .actedUnverified,
                     "clicked '\(label)': the window's pixels changed but nothing structural did; "
-                        + "likely a repaint, not the action landing",
+                        + "verify the intended result before deciding on further input",
                     scene: after
                 )
         }

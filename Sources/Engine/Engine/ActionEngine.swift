@@ -295,12 +295,10 @@ public struct ActionEngine: Sendable {
             case .ghost, .unattributable:
                 let why = verdict == .ghost
                     ? "this window did NOT change (identical scene)"
-                    : "the window's pixels changed but nothing structural did: no element appeared, disappeared, or "
-                        + "retitled, "
-                        + "so this is likely animation/repaint, NOT your action landing"
-                let advice = elsewhere.changed ? "" : " If you expected an effect here, the click likely did not "
-                    + "register: "
-                    + "try the exact label with a section arg, or a menu."
+                    : "the window's pixels changed but nothing structural did: the intended effect "
+                        + "is not classified"
+                let advice = elsewhere.changed ? "" : " Verify the intended result in a fresh observation "
+                    + "before deciding on further input; do not repeat the click solely from this verdict."
                 return ActOutcome(.actedUnverified, "\(request.verb.performed) '\(element.label)': \(why).\(advice) "
                     + "\(elsewhere.sentence)", scene: after)
         }

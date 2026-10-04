@@ -275,7 +275,9 @@ Driver offers is not yet turned on here.
   shares the control's current text.
 - `found_acted` carries the effect's summary; every `acted_unverified` carries the `ElsewhereGuide`
   sentence, which names a window that opened, closed or retitled outside the perceived one, or says
-  that nothing else changed, so a dead click is never mistaken for a slow one.
+  that no such window transition was observed. An unchanged census cannot prove the absence of an
+  effect inside a window; unclassified pixel changes require reading the intended result before
+  deciding on further input, without repeating the click solely from that verdict.
 - Activation happens only when the application is not in front and no pop-up is open; a menu is
   believed only while a pop-up window exists, and while one does its rows are the effect.
 - The engine never sleeps a literal: `ActionTiming` holds every pause with its measurement, and the

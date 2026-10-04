@@ -52,6 +52,6 @@ struct ElsewhereGuideTests {
         #expect(retitled.sentence.contains("now titled \"B\""))
         let resized = ElsewhereGuide.forUnverifiedAct(app: "X", before: [verdict(1)], after: [verdict(1, w: 900)])
         #expect(!resized.changed)
-        #expect(resized.sentence.contains("Nothing else in X changed"))
+        #expect(resized.sentence.contains("No window of X opened, closed or retitled"))
     }
 }

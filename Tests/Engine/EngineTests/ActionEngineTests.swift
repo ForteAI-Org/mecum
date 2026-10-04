@@ -228,8 +228,8 @@ struct ActionEngineTests {
         #expect(outcome.kind == .actedUnverified)
         #expect(actuator.confirmations == [.absent], "an identical scene is verified absence")
         #expect(outcome.message.contains("did NOT change"))
-        #expect(outcome.message.contains("likely did not register"))
-        #expect(outcome.message.contains("Nothing else in X changed"))
+        #expect(outcome.message.contains("do not repeat the click solely from this verdict"))
+        #expect(outcome.message.contains("No window of X opened, closed or retitled"))
     }
 
     @Test("a repaint is unattributable, and a window that appeared elsewhere is named instead of blaming the click")
@@ -243,6 +243,38 @@ struct ActionEngineTests {
         #expect(actuator.confirmations == [.unknown], "a repaint establishes nothing")
         #expect(outcome.message.contains("nothing structural"))
         #expect(outcome.message.contains("NEW window \"Save\" appeared"))
+        #expect(!outcome.message.contains("likely did not register"))
+    }
+
+    @Test("an unclassified display update does not invite replay", arguments: ["7+", "78"])
+    func displayUpdateRemainsUnverified(value: String) async {
+        let displayBefore = SceneElement(
+            id    : "text|display",
+            kind  : .text,
+            label : "7",
+            bounds: rect(0.6, 0.1)
+        )
+        let displayAfter = SceneElement(
+            id    : "text|display",
+            kind  : .text,
+            label : value,
+            bounds: rect(0.6, 0.1)
+        )
+        let actuator = RecordingActuator()
+        let outcome = await engine(
+            scenes  : ScriptedScenes([
+                scene([export, displayBefore], token: "before"),
+                scene([export, displayAfter], token: "after")
+            ]),
+            actuator: actuator
+        ).act(request("Export"))
+
+        #expect(outcome.kind == .actedUnverified)
+        #expect(actuator.confirmations == [.unknown])
+        #expect(actuator.gestures.count == 1)
+        #expect(outcome.scene?.elements.contains(where: { $0.label == value }) == true)
+        #expect(!outcome.message.contains("dead click"))
+        #expect(!outcome.message.contains("NOT your action landing"))
         #expect(!outcome.message.contains("likely did not register"))
     }
 

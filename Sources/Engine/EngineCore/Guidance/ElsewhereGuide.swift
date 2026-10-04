@@ -63,9 +63,8 @@ public enum ElsewhereGuide {
         }
         return Elsewhere(
             changed : false,
-            sentence: "Nothing else in \(app) changed either: no window of it opened, closed or retitled; "
-                + "if the effect was meant for ANOTHER app verify there, otherwise this was a dead click, not a slow "
-                    + "one."
+            sentence: "No window of \(app) opened, closed or retitled. This census does not verify changes "
+                + "inside a window; read the intended result before deciding on further input."
         )
     }
 
