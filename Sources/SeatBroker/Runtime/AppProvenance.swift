@@ -74,11 +74,16 @@ final class LaunchLedger {
     /// Asks the application `pid` to quit, for one a seat held and has finished with. The
     /// controlled tests supply one that records the pid, so no process is touched.
     let terminate: @MainActor (pid_t) -> Void
+    private let isTerminated: @MainActor (pid_t) -> Bool
 
     init(
-        terminate: @escaping @MainActor (pid_t) -> Void = { NSRunningApplication(processIdentifier: $0)?.terminate() }
+        terminate: @escaping @MainActor (pid_t) -> Void = { NSRunningApplication(processIdentifier: $0)?.terminate() },
+        isTerminated: @escaping @MainActor (pid_t) -> Bool = {
+            NSRunningApplication(processIdentifier: $0)?.isTerminated ?? true
+        }
     ) {
         self.terminate = terminate
+        self.isTerminated = isTerminated
     }
 
     func record(_ provenance: AppProvenance, for pid: pid_t) {
@@ -98,6 +103,26 @@ final class LaunchLedger {
     ) -> Bool {
         guard provenance(of: pid).endsByQuitting, terminate(pid) else { return false }
         forget(pid)
+        return true
+    }
+
+    /// After handback, asks an owned application to quit and confirms its exit within a bounded
+    /// wait. A Save sheet can defer the request. Forget ownership even then: the application is
+    /// back on the person's desktop, and a later cleanup must not retry or discard its documents.
+    func quitHandedBack(_ pid: pid_t, waitingFor timeout: Duration = .seconds(1)) async -> Bool {
+        guard provenance(of: pid).endsByQuitting else { return false }
+        defer { forget(pid) }
+        terminate(pid)
+        let clock = ContinuousClock()
+        let deadline = clock.now.advanced(by: timeout)
+        while !isTerminated(pid) {
+            guard clock.now < deadline, !Task.isCancelled else { return false }
+            do {
+                try await clock.sleep(until: min(deadline, clock.now.advanced(by: .milliseconds(50))))
+            } catch {
+                return false
+            }
+        }
         return true
     }
 

@@ -261,8 +261,10 @@ public final class AgentSession {
         let finish = Self.finishing(held.provenance.finish(windowRestored: !driver.hasUnrestoredWindow),
                                     handback: handback, app: held.name)
         if finish.quits {
-            ledger.terminate(held.pid)
-            ledger.forget(held.pid)
+            guard await ledger.quitHandedBack(held.pid) else {
+                return "\(held.name) was returned to your desktop but is still running after the quit request. "
+                    + "It may be waiting for an unsaved-document decision. No document was discarded."
+            }
         }
         return finish.sentence
     }

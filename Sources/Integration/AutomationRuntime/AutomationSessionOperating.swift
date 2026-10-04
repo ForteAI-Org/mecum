@@ -19,12 +19,16 @@ public protocol AutomationSessionOperating: AnyObject {
     /// Presses a button of the held application's dialog or alert in front, by its title.
     func press(button: String) async throws -> ActOutcome
     func close() async
+    /// Any work left after the latest completed close, such as an application deferring its quit.
+    var closeWarning: String? { get }
     /// The applications `open` can open that `query` names, best first, or all of them when it is nil.
     /// Read-only: it needs no open session and opens nothing.
     func applications(matching query: String?) async throws -> [ApplicationCandidate]
 }
 
 public extension AutomationSessionOperating {
+
+    var closeWarning: String? { nil }
 
     /// A session with no application to read a menu bar of.
     func menu(path: String) async throws -> ActOutcome {

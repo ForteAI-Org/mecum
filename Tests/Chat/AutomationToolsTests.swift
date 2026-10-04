@@ -85,6 +85,20 @@ struct AutomationToolsTests {
     }
 
     @Test
+    func closingReportsPendingApplicationCleanupAlongsideTheReleasedSeat() async throws {
+        let session = SyntheticSession()
+        let warning = "TextEdit is still running after the quit request."
+        session.closeWarning = warning
+        let tools = AutomationTools(session: session)
+        let id = try #require(session.id)
+        let result = try await tools.call("close_session", .object(["session": .string(id.uuidString)]))
+
+        #expect(session.id == nil)
+        #expect(result["structuredContent"]["status"].string == "closed")
+        #expect(result["structuredContent"]["warning"].string == warning)
+    }
+
+    @Test
     func inputToolsAreListedWithTheirSchemas() throws {
         let tools = Dictionary(uniqueKeysWithValues: AutomationTools.definitions.map { ($0["name"].string ?? "", $0) })
         let required: [String: [String]] = [
@@ -298,6 +312,7 @@ private final class CatalogueSession: AutomationSessionOperating {
 @MainActor
 private final class SyntheticSession: AutomationSessionOperating {
     var id: UUID? = UUID()
+    var closeWarning: String?
     var calls: [String] = []
     var results: [ActOutcomeKind] = []
     var throwOnTarget: String?

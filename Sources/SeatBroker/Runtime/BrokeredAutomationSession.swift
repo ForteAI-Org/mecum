@@ -93,6 +93,7 @@ public final class BrokeredAutomationSession: AutomationSessionOperating {
     @ObservationIgnored private var runtime: EngineRuntime?
     @ObservationIgnored private var application: NSRunningApplication?
     @ObservationIgnored private var closing: Task<Void, Never>?
+    public private(set) var closeWarning: String?
     @ObservationIgnored private var isInTurn = false
     @ObservationIgnored private var idleRelease: Task<Void, Never>?
 
@@ -430,6 +431,7 @@ public final class BrokeredAutomationSession: AutomationSessionOperating {
         idleRelease?.cancel()
         idleRelease = nil
         if let closing { await closing.value; return }
+        closeWarning = nil
         let runtime = self.runtime
         let target  = self.target
         let lease   = self.lease
@@ -442,7 +444,8 @@ public final class BrokeredAutomationSession: AutomationSessionOperating {
             await runtime?.finish()
             await target?.stop()
             if let lease {
-                if let left = await lease.session.finishUsingApp() {
+                closeWarning = await lease.session.finishUsingApp()
+                if let left = closeWarning {
                     Self.log.error("A worker's session closed with this left to do: \(left, privacy: .public)")
                 }
                 lease.giveBack()

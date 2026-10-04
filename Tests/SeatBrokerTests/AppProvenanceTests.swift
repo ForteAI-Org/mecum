@@ -42,6 +42,45 @@ func aLaunchedApplicationThatWasNeverSeatedIsQuitAndOneAlreadyRunningIsNot() {
     #expect(ledger.provenance(of: 303) == .openedByAgent)
 }
 
+@Test @MainActor
+func aDeferredQuitIsReportedAndNeverRetriedAfterHandback() async {
+    var asked: [pid_t] = []
+    let ledger = LaunchLedger(terminate: { asked.append($0) }, isTerminated: { _ in false })
+    ledger.record(.openedByAgent, for: 101)
+
+    #expect(await !ledger.quitHandedBack(101, waitingFor: .milliseconds(10)))
+    #expect(ledger.provenance(of: 101) == .alreadyRunning)
+    #expect(await !ledger.quitHandedBack(101, waitingFor: .zero))
+    #expect(asked == [101])
+}
+
+@Test @MainActor
+func aQuitIsConfirmedOnlyAfterTheApplicationExits() async {
+    var exited = false
+    var asked: [pid_t] = []
+    let ledger = LaunchLedger(terminate: { asked.append($0) }, isTerminated: { _ in exited })
+    ledger.record(.openedByAgent, for: 101)
+    let exit = Task { @MainActor in
+        try await Task.sleep(for: .milliseconds(10))
+        exited = true
+    }
+
+    #expect(await ledger.quitHandedBack(101, waitingFor: .seconds(1)))
+    _ = try? await exit.value
+    #expect(exited)
+    #expect(asked == [101])
+    #expect(ledger.provenance(of: 101) == .alreadyRunning)
+}
+
+@Test @MainActor
+func handbackNeverQuitsAnApplicationAlreadyRunning() async {
+    var asked: [pid_t] = []
+    let ledger = LaunchLedger(terminate: { asked.append($0) }, isTerminated: { _ in true })
+    ledger.record(.alreadyRunning, for: 101)
+    #expect(await !ledger.quitHandedBack(101, waitingFor: .zero))
+    #expect(asked.isEmpty)
+}
+
 @Test
 func onlyAnApplicationTheAgentOpenedIsQuitWhenItIsDone() {
     #expect(AppProvenance.openedByAgent.endsByQuitting)

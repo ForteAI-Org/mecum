@@ -272,7 +272,10 @@ public final class AutomationTools {
                              "requested": .number(Double(steps.count))])
         case "close_session":
             await session.close()
-            value = .object(["status": .string("closed"), "message": .string("Application session closed.")])
+            var result: [String: JSONValue] = ["status": .string("closed"),
+                                               "message": .string("Application session closed.")]
+            if let warning = session.closeWarning { result["warning"] = .string(warning) }
+            value = .object(result)
         default: throw AutomationFailure("Unknown tool: \(name)")
         }
         try record?("← \(name) \(String(decoding: try JSONEncoder().encode(value), as: UTF8.self))")
