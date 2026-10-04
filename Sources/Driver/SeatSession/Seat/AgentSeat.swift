@@ -132,6 +132,9 @@ public final class AgentSeat {
     private var pendingAdoptions: [Int: AdoptedWindow] = [:]
     private var adoptionRestorations: [Int: WindowReleaseOutcome] = [:]
     private var adoptionInFlight = false
+    /// The identity this adoption is placing. Its resulting front-order edge belongs to the kit,
+    /// so the native reader's raise attribution cannot turn containment into a selection change.
+    var adoptingPlacementIdentity: WindowIdentity?
     var isTearingDown = false
 
     @TaskLocal
@@ -986,6 +989,7 @@ public final class AgentSeat {
         adoptionInFlight = true
         defer {
             adoptionInFlight = false
+            adoptingPlacementIdentity = nil
             let waiting = adoptionWaiters
             adoptionWaiters.removeAll()
             for waiter in waiting { waiter.resume() }
@@ -1031,7 +1035,10 @@ public final class AgentSeat {
         do {
             // A window born on the display is already at `origin`, so the one
             // write this transaction makes is the one it does not need.
-            if !takenInPlace { try placing.move(window, to: origin) }
+            if !takenInPlace {
+                adoptingPlacementIdentity = window.identity
+                try placing.move(window, to: origin)
+            }
             try checkAdoptionMayContinue()
 
             let confirmation = try await confirmPlacement(
@@ -3537,12 +3544,14 @@ public final class AgentSeat {
     /// fullscreen, not movable, too large to shrink, attempts exhausted. The
     /// record it makes owes the frame the window was found at, which is what
     /// the release gives back to a window the person already had open.
-    func takeInRefusedPreexistingMembers(until deadlineNanoseconds: UInt64) async {
+    func takeInRefusedPreexistingMembers(until deadlineNanoseconds: UInt64) async -> ObservationUnavailable? {
 
         guard let assignment = assignmentKit.lifecycle.current,
               let blocks     = selectionKit.lastAssignmentStatus?.blocks
-        else { return }
+        else { return nil }
 
+        let selectedBeforeContainment = selectionKit.selected?.surface
+        var movedAnotherWindow = false
         let refused = blocks.compactMap { block -> Int? in
             guard case .effectRefused(let number, .adapterNotQualified) = block else { return nil }
             return number
@@ -3554,7 +3563,7 @@ public final class AgentSeat {
                   DispatchTime.now().uptimeNanoseconds < deadlineNanoseconds,
                   case .full = windowFollowScope(requiringWatch: false),
                   state.acceptsCommands || containmentOnlyFollowWait
-            else { return }
+            else { return nil }
             guard let member = assignmentKit.inventory.surfaces[number],
                   member.identity.process == assignment.instance,
                   member.origin == .preexisting,
@@ -3569,6 +3578,10 @@ public final class AgentSeat {
                 application was handed over and its direct move was refused: taking it in
                 """)
             await transferDetectedWindow(member.reference, level: nil)
+            if session[number]?.window.reference.identity == member.identity,
+               member.identity != selectedBeforeContainment {
+                movedAnotherWindow = true
+            }
         }
 
         // A window a previous seat left where its display stood: a dialog born
@@ -3594,13 +3607,34 @@ public final class AgentSeat {
                   case .full = windowFollowScope(requiringWatch: false),
                   state.acceptsCommands || containmentOnlyFollowWait,
                   session[reference.windowNumber] == nil
-            else { return }
+            else { return nil }
             Self.log.info("""
                 window \(reference.windowNumber, privacy: .public) was already on the virtual \
                 display when the application was handed over, owned by no seat: taking it in place
                 """)
             await ownWindowBornInSeat(reference, level: nil)
         }
+        // Containment can put another held window above the selected one. Its
+        // application-wide AX hit test would then name that other window.
+        guard movedAnotherWindow,
+              let selected = selectedBeforeContainment,
+              selectionKit.selected?.surface == selected,
+              selectionKit.attachedHost(of: selected) == nil,
+              let record = session[selected.windowNumber],
+              record.window.reference.identity == selected
+        else { return nil }
+        guard !Task.isCancelled,
+              DispatchTime.now().uptimeNanoseconds < deadlineNanoseconds,
+              case .full = windowFollowScope(requiringWatch: false),
+              state.acceptsCommands || containmentOnlyFollowWait
+        else { return nil }
+        do { _ = try await stage(record.window) }
+        catch {
+            return .captureFailed(
+                reason: "the selected window could not be staged after containment: \(String(describing: error))"
+            )
+        }
+        return nil
     }
 
     /// Waits for the one notification or observation pass that owns the

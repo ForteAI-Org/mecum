@@ -287,6 +287,7 @@ final class FakePlacing: WindowPlacing, @unchecked Sendable {
     /// none of them on an active application.
     var moves: [CGPoint] = []
     var stages           = 0
+    var stagedWindows: [Int] = []
     var recoveries       = 0
 
     var bodyFrame: CGRect?
@@ -346,6 +347,7 @@ final class FakePlacing: WindowPlacing, @unchecked Sendable {
     ) async throws -> WindowReference {
 
         stages += 1
+        stagedWindows.append(window.windowNumber)
         if let stageError { throw stageError }
         onStage?()
         await onStageWait?()

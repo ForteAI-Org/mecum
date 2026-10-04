@@ -199,6 +199,22 @@ virtual display" is a check the fence cannot make, because the fence knows the
 person's displays and deliberately knows nothing about the virtual one; only the
 watchdog can combine the fence's latched signals with the display's geometry.
 
+## Selection while containing preexisting windows
+
+Moving another already-open window into the seat can change the application's
+front order. The identity currently placed by an adoption transaction is
+excluded from application recency, while its geometry, visibility and modal
+claims remain authoritative. Later qualified application recency for an owned
+document updates both the selected capture and the registered current target.
+Auxiliary eligibility alone does not grant that target change.
+
+After moving preexisting siblings, the observation path stages the original
+selected standalone window if it is still the selection. This keeps the native
+application-wide AX hit test from naming a sibling above the captured window.
+It does not reselect an old window after the selection changes. A staging
+failure refuses the observation; all existing endpoint identity and modal
+checks still apply. See [stabilization evidence](StabilizationRounds.md).
+
 ## Testing it
 
 Everything goes through the `Makefile`; `make help` lists it.

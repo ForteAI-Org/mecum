@@ -56,6 +56,9 @@ final class ControlledSurfaceReader: AssignedSurfaceReading, @unchecked Sendable
     var modals : [Int: ModalScope] = [:]
     var recency: [RecencyClaim] = []
 
+    /// Edge-triggered native events for successive reads, before the standing batch.
+    var recencyReadings: [[RecencyClaim]] = []
+
     /// True to answer a failed pass, which must leave membership untouched.
     var readingFails = false
 
@@ -141,7 +144,7 @@ final class ControlledSurfaceReader: AssignedSurfaceReading, @unchecked Sendable
                 )
             }
         }
-        batch.recency = recency
+        batch.recency = recencyReadings.isEmpty ? recency : recencyReadings.removeFirst()
 
         var retained: [WindowIdentity: RetainedSurfaceDisposition] = [:]
         for identity in withdrawn { retained[identity] = .withdrawn }

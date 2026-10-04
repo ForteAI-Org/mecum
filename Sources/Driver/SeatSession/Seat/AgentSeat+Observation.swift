@@ -376,7 +376,11 @@ extension AgentSeat {
         for claim in claims.parents      { selectionKit.declareParent(claim) }
         for claim in claims.modals       { selectionKit.declareModal(claim) }
         for claim in claims.visibilities { selectionKit.observeVisibility(claim) }
-        for claim in claims.recency      { selectionKit.noteRecency(claim) }
+        for claim in claims.recency {
+            // A front-order change observed while placing this identity is not an application choice.
+            guard claim.surface != adoptingPlacementIdentity else { continue }
+            selectionKit.noteRecency(claim)
+        }
 
         // A window the application stopped scoping is gone even though the
         // window server still shows a surface for it. Without this the member
@@ -514,7 +518,12 @@ extension AgentSeat {
             alignedSelectionGeneration = selectionKit.selectionGeneration
             return
         }
+        // A real document choice may name a held window never previously targeted.
+        // Merely making an auxiliary surface eligible does not grant it that path.
+        let applicationDocument = selected.reason == .qualifiedRecency
+            && selectionKit.core.facts[selected.surface]?.role == .document
         guard session.targetHistory.contains(selected.surface.windowNumber)
+                || applicationDocument
                 || operatingTargetStoppedQualifying()
         else { return }
 
@@ -1329,7 +1338,9 @@ extension AgentSeat {
             await settleWindowFollowingForObservation(until: deadlineNanoseconds)
             // A window already open at the handover is in the follower's
             // baseline, so the seat takes that one in through the same path.
-            await takeInRefusedPreexistingMembers(until: deadlineNanoseconds)
+            if let refusal = await takeInRefusedPreexistingMembers(until: deadlineNanoseconds) {
+                return .failure(refusal)
+            }
             await Task.yield()
             guard !Task.isCancelled else {
                 return .failure(.captureFailed(reason: String(describing: CancellationError())))

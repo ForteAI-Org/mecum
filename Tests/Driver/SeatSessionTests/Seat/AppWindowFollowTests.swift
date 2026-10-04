@@ -643,6 +643,89 @@ struct AppWindowFollowTests {
                 "a window the person already had open goes back where it was")
     }
 
+    @Test("a front-order change caused by taking in a preexisting window does not replace the requested target")
+    func containingAPreexistingWindowDoesNotRedirectTheFirstObservation() async throws {
+        let sensing = FakeSensing()
+        let placing = FakePlacing()
+        let reader = ControlledSurfaceReader(sensing: sensing)
+        let leftOpen = Self.reference(Self.secondWindowNumber, frame: Self.leftOpenFrame)
+        sensing.additionalWindows[leftOpen.windowNumber] = leftOpen
+        placing.bodyFrames[leftOpen.windowNumber] = leftOpen.frame
+        let (seat, first) = try await Self.followingSeat(
+            sensing : sensing,
+            placing : placing,
+            marker  : 7_049,
+            baseline: [Self.surface(leftOpen)],
+            reader  : reader
+        )
+        defer { seat.stopWindowFollowing() }
+        let identity = try #require(leftOpen.identity)
+        placing.onMove = { origin in
+            let moved = leftOpen.replacingFrame(CGRect(origin: origin, size: leftOpen.frame.size))
+            sensing.additionalWindows[leftOpen.windowNumber] = moved
+            placing.bodyFrames[leftOpen.windowNumber] = moved.frame
+            reader.recencyReadings = [[RecencyClaim(
+                surface              : identity,
+                signal               : .returnedToFront,
+                provenance           : .qualifiedFrontOrderAttestation,
+                origin               : .application(provenance: .qualifiedRaiseAttribution),
+                observedAtNanoseconds: 100
+            )], []]
+        }
+
+        let opening = try await observe(seat)
+        #expect(opening.reference.recipient == first.reference.identity)
+        #expect(seat.currentTarget?.id == first.id)
+        #expect(seat.adoptedWindows.contains { $0.reference.identity == identity })
+        #expect(placing.stagedWindows.last == first.id,
+                "Containment must not leave another held window above the selected window's hit test")
+
+        // A later application raise of the same window is still a real selection change.
+        reader.recency = [RecencyClaim(
+            surface              : identity,
+            signal               : .returnedToFront,
+            provenance           : .qualifiedFrontOrderAttestation,
+            origin               : .application(provenance: .qualifiedRaiseAttribution),
+            observedAtNanoseconds: 200
+        )]
+        let later = try await observe(seat)
+        #expect(later.reference.recipient == identity)
+        #expect(seat.currentTarget?.id == leftOpen.windowNumber)
+    }
+
+    @Test("a failed staging after containing another window returns no observation")
+    func containmentCannotPublishBeforeTheSelectedWindowIsRestaged() async throws {
+        let sensing = FakeSensing()
+        let placing = FakePlacing()
+        let reader = ControlledSurfaceReader(sensing: sensing)
+        let leftOpen = Self.reference(Self.secondWindowNumber, frame: Self.leftOpenFrame)
+        sensing.additionalWindows[leftOpen.windowNumber] = leftOpen
+        placing.bodyFrames[leftOpen.windowNumber] = leftOpen.frame
+        let (seat, first) = try await Self.followingSeat(
+            sensing : sensing,
+            placing : placing,
+            marker  : 7_050,
+            baseline: [Self.surface(leftOpen)],
+            reader  : reader
+        )
+        defer { seat.stopWindowFollowing() }
+        placing.onMove = { origin in
+            let moved = leftOpen.replacingFrame(CGRect(origin: origin, size: leftOpen.frame.size))
+            sensing.additionalWindows[leftOpen.windowNumber] = moved
+            placing.bodyFrames[leftOpen.windowNumber] = moved.frame
+        }
+        placing.stageError = CancellationError()
+
+        let opening = await seat.observe()
+        guard case .failure(.captureFailed(let reason)) = opening else {
+            Issue.record("A failed restoration of the selected window must refuse its observation")
+            return
+        }
+        #expect(reason.contains("after containment"))
+        #expect(placing.stagedWindows.last == first.id)
+        #expect(!seat.coherentState.hasCurrentObservation)
+    }
+
     @Test("a window of another process left open beside it is still left alone")
     func aStrangersWindowLeftOpenIsLeftAlone() async throws {
         let sensing = FakeSensing()
