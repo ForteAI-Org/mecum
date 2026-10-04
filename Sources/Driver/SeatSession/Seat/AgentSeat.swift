@@ -894,7 +894,7 @@ public final class AgentSeat {
             selectionKit.attachedHost(of: $0) != nil
         } ?? false
 
-        let pending = AdoptedWindow(
+        var pending = AdoptedWindow(
             reference          : window,
             originalFrame      : owed,
             title              : title,
@@ -911,7 +911,30 @@ public final class AgentSeat {
             if !takenInPlace { try placing.move(window, to: origin) }
             try checkAdoptionMayContinue()
 
-            let placed = try await confirmPlacement(of: window, expectedOrigin: origin, within: bounds)
+            let confirmation = try await confirmPlacement(
+                of            : window,
+                expectedOrigin: origin,
+                within        : bounds,
+                takenInPlace  : takenInPlace
+            )
+            let placed = confirmation.reference
+            if takenInPlace, restoringTo == nil, !wasFullScreen,
+               confirmation.body != window.frame {
+                // No physical frame was borrowed for this in-place adoption.
+                // The application's settled AX body, bracketed by agreeing
+                // server readings, is its return destination. Retaining the
+                // transient birth size would invent a resize obligation.
+                pending = AdoptedWindow(
+                    reference          : placed,
+                    originalFrame      : confirmation.body,
+                    title              : pending.title,
+                    originalDisplayID  : pending.originalDisplayID,
+                    wasFullScreen      : pending.wasFullScreen,
+                    originalServerFrame: placed.frame,
+                    owesNoReturn       : pending.owesNoReturn
+                )
+                pendingAdoptions[window.windowNumber] = pending
+            }
             let record = WindowRecord(
                 window  : pending.withReference(placed),
                 platform: platform,
@@ -919,13 +942,13 @@ public final class AgentSeat {
                 // as a thumbnail of no fixed size, 90 by 97 points and 120 by
                 // 121 when measured, so the comparison is against the window's
                 // own size and never a literal. `placed` is the window
-                // server's and `window` the application's, so the wider
-                // cross-source tolerance: MarkEdit's 3 pt read as stashed.
+                // server's and `confirmation.body` the confirmed body, so use
+                // the wider tolerance: MarkEdit's 3 pt read as stashed.
                 isStaged: SeatWindowSession.readsAsStaged(
                     serverSize: placed.frame.size,
-                    fullSize  : window.frame.size
+                    fullSize  : confirmation.body.size
                 ),
-                operationalSize: window.frame.size
+                operationalSize: confirmation.body.size
             )
 
             try checkAdoptionMayContinue()
@@ -4168,6 +4191,12 @@ public final class AgentSeat {
     /// confirms the window by the deadline. A thumbnail cannot be confirmed in
     /// its place: the strip is on the physical display, outside `bounds`.
     ///
+    /// A window born inside the display may settle at a different body size.
+    /// Only this in-place path accepts the new size: AX and two bracketed
+    /// server readings must agree inside the display, followed by the ordinary
+    /// two-reading stability proof. A smaller server frame with a full-size
+    /// AX body still takes the thumbnail staging path.
+    ///
     /// The budget is an absolute two-second deadline. Four early 20 ms readings
     /// let a cooperative child finish the same two-reading proof without
     /// spending 200 ms in fixed waits after its AX move. A slower window then
@@ -4176,10 +4205,12 @@ public final class AgentSeat {
     private func confirmPlacement(
         of window     : WindowReference,
         expectedOrigin: CGPoint,
-        within bounds : CGRect
-    ) async throws -> WindowReference {
+        within bounds : CGRect,
+        takenInPlace  : Bool
+    ) async throws -> (reference: WindowReference, body: CGRect) {
 
         var previous    : WindowReference?
+        var previousBody: CGRect?
         var last        : WindowReference?
         var refusedRaise: DisplayFailure?
         var didAttemptStage = false
@@ -4196,8 +4227,9 @@ public final class AgentSeat {
             readings += 1
             try checkAdoptionMayContinue()
 
-            guard let reading = sensing.windowGeometry(of: window.windowNumber) else {
+            guard var reading = sensing.windowGeometry(of: window.windowNumber) else {
                 previous = nil
+                previousBody = nil
                 continue
             }
 
@@ -4207,20 +4239,49 @@ public final class AgentSeat {
                 throw SeatInterruption(issues: [.identityChanged])
             }
 
+            var fullBody = window.frame
+            if takenInPlace,
+               !VirtualWindowPlacementCheck.sizesMatchAcrossSources(reading.frame.size, fullBody.size) {
+                let body = try placing.frame(of: reading)
+                guard let afterBody = sensing.windowGeometry(of: window.windowNumber) else {
+                    previous = nil
+                    previousBody = nil
+                    continue
+                }
+                guard afterBody.hasSameIdentity(as: window) else {
+                    throw SeatInterruption(issues: [.identityChanged])
+                }
+                guard VirtualWindowPlacementCheck.framesMatch(reading.frame, afterBody.frame) else {
+                    previous = nil
+                    previousBody = nil
+                    continue
+                }
+                reading = afterBody
+                last = reading
+                if let body, bounds.contains(body), bounds.contains(reading.frame),
+                   VirtualWindowPlacementCheck.framesMatch(
+                       body,
+                       reading.frame,
+                       tolerance: VirtualWindowPlacementCheck.crossSourceTolerance
+                   ) {
+                    fullBody = body
+                }
+            }
+
             // Reads smaller than the body by more than the offset between the
             // two sources, so it is the thumbnail and not MarkEdit's 3 pt.
             let slack = VirtualWindowPlacementCheck.crossSourceTolerance
             if !didAttemptStage,
-               reading.frame.width  < window.frame.width  - slack
-                || reading.frame.height < window.frame.height - slack {
+               reading.frame.width  < fullBody.width  - slack
+                || reading.frame.height < fullBody.height - slack {
                 didAttemptStage = true
                 let requested = window.replacingFrame(
-                    CGRect(origin: expectedOrigin, size: window.frame.size)
+                    CGRect(origin: expectedOrigin, size: fullBody.size)
                 )
                 do {
                     _ = try await placing.stage(
                         requested,
-                        expectedSize: window.frame.size,
+                        expectedSize: fullBody.size,
                         within      : bounds
                     )
                 } catch let failure as DisplayFailure {
@@ -4229,16 +4290,22 @@ public final class AgentSeat {
                 }
                 try checkAdoptionMayContinue()
                 previous = nil
+                previousBody = nil
                 continue
             }
 
-            if let previous,
+            if let previous, let previousBody,
                VirtualWindowPlacementCheck.framesMatch(previous.frame, reading.frame),
+               VirtualWindowPlacementCheck.framesMatch(
+                   previousBody,
+                   fullBody
+               ),
                bounds.contains(reading.frame) {
-                return reading
+                return (reading, fullBody)
             }
 
             previous = reading
+            previousBody = fullBody
         }
 
         throw refusedRaise ?? DisplayFailure.placementNotConfirmed(

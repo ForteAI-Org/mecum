@@ -285,6 +285,75 @@ struct AppWindowFollowTests {
                 "an owner that gave a window back must not take it straight back")
     }
 
+    @Test("a born-in-seat modal can settle at a new AX-attested size without a resize request")
+    func resizedBornModalIsTakenAtItsSettledSize() async throws {
+        let sensing = FakeSensing()
+        let placing = FakePlacing()
+        let (seat, _) = try await Self.followingSeat(sensing: sensing, placing: placing)
+        let initial = CGRect(x: FakeGeometry.virtual.minX + 300, y: FakeGeometry.virtual.minY + 200,
+                             width: 552, height: 300)
+        let settled = CGRect(origin: initial.origin, size: CGSize(width: 260, height: 276))
+        let born = Self.offer(Self.secondWindowNumber, to: sensing, placing, frame: initial)
+        let movesBefore = placing.moves.count
+        let stagesBefore = placing.stages
+        placing.stageError = NoWindowElement.refused
+        placing.resizeError = NoWindowElement.refused
+        sensing.windowGeometryOverride = { number in
+            if number == born.windowNumber, seat.state == .starting {
+                placing.bodyFrames[number] = settled
+                sensing.additionalWindows[number] = born.replacingFrame(settled)
+                return sensing.additionalWindows[number]
+            }
+            return number == FakeGeometry.windowNumber ? sensing.geometry : sensing.additionalWindows[number]
+        }
+        defer { sensing.windowGeometryOverride = nil }
+
+        await Self.pass(seat)
+
+        let adopted = try #require(seat.adoptedWindows.first { $0.id == born.windowNumber })
+        #expect(adopted.reference.frame == settled)
+        #expect(seat.session[born.windowNumber]?.operationalSize == settled.size)
+        #expect(seat.isStaged(adopted))
+        #expect(seat.state == .ready)
+        #expect(placing.moves.count == movesBefore && placing.stages == stagesBefore)
+        #expect(placing.resizes.isEmpty)
+        #expect(sensing.windowGeometry(of: born.windowNumber)?.frame == settled)
+        #expect(adopted.originalFrame == settled,
+                "the seat wrote no size and must retain the window's settled body")
+        let returned = await seat.release(adopted)
+        #expect(returned == .returned)
+        #expect(placing.moves.count == movesBefore && placing.resizes.isEmpty)
+    }
+
+    @Test("a small born-in-seat server frame without matching AX body remains a thumbnail")
+    func bornThumbnailStillNeedsItsFullBody() async throws {
+        let sensing = FakeSensing()
+        let placing = FakePlacing()
+        let (seat, _) = try await Self.followingSeat(sensing: sensing, placing: placing)
+        let initial = CGRect(x: FakeGeometry.virtual.minX + 300, y: FakeGeometry.virtual.minY + 200,
+                             width: 700, height: 500)
+        let thumbnail = CGRect(origin: initial.origin, size: CGSize(width: 140, height: 100))
+        let born = Self.offer(Self.secondWindowNumber, to: sensing, placing, frame: initial)
+        var restoredFullBody = false
+        placing.onStage = { restoredFullBody = true }
+        sensing.windowGeometryOverride = { number in
+            if number == born.windowNumber, seat.state == .starting, !restoredFullBody {
+                return born.replacingFrame(thumbnail)
+            }
+            return number == FakeGeometry.windowNumber ? sensing.geometry : sensing.additionalWindows[number]
+        }
+        defer { sensing.windowGeometryOverride = nil }
+
+        await Self.pass(seat)
+
+        let adopted = try #require(seat.adoptedWindows.first { $0.id == born.windowNumber })
+        #expect(restoredFullBody)
+        #expect(adopted.reference.frame == initial)
+        #expect(seat.session[born.windowNumber]?.operationalSize == initial.size)
+        #expect(seat.isStaged(adopted))
+        #expect(seat.state == .ready)
+    }
+
     @Test("observation settles an outside popup through the owned transfer path")
     func observationSettlesOutsidePopup() async throws {
 

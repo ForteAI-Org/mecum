@@ -37,7 +37,9 @@ nonisolated public struct AdoptedWindow: Sendable, Equatable, Identifiable {
 
     /// The frame the window had in the User Seat, which `release` returns it
     /// to. It is the application's own accessibility body, because that is
-    /// what the seat writes back through `AXPosition`.
+    /// what the seat writes back through `AXPosition`. A window taken in place
+    /// inside the Virtual Display records its confirmed settled body: no
+    /// physical frame was borrowed and no birth-time resize is owed.
     public let originalFrame: CGRect
 
     /// The **window server's** rectangle for the same window in the same
