@@ -102,9 +102,10 @@ the window returns, the virtual display disappears and foreground focus is resto
 Record any change in the window's position or size.
 
 If the Driver reports `unvalidated`, open a [Seat compatibility issue](https://github.com/ForteAI-Org/mecum/issues/new?template=seat_validation.yml).
-For an experimental run, explicitly add `--allow-unvalidated-build`. This permits
-unvalidated build or hardware configurations, but cannot bypass missing permissions
-or failed runtime checks. One successful run is not full Driver validation.
+Build and hardware qualification do not block a run. The Driver keeps the
+`unvalidatedBuild` mark and still requires permissions and passing runtime checks.
+`--allow-unvalidated-build` remains accepted for existing scripts. One successful
+run is not full Driver validation.
 
 ## Start a chat
 
@@ -120,7 +121,6 @@ Use `claude` instead of `codex` below to select Claude:
 
 Choose a conversation and model. First ask: “Reply with READY. Do not call any tools.”
 Once the Seat check succeeds, ask: “Inspect the open TextEdit document. Do not edit it.”
-For an unvalidated configuration, include `--allow-unvalidated-build` in this command too.
 
 Use `/status` to inspect, `/release` to return the windows and `/quit` to exit.
 These directory overrides do not change the provider's own history storage.

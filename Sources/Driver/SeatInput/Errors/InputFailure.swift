@@ -29,10 +29,9 @@ nonisolated public enum InputFailure: Error, Sendable, Equatable {
     /// as `unavailable(reason:)`.
     case primitiveUnavailable(String)
 
-    /// The gate refused: an unknown build, a missing grant or a self check that
-    /// did not pass. Fail closed, Spec section 6 and
-    /// `Documentation/Driver/adr/Adr0001FailClosedPrivatePrimitives.md`. The
-    /// readiness carries which of the three it was.
+    /// The gate refused a missing grant, failed self check or unreadable Ledger.
+    /// Readiness carries the cause. Missing build qualification alone does not
+    /// refuse (Spec section 6 and ADR 0015).
     case facilityUnavailable(FacilityReadiness)
 
     /// `SLSMainConnectionID` answered zero: this process has no window server

@@ -51,8 +51,8 @@ public actor InputDriver {
     package nonisolated let commandGate: InputCommandGate
 
     /// What the Facility answered about this system when the driver was built.
-    /// A driver only exists when it is allowed to act, so this is `validated`,
-    /// or `unvalidated` with the consumer's opt in.
+    /// A driver only exists after runtime checks and permissions pass, so this
+    /// is `validated` or `unvalidated`, with the latter marked on every Receipt.
     public nonisolated let readiness: FacilityReadiness
 
     /// True when the Ledger does not cover this build or this hardware. Every
@@ -63,9 +63,9 @@ public actor InputDriver {
     ///
     /// The gate runs here and not per send: primitives, the record's declared
     /// length and the offset round trip against the public setters, then the
-    /// Post Event grant, then the Ledger (spec section 6). A build the Ledger
-    /// does not know refuses unless the consumer opted in for **this** Facility,
-    /// and an opt in never lifts a failed self check.
+    /// Post Event grant, then the Ledger (spec section 6). Missing qualification
+    /// marks the driver without refusing it. The legacy opt in does not lift a
+    /// failed self check or a missing grant.
     public init(
         allowUnvalidatedBuild: Bool = false,
         table                : SymbolTable = .shared,

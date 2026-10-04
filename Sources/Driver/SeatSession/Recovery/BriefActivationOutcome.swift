@@ -36,7 +36,7 @@ nonisolated public enum BriefActivationOutcome: Sendable, Equatable {
     public enum Refusal: String, Sendable, Equatable {
 
         /// The host was not configured to restore the person's focus, or the
-        /// facility is not qualified on this build: nothing could give it back.
+        /// facility is unavailable at runtime: nothing could give it back.
         case noFocusRecovery
 
         /// The seat is not ready: acting, waiting, recovering, failed, tearing

@@ -100,7 +100,7 @@ struct FacilityGateTests {
             (true,  false, true,  true,  "unavailable",        false, false),
             (true,  false, false, false, "unavailable",        false, false),
             (true,  false, false, true,  "unavailable",        false, false),
-            (false, true,  true,  false, "unvalidatedBuild",   false, true),
+            (false, true,  true,  false, "unvalidatedBuild",   true,  true),
             (false, true,  true,  true,  "unvalidatedBuild",   true,  true),
             (false, true,  false, false, "permissionMissing",  false, false),
             (false, true,  false, true,  "permissionMissing",  false, false),
@@ -159,11 +159,11 @@ struct FacilityGateTests {
         )
         #expect(gate.readiness == .unvalidated(.hardware(build: "26A5425a", model: "Mac99,9")))
         #expect(gate.unvalidatedBuild)
-        #expect(!gate.mayAct)
+        #expect(gate.mayAct)
     }
 
-    @Test("the opt in lets an unvalidated Mac act, still marked")
-    func unknownHardwareOptIn() throws {
+    @Test("the legacy opt in does not change an unvalidated Mac eligibility")
+    func legacyOptInPreservesEligibility() throws {
         let gate = FacilityGate.evaluate(
             facility             : Self.fictitious,
             build                : Self.unknownHardware,
@@ -187,7 +187,7 @@ struct FacilityGateTests {
             allowUnvalidatedBuild: false
         )
         #expect(gate.readiness == .unvalidated(.hardware(build: "26A5425a", model: "Mac16,1")))
-        #expect(!gate.mayAct)
+        #expect(gate.mayAct)
     }
 
     @Test("an untested primitive is unvalidated on the build's own key")
@@ -201,14 +201,16 @@ struct FacilityGateTests {
             allowUnvalidatedBuild: false
         )
         #expect(gate.readiness == .unvalidated(.build("26A5425a")))
+        #expect(gate.mayAct)
+        #expect(gate.unvalidatedBuild)
     }
 
-    @Test("only validated allows use without an opt in")
+    @Test("unvalidated use stays marked and requires no opt in")
     func allowsUse() throws {
         let validated = try Self.gate(inLedger: true, selfCheckOK: true, permissionOK: true, allow: false)
         #expect(validated.readiness.allowsUse)
-        let unvalidated = try Self.gate(inLedger: false, selfCheckOK: true, permissionOK: true, allow: true)
-        #expect(!unvalidated.readiness.allowsUse)
+        let unvalidated = try Self.gate(inLedger: false, selfCheckOK: true, permissionOK: true, allow: false)
+        #expect(unvalidated.readiness.allowsUse)
         #expect(unvalidated.mayAct)
     }
 

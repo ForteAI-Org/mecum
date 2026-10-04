@@ -12,8 +12,9 @@ the product. Where the two disagree, this file wins here.
 2. **Protocols carry role names**, never a `Protocol` suffix: `WindowRelocating`,
    `EventPosting`, `InputPlatform`. A protocol with one implementation and no
    second one in sight does not get written.
-3. **Fail closed.** On an unknown symbol, record layout or macOS build a Facility
-   refuses. There is no implicit fallback anywhere in this package.
+3. **Fail closed on runtime faults.** Missing permissions, unresolved symbols
+   and invalid record layouts refuse. An unqualified macOS build may act and
+   keeps its `unvalidatedBuild` mark (ADR 0015). No cross-seat fallback exists.
 4. **No unsafe unwraps.** `!` and `try!` are out. The audited exception is the
    record writing path, where every offset is bounds-checked first.
 5. **Explicit over clever**, and in the hot paths comment the trick.

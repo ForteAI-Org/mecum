@@ -74,19 +74,6 @@ struct LiveStage {
 
         LivePump.prepare()
 
-        // A Live run is a research consumer, which is who this opt in was
-        // written for: it lets the Facilities act on a macOS build the Ledger
-        // has not been promoted to, and it is set here and never in the kit.
-        //
-        // It is not a way around the safety rule, because it cannot lift the
-        // one that matters. The self checks still run at every Facility start,
-        // and `allowUnvalidatedBuild` cannot rescue a failed one: if the record
-        // offsets moved on this build, the cross validation fails and every
-        // Facility refuses whatever this flag says. What the flag waives is the
-        // Ledger's blessing, which is a fact about a document, not about the
-        // system. Every Receipt and every event from such a run says
-        // `unvalidatedBuild`.
-        FacilityGate.researchOptInForUnvalidatedBuilds = true
         let build = BuildIdentity.current
         if (try? Ledger.bundled())?.entry(for: build) == nil {
             print("running on \(build.osVersion), which the Ledger does not describe: "

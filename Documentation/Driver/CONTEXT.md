@@ -204,8 +204,9 @@ whether a `waiting` seat's target went back to the background.
 _Avoid_: poll, tick, watchdog (the checks it runs)
 
 **Fail Closed**:
-On an unknown symbol, record layout or macOS build the facility refuses to act.
-There is no implicit fallback to global event posting.
+On a missing permission, unresolved symbol or invalid record layout the facility
+refuses to act. Missing build qualification is reported without blocking use
+(ADR 0015). There is no implicit fallback to global event posting.
 _Avoid_: graceful degradation, best effort
 
 ## Primitives

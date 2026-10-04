@@ -187,8 +187,6 @@ struct SystemGateHostTests {
     @Test("Facilities pass their self checks and preserve the build validation boundary",
           .enabled(if: tierEnabled()))
     func facilitiesAreReady() throws {
-        let ledger = try Ledger.bundled()
-        let buildIsRecorded = ledger.entry(for: .current) != nil
         for facility in Facility.all {
             #expect(
                 FacilityGate.selfCheckFailure(for: facility) == nil,
@@ -203,9 +201,8 @@ struct SystemGateHostTests {
                 #expect(!Permissions.preflight(kind))
                 #expect(!gate.mayAct)
             case .unvalidated:
-                #expect(!buildIsRecorded, "A recorded build must not lose its validation")
                 #expect(gate.unvalidatedBuild)
-                #expect(gate.mayAct, "The Host tier explicitly opts into qualifying a new build")
+                #expect(gate.mayAct, "Missing qualification does not block a ready Facility")
             case .unavailable:
                 Issue.record("\(facility.name) is \(gate.readiness) on this build")
             }

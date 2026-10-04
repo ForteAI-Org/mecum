@@ -3,8 +3,8 @@
 Every private primitive the kit relies on is gated per macOS build: the symbol is
 resolved, the record's shape is checked, the offsets are cross-validated against
 public setters, and only a Ledger entry plus passing self-checks make a Facility
-`validated`. On an unknown build, a missing symbol or a changed record the
-Facility refuses to act. There is deliberately no fallback to global event
+`validated`. A missing symbol or a changed record refuses action. The original
+unknown-build refusal is superseded by [ADR 0015](Adr0015UnqualifiedBuildsRemainUsable.md). There is deliberately no fallback to global event
 posting: an action that leaks onto the User Seat is worse than an action that
 does not happen, and a click that may or may not have landed is worse than a
 click that was never sent.

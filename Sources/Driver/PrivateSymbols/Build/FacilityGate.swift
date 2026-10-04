@@ -17,7 +17,7 @@ import SeatCore
 ///
 /// 1. **A failed self check wins over everything.** The running system beats the
 ///    Ledger, so a missing symbol or a moved offset is `unavailable` even on a
-///    build the Ledger blesses, and `allowUnvalidatedBuild` cannot lift it.
+///    build the Ledger blesses. Ledger coverage never lifts it.
 /// 2. **Then the permission.** It is checked after the self checks because a
 ///    grant cannot repair a missing primitive, and reporting
 ///    `permissionMissing` for a Facility that could not work anyway sends the
@@ -29,14 +29,13 @@ nonisolated public struct FacilityGate: Sendable, Equatable {
     /// What the Facility answers about this system.
     public let readiness: FacilityReadiness
 
-    /// Whether the Facility may act. True for `validated`, and for
-    /// `unvalidated` only when the consumer opted in for this Facility.
+    /// Whether the Facility may act. Ledger coverage is evidence, not a gate.
+    /// Missing permissions and failed runtime self checks still refuse.
     public let mayAct: Bool
 
     /// Whether every Receipt and event of this Facility must carry
     /// `unvalidatedBuild: true`. True whenever the Ledger does not cover this
-    /// system, whether or not the consumer opted in, because the mark describes
-    /// the evidence and not the permission.
+    /// system, because the mark describes the evidence and not the permission.
     public let unvalidatedBuild: Bool
 
     init(
@@ -45,13 +44,7 @@ nonisolated public struct FacilityGate: Sendable, Equatable {
         unvalidatedBuild: Bool
     ) {
         self.readiness        = readiness
-        // Release builds never refuse on the gate: the readiness still reports
-        // what the system answered, but every Facility acts as it does in debug.
-        #if DEBUG
         self.mayAct           = mayAct
-        #else
-        self.mayAct           = true
-        #endif
         self.unvalidatedBuild = unvalidatedBuild
     }
 
@@ -64,8 +57,8 @@ nonisolated public struct FacilityGate: Sendable, Equatable {
     ///   - selfCheckFailure: the reason steps 1 to 3 failed, `nil` when they
     ///     passed. Steps 4 and beyond (effect) never run at runtime.
     ///   - missingPermission: the grant the Facility needs and does not have.
-    ///   - allowUnvalidatedBuild: the per-Facility opt in. There is no global
-    ///     flag, and it never lifts a failed self check.
+    ///   - allowUnvalidatedBuild: retained for source compatibility. Unvalidated
+    ///     systems may act regardless of this value after runtime checks pass.
     public static func evaluate(
         facility             : Facility,
         build                : BuildIdentity,
@@ -94,7 +87,7 @@ nonisolated public struct FacilityGate: Sendable, Equatable {
         func unvalidated(_ scope: UnvalidatedScope) -> FacilityGate {
             FacilityGate(
                 readiness       : .unvalidated(scope),
-                mayAct          : allowUnvalidatedBuild,
+                mayAct          : true,
                 unvalidatedBuild: true
             )
         }
@@ -126,22 +119,13 @@ nonisolated public struct FacilityGate: Sendable, Equatable {
     /// The runtime entry point: runs steps 1 to 3 against the running system,
     /// reads the bundled Ledger, preflights the grants, and derives. A Ledger
     /// that cannot be read is `unavailable` and not an empty Ledger, because an
-    /// empty Ledger would answer `unvalidated` and let the opt in through on
-    /// evidence that was never shipped.
+    /// empty Ledger would conceal a damaged resource as missing qualification.
     public static func current(
         facility             : Facility,
         allowUnvalidatedBuild: Bool = false,
         build                : BuildIdentity = .current,
         table                : SymbolTable = .shared
     ) -> FacilityGate {
-        // ponytail: process-wide research opt-in for the lab. The kit's design is
-        // per-facility opt-in only, but every internal probe (placement, capture
-        // witness, sensing) calls this with the default, so threading a flag
-        // through them is a six-file change. Self checks and permissions still
-        // refuse; only the Ledger verdict is lifted, and every receipt keeps
-        // `unvalidatedBuild == true`. Upgrade path: run the compat suite on this
-        // build, promote it into the Ledger, then stop setting this.
-        let allowUnvalidatedBuild = allowUnvalidatedBuild || researchOptInForUnvalidatedBuilds
         let ledger: Ledger
         do {
             ledger = try Ledger.bundled()
@@ -162,8 +146,8 @@ nonisolated public struct FacilityGate: Sendable, Equatable {
         )
     }
 
-    /// Set once at startup by a research consumer that accepts acting on a
-    /// macOS build the Ledger has not validated. See `current`.
+    /// Retained for source compatibility with research consumers. Unvalidated
+    /// systems no longer need this flag; runtime failures still refuse.
     nonisolated(unsafe) public static var researchOptInForUnvalidatedBuilds = false
 
     /// Steps 1 to 3 of the compatibility suite, the ones cheap enough to run

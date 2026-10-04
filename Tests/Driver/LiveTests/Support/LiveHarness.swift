@@ -13,17 +13,6 @@ import SeatCore
 
 /// The Live tier runs only when the environment asks for it: it opens windows,
 /// moves the person's applications and posts real events.
-/// Lets the Facilities act on a macOS build the Ledger has not been promoted to.
-///
-/// The same circle as the host tier: a build is promoted by reading a report,
-/// the report needs these suites to run, and on an unpromoted build every
-/// Facility refuses. It waives the Ledger's blessing and nothing else, and the
-/// self checks that protect the record offsets still run and still refuse.
-private let liveResearchOptIn: Bool = {
-    FacilityGate.researchOptInForUnvalidatedBuilds = true
-    return true
-}()
-
 nonisolated func tierEnabled() -> Bool {
     ProcessInfo.processInfo.environment["AGENTSEAT_LIVE_TESTS"] == "1"
 }
@@ -36,10 +25,6 @@ nonisolated func liveSkipReason(
     needsChrome: Bool = false
 ) -> String? {
     guard tierEnabled() else { return "AGENTSEAT_LIVE_TESTS=1 is required for the Live tier." }
-    // Every Live suite passes through here, which is why the opt in is set here
-    // and not only inside `LiveStage`: the contextual menu suite brings up its
-    // own seat and was refused by the gate on an unpromoted build.
-    _ = liveResearchOptIn
     if let optIn, ProcessInfo.processInfo.environment[optIn] != "1" {
         return "\(optIn)=1 is required: this optional calibration is disabled by default."
     }

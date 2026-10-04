@@ -145,8 +145,8 @@ nonisolated public struct Facility: Sendable, Hashable {
     /// It is separate from `windowIdentity` and not an addition to it. Its one
     /// new primitive has not been promoted into the build ledger, so folding it
     /// into the identity Facility would turn every ordinary identity reading
-    /// unvalidated over a symbol those readings never touch. A consumer opts
-    /// into this Facility the way it opts into focus recovery.
+    /// unvalidated over a symbol those readings never touch. This Facility
+    /// keeps that evidence separate without requiring a qualification opt in.
     public static let remoteWindowGeometry = Facility(
         name: "remoteWindowGeometry",
         requirements: [
@@ -176,7 +176,7 @@ nonisolated public struct Facility: Sendable, Hashable {
 
     /// Optional focus restoration. Kept separate from the four baseline
     /// facilities: its new symbol has not been promoted into the build ledger.
-    /// A consumer must explicitly opt into this unvalidated facility.
+    /// Missing Ledger qualification marks recovery without blocking its use.
     public static let focusRecovery = Facility(
         name: "focusRecovery",
         requirements: [

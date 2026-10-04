@@ -119,6 +119,14 @@ fails closed to an explicit target choice only when AX reports no unique focused
 or main window, or reports contradictory current-window state. The Live campaign
 has not yet been run.
 
+## Unqualified builds
+
+Build and hardware coverage in the Ledger describe evidence. They no longer
+block use after runtime self checks and permission preflights pass. Receipts keep
+`unvalidatedBuild: true`; a successful run does not promote a Ledger entry.
+Debug and release apply the same checks. Legacy `allowUnvalidatedBuild` options
+remain accepted. See [ADR 0015](adr/Adr0015UnqualifiedBuildsRemainUsable.md).
+
 ## The fence is alive only while somebody holds it
 
 The HID fence is reference counted in the process: the first acquisition
