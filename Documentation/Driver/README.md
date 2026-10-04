@@ -153,7 +153,7 @@ watchdog can combine the fence's latched signals with the display's geometry.
 Everything goes through the `Makefile`; `make help` lists it.
 
 ```
-make test           unit tier: pure, parallel, no permission needed
+make test           unit tier: pure, serialized, no permission needed
 make host-tests     host tier: TCC and a real display, two commands, counts asserted
 make live-tests     live tier: real windows and a real browser
 make bench          the measurements of spec section 8, each one a gate
@@ -161,7 +161,9 @@ make compat-report  runs the tiers and writes docs/compatibility/Build<build>.{m
 make promote-build BUILD=26A5425a
 ```
 
-Three tiers. Unit is pure and parallel. Host needs TCC and a real display. Live
+Three tiers. Unit is pure and serialized: adoption waits pump the main queue,
+so parallel suites starve recovery instead of exercising independent work.
+Host needs TCC and a real display. Live
 drives real windows and a real browser, and it needs the person's Mac to itself:
 a running consumer holds the virtual display's identity, and a second display
 with the same identity is refused.
@@ -175,13 +177,12 @@ target, so a row taken with a hand on the mouse comes back `INCO`, and an
 inconclusive row is never a pass. Both are preconditions of measuring, not
 defects to work around.
 
-**A green exit status from a tier is not evidence that the tier ran.** A live HID
-tap plus repeated virtual display creation ends the process with exit code 0 and
-no summary line at all. So the Host tier runs as **two commands**, the seat cycle
-apart from the display suites, and every tier asserts the number of tests it
-reported. That is what the `Makefile` is for, and it is why running
-`xcrun swift test` by hand on the Host tier will tell you it passed when it died
-after three tests.
+**A green exit status from a tier is not evidence that the tier ran.** Native
+capture could return through Swift async main and exit before the test's
+completion summary. Both Host processes use a synchronous native runner
+around the same built Swift Testing bundle. The Host tier still keeps the
+seat cycle apart from the display suites. Every tier asserts its reported
+count. An incomplete run therefore fails even if the process exited zero.
 
 The Live tier runs `--no-parallel` for a second reason: its two suites drive the
 same browser, and in parallel one of them quits the window the other adopted.

@@ -6,12 +6,10 @@
 #
 # The three test tiers, the benchmarks, the compatibility report and the one
 # thing that writes the ledger. Nothing here is clever: what it encodes is the
-# two facts about this package that a plain `swift test` gets wrong.
+# three facts about this package that a plain `swift test` gets wrong.
 #
-# 1. The Host tier runs as **two commands**, the seat cycle apart from
-#    everything else. A live HID fence held across repeated virtual display
-#    creation ends the process, and in one command the run stops partway with a
-#    green exit status and no summary at all (Documentation/Driver/SpiLedger.md).
+# 1. Both Host processes use a synchronous native entry point. Swift async main
+#    could exit during native capture before either process reported completion.
 # 2. Every tier **asserts how many tests it reported**, because of the same
 #    defect: exit status 0 is not evidence that a run finished.
 # 3. The unit tier runs **serialized**. Every suite in it is `@MainActor`, and a
@@ -78,7 +76,7 @@ QT_PYTHON ?= $(shell command -v python3)
 BENCH ?= fence-callback fence-clamp input-trace-overhead send-click display-lifecycle \
          monitor-60 monitor-120 stage seat-idle window-watch focus-refresh recovery
 
-.PHONY: all test host-tests live-tests qt-live-tests qt-editor-live-tests qt-fixture-live-tests bench compat-report promote-build clean help
+.PHONY: all test native-test-runner host-tests live-tests qt-live-tests qt-editor-live-tests qt-fixture-live-tests bench compat-report promote-build clean help
 
 all: test
 
@@ -113,12 +111,27 @@ test:
 	@bash Tools/Driver/Scripts/test-seatbench-contract.sh
 	@TIER_BUNDLES=$(UNIT_BUNDLES) $(TIER) unit - $(SWIFT) test --no-parallel
 
-# Two commands, and the split is not a style choice: see the header.
-host-tests:
+# The synchronous entry point survives native RunLoop returns during capture.
+# It loads the same built Swift Testing bundle; each tier still checks its count.
+native-test-runner:
+	@$(SWIFT) build --build-tests
+	@$(SWIFT)c -parse-as-library \
+	    -F "$$(xcrun --sdk macosx --show-sdk-platform-path)/Developer/Library/Frameworks" \
+	    -Xlinker -rpath \
+	    -Xlinker "$$(xcrun --sdk macosx --show-sdk-platform-path)/Developer/Library/Frameworks" \
+	    -Xlinker -rpath \
+	    -Xlinker "$$(xcrun --sdk macosx --show-sdk-platform-path)/Developer/usr/lib" \
+	    Tools/Driver/Scripts/NativeTestMain.swift -o .build/native-driver-test-main
+
+host-tests: native-test-runner
 	@AGENTSEAT_HOST_TESTS=1 $(TIER) host-seat-cycle $(HOST_CYCLE_TESTS) \
-	    $(SWIFT) test --filter theSeatCycle
+	    .build/native-driver-test-main \
+	    "$$($(SWIFT) build --show-bin-path)/HostTests.xctest/Contents/MacOS/HostTests" \
+	    --filter theSeatCycle --no-parallel
 	@AGENTSEAT_HOST_TESTS=1 $(TIER) host-display-suites $(HOST_REST_TESTS) \
-	    $(SWIFT) test --filter HostTests --skip theSeatCycle
+	    .build/native-driver-test-main \
+	    "$$($(SWIFT) build --show-bin-path)/HostTests.xctest/Contents/MacOS/HostTests" \
+	    --skip theSeatCycle --no-parallel
 
 # `--no-parallel` is load bearing: both Live suites drive the same browser and
 # the process admits one virtual display at a time, so run in parallel one suite
