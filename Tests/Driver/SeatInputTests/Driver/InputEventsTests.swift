@@ -601,6 +601,14 @@ struct InputEventsTests {
         #expect(events[0].event.getIntegerValueField(.scrollWheelEventDeltaAxis1) == -6)
     }
 
+    @Test("scroll modifiers come only from the keys owned by the current turn",
+          arguments: [Modifiers(), .shift, [.command, .option]])
+    func scrollUsesOwnedModifiers(_ held: Modifiers) throws {
+        let events = try build(.scroll(location(50, 60), deltaY: -6), held: held)
+        #expect(events[0].event.flags == held.cgFlags)
+        #expect(events[0].event.getIntegerValueField(.scrollWheelEventDeltaAxis2) == 0)
+    }
+
     // MARK: drag
 
     @Test("a drag opens with a move, presses, drags and releases, paced by the platform")

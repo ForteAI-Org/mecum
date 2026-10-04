@@ -383,6 +383,9 @@ nonisolated package enum InputEvents {
                 throw InputFailure.eventCreationFailed
             }
             event.location = location.screenPoint
+            // The private source retains flags from prior directed key events.
+            // Scroll reflects only this Turn's held keys, not that cached state.
+            event.flags = held.cgFlags
             event.setIntegerValueField(.scrollWheelEventIsContinuous, value: 0)
             mark(event, correlationID: correlationID, isMouse: false)
             events.append(PreparedEvent(
