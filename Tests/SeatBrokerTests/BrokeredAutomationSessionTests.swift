@@ -297,6 +297,21 @@ struct BrokeredAutomationSessionTests {
             + "no window of the assigned application is eligible to act in.")
     }
 
+    @Test("a different opening window is refused with its numbers and without exposing its scene")
+    func anOpeningIdentityMismatchIsWorded() {
+        let process = ProcessIdentity(processID: 4242, serialNumberHigh: 1, serialNumberLow: 4242)
+        let expected = WindowIdentity(process: process, windowNumber: 777, ownerConnectionID: 5242)
+        let observed = WindowIdentity(process: process, windowNumber: 778, ownerConnectionID: 5242)
+        let refusal = BrokeredAutomationSession.refusal(for: SeatDrivingFailure.initialWindowChanged(
+            expected: expected,
+            observed: observed
+        ))
+        #expect(refusal is AutomationFailure)
+        #expect(String(describing: refusal).contains("adopted identity of window 777"))
+        #expect(String(describing: refusal).contains("reported window: 778"))
+        #expect(String(describing: refusal).contains("No scene from that window was returned and no input was sent"))
+    }
+
     @Test("a holder idle between turns gives the seat back as soon as another entry waits",
           .timeLimit(.minutes(1)))
     func anIdleHolderReleasesWhenAnEntryStartsWaiting() async throws {

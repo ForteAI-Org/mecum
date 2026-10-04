@@ -48,6 +48,13 @@ and is never a reason to send the gesture again.
 | `SeatDriving` (`Sources/Integration`) | the Driver's seat filling the Engine's roles: `SeatTarget` owns the host, the seat and the adopted window; `SeatSceneProvider` is `SceneProviding` over the seat's stills; `SeatActuator` is `Actuating` over routed Commands inside a Turn, answering every receipt with what the engine saw; `SeatControls` is `ControlPressing` without the geometric read |
 | `mecum` (tool, `Tools/Engine/mecum`) | the command line: `windows`, `scene`, `act`, `select`, `memory`; the composition root that wires the foreground adapters, or the Seat's with `--seat` |
 
+Before the first SeatDriving observation reaches the Engine, `SeatTarget`
+requires the full attested identity of the adopted window, including its process
+lifetime and owner connection. A different selection refuses before exposing a
+scene; after the first match, ordinary window following remains available.
+The borrowed target receives the broker's adopted identity explicitly so a
+selection change before borrowing cannot redefine the opening target.
+
 Link the `MecumEngine` library product. `EngineCore` imports `PerceptionCore`, Foundation and
 CoreGraphics; `Memory` imports `EngineCore` and `PerceptionCore`; the adapters import their core
 module and one framework, and `FileKnowledge` imports `Memory` and Foundation only. A background seat fills

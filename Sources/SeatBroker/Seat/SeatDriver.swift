@@ -571,10 +571,14 @@ final class SeatDriver {
     /// by `observe` does, so the monitor shows the dialog the engine reads. Throws `sessionClosed`
     /// while there is no seat or no window.
     func borrowedTarget() throws -> SeatTarget {
-        guard let seat, window != nil else { throw SeatBrokerError.sessionClosed }
+        guard let seat, let window else { throw SeatBrokerError.sessionClosed }
+        guard let identity = window.reference.identity else {
+            throw SeatBrokerError.windowNotAttested(windowNumber: window.id)
+        }
         let target = SeatTarget(
-            borrowing: host,
-            seat     : seat
+            borrowing    : host,
+            seat         : seat,
+            initialWindow: identity
         ) { [weak self] delivery in
             self?.preview.follow(delivery)
         }

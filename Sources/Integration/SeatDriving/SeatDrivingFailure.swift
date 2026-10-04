@@ -6,6 +6,7 @@
 //
 
 import CoreGraphics
+import SeatCore
 
 /// SeatDrivingFailure names why the seat could not see or act for the engine.
 public enum SeatDrivingFailure: Error, Equatable {
@@ -14,6 +15,9 @@ public enum SeatDrivingFailure: Error, Equatable {
     case notAdopted
     /// The window server does not attest this window number for this process.
     case windowNotAttested(number: Int, processID: Int32)
+    /// The first observation must belong to the window entrusted to this target, including its
+    /// process lifetime and owning connection. No scene or input is supplied for another window.
+    case initialWindowChanged(expected: WindowIdentity, observed: WindowIdentity?)
     /// A still came back without pixels or without valid geometry.
     case frameUnusable
     /// The gesture's point is outside the adopted window, where the seat refuses to post: a pop-up

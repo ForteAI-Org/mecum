@@ -561,6 +561,14 @@ public final class BrokeredAutomationSession: AutomationSessionOperating {
     /// The worker's sentence for an application that showed no window or a seat that could not
     /// observe, and every other error as it came, so a cancellation stays a cancellation.
     static func refusal(for error: any Error) -> any Error {
+        if case .initialWindowChanged(let expected, let observed)? = error as? SeatDrivingFailure {
+            let actual = observed.map { String($0.windowNumber) } ?? "an unattested window"
+            return AutomationFailure(
+                "The first observation did not match the adopted identity of window \(expected.windowNumber) "
+                    + "(reported window: \(actual)). "
+                    + "No scene from that window was returned and no input was sent. "
+                    + "List the current windows and open the intended one again.")
+        }
         // The seat's own reason reaches the agent as the router prints it, which for an enum is its
         // case and payload: the sentence is the one the seat's mapper writes for a person.
         if error is ObservationUnavailable {

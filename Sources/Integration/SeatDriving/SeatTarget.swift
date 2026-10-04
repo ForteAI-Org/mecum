@@ -35,6 +35,8 @@ public final class SeatTarget {
     /// The observation the last Frame was delivered with, and whether a Command already consumed it.
     private var delivery: SeatObservationDelivery?
     private var deliverySpent = false
+    /// The opening obligation ends only when this window supplies its first qualified observation.
+    private var initialWindow: WindowIdentity?
 
     /// The geometry of the last observation, the coordinate authority for the next command.
     public private(set) var lastWindowGeometry: WindowGeometryObservation?
@@ -58,15 +60,19 @@ public final class SeatTarget {
     /// observation: one the owner takes afterwards supersedes it, so the next Command from here is
     /// refused before any event and never redirected. `observed` hears every observation taken
     /// here, so the owner's live picture shows the window the engine reads and not the one it adopted.
+    /// The first observation must match `initialWindow`, or the selected window at the borrow when
+    /// it is omitted. Later window following remains available after that first identity is verified.
     package init(
         borrowing host: SeatHost,
         seat          : AgentSeat,
+        initialWindow : WindowIdentity? = nil,
         observed      : (@MainActor (SeatObservationDelivery) -> Void)? = nil
     ) {
         self.host     = host
         self.seat     = seat
         self.observed = observed
         isBorrowed    = true
+        self.initialWindow = initialWindow ?? seat.currentTarget?.reference.identity
     }
 
     /// Brings up the virtual display and the fence, atomically, and makes the seat.
@@ -91,6 +97,7 @@ public final class SeatTarget {
         var window = try await seat.adopt(reference, platform: .universal, title: title)
         if !seat.isStaged(window) { window = try await seat.stage(window) }
         adopted = window
+        initialWindow = window.reference.identity
         return window
     }
 
@@ -104,6 +111,7 @@ public final class SeatTarget {
     /// application's windows, else the one adopted here.
     public func currentWindow() throws -> AdoptedWindow {
         guard let window = seat?.currentTarget ?? adopted else { throw SeatDrivingFailure.notAdopted }
+        try verifyInitialWindow(window.reference.identity)
         return window
     }
 
@@ -123,12 +131,16 @@ public final class SeatTarget {
     @discardableResult
     public func observe() async throws -> SeatObservationDelivery {
         let seat = try agentSeat()
+        _ = try currentWindow()
         let delivered = try await Self.retrying {
+            _ = try self.currentWindow()
             switch await seat.observe() {
                 case .success(let delivery): return delivery
                 case .failure(let reason)  : throw reason
             }
         }
+        try verifyInitialWindow(delivered.reference.recipient)
+        initialWindow = nil
         delivery           = delivered
         deliverySpent      = false
         lastWindowGeometry = delivered.geometry
@@ -164,6 +176,8 @@ public final class SeatTarget {
     /// One still of the whole virtual display: the only capture that holds both the window and a
     /// pop-up floating beside it, because a window filter captures exactly one window.
     public func displayStill() async throws -> SeatFrame {
+        // A display crop cannot establish the opening identity; qualify the selected window first.
+        if initialWindow != nil { _ = try await observe() }
         // A stopped borrow has no seat and must not read the owner's display, which may show another window.
         guard seat != nil, let displayID = host.displayID else { throw SeatDrivingFailure.notAdopted }
         return try await Self.retrying {
@@ -192,7 +206,15 @@ public final class SeatTarget {
         deliverySpent = false
         lastCapturedWindow = nil
         lastWindowGeometry = nil
+        initialWindow = nil
         if !isBorrowed { _ = await host.stop() }
+    }
+
+    private func verifyInitialWindow(_ observed: WindowIdentity?) throws {
+        guard let expected = initialWindow else { return }
+        guard observed == expected else {
+            throw SeatDrivingFailure.initialWindowChanged(expected: expected, observed: observed)
+        }
     }
 
     private static func retrying<T>(_ body: () async throws -> T) async throws -> T {
@@ -201,6 +223,7 @@ public final class SeatTarget {
             do { return try await body() } catch {
                 lastError = error
                 if error is CancellationError { break }
+                if case .initialWindowChanged? = error as? SeatDrivingFailure { break }
                 try? await Task.sleep(for: .milliseconds(250 * attempt))
             }
         }
