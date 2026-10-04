@@ -785,8 +785,23 @@ extension AgentSeat {
                 instance.processID, chain, observation.selectionGeneration
             )
         }
+        let mayReadOwnWindowlessContent: Bool
+        switch outcome {
+            case .failure(.subtreeUnreadable):
+                mayReadOwnWindowlessContent = true
+            case .success(let endpoint):
+                // A windowless focused control can have an auxiliary themed widget
+                // elsewhere in its subtree. Prefer its own parentage if proved.
+                mayReadOwnWindowlessContent = command.firstMouseScreenPoint == nil
+                    && endpoint.kind == .keyboardContext
+                    && endpoint.relation == .remoteContent
+                    && endpoint.evidence == .remoteContentOfSurface
+                    && endpoint.logicalSurface == sheet
+            default:
+                mayReadOwnWindowlessContent = false
+        }
         if !hasAttestedModalRelation,
-           case .failure(.subtreeUnreadable) = outcome,
+           mayReadOwnWindowlessContent,
            case .success(let content) = endpoints.windowlessContent(
                instance.processID,
                command.firstMouseScreenPoint,

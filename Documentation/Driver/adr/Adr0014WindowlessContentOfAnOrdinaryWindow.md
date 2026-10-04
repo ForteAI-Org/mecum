@@ -48,13 +48,36 @@ endpoint on its own window.
   success with zero or `-25201`; any other error, or the symbol missing, is a
   failed read. `-25201` is also what a destroyed element answers, and the parent
   or children read that follows one fails and refuses.
-- **Only after a refusal.** `AgentSeat.inputEndpoint` asks for it only when the
-  surface has no attested modal relation and the discovery, with the ordinary
-  keyboard route for keys, refused with `subtreeUnreadable`. A surface whose host
-  is another window is never answered. Every modal path behaves as before.
+- **For an ordinary surface.** `AgentSeat.inputEndpoint` asks when the surface
+  has no attested modal relation and discovery refused with `subtreeUnreadable`.
+  Since the 2026-10-03 follow-up, it also asks for keys when discovery inferred
+  `remoteContentOfSurface` from a subtree while the focused control itself
+  named no window. A positively proved own parent path wins over that inferred
+  auxiliary destination. A failed proof leaves the original outcome in place;
+  a focus directly naming another window never enters this path. A surface
+  whose host is another window is never answered. Every modal path behaves as
+  before.
 - **Keys are proved twice.** At the boundary the same proof is taken again,
   because the focused control names no window and the plain focus reading would
   answer nil. A focus that left the page's content retires the context.
+
+## Follow-up: auxiliary themed widgets in the subtree
+
+Repeated owned Safari field edits through Mecum on 2026-10-03 reached an
+unclassified keyboard endpoint with evidence `remoteContentOfSurface`. Native
+traces identified three successive 14×14 endpoints owned by
+`ThemeWidgetControlViewService`, while accessibility reported Safari's PID.
+The initial keyboard discovery had inferred a recipient from a named window
+elsewhere under the focused surface because the focused control itself named
+no Window ID. Containment of that auxiliary window did not establish it as the
+text control's recipient.
+
+The follow-up gives priority to the existing complete own-content parent proof
+in this one nonmodal keyboard case. It adds no backend qualification for the
+widget service. The proof is repeated at the posting boundary as before. Tests
+cover the positive route, missing proof, a directly named foreign focus, modal
+surfaces and proof loss before posting. App repeat results are tracked in
+[stabilization rounds](../StabilizationRounds.md).
 
 ## Why remote panel content stays refused
 
@@ -72,9 +95,9 @@ seat failed to attest remains the residual risk.
 
 ## What stays unproven
 
-- That Safari's page acts on the seat's background events once they are routed
-  to its window. The route decides the recipient, never the effect, and no live
-  run has posted through it yet.
+- Safari beyond the controlled owned field and button used by the 2026-10-03
+  follow-up. Their app-path results are recorded in stabilization rounds; the
+  route itself decides the recipient and never proves the effect.
 - Keys on a page whose application reports no focused control. The shipping
   reading above answered `-25212` (no value) for `AXFocusedUIElement`: with no
   focused control this route refuses, and so does `ordinaryKeyboardContext`,
