@@ -1082,8 +1082,8 @@ struct UserFocusRecoveryTests {
         fixture.recovery.stop()
     }
 
-    @Test("the front the person takes during a brief activation stays theirs")
-    func personsChoiceDuringABriefActivationStands() async {
+    @Test("the front the person takes during a brief activation stays theirs", arguments: [false, true])
+    func personsChoiceDuringABriefActivationStands(readsReady: Bool) async {
         let fixture = Harness()
         fixture.requiresPausedGate = false
         fixture.onRestore = { [unowned fixture] in fixture.bringInFront($0) }
@@ -1094,13 +1094,113 @@ struct UserFocusRecoveryTests {
                 reads += 1
                 fixture.bringInFront(Self.other)
                 fixture.recovery.activationChanged(to: Self.other.processID)
-                return false
+                return readsReady
             },
             atMost: 1_000_000_000
         )
-        #expect(run.outcome == .notReady(afterMilliseconds: 0))
+        #expect(run.outcome == .notReady(afterMilliseconds: 0), "A changed foreground invalidates the predicate")
         #expect(reads == 1, "the poll stops once the front is no longer the target's")
         #expect(fixture.requested == [FakeGeometry.adoptedWindow], "nothing is handed back over the person")
+        #expect(fixture.reports.isEmpty)
+        #expect(!fixture.gate.isPaused)
+        fixture.recovery.stop()
+    }
+
+    @Test("A server front witness cannot authorize readiness before workspace activation agrees")
+    func briefReadinessNeedsWorkspaceAgreement() async {
+        let fixture = Harness()
+        fixture.requiresPausedGate = false
+        fixture.frontOverride = true
+        fixture.onRestore = { [unowned fixture] window in
+            if window.processID == Self.user.processID {
+                fixture.frontOverride = false
+                fixture.bringInFront(window)
+            }
+        }
+        var reads = 0
+        let run = await fixture.recovery.bringBrieflyInFront(
+            FakeGeometry.adoptedWindow,
+            until: { reads += 1; return true },
+            atMost: 100_000_000
+        )
+        #expect(run.outcome == .notReady(afterMilliseconds: 0))
+        #expect(reads == 0)
+        #expect(fixture.requested == [FakeGeometry.adoptedWindow, Self.user])
+        #expect(fixture.reports.isEmpty)
+        #expect(!fixture.gate.isPaused)
+        fixture.recovery.stop()
+    }
+
+    @Test("Readiness that finishes after the deadline does not authorize dispatch")
+    func aLateReadinessResultIsNotReady() async {
+        let fixture = Harness()
+        fixture.requiresPausedGate = false
+        fixture.onRestore = { [unowned fixture] in fixture.bringInFront($0) }
+        let run = await fixture.recovery.bringBrieflyInFront(
+            FakeGeometry.adoptedWindow,
+            until: { fixture.time += 1_000_000_001; return true },
+            atMost: 1_000_000_000
+        )
+        #expect(run.outcome == .notReady(afterMilliseconds: 1000))
+        #expect(fixture.requested == [FakeGeometry.adoptedWindow, Self.user])
+        #expect(fixture.reports.isEmpty)
+        #expect(!fixture.gate.isPaused)
+        fixture.recovery.stop()
+    }
+
+    @Test("Brief handback can settle after the ordinary recovery verification window")
+    func aDelayedBriefHandbackCanBeVerified() async {
+        let fixture = Harness()
+        fixture.requiresPausedGate = false
+        var handbackReads = 0
+        fixture.onRestore = { [unowned fixture] window in
+            fixture.bringInFront(window)
+            if window.processID == Self.user.processID {
+                fixture.sensing.windowGeometryOverride = { number in
+                    guard number == Self.user.windowNumber else { return fixture.sensing.geometry }
+                    handbackReads += 1
+                    if handbackReads == 1 { fixture.time += 300_000_000 }
+                    return Self.user
+                }
+            }
+        }
+        let run = await fixture.recovery.bringBrieflyInFront(
+            FakeGeometry.adoptedWindow,
+            until: { true },
+            atMost: 1_000_000_000
+        )
+        #expect(run.outcome == .ready(afterMilliseconds: 0))
+        #expect(handbackReads >= 2)
+        #expect(fixture.requested == [FakeGeometry.adoptedWindow, Self.user])
+        #expect(fixture.reports.isEmpty)
+        #expect(!fixture.gate.isPaused)
+        fixture.recovery.stop()
+    }
+
+    @Test("A handback reading that finishes after its deadline cannot authorize readiness")
+    func aLateHandbackReadingIsNotReady() async {
+        let fixture = Harness()
+        fixture.requiresPausedGate = false
+        var handbackReads = 0
+        fixture.onRestore = { [unowned fixture] window in
+            fixture.bringInFront(window)
+            if window.processID == Self.user.processID {
+                fixture.sensing.windowGeometryOverride = { number in
+                    guard number == Self.user.windowNumber else { return fixture.sensing.geometry }
+                    handbackReads += 1
+                    if handbackReads == 2 { fixture.time += UserFocusRecovery.briefHandbackLimitNanoseconds + 1 }
+                    return Self.user
+                }
+            }
+        }
+        let run = await fixture.recovery.bringBrieflyInFront(
+            FakeGeometry.adoptedWindow,
+            until: { true },
+            atMost: 1_000_000_000
+        )
+        #expect(run.outcome == .handbackNotVerified)
+        #expect(handbackReads >= 2)
+        #expect(fixture.requested == [FakeGeometry.adoptedWindow, Self.user])
         #expect(fixture.reports.isEmpty)
         #expect(!fixture.gate.isPaused)
         fixture.recovery.stop()

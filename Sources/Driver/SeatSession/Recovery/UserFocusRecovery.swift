@@ -31,6 +31,7 @@ final class UserFocusRecovery {
     private let gate: InputCommandGate
     private let adopted: () -> [WindowReference]
     private let restore: (WindowReference) throws -> Int32
+    private let restoreForBriefActivation: (WindowReference) throws -> Int32
     private let changed: (UserFocusRecoveryReport) -> Void
     private let now: () -> UInt64
     private let requestTiming: () -> UserFocusRequestTiming
@@ -156,6 +157,11 @@ final class UserFocusRecovery {
     /// qualified over many.
     static let briefActivationLimitNanoseconds: UInt64 = 2_000_000_000
 
+    /// Bounds verification after a brief activation's native handback. The
+    /// consumer's activation can settle past ordinary recovery's 250 ms window;
+    /// two timely identity matches remain required. See ADR 0023.
+    static let briefHandbackLimitNanoseconds: UInt64 = 1_000_000_000
+
     /// Whether a request was already made for the activation being answered
     /// now. A verification that did not agree is not a reason to ask again, so
     /// the reconciliation arms only an activation that asked for nothing.
@@ -204,6 +210,7 @@ final class UserFocusRecovery {
     init(sensing: any SeatSensing, gate: InputCommandGate,
          adopted: @escaping () -> [WindowReference],
          restore: @escaping (WindowReference) throws -> Int32,
+         restoreForBriefActivation: ((WindowReference) throws -> Int32)? = nil,
          now: @escaping () -> UInt64 = { DispatchTime.now().uptimeNanoseconds },
          requestTiming: @escaping () -> UserFocusRequestTiming = { UserFocusRequestTiming() },
          prepareDestination: @escaping (WindowReference, [WindowReference]) throws -> Void = { _, _ in },
@@ -214,6 +221,7 @@ final class UserFocusRecovery {
         self.gate = gate
         self.adopted = adopted
         self.restore = restore
+        self.restoreForBriefActivation = restoreForBriefActivation ?? restore
         self.now = now
         self.requestTiming = requestTiming
         self.prepareDestination = prepareDestination
@@ -504,7 +512,7 @@ final class UserFocusRecovery {
     /// exists for. The front goes back only while the target still holds it: a
     /// person who took it meanwhile keeps it, and the poll stops there too.
     ///
-    /// The handback is verified by two agreeing readings inside the 250 ms
+    /// The handback is verified by two agreeing readings inside the one-second
     /// verification window. A target that still holds the front after it is
     /// handed to the ordinary path as an activation of the target, so the seat
     /// pauses and waits for the person as it does for any other; the handback
@@ -535,10 +543,10 @@ final class UserFocusRecovery {
 
         let bound = min(bound, Self.briefActivationLimitNanoseconds)
         let start = now()
-        expectActivation(of: target.processID, until: start &+ bound &+ Self.verificationWindowNanoseconds)
+        expectActivation(of: target.processID, until: start &+ bound &+ Self.briefHandbackLimitNanoseconds)
         var frontRefusal: String?
         do {
-            let code = try restore(target)
+            let code = try restoreForBriefActivation(target)
             if code != 0 { frontRefusal = "request code \(code)" }
         } catch { frontRefusal = String(describing: error) }
         var readyAfter: UInt64?
@@ -562,25 +570,26 @@ final class UserFocusRecovery {
             let front = sensing.frontmostProcessID.map { "process \($0)" } ?? "no process"
             summary += ", and the front is with \(front), where it was left"
             await refreshPreparation()
-            return (outcome, summary)
+            return (readyAfter == nil ? outcome : .handbackNotVerified, summary)
         }
         let handbackStart = now()
         let handback = await giveFrontBack(to: person, targets: targets)
         let handbackDuration = now() &- handbackStart
         endExpectedActivation()
-        guard handback.verified || !isFrontmost(target.processID) else {
-            activationChanged(to: target.processID, source: .briefActivationHandback)
+        guard handback.verified else {
             summary += ", and the front was not verified back on window \(person.windowNumber) within "
-                + Self.milliseconds(Self.verificationWindowNanoseconds)
+                + Self.milliseconds(Self.briefHandbackLimitNanoseconds)
                 + (handback.refusal.map { " (\($0))" } ?? "")
-                + ", so the ordinary recovery has it"
+            if isFrontmost(target.processID) {
+                activationChanged(to: target.processID, source: .briefActivationHandback)
+                summary += ", so the ordinary recovery has it"
+            } else {
+                summary += ", where the person's front was left"
+                await refreshPreparation()
+            }
             return (.handbackNotVerified, summary)
         }
-        summary += handback.verified
-            ? ", gave the front back to window \(person.windowNumber) in \(Self.milliseconds(handbackDuration))"
-            : ", and the front went to process "
-                + (sensing.frontmostProcessID.map { "\($0)" } ?? "none")
-                + " instead of window \(person.windowNumber)"
+        summary += ", gave the front back to window \(person.windowNumber) in \(Self.milliseconds(handbackDuration))"
         await refreshPreparation()
         return (outcome, summary)
     }
@@ -602,12 +611,18 @@ final class UserFocusRecovery {
         for _ in 0 ..< polls {
             guard now() < deadline, !Task.isCancelled else { return nil }
             await EventLoopWait.sleep(.nanoseconds(Self.briefActivationPollNanoseconds))
-            let inFront = isFrontmost(target.processID)
+            guard now() < deadline, !Task.isCancelled else { return nil }
+            let inFront = isFrontmost(target.processID) && sensing.frontmostProcessID == target.processID
             // The activation can show a moment after the request, so only a
             // front the target was seen holding can be taken from it.
             if seenInFront, !inFront { return nil }
             seenInFront = seenInFront || inFront
-            if isReady() { return now() &- start }
+            if inFront, isReady() {
+                guard now() < deadline, !Task.isCancelled,
+                      isFrontmost(target.processID), sensing.frontmostProcessID == target.processID
+                else { return nil }
+                return now() &- start
+            }
         }
         return nil
     }
@@ -621,18 +636,46 @@ final class UserFocusRecovery {
     ) async -> (verified: Bool, refusal: String?) {
         do {
             try prepareDestination(person, targets)
-            let code = try restore(person)
+            let code = try restoreForBriefActivation(person)
             if code != 0 { return (false, "request code \(code)") }
         } catch { return (false, String(describing: error)) }
-        let deadline = now() &+ Self.verificationWindowNanoseconds
+        let verificationStart = now()
+        let deadline = verificationStart &+ Self.briefHandbackLimitNanoseconds
         var agreeing = 0
-        for _ in 0 ..< Self.verificationWindowNanoseconds / 5_000_000 {
+        var lastWindow: WindowReference?
+        var lastFront: Int32?
+        var lastWindowWasEligible = false
+        var lastMatches = false
+        var readings = 0
+        var lastReadingDuration: UInt64 = 0
+        var firstMatchAfter: UInt64?
+        for _ in 0 ..< Self.briefHandbackLimitNanoseconds / 5_000_000 {
             guard now() < deadline, !Task.isCancelled else { break }
             await EventLoopWait.sleep(.milliseconds(5))
-            agreeing = currentUserWindow()?.hasSameIdentity(as: person) == true ? agreeing + 1 : 0
+            guard now() < deadline, !Task.isCancelled else { break }
+            let readingStart = now()
+            lastWindow = sensing.focusedUserWindow
+            lastFront = sensing.frontmostProcessID
+            lastWindowWasEligible = lastWindow.map {
+                lastFront == $0.processID && validDestination($0)
+            } ?? false
+            lastMatches = lastWindowWasEligible && lastWindow?.hasSameIdentity(as: person) == true
+            readings += 1
+            let readingEnd = now()
+            lastReadingDuration = readingEnd &- readingStart
+            if lastMatches, firstMatchAfter == nil { firstMatchAfter = readingEnd &- verificationStart }
+            guard readingEnd < deadline, !Task.isCancelled else { break }
+            agreeing = lastMatches ? agreeing + 1 : 0
             if agreeing == 2 { return (true, nil) }
         }
-        return (false, nil)
+        let reading = lastWindow.map {
+            "focused window \($0.windowNumber), owner \($0.processID), frame \($0.frame), eligible \(lastWindowWasEligible)"
+        } ?? "no focused window"
+        let firstMatch = firstMatchAfter.map(Self.milliseconds) ?? "none"
+        return (false, "\(reading), workspace foreground \(lastFront.map(String.init) ?? "none"), "
+            + "matches expected identity \(lastMatches), \(readings) readings, "
+            + "last reading \(Self.milliseconds(lastReadingDuration)), first match \(firstMatch), "
+            + "elapsed \(Self.milliseconds(now() &- verificationStart))")
     }
 
     /// The driver awaits this before preparation and before every atomic command,

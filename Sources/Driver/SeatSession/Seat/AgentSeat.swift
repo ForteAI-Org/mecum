@@ -4102,9 +4102,9 @@ public final class AgentSeat {
     /// `targetActivated` and never waits, and it is `acting` for the length of
     /// it, like a Command, so no other pass runs underneath. It ends in the
     /// state it began in. If the person takes the front meanwhile it is left
-    /// with them. A handback that is not verified is handed to the ordinary
-    /// recovery, which pauses and waits for the person; that is
-    /// `handbackNotVerified`, never a success.
+    /// with them. An unverified handback returns `handbackNotVerified`, never
+    /// success. If the target still holds the front, ordinary recovery pauses
+    /// and waits; a different foreground is left with the person's choice.
     ///
     /// It refuses before bringing anything in front, and logs one line saying
     /// why, when no focus recovery is installed, when the seat is not ready,
@@ -4230,6 +4230,7 @@ public final class AgentSeat {
         let recovery = UserFocusRecovery(sensing: sensing, gate: driver.commandGate,
             adopted: { [weak self] in self?.adoptedWindows.map(\.reference) ?? [] },
             restore: { try restorer.restore($0) },
+            restoreForBriefActivation: { try restorer.restore($0, primesKeyWindow: true) },
             requestTiming: { restorer.timing },
             prepareDestination: { try restorer.prepare($0, targets: $1) },
             renewDestination: { try restorer.renewDestination($0) },

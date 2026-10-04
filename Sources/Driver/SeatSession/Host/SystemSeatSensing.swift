@@ -122,6 +122,34 @@ nonisolated final class SystemSeatSensing: SeatSensing, @unchecked Sendable {
 
     var focusedUserWindow: WindowReference? {
         guard let pid = frontmostProcessID else { return nil }
+        return Self.readFocusedUserWindow(
+            processID: pid,
+            ownProcessID: ProcessInfo.processInfo.processIdentifier,
+            readOwnWindowNumber: { MainActor.assumeIsolated { NSApplication.shared.keyWindow?.windowNumber } },
+            readAccessibilityWindowNumber: Self.accessibilityFocusedWindowNumber,
+            readGeometry: { WindowServerProbe.geometry(of: $0) }
+        )
+    }
+
+    /// Reads the consumer's key window locally, avoiding AX messaging to its
+    /// own UI thread. External focus keeps the bounded AX reading. Neither
+    /// source admits geometry with a different owner or window number.
+    static func readFocusedUserWindow(
+        processID                    : Int32,
+        ownProcessID                 : Int32,
+        readOwnWindowNumber          : () -> Int?,
+        readAccessibilityWindowNumber: (Int32) -> Int?,
+        readGeometry                 : (Int) -> WindowReference?
+    ) -> WindowReference? {
+        let number = processID == ownProcessID
+            ? readOwnWindowNumber() : readAccessibilityWindowNumber(processID)
+        guard let number,
+              let window = readGeometry(number), window.processID == processID,
+              window.windowNumber == number else { return nil }
+        return window
+    }
+
+    private static func accessibilityFocusedWindowNumber(_ pid: Int32) -> Int? {
         let app = AXUIElementCreateApplication(pid)
         AXUIElementSetMessagingTimeout(app, 0.05)
         var value: CFTypeRef?
@@ -130,11 +158,9 @@ nonisolated final class SystemSeatSensing: SeatSensing, @unchecked Sendable {
             kAXFocusedWindowAttribute as CFString,
             &value
         ) == .success,
-              let value, CFGetTypeID(value) == AXUIElementGetTypeID(),
-              let number = WindowRelocator.windowNumber(of: unsafeDowncast(value, to: AXUIElement.self)),
-              let window = WindowServerProbe.geometry(of: number), window.processID == pid
+              let value, CFGetTypeID(value) == AXUIElementGetTypeID()
         else { return nil }
-        return window
+        return WindowRelocator.windowNumber(of: unsafeDowncast(value, to: AXUIElement.self))
     }
 
     var focusRecoverySnapshot: FocusRecoverySnapshot? {

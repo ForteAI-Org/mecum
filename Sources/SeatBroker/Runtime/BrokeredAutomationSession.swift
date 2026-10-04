@@ -391,8 +391,8 @@ public final class BrokeredAutomationSession: AutomationSessionOperating {
             case .notReady:
                 return .stillDisabled(reason: nil)
             case .handbackNotVerified:
-                return .stillDisabled(reason: "It was brought forward for a moment, and the seat now waits "
-                    + "for the person's own window to come back in front.")
+                return .stillDisabled(reason: "It was brought forward for a moment, but the return to "
+                    + "the person's own window was not verified. Observe before more input.")
             case .refused(let refusal):
                 let because: String
                 switch refusal {

@@ -15,8 +15,8 @@
 /// caller reads its own state again.
 nonisolated public enum BriefActivationOutcome: Sendable, Equatable {
 
-    /// The condition held this long after the request, and the front went
-    /// back to the person's side.
+    /// The condition held this long after the request, and the handback to
+    /// the person's attested window was verified.
     case ready(afterMilliseconds: Int)
 
     /// The condition did not hold within the bound, and the front went back to
@@ -27,9 +27,9 @@ nonisolated public enum BriefActivationOutcome: Sendable, Equatable {
     /// `frontRequestRefused`, whose front is handed back if it moved anyway.
     case refused(Refusal)
 
-    /// The target still held the front after the handback and its 250 ms
-    /// verification. The ordinary focus recovery has the episode now: the seat
-    /// is waiting, as it is for any activation of its target.
+    /// The handback to the person's attested window was not verified within
+    /// one second. If the target still holds foreground, ordinary focus recovery
+    /// owns the episode. A different foreground is left with the person's choice.
     case handbackNotVerified
 
     /// Why the seat brought nothing in front.

@@ -201,6 +201,12 @@ watchdog can combine the fence's latched signals with the display's geometry.
 
 ## Selection while containing preexisting windows
 
+Returning to the consumer uses its exact visible AppKit window in ordinary
+recovery and primed handback. A missing or non-keyable local destination
+refuses without another activation route. External processes retain their
+existing restoration policy. See
+[ADR 0028](adr/Adr0028RestoreConsumerThroughAppKit.md).
+
 When adoption begins from an attested thumbnail, or confirmation needs
 staging, two agreeing full-size readings must also reach the requested
 position. Stage Manager can otherwise pause at an intermediate position and

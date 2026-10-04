@@ -28,11 +28,15 @@ struct BriefActivationTests {
     @MainActor
     private final class Record {
         var requested: [WindowReference]         = []
+        var briefRequested: [WindowReference]    = []
         var reports  : [UserFocusRecoveryReport] = []
     }
 
     private static func seat(
-        sensing: FakeSensing
+        sensing          : FakeSensing,
+        requestsActivate : Bool = true,
+        hasBriefRestorer : Bool = false,
+        handbackIsReadable: Bool = true
     ) async throws -> (seat: AgentSeat, record: Record, recovery: UserFocusRecovery) {
         sensing.additionalWindows[user.windowNumber] = user
         sensing.focusedUserWindow = user
@@ -46,10 +50,19 @@ struct BriefActivationTests {
             adopted: { [weak seat] in seat?.adoptedWindows.map(\.reference) ?? [] },
             restore: { window in
                 record.requested.append(window)
+                if requestsActivate {
+                    sensing.frontmostProcessID = window.processID
+                    sensing.focusedUserWindow = window.processID == user.processID && !handbackIsReadable
+                        ? nil : window
+                }
+                return 0
+            },
+            restoreForBriefActivation: hasBriefRestorer ? { window in
+                record.briefRequested.append(window)
                 sensing.frontmostProcessID = window.processID
                 sensing.focusedUserWindow = window
                 return 0
-            },
+            } : nil,
             changed: { record.reports.append($0) }
         )
         seat.focusRecovery = recovery
@@ -88,6 +101,67 @@ struct BriefActivationTests {
         }
         #expect(!states.contains(.waiting))
         #expect(states == [.acting, before], "acting for the length of it, like a Command")
+    }
+
+    @Test("Enabled readiness cannot succeed when an acknowledged front request never activates the target")
+    func readinessRequiresTheObservedForeground() async throws {
+        let sensing = FakeSensing()
+        let (seat, record, _) = try await Self.seat(sensing: sensing, requestsActivate: false)
+        let target = try #require(seat.currentTarget).reference
+        var checks = 0
+        let outcome = await seat.bringTargetBrieflyInFront(
+            until: { checks += 1; return true }, atMost: .milliseconds(250)
+        )
+        guard case .notReady = outcome else { Issue.record("False readiness: \(outcome)"); return }
+        #expect(checks == 0, "Readiness belongs to the requested foreground")
+        #expect(record.requested == [target])
+        #expect(sensing.frontmostProcessID == Self.user.processID)
+        #expect(record.reports.isEmpty)
+        #expect(seat.inputPauseReasons.isEmpty)
+    }
+
+    @Test("A readiness callback after the brief activation deadline cannot authorize a command")
+    func anExpiredReadinessCallbackNeverRuns() async throws {
+        let sensing = FakeSensing()
+        let (seat, record, _) = try await Self.seat(sensing: sensing)
+        let target = try #require(seat.currentTarget).reference
+        var checks = 0
+        let outcome = await seat.bringTargetBrieflyInFront(
+            until: { checks += 1; return true }, atMost: .milliseconds(1)
+        )
+        guard case .notReady = outcome else { Issue.record("Late readiness: \(outcome)"); return }
+        #expect(checks == 0)
+        #expect(record.requested == [target, Self.user])
+        #expect(sensing.frontmostProcessID == Self.user.processID)
+        #expect(seat.inputPauseReasons.isEmpty)
+    }
+
+    @Test("A brief activation and its handback use their scoped restorer, preserving the ordinary route")
+    func briefRequestsUseTheirScopedRestorer() async throws {
+        let sensing = FakeSensing()
+        let (seat, record, _) = try await Self.seat(sensing: sensing, hasBriefRestorer: true)
+        let target = try #require(seat.currentTarget).reference
+        let outcome = await seat.bringTargetBrieflyInFront(until: { true })
+        guard case .ready = outcome else { Issue.record("Not ready: \(outcome)"); return }
+        #expect(record.requested.isEmpty)
+        #expect(record.briefRequested == [target, Self.user])
+        #expect(sensing.frontmostProcessID == Self.user.processID)
+        #expect(seat.inputPauseReasons.isEmpty)
+    }
+
+    @Test("Returning to the person's process without its attested window cannot report readiness")
+    func anUnreadableHandbackIsNotReadiness() async throws {
+        let sensing = FakeSensing()
+        let (seat, record, _) = try await Self.seat(
+            sensing: sensing,
+            handbackIsReadable: false
+        )
+        let target = try #require(seat.currentTarget).reference
+        #expect(await seat.bringTargetBrieflyInFront(until: { true }) == .handbackNotVerified)
+        #expect(record.requested == [target, Self.user])
+        #expect(sensing.frontmostProcessID == Self.user.processID)
+        #expect(record.reports.isEmpty, "No new focus recovery may override the person's process")
+        #expect(seat.inputPauseReasons.isEmpty)
     }
 
     @Test("with no window of the person's in front it refuses by name and brings nothing in front")

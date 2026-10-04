@@ -61,6 +61,11 @@ refused before any request: that is the application's own reason for a disabled
 item, and with Photoshop's "Save changes?" alert up two seconds in front changed
 nothing.
 
+[ADR 0023](Adr0023BriefHandbackVerificationLimit.md) records the later
+one-second brief-handback verification candidate after signed-app diagnostics
+show native settling beyond the original 250 ms. Ordinary recovery keeps its
+original verification window; native command qualification remains required.
+
 ## What this does not authorize
 
 Not the clipboard, not a paste, not a key equivalent and not input delivery: ADR
