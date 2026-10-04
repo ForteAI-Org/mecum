@@ -50,6 +50,42 @@ struct ElementGrouperTests {
 
     // MARK: Icon and caption pairing
 
+    @Test("neighboring button borders keep their enclosed labels", arguments: [1.0, 2.0])
+    func enclosedButtonLabelsDoNotNameEachOther(scale: CGFloat) throws {
+        func scaled(_ rect: CGRect) -> CGRect {
+            CGRect(x: rect.minX * scale, y: rect.minY * scale,
+                   width: rect.width * scale, height: rect.height * scale)
+        }
+        let close = scaled(box(897, 655, 78, 38))
+        let create = scaled(box(985, 655, 78, 38))
+        let texts = [Text(rect: scaled(box(920, 668, 34, 14)), text: "Close"),
+                     Text(rect: scaled(box(1004, 668, 42, 14)), text: "Create")]
+        for borders in [[close, create], [create, close]] {
+            let out = ElementGrouper.group(texts: texts, icons: borders.map { Icon(rect: $0) })
+            let closeControl = try #require(out.first { $0.label == "Close" })
+            let createControl = try #require(out.first { $0.label == "Create" })
+            #expect(closeControl.kind == .control)
+            #expect(createControl.kind == .control)
+            #expect(closeControl.rect == close)
+            #expect(createControl.rect == create)
+            #expect(!create.contains(CGPoint(x: closeControl.rect.midX, y: closeControl.rect.midY)))
+        }
+    }
+
+    @Test("an enclosed label wins over a caption touching the border")
+    func enclosedLabelWinsOverATouchingCaption() throws {
+        let border = box(100, 100, 60, 40)
+        let out = ElementGrouper.group(
+            texts: [Text(rect: box(72, 113, 28, 14), text: "Back"),
+                    Text(rect: box(116, 113, 28, 14), text: "Keep")],
+            icons: [Icon(rect: border)]
+        )
+        let control = try #require(out.first { $0.kind == .control })
+        #expect(control.label == "Keep")
+        #expect(control.rect == border)
+        #expect(out.contains { $0.kind == .text && $0.label == "Back" })
+    }
+
     @Test("an icon with a right label becomes one control")
     func iconWithRightLabel() {
         let out = ElementGrouper.group(texts: [Text(rect: box(30, 101, 52, 16), text: "Export")],

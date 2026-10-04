@@ -59,6 +59,32 @@ struct ScenePipelineTests {
 
     private let window = ScenePipeline.Window(bundleID: "com.x", appName: "X", title: "Export")
 
+    @Test("two neighboring captured buttons keep their own hit regions")
+    func neighboringButtonHitRegions() async throws {
+        let close = CGRect(x: 897, y: 655, width: 78, height: 38)
+        let create = CGRect(x: 985, y: 655, width: 78, height: 38)
+        let text = FixedText(runs: [
+            RecognizedText(text: "Close", pixelBox: CGRect(x: 920, y: 668, width: 34, height: 14)),
+            RecognizedText(text: "Create", pixelBox: CGRect(x: 1004, y: 668, width: 42, height: 14))
+        ])
+        let regions = FixedRegions(boxes: [close, create,
+            CGRect(x: 917, y: 665, width: 38, height: 17),
+            CGRect(x: 1002, y: 666, width: 44, height: 16)
+        ])
+        let size = CGSize(width: 1080, height: 718)
+        let scene = try await ScenePipeline(text: text, regions: regions).perceive(
+            try blank(1080, 718), of: window
+        )
+        for (label, expected, other) in [("Close", close, create), ("Create", create, close)] {
+            let element = try #require(scene.elements.first { $0.label == label })
+            let hitRegion = element.bounds.pixelBox(in: size)
+            let point = CGPoint(x: hitRegion.midX, y: hitRegion.midY)
+            #expect(element.kind == .control)
+            #expect(expected.contains(point))
+            #expect(!other.contains(point))
+        }
+    }
+
     @Test("text runs and an adjacent segment become one control with a normalized position")
     func iconAndCaptionBecomeAControl() async throws {
         let text = FixedText(runs: [RecognizedText(text: "Export", pixelBox: CGRect(x: 30, y: 101, width: 52, height: 16))])

@@ -104,6 +104,14 @@ public enum ElementGrouper {
         let icon: Int
         let text: Int
         let gap: CGFloat
+        let enclosureRank: Int
+
+        init(icon: Int, text: Int, gap: CGFloat, enclosureRank: Int = 1) {
+            self.icon = icon
+            self.text = text
+            self.gap = gap
+            self.enclosureRank = enclosureRank
+        }
     }
 
     // MARK: Grouping
@@ -116,7 +124,7 @@ public enum ElementGrouper {
         // Caption pass: every icon claims its nearest caption; one text names at most one icon.
         var claims: [Claim] = []
         for (iconIndex, icon) in icons.enumerated() {
-            var best: (text: Int, gap: CGFloat)?
+            var best: (text: Int, gap: CGFloat, enclosureRank: Int)?
             for (textIndex, text) in merged.enumerated() {
                 guard text.text.count <= 48,
                       LabelText.isNameworthy(text.text),
@@ -125,14 +133,22 @@ public enum ElementGrouper {
                 // A switch is named by the row pass, from its left; a caption to its right is a list row.
                 if icon.isToggle, text.rect.minX >= icon.rect.minX - 0.2 * icon.rect.height { continue }
                 if isNextListLine(icon: icon.rect, caption: text.rect, texts: merged) { continue }
-                if best.map({ gap < $0.gap }) ?? true { best = (textIndex, gap) }
+                let rank = enclosesButtonLabel(icon: icon.rect, text: text.rect) ? 0 : 1
+                if best.map({ (rank, gap) < ($0.enclosureRank, $0.gap) }) ?? true {
+                    best = (textIndex, gap, rank)
+                }
             }
-            if let best { claims.append(Claim(icon: iconIndex, text: best.text, gap: best.gap)) }
+            if let best {
+                claims.append(Claim(icon: iconIndex, text: best.text, gap: best.gap,
+                                    enclosureRank: best.enclosureRank))
+            }
         }
 
         var out: [GroupedElement] = []
         var consumedText = Set<Int>(), pairedIcon = Set<Int>()
-        for claim in claims.sorted(by: { ($0.gap, $0.icon) < ($1.gap, $1.icon) })
+        for claim in claims.sorted(by: {
+            ($0.enclosureRank, $0.gap, $0.icon) < ($1.enclosureRank, $1.gap, $1.icon)
+        })
         where !consumedText.contains(claim.text) && !pairedIcon.contains(claim.icon) {
             let icon = icons[claim.icon], text = merged[claim.text]
             out.append(GroupedElement(
@@ -405,6 +421,8 @@ public enum ElementGrouper {
     /// stronger pair, or nil when the layout is none of: label right, label left, caption centered
     /// beneath. A caption carries a half-pixel penalty so a side label wins a tie.
     static func pairGap(icon: CGRect, text: CGRect) -> CGFloat? {
+        // A button's enclosed label must name its own border before a neighboring caption.
+        if enclosesButtonLabel(icon: icon, text: text) { return 0 }
         let aligned = verticalOverlap(icon, text) >= 0.5 * min(icon.height, text.height)
         let side = 0.9 * icon.height
         if aligned {
@@ -419,6 +437,15 @@ public enum ElementGrouper {
             return max(0, verticalGap) + 0.5
         }
         return nil
+    }
+
+    /// Recognizes a centered label inset in a border of button height. A glyph-sized blob or
+    /// text inside a thumbnail does not give its surrounding segment a button's label.
+    private static func enclosesButtonLabel(icon: CGRect, text: CGRect) -> Bool {
+        icon.contains(text)
+            && icon.height >= 1.5 * text.height && icon.height <= 3.5 * text.height
+            && abs(icon.midX - text.midX) <= 0.25 * icon.width
+            && abs(icon.midY - text.midY) <= 0.25 * icon.height
     }
 
     private static func verticalOverlap(_ a: CGRect, _ b: CGRect) -> CGFloat {

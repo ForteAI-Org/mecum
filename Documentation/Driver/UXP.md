@@ -422,6 +422,12 @@ remain unqualified. A passing modal or view-control row cannot close this failur
 
 ## Inventory and qualification
 
+The 4 October follow-up fixes a pixel-grouping defect in New Document: Close's
+label had named the neighboring Create border. Three signed Mecum UI repeats
+on candidate `6443dc84` cancel without creating a document; independent native
+Window menu inspection confirms the same four owned documents before and after.
+See [stabilization rounds](StabilizationRounds.md#round-4-neighboring-photoshop-button-labels).
+
 The signed Mecum application flow on 3 October 2026 reached Photoshop 27.10.0's
 New Layer and New Document dialogs through the app's tool path. It exposed
 additional integration limits: replacing the layer name left existing text,

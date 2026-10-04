@@ -48,6 +48,10 @@ scene.resolve(target: "Export")               // .found, .ambiguous(n) or .none
 
 ## Contracts
 
+- A centered label enclosed by a border of button height names that border
+  before a neighboring caption. Adjacent buttons retain separate hit rectangles;
+  glyph-sized components and thumbnail borders do not receive this priority.
+
 - `SceneToken` is FNV-1a over sorted content and states: equal screens give equal tokens across
   processes and launches, and any element or state change gives a different one.
 - `SceneIdentity.key` is position-free for a labeled element (`kind|normalized label`) and a coarse
