@@ -5,6 +5,7 @@
 //  Created by Eliomar Alejandro Rodriguez Ferrer on 23/09/2026.
 //
 
+import os
 import SwiftUI
 
 /// TeamShellView is the team window once the workspace is open (§3.1): a two
@@ -44,6 +45,11 @@ struct TeamShellView: View {
 
     /// Long enough for the split to lay out the compact sidebar before the inspector opens beside it.
     private static let sidebarCompacting = Duration.milliseconds(50)
+
+    private static let log = Logger(
+        subsystem: "dev.forte.Mecum",
+        category : "TeamShell"
+    )
 
     @Bindable
     var team: TeamModel
@@ -116,8 +122,14 @@ struct TeamShellView: View {
                 }
         }
         .background(WindowWidthReader(onWidth: windowResized))
-        .onChange(of: columns) {
-            if columns != .all { columns = .all }
+        .onChange(of: columns) { previous, now in
+            guard now != .all else { return }
+
+            // Nothing in the app hides the sidebar, so what did is worth a line in the exported log.
+            Self.log.notice(
+                "The sidebar went from \(String(describing: previous), privacy: .public) to \(String(describing: now), privacy: .public); restoring it"
+            )
+            columns = .all
         }
         .onChange(of: team.selection) {
             Task { await team.openSelectedConversation() }
@@ -198,7 +210,9 @@ struct TeamShellView: View {
     @ToolbarContentBuilder
     private var toolbar: some ToolbarContent {
         // The worker's name leads the conversation's side of the bar, in place of a title,
-        // without the glass a macOS 26 toolbar gives its items.
+        // without the glass a macOS 26 toolbar gives its items. The window has no title, so the
+        // flexible space is what takes the controls to the trailing edge; before macOS 26 it is
+        // an item holding only a spacer, since every placement there, `.primaryAction` too, packs leading.
         if #available(macOS 26, *) {
             ToolbarItem(placement: .navigation) { header }
                 .sharedBackgroundVisibility(.hidden)
@@ -206,6 +220,8 @@ struct TeamShellView: View {
             ToolbarSpacer(.flexible)
         } else {
             ToolbarItem(placement: .navigation) { header }
+
+            ToolbarItem { Spacer() }
         }
 
         if let worker = team.selectedWorker,

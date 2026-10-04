@@ -134,7 +134,10 @@ enum WindowClickCheck {
             "clicking the header opened the inspector"
         )
 
-        // The inspector's own shortcut opens it and closes it again.
+        // The inspector's own shortcut opens it and closes it again, and the
+        // sidebar, which the window is wide enough to keep full, stays shown and as wide throughout.
+        printSplitItems(in: hosting)
+        let width = try sidebarWidth(in: hosting)
         for shows in [true, false] {
             press(
                 "i",
@@ -143,11 +146,20 @@ enum WindowClickCheck {
                 in        : window,
                 throughApp: true
             )
-            try await Task.sleep(for: .seconds(1))
-            print("click check: after Control-Option-Command-I, requested \(probe.isInspectorRequested)")
+            let narrowest = try await narrowestSidebar(
+                in : hosting,
+                for: .seconds(1)
+            )
+            print("click check: after Control-Option-Command-I, requested \(probe.isInspectorRequested), "
+                + "sidebar narrowest \(narrowest)")
+            printSplitItems(in: hosting)
             try expect(
                 probe.isInspectorRequested == shows && showsInspector(hosting) == shows,
                 "Control-Option-Command-I did not \(shows ? "show" : "hide") the inspector"
+            )
+            try expect(
+                narrowest == width,
+                "\(shows ? "showing" : "hiding") the inspector changed the sidebar from \(width) to \(narrowest)"
             )
         }
 
@@ -523,6 +535,23 @@ enum WindowClickCheck {
             try await Task.sleep(for: .milliseconds(50))
         }
         return narrowest
+    }
+
+    /// Prints each split view controller's items under `root`, outermost first, which
+    /// says on each macOS whether the inspector shares the sidebar's controller and
+    /// whether `SidebarBridge` holds the sidebar's `canCollapse` false.
+    private static func printSplitItems(in root: NSView) {
+        var queue = [root]
+        while !queue.isEmpty {
+            let view = queue.removeFirst()
+            if let split = view as? NSSplitView, let controller = split.delegate as? NSSplitViewController {
+                let items = controller.splitViewItems.map {
+                    "behavior \($0.behavior.rawValue) canCollapse \($0.canCollapse) collapsed \($0.isCollapsed)"
+                }
+                print("click check: \(type(of: controller)) items \(items)")
+            }
+            queue += view.subviews
+        }
     }
 
     /// The first view of `type` under `root`, breadth first.
