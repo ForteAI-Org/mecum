@@ -92,10 +92,19 @@ Chromium and Electron, a consumer's own). The posting route is the same for all.
 _Avoid_: profile (the research-era name), route, backend
 
 **Preparation**:
-The two records that make the target window active and key inside its own
-process only, sent before a mouse Command on platforms that need it and undone
-once the Command is done.
+The activation and key-window records that make the target window active and
+key inside its own process only. A platform applies them before a Command and
+restores them afterwards. A qualified Native Text Input scope can own them
+across separately observed Commands until its bounded closure.
 _Avoid_: activation (the user-visible kind), focus, prep
+
+**Native Text Input**:
+A bounded, explicitly qualified composition scope that keeps the recipient's
+native input context prepared in one Turn. Every physical key still requires
+its own observation, decision and confirmation. Deadline, cancellation and
+window return close the scope and restore preparation. Closure is not document
+rollback and does not promise to discard marked text.
+_Avoid_: sequence, batch, foreground typing.
 
 **Cursor Fence**:
 The HID-level event tap that keeps the physical cursor on physical displays and

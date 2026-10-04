@@ -59,7 +59,7 @@ HOST_REST_TESTS := 29
 # they take a window in and out of fullscreen, which is the person's screen.
 # Includes the eight opt-in Adobe UXP rows. This assertion counts the reported
 # Live bundle, including intentionally skipped rows.
-LIVE_TESTS := 115
+LIVE_TESTS := 118
 UXP_LIVE_ROWS := dialogsInBackground documentsInBackground selectionInBackground pixelEditingInBackground layerEditingInBackground newLayerDialogInBackground newLayerTypedTextInBackground documentDragInBackground
 QT_LIVE_ROWS := discoverDaVinci adoptAndReturnDaVinci observeDaVinci \
                 clickDaVinciSearch openAndCancelDaVinciProjectDialog insertTextIntoDaVinciSearch \
@@ -78,7 +78,7 @@ QT_PYTHON ?= $(shell command -v python3)
 BENCH ?= fence-callback fence-clamp input-trace-overhead send-click display-lifecycle \
          monitor-60 monitor-120 stage seat-idle window-watch focus-refresh recovery
 
-.PHONY: all test native-test-runner host-tests live-tests uxp-live-tests qt-live-tests qt-editor-live-tests qt-fixture-live-tests qt-panel-birth-live-tests qt-geometry-live-tests bench compat-report promote-build clean help
+.PHONY: all test native-test-runner host-tests live-tests uxp-live-tests qt-live-tests qt-editor-live-tests qt-fixture-live-tests qt-ime-live-tests qt-panel-birth-live-tests qt-geometry-live-tests bench compat-report promote-build clean help
 
 all: test
 
@@ -90,6 +90,7 @@ help:
 	@echo 'make qt-live-tests  Qt tier: open DaVinci Project Manager, one process per row'
 	@echo 'make qt-editor-live-tests  Qt editor tier: open the disposable New Project 1 project'
 	@echo 'make qt-fixture-live-tests QT_PYTHON=<PySide6 Python>  Qt 6 controlled fixture tier'
+	@echo 'make qt-ime-live-tests QT_PYTHON=<PySide6 Python>  Qt native composition and cleanup'
 	@echo 'make qt-panel-birth-live-tests QT_PYTHON=<PySide6 Python>  Strict native panel visibility'
 	@echo 'make qt-geometry-live-tests QT_PYTHON=<PySide6 Python>  Qt settled return geometry with Stage Manager'
 	@echo 'make bench          the measurements of spec section 8, each one a gate'
@@ -185,6 +186,11 @@ qt-editor-live-tests:
 qt-panel-birth-live-tests:
 	@AGENTSEAT_LIVE_TESTS=1 AGENTSEAT_QT_PANEL_BIRTH_TESTS=1 AGENTSEAT_QT_PYTHON="$(QT_PYTHON)" \
 	    $(TIER) qt-panel-birth 1 $(SWIFT) test --filter QtFixtureLiveTests.nativeFileDialog --no-parallel
+
+# Native preedit/commit, deadline and cancellation have independent oracles.
+qt-ime-live-tests:
+	@AGENTSEAT_LIVE_TESTS=1 AGENTSEAT_QT_IME_TESTS=1 AGENTSEAT_QT_PYTHON="$(QT_PYTHON)" \
+	    $(TIER) qt-ime 3 $(SWIFT) test --filter QtFixtureLiveTests.inputMethod --no-parallel
 
 # Discovery deliberately precedes display creation. The owned window starts
 # partly outside the physical display and may settle before adoption.

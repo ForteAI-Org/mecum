@@ -35,6 +35,11 @@ enum SeatErrorMapper {
             "The seat stopped: " + stop.issues.map(sentence).joined(separator: "; ") + "."
         case let failure as InputPreparationFailure:
             sentence(failure)
+        case let failure as NativeTextInputFailure:
+            preparationCause(failure.cause)
+                + (failure.cleanup.needsRecovery
+                   ? " Native text composition could not be restored."
+                   : " Native text composition was closed.")
         case let failure as InputFailure:    sentence(failure)
         case let failure as CaptureFailure:  sentence(failure)
         case let failure as FenceFailure:    sentence(failure)
@@ -225,6 +230,7 @@ enum SeatErrorMapper {
             return []
         case let failure as InputPreparationFailure: return pauseReasons(of: failure.cause)
         case let failure as InputSequenceFailure:    return pauseReasons(of: failure.cause)
+        case let failure as NativeTextInputFailure:  return pauseReasons(of: failure.cause)
         default:                                     return []
         }
     }
@@ -668,6 +674,15 @@ enum SeatErrorMapper {
             "No event source could be created for the input."
         case .inputPaused(let reasons):
             "Input is paused: \(reasons.map(phrase).joined(separator: ", "))."
+        case .nativeTextInputRefused(let reason):
+            switch reason {
+            case .unsupported: "Native text composition is not qualified for this surface."
+            case .contextActive: "A native text composition is already in progress."
+            case .contextClosed: "The native text composition ended before this key could be sent."
+            case .contextMismatch: "The key no longer targets the composing window."
+            case .commandUnsupported: "This command cannot be used during native text composition."
+            case .invalidDeadline: "Native text composition requires a deadline of at most five seconds."
+            }
         case .processUnavailable(let processID):
             "The target application (PID \(processID)) is no longer running."
         case .invalidWindowNumber(let windowNumber):

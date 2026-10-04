@@ -6,6 +6,7 @@
 //
 
 import Dispatch
+import Foundation
 import os
 import PrivateSymbols
 import SeatCore
@@ -26,7 +27,38 @@ import SeatCore
 /// process-scoped exclusion coordinates every driver aimed at the same PID, so
 /// one Preparation cannot be restored while another driver is still posting.
 /// The posting work itself is synchronous, in `InputEngine`.
-public actor InputDriver {
+public actor InputDriver: NativeTextInputPreparing {
+
+    @TaskLocal
+    private static var nativeTextInputID: UUID?
+
+    private final class NativeTextInputContext {
+        let id           = UUID()
+        let window       : WindowReference
+        let correlationID: Int64
+        let deadline     : UInt64
+        var participant  : AppKitStatePreparation.Participant?
+        var lease        : InputTargetExclusion.Lease?
+        var expiry       : Task<Void, Never>?
+        var cleanup      : InputCleanupResult?
+
+        init(
+            window       : WindowReference,
+            correlationID: Int64,
+            deadline     : UInt64,
+            participant  : AppKitStatePreparation.Participant,
+            lease        : InputTargetExclusion.Lease
+        ) {
+            self.window        = window
+            self.correlationID = correlationID
+            self.deadline      = deadline
+            self.participant   = participant
+            self.lease         = lease
+        }
+    }
+
+    private var nativeTextInput: NativeTextInputContext?
+    private var isNativeTextInputScopeInFlight = false
 
     /// CleanupAttempt keeps the typed restore failure beside the structured
     /// result. The Receipt takes the result; a failure path also retains the
@@ -89,6 +121,178 @@ public actor InputDriver {
         self.traceHandler      = traceHandler
         self.readiness        = gate.readiness
         self.unvalidatedBuild = gate.unvalidatedBuild
+    }
+
+    /// Keeps only the recipient's native input context prepared across fresh
+    /// decisions. The process exclusion lasts until restoration, cancellation
+    /// or a maximum five-second deadline. No Command is posted by this method.
+    public func withNativeTextInput(
+        to window    : WindowReference,
+        correlationID: Int64,
+        within       : Duration,
+        operation    : @escaping @Sendable () async throws -> Void
+    ) async throws -> InputCleanupResult {
+        guard within > .zero, within <= .seconds(5) else {
+            throw InputFailure.nativeTextInputRefused(.invalidDeadline)
+        }
+        guard !isNativeTextInputScopeInFlight, Self.nativeTextInputID == nil else {
+            throw InputFailure.nativeTextInputRefused(.contextActive)
+        }
+        isNativeTextInputScopeInFlight = true
+        defer { isNativeTextInputScopeInFlight = false }
+        let components = within.components
+        let budget = UInt64(components.seconds) * 1_000_000_000
+            + UInt64(components.attoseconds / 1_000_000_000)
+        var lease: InputTargetExclusion.Lease?
+        do {
+            let acquired = try await Self.targetExclusion.acquire(processID: window.processID)
+            lease = acquired
+            try Task.checkCancellation()
+            guard nativeTextInput == nil else { throw InputFailure.nativeTextInputRefused(.contextActive) }
+            try await commandGate.prepare(correlationID: correlationID)
+            guard engine.keyHold.held(processID: window.processID).isEmpty else {
+                throw InputFailure.nativeTextInputRefused(.commandUnsupported)
+            }
+            let expected = try engine.identity(of: window)
+            var participant = try engine.preparation.participant(for: window)
+            try validate(
+                participant,
+                against: expected
+            )
+            try engine.preparation.apply(&participant)
+            let context = NativeTextInputContext(
+                window       : window,
+                correlationID: correlationID,
+                deadline     : DispatchTime.now().uptimeNanoseconds + budget,
+                participant  : participant,
+                lease        : acquired
+            )
+            lease = nil
+            nativeTextInput = context
+            let id = context.id
+            context.expiry = Task { [weak self] in
+                do { try await Task.sleep(for: within) }
+                catch { return }
+                await self?.closeNativeTextInput(id: id)
+            }
+            do {
+                try await Task.sleep(for: .milliseconds(300))
+                try requireNativeTextInput(
+                    id           : id,
+                    window       : window,
+                    correlationID: correlationID
+                )
+                try await withTaskCancellationHandler {
+                    try await Self.$nativeTextInputID.withValue(id) {
+                        try await operation()
+                    }
+                } onCancel: {
+                    Task { await self.closeNativeTextInput(id: id) }
+                }
+                try Task.checkCancellation()
+                guard context.cleanup == nil,
+                      DispatchTime.now().uptimeNanoseconds < context.deadline
+                else { throw InputFailure.nativeTextInputRefused(.contextClosed) }
+                let cleanup = closeNativeTextInput(id: id)
+                nativeTextInput = nil
+                return cleanup
+            } catch {
+                let cleanup = closeNativeTextInput(id: id)
+                nativeTextInput = nil
+                throw NativeTextInputFailure(
+                    cause  : error,
+                    cleanup: cleanup
+                )
+            }
+        } catch {
+            releaseExclusion(&lease)
+            if error is InputTargetExclusion.Cancellation { throw CancellationError() }
+            throw error
+        }
+    }
+
+    public func cancelNativeTextInput(correlationID: Int64) -> InputCleanupResult {
+        guard let context = nativeTextInput, context.correlationID == correlationID else {
+            return .notRequired
+        }
+        return closeNativeTextInput(id: context.id)
+    }
+
+    @discardableResult
+    private func closeNativeTextInput(id: UUID) -> InputCleanupResult {
+        guard let context = nativeTextInput, context.id == id else { return .notRequired }
+        if let cleanup = context.cleanup { return cleanup }
+        context.expiry?.cancel()
+        context.expiry = nil
+        // A long-lived preparation must not address a recycled ownership chain.
+        let cleanup: InputCleanupResult
+        do {
+            _ = try engine.identity(of: context.window)
+            cleanup = restoreParticipant(&context.participant).result
+        } catch {
+            context.participant = nil
+            cleanup = .failed(code: nil)
+        }
+        context.cleanup = cleanup
+        releaseExclusion(&context.lease)
+        return cleanup
+    }
+
+    private func requireNativeTextInput(
+        id           : UUID,
+        window       : WindowReference,
+        correlationID: Int64
+    ) throws {
+        guard let context = nativeTextInput, context.id == id, context.cleanup == nil else {
+            throw InputFailure.nativeTextInputRefused(.contextClosed)
+        }
+        guard DispatchTime.now().uptimeNanoseconds < context.deadline else {
+            closeNativeTextInput(id: id)
+            throw InputFailure.nativeTextInputRefused(.contextClosed)
+        }
+        guard context.correlationID == correlationID,
+              context.window.identity == window.identity,
+              context.window.windowNumber == window.windowNumber
+        else { throw InputFailure.nativeTextInputRefused(.contextMismatch) }
+        guard engine.keyHold.held(processID: window.processID).isEmpty
+        else { throw InputFailure.nativeTextInputRefused(.commandUnsupported) }
+    }
+
+    private func sendInNativeTextInput(
+        _ command    : InputCommand,
+        to window    : WindowReference,
+        correlationID: Int64,
+        platform     : any InputPlatform,
+        trace        : inout InputTraceContext,
+        id           : UUID,
+        beforeFirstPost: @escaping @Sendable () async throws -> Void
+    ) async throws -> InputReceipt {
+        try Task.checkCancellation()
+        try requireNativeTextInputCommand(command)
+        guard nativeTextInputIsQualified(on: platform) else {
+            throw InputFailure.nativeTextInputRefused(.unsupported)
+        }
+        try requireNativeTextInput(
+            id           : id,
+            window       : window,
+            correlationID: correlationID
+        )
+        try await commandGate.prepare(correlationID: correlationID)
+        try await beforeFirstPost()
+        // The deadline may have closed the context while admission suspended.
+        try Task.checkCancellation()
+        try requireNativeTextInput(
+            id           : id,
+            window       : window,
+            correlationID: correlationID
+        )
+        return try engine.post(
+            command,
+            to           : window,
+            correlationID: correlationID,
+            platform     : platform,
+            trace        : &trace
+        )
     }
 
     /// Posts one Command to one window.
@@ -162,6 +366,33 @@ public actor InputDriver {
             )
             recordCompletedTrace(traceContext.completed(at: DispatchTime.now().uptimeNanoseconds))
             throw failure
+        }
+
+        if Self.nativeTextInputID == nil, let context = nativeTextInput,
+           context.window.processID == window.processID,
+           context.correlationID == correlationID {
+            let isClosed = context.cleanup != nil
+                || DispatchTime.now().uptimeNanoseconds >= context.deadline
+            recordCompletedTrace(traceContext.completed(at: DispatchTime.now().uptimeNanoseconds))
+            throw InputFailure.nativeTextInputRefused(isClosed ? .contextClosed : .contextMismatch)
+        }
+
+        if let id = Self.nativeTextInputID {
+            do {
+                let receipt = try await sendInNativeTextInput(
+                    command,
+                    to           : window,
+                    correlationID: correlationID,
+                    platform     : platform,
+                    trace        : &traceContext,
+                    id           : id,
+                    beforeFirstPost: beforeFirstPost
+                )
+                return complete(receipt, traceContext: traceContext)
+            } catch {
+                recordCompletedTrace(traceContext.completed(at: DispatchTime.now().uptimeNanoseconds))
+                throw error
+            }
         }
 
         do {
@@ -367,6 +598,7 @@ public actor InputDriver {
     /// `send`: no Command events went out here, so the caller receives a failed
     /// cleanup rather than a delivery failure for an already posted Command.
     public func cyclePreparation(on window: WindowReference) async throws {
+        guard Self.nativeTextInputID == nil else { throw InputFailure.nativeTextInputRefused(.commandUnsupported) }
         guard window.identity != nil else {
             throw InputFailure.windowIdentityUnverified(
                 processID   : window.processID,
@@ -442,6 +674,7 @@ public actor InputDriver {
         platform     : any InputPlatform = ChromiumPlatform()
     ) async throws -> [InputReceipt] {
 
+        guard Self.nativeTextInputID == nil else { throw InputFailure.nativeTextInputRefused(.commandUnsupported) }
         guard !commands.isEmpty else { throw InputFailure.noCommands }
         let traceContexts = commands.map {
             InputTraceIdentity.submitted(
@@ -484,6 +717,7 @@ public actor InputDriver {
         traceContexts suppliedTraceContexts: [InputTraceContext]
     ) async throws -> [InputReceipt] {
 
+        guard Self.nativeTextInputID == nil else { throw InputFailure.nativeTextInputRefused(.commandUnsupported) }
         guard !commands.isEmpty else { throw InputFailure.noCommands }
         guard commands.count == suppliedTraceContexts.count else {
             throw InputFailure.noCommands

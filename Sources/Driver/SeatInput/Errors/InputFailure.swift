@@ -47,6 +47,9 @@ nonisolated public enum InputFailure: Error, Sendable, Equatable {
     /// nothing named is a pause nobody can act on.
     case inputPaused([InputPauseReason])
 
+    /// A native composition cannot establish or retain its bounded recipient.
+    case nativeTextInputRefused(NativeTextInputRefusal)
+
     // MARK: The target
 
     /// The process that owns the target window is gone.

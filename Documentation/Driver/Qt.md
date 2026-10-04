@@ -74,7 +74,7 @@ window from an on-screen row alone.
 | `send(.click(..., .left, count: 1))` | No preparation | DaVinci Search changed `0 → 1 → 0`; New Project and Cancel opened and closed a dialog. The Qt 6 fixture's button counter incremented. A prepared DaVinci Cancel click caused `activationUnverified`, so clicks remain unprepared. | Passed on measured controls |
 | DaVinci editor page controls | `QtPlatform` click | In the disposable `New Project 1` project, background clicks changed Cut `1 → 0`, Edit `0 → 1`, then restored Cut `1` and Edit `0`. The main window returned; no media or project contents were changed. | Passed on Cut and Edit |
 | `send(.key)` | No preparation | Backspace removed one character and Right Arrow collapsed a selection in DaVinci. In Qt 6, `down`, three `repeated` key downs and `up` changed the target's key-down counter by 1, 3 and 0. Other virtual keys and modifier combinations need separate oracles. | Partial |
-| `send(.text)` | No preparation | A typed `x` appended in DaVinci; Qt 6 accepted `é🧪` as two grapheme clusters and four events. Active IME composition remains untested. | Partial |
+| `send(.text)` | No preparation | A typed `x` appended in DaVinci; Qt 6 accepted `é🧪` as two grapheme clusters and four events. Native composition is qualified separately through its bounded scope. | Partial |
 | `send(.insertText)` | No preparation | Atomic `qtbgprobe` insertion appeared in DaVinci Search and `qt6bulk` in the Qt 6 line edit. The earlier prepared Qt recipe also inserted text, but restored Qt Quick's `TextInput` without active focus. The current unprepared recipe preserves its text and next modified key. | Passed for measured text fields |
 | `send(.drag)` | Prepare, shared pacing | DaVinci text selection changed from `{9, 0}` to `{0, 8}`; the Qt 6 slider changed from 0 to 81 along a paced drag between measured widget points. Qt Quick also accepted one internal drag between measured items. The owned native `QDrag` fixture also transferred its exact MIME payload between widgets; cross-application drop remains untested. | Passed on measured drags, Qt Quick internal drop and native QWidget MIME drop |
 | Custom painted `QWidget` | `QtPlatform` | A fixture-owned canvas handled its own mouse, wheel and key events. Routed commands produced two presses, eight drag moves, two releases, one wheel event and one `k` key press in target-side state, with zero physical HID events and an unchanged User Seat. | Passed on this custom canvas |
@@ -82,7 +82,7 @@ window from an on-screen row alone.
 | `withContextMenu` / menu observation / item action | Shared | Qt 6 opened a menu wholly inside the virtual display, captured its own 128 by 26 surface, clicked the target-published action frame, incremented `menuChoices` and verified `chosenItem` closure. DaVinci's 184 by 164 menu was opened and captured in four consecutive runs after the Search locator correction. Its `Select All` label was identified in the image, clicked through the dedicated menu observation, closed as `chosenItem`, and selected all nine temporary Search characters. The query was cleared and Search closed. Earlier DaVinci attempts had stalled. | Passed on both measured menu item actions |
 | `send(.click(..., count: 2))` | No preparation | Four events selected the whole DaVinci Search word, AX range `{0, 9}`; the Qt 6 line edit's double-click counter also incremented. | Passed on text |
 | `send(.scroll)` | No preparation | Qt 6's scroll area changed its target-side offset from 0 to 60 after one wheel event. DaVinci's thumbnail slider stayed at `-50`; it is not a scroll offset oracle. | Passed on Qt 6 scroll area |
-| Qt Quick / QML | `QtPlatform` | The owned `QQuickView` fixture verified a button click, committed Unicode text, bulk insertion followed by Shift+Left selection, vertical wheel scrolling, and one `Drag.Internal` accepted by a measured `DropArea`. Its target-side JSON included text, active focus, selection, wheel axes/modifiers, the moved source frame and accepted-drop counters. | Passed on measured QML controls; Native QWidget drag qualified separately |
+| Qt Quick / QML | `QtPlatform` | The owned `QQuickView` fixture verified a button click, committed Unicode text, bulk insertion followed by Shift+Left selection, vertical wheel scrolling, and one `Drag.Internal` accepted by a measured `DropArea`. Its target-side JSON included text, active focus, selection, wheel axes/modifiers, the moved source frame and accepted-drop counters. | Passed on measured QML controls; Native QWidget drag and bounded dead-key composition qualified separately |
 | Modified key / shortcut / held repeat | No preparation, shared flags and pacing | DaVinci's layout-resolved `⌘A` selected all nine Search characters. Qt 6 counted the `down → 3 repeat → up` sequence while the turn held the key. Other modifiers, shortcut destinations and repeat rates are pending. | Partial |
 | Window watch / modal child / return | Shared | DaVinci's New Project opened window `8616`; the watcher adopted and staged it, then a Qt-policy click on Cancel closed it with the foreground app and cursor unchanged in a run with zero physical HID events. The Qt 6 fixture also opened its own modal child, followed window `14306` into the virtual display and cancelled it through a measured button. Qt kept the hidden dialog's WindowServer surface after Cancel, so its logical presence stayed unreadable; the consumer explicitly released that child with `.leaveOnVirtualDisplay` and returned the parent. Focus recovery was enabled for both rows. | Passed on both measured dialogs; explicit child release required on Qt 6 fixture |
 | Qt widget `QFileDialog` | `QtPlatform` and shared watcher | The owned Qt 6 dialog was an adopted 654 by 491 window on the virtual display. Cancel was addressed from the widget's measured button frame; the target reported the dialog closed and `fileDialogAccepted == false`. Its child record was released, the parent returned and the User Seat stayed unchanged with zero physical HID events. | Passed on fixture widget dialog |
@@ -204,6 +204,82 @@ verify the current return destination and refusal on identity replacement.
 This qualifies this settled-home case, not every Stage Manager transition or
 restoration to an arbitrary offscreen rectangle. It records where ownership
 begins, rather than promising reversal of changes made before adoption.
+
+## Bounded native composition
+
+`make qt-ime-live-tests SWIFT=swift QT_PYTHON=/absolute/path/to/pyside6/python`
+runs three separate effect-based composition and cleanup rows. On 26A434 all
+three pass through `AgentSeat.withNativeTextInput`, with a new observation and
+confirmation for each physical key. The passing ten-row fixture tier and
+these three opt-in rows are separate qualifications. The current Dvorak
+source supplies an Option dead key at position 2 and an unmodified commit key
+at position 2. A read-only Carbon translation resolves that pair. The test
+requires empty committed text, nonempty preedit and
+`TextInput.inputMethodComposing == true` after the first command, then exact
+`é`, empty preedit and composition ended after the second. Neither command
+carries injected Unicode text. Other IMEs may require a different fixture and
+are not qualified by this dead-key pair.
+
+The original ordinary Qt route posted the first key but produced no native preedit.
+Explicit own-window priming also left preedit empty. Full AppKit preparation
+instead left committed `´` and `activeFocus == false` after restoration. All
+three background attempts returned the owned window and preserved the User
+Seat with zero physical input. An AppKit-policy control used no preparation
+and therefore does not establish a separate full-preparation result.
+
+A separate native foreground control launched only the owned QML fixture,
+requested its own activation and text focus, and posted the same physical key
+pair to its PID. The first key produced preedit `´` with composition active;
+the second committed exact `é` and ended composition. The fixture closed and
+the original foreground and cursor were verified restored. The control used
+a fresh state file per launch and independently required native text focus
+before posting. This is a control for the oracle and source layout, not
+background Driver coverage.
+
+Qt 6.11.2's Cocoa implementation hands dead keys to the native input context
+in [QNSView's key handler](https://raw.githubusercontent.com/qt/qtbase/v6.11.2/src/plugins/platforms/cocoa/qnsview_keys.mm).
+It translates native marked text into `QInputMethodEvent` in
+[its text-input client](https://raw.githubusercontent.com/qt/qtbase/v6.11.2/src/plugins/platforms/cocoa/qnsview_complextext.mm).
+The fixture now records actual `QInputMethodEvent` preedit and commit values,
+application state and native focus object. Full per-key preparation produced
+preedit `´` followed by an isolated `´` commit during restoration. A diagnostic
+sequence produced preedit then `é`; a second control retained preparation
+through two fresh Seat observations and produced the same exact commit.
+These controls identified context lifetime as the missing boundary. Their
+temporary overrides were removed.
+
+The production scope owns one Turn and consumes its entry observation. It
+holds the same recipient's preparation and process exclusion, accepts only
+physical key presses with no injected Unicode, and preserves fresh observation,
+final admission and confirmation before every Command. It has a deadline of at
+most five seconds, including the 300 ms preparation settle. Ordinary Qt text,
+bulk insertion and other Commands retain their command policies.
+
+The three current native rows require actual marked preedit followed by exact
+`é`, automatic deadline restoration while the callback is waiting with a late
+key refused before posting, and cancellation while preedit is open. Each
+requires `ApplicationInactive` after closure, returned window, zero physical
+events, preserved User Seat, and removed display/fence. Cancellation and timeout
+close the native context; on this source Qt commits an isolated accent. They do
+not undo edits or promise discarded marked text. Scope errors retain cleanup
+separately from their cause, and failed restoration degrades the Seat.
+
+[ADR 0018](adr/Adr0018BoundNativeTextInputPreparation.md) records the contract.
+This qualifies the measured dead-key source on the owned Qt Quick surface.
+Candidate windows, CJK IMEs, other source layouts and additional application
+surfaces are still pending. The initial physical
+presentation of native Qt panels remains pending.
+The stale discovery geometry case has a current fix and a dedicated tier below;
+other Stage Manager geometries still need independent qualification.
+
+The scope preserves the exact native composing recipient through preedit and
+commit, while retaining fresh observations, cancellation, lifetime checks and
+bounded restoration. Detached tasks and children that outlive the callback
+are refused before posting through task-local scope identity at both admission
+and input boundaries. The removed `AgentSeat.sendSequence` cannot supply that
+contract: it intentionally lacks a new observation and decision between
+commands. No batching bypass or physical-input fallback was added, and no
+experimental preparation override is retained in the composition row.
 
 ## Native panel visibility
 

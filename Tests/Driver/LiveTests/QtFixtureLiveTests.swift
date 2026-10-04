@@ -4,6 +4,7 @@
 //
 
 import AppKit
+import Carbon
 import CoreGraphics
 import CursorGuard
 import Foundation
@@ -249,10 +250,58 @@ struct QtFixtureLiveTests {
             if: qtFixtureSkipReason() == nil,
             Comment(rawValue: qtFixtureSkipReason() ?? "")))
     func quickCommands() async throws {
-        try await runQuickCommands()
+        try await runQuickCommands(includingComposition: false)
     }
 
-    private func runQuickCommands() async throws {
+    @Test(
+        "Qt Quick preserves native dead-key preedit through commit",
+        .enabled(
+            if: qtFixtureSkipReason() == nil
+                && ProcessInfo.processInfo.environment["AGENTSEAT_QT_IME_TESTS"] == "1",
+            "AGENTSEAT_QT_IME_TESTS=1 and the Qt fixture prerequisites are required"))
+    func inputMethodComposition() async throws {
+        try await runQuickCommands(includingComposition: true)
+    }
+
+    private enum CompositionEnding {
+        case commit
+        case deadline
+        case cancellation
+    }
+
+    @Test(
+        "Qt native composition expires while the consumer is still waiting",
+        .enabled(
+            if: qtFixtureSkipReason() == nil
+                && ProcessInfo.processInfo.environment["AGENTSEAT_QT_IME_TESTS"] == "1",
+            "AGENTSEAT_QT_IME_TESTS=1 and the Qt fixture prerequisites are required"))
+    func inputMethodDeadline() async throws {
+        try await runQuickCommands(includingComposition: true, ending: .deadline)
+    }
+
+    @Test(
+        "Qt native composition restores after cancellation with marked text open",
+        .enabled(
+            if: qtFixtureSkipReason() == nil
+                && ProcessInfo.processInfo.environment["AGENTSEAT_QT_IME_TESTS"] == "1",
+            "AGENTSEAT_QT_IME_TESTS=1 and the Qt fixture prerequisites are required"))
+    func inputMethodCancellation() async throws {
+        try await runQuickCommands(includingComposition: true, ending: .cancellation)
+    }
+
+    private func runQuickCommands(
+        includingComposition: Bool,
+        ending              : CompositionEnding = .commit
+    ) async throws {
+        var composition: (sourceID: String, dead: CGKeyCode, commit: CGKeyCode)?
+        if includingComposition {
+            guard let resolved = nativeDeadKeySequence() else {
+                throw LiveFailure.unsupported(
+                    "The Qt composition row requires a current keyboard layout with an acute dead key"
+                )
+            }
+            composition = resolved
+        }
         let target = try QtProbeTarget(scriptName: "QtQuickProbe.py")
         defer { target.stop() }
         let original = try WindowReader.windowSnapshot(
@@ -305,9 +354,13 @@ struct QtFixtureLiveTests {
                     ))
                 }
 
+                var compositionTurn: Turn?
                 @MainActor
                 func send(_ command: InputCommand, effect: @MainActor () throws -> Bool) async throws {
-                    let turn = try await stage.seat.acquire()
+                    let ownsTurn = compositionTurn == nil
+                    let turn: Turn
+                    if let active = compositionTurn { turn = active }
+                    else { turn = try await stage.seat.acquire() }
                     var posted: InputReceipt?
                     do {
                         let observation = try await liveObservation(stage.seat)
@@ -318,7 +371,7 @@ struct QtFixtureLiveTests {
                         try stage.seat.confirm(receipt, changed ? .observed : .absent)
                         posted = nil
                         _ = await stage.seat.concludeObservation()
-                        try stage.seat.release(turn)
+                        if ownsTurn { try stage.seat.release(turn) }
                         print("QT_QUICK command=\(command.kind) effect=\(changed) events=\(receipt.eventCount)"
                             + " preparation=\(receipt.preparation)")
                         if !changed {
@@ -329,41 +382,136 @@ struct QtFixtureLiveTests {
                     } catch {
                         if let posted { try? stage.seat.confirm(posted, .unknown) }
                         _ = await stage.seat.concludeObservation()
-                        try? stage.seat.release(turn)
+                        if ownsTurn { try? stage.seat.release(turn) }
                         throw error
                     }
                 }
 
-                try await send(.click(point("button"))) { (try state()["clicks"] as? NSNumber)?.intValue == 1 }
+                if composition == nil {
+                    try await send(.click(point("button"))) { (try state()["clicks"] as? NSNumber)?.intValue == 1 }
+                }
                 try await send(.click(point("field"))) { try state()["activeFocus"] as? Bool == true }
-                try await send(.text("é🧪")) { try state()["text"] as? String == "é🧪" }
-                try await send(.insertText(" qml bulk")) {
-                    let value = try state()
-                    return value["text"] as? String == "é🧪 qml bulk" && value["activeFocus"] as? Bool == true
-                }
-                try await send(.key(virtualKey: 123, text: "", modifiers: .shift)) {
-                    try state()["selectedText"] as? String == "k"
-                }
-                try await send(.scroll(point("scroll"), deltaY: -4)) {
-                    (try state()["scroll"] as? NSNumber)?.doubleValue ?? 0 > 0
-                }
-                let initialSource = try #require(state()["sourceFrame"] as? [NSNumber])
-                try await send(.drag(from: point("source"), to: point("destination"))) {
-                    let value = try state()
-                    guard let source = value["sourceFrame"] as? [NSNumber], source.count == 4,
-                          let destination = value["destinationFrame"] as? [NSNumber], destination.count == 4
-                    else { return false }
-                    let destinationBody = CGRect(
-                        x: destination[0].doubleValue, y: destination[1].doubleValue,
-                        width: destination[2].doubleValue, height: destination[3].doubleValue
-                    )
-                    let sourceHotSpot = CGPoint(x: source[0].doubleValue + source[2].doubleValue / 2,
-                                                y: source[1].doubleValue + source[3].doubleValue / 2)
-                    return (value["drops"] as? NSNumber)?.intValue == 1
-                        && (value["dragEnters"] as? NSNumber)?.intValue ?? 0 > 0
-                        && (value["dragReleases"] as? NSNumber)?.intValue == 1
-                        && source[0].doubleValue > initialSource[0].doubleValue + 250
-                        && destinationBody.contains(sourceHotSpot)
+                if let composition {
+                    let turn = try await stage.seat.acquire()
+                    compositionTurn = turn
+                    do {
+                        let entry = try await liveObservation(stage.seat)
+                        var isBodyWaiting = false
+                        @MainActor @Sendable
+                        func body() async throws {
+                            try await send(.key(
+                                virtualKey: composition.dead,
+                                text      : "",
+                                modifiers : .option
+                            )) {
+                                let value = try state()
+                                return value["text"] as? String == ""
+                                    && value["inputMethodComposing"] as? Bool == true
+                                    && (value["preeditText"] as? String)?.isEmpty == false
+                            }
+                            switch ending {
+                            case .commit:
+                                try await send(.key(
+                                    virtualKey: composition.commit,
+                                    text      : ""
+                                )) {
+                                    let value = try state()
+                                    return value["text"] as? String == "é"
+                                        && value["inputMethodComposing"] as? Bool == false
+                                        && value["preeditText"] as? String == ""
+                                }
+                            case .deadline:
+                                try await Task.sleep(for: .seconds(2))
+                                try #require(try state()["applicationState"] as? String == "ApplicationInactive")
+                                let late = try await liveObservation(stage.seat)
+                                let eventsBefore = try #require(state()["inputMethodEvents"] as? [[String: Any]]).count
+                                await #expect(throws: InputFailure.nativeTextInputRefused(.contextClosed)) {
+                                    try await stage.seat.send(
+                                        .key(virtualKey: composition.commit, text: ""),
+                                        observation: late,
+                                        turn       : turn
+                                    )
+                                }
+                                try #require(try (state()["inputMethodEvents"] as? [[String: Any]])?.count == eventsBefore)
+                            case .cancellation:
+                                isBodyWaiting = true
+                                try await Task.sleep(for: .seconds(5))
+                            }
+                        }
+                        let budget: Duration = ending == .deadline ? .milliseconds(1500) : .seconds(3)
+                        let operation = Task { @MainActor in
+                            try await stage.seat.withNativeTextInput(
+                                observation: entry,
+                                turn       : turn,
+                                within     : budget,
+                                operation  : body
+                            )
+                        }
+                        defer { operation.cancel() }
+                        if ending == .cancellation {
+                            let waiting = await LivePump.settle(until: { isBodyWaiting }, timeout: 2)
+                            try #require(waiting, "Cancellation did not reach a live native preedit")
+                            operation.cancel()
+                        }
+                        let cleanup: InputCleanupResult
+                        switch await operation.result {
+                        case .success(let result):
+                            try #require(ending == .commit)
+                            cleanup = result
+                        case .failure(let error):
+                            let failure = try #require(error as? NativeTextInputFailure)
+                            if ending == .deadline {
+                                try #require(failure.cause as? InputFailure == .nativeTextInputRefused(.contextClosed))
+                            } else if ending == .cancellation {
+                                try #require(failure.cause is CancellationError)
+                            } else { throw error }
+                            cleanup = failure.cleanup
+                        }
+                        compositionTurn = nil
+                        try #require(cleanup == .succeeded)
+                        let inactive = await LivePump.settle(until: {
+                            (try? state()["applicationState"] as? String) == "ApplicationInactive"
+                        }, timeout: 2)
+                        try #require(inactive, "The native input context did not restore Qt's inactive state")
+                        try stage.seat.release(turn)
+                    } catch {
+                        compositionTurn = nil
+                        try? stage.seat.release(turn)
+                        throw error
+                    }
+                    print("QT_COMPOSITION source=\(composition.sourceID) dead=\(composition.dead)"
+                        + " commit=\(composition.commit) ending=\(ending) native-context-restored=true")
+                    try #require(nativeDeadKeySequence()?.sourceID == composition.sourceID)
+                } else {
+                    try await send(.text("é🧪")) { try state()["text"] as? String == "é🧪" }
+                    try await send(.insertText(" qml bulk")) {
+                        let value = try state()
+                        return value["text"] as? String == "é🧪 qml bulk" && value["activeFocus"] as? Bool == true
+                    }
+                    try await send(.key(virtualKey: 123, text: "", modifiers: .shift)) {
+                        try state()["selectedText"] as? String == "k"
+                    }
+                    try await send(.scroll(point("scroll"), deltaY: -4)) {
+                        (try state()["scroll"] as? NSNumber)?.doubleValue ?? 0 > 0
+                    }
+                    let initialSource = try #require(state()["sourceFrame"] as? [NSNumber])
+                    try await send(.drag(from: point("source"), to: point("destination"))) {
+                        let value = try state()
+                        guard let source = value["sourceFrame"] as? [NSNumber], source.count == 4,
+                              let destination = value["destinationFrame"] as? [NSNumber], destination.count == 4
+                        else { return false }
+                        let destinationBody = CGRect(
+                            x: destination[0].doubleValue, y: destination[1].doubleValue,
+                            width: destination[2].doubleValue, height: destination[3].doubleValue
+                        )
+                        let sourceHotSpot = CGPoint(x: source[0].doubleValue + source[2].doubleValue / 2,
+                                                    y: source[1].doubleValue + source[3].doubleValue / 2)
+                        return (value["drops"] as? NSNumber)?.intValue == 1
+                            && (value["dragEnters"] as? NSNumber)?.intValue ?? 0 > 0
+                            && (value["dragReleases"] as? NSNumber)?.intValue == 1
+                            && source[0].doubleValue > initialSource[0].doubleValue + 250
+                            && destinationBody.contains(sourceHotSpot)
+                    }
                 }
                 let data = try JSONSerialization.data(withJSONObject: state(), options: .sortedKeys)
                 print("QT_QUICK state=\(String(decoding: data, as: UTF8.self))")

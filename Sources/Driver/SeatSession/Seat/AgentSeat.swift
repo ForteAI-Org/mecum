@@ -134,6 +134,11 @@ public final class AgentSeat {
     private var adoptionInFlight = false
     var isTearingDown = false
 
+    @TaskLocal
+    private nonisolated static var nativeTextInputID: UUID?
+
+    private var nativeTextInputContext: (window: WindowReference, turn: Turn, id: UUID)?
+
     /// True for the length of one coordinated assignment release, so nothing
     /// inside it restages a predecessor of a window that is on its way out.
     private var isReleasingAssignment = false
@@ -382,6 +387,7 @@ public final class AgentSeat {
     /// on a state nobody established, and the next holder cannot know: the
     /// evidence is a Command that already went out.
     public func release(_ turn: Turn) throws {
+        guard nativeTextInputContext?.turn != turn else { throw InputFailure.nativeTextInputRefused(.contextActive) }
 
         let unconfirmed = posted.filter { $0.confirmation == nil }.count
         guard unconfirmed == 0 else {
@@ -485,6 +491,93 @@ public final class AgentSeat {
             maximumCodeUnits: limits.maximumCodeUnits
         )
         return chunks.map { mode == .typed ? InputCommand.text($0) : InputCommand.insertText($0) }
+    }
+
+    /// Runs qualified native composition in one Turn, with a fresh observation and
+    /// confirmation for every physical key. Preparation is owned by the scope,
+    /// not by individual Receipts. Restoration closes the native context; it
+    /// does not promise to discard marked text or undo committed edits.
+    public func withNativeTextInput(
+        observation: SeatObservationReference,
+        turn       : Turn,
+        within     : Duration = .seconds(3),
+        operation  : @escaping @MainActor @Sendable () async throws -> Void
+    ) async throws -> InputCleanupResult {
+        guard nativeTextInputContext == nil, Self.nativeTextInputID == nil,
+              menuContext == nil, !actionInFlight else {
+            throw InputFailure.nativeTextInputRefused(.contextActive)
+        }
+        let window = try admitOrdinary(observation)
+        var trace = InputTraceIdentity.submitted(
+            command      : .key(virtualKey: 0, text: ""),
+            window       : window.reference,
+            correlationID: turn.correlationID
+        )
+        let record = try preflight(
+            window,
+            turn        : turn,
+            traceContext: &trace
+        )
+        guard nativeTextInputIsQualified(on: record.platform),
+              let preparing = sender as? any NativeTextInputPreparing
+        else { throw InputFailure.nativeTextInputRefused(.unsupported) }
+        let endpoint = try inputEndpoint(
+            for: .key(
+                virtualKey: 0,
+                text      : ""
+            ),
+            observation: observation
+        )?.endpoint
+        let isOwnSurface = endpoint == nil || (
+            endpoint?.identity == window.reference.identity
+                && endpoint?.relation == .logicalSurface
+                && endpoint?.evidence == .attestedSurfaceItself
+        )
+        guard attestedModalSurface(for: observation) == nil,
+              isOwnSurface
+        else { throw InputFailure.nativeTextInputRefused(.unsupported) }
+        guard heldKeyCount(of: turn) == 0 else { throw InputFailure.nativeTextInputRefused(.commandUnsupported) }
+        let id = UUID()
+        nativeTextInputContext = (
+            window: window.reference,
+            turn  : turn,
+            id    : id
+        )
+        let previous = state
+        actionInFlight = true
+        transition(to: .acting, reason: .requested)
+        defer {
+            nativeTextInputContext = nil
+            actionInFlight = false
+            restoreActionState(previous, reason: .requested)
+        }
+        // Preparation can change focus and pixels. The entry observation cannot
+        // be reused for the body's first Command.
+        noteObservationConsumed()
+        do {
+            let cleanup = try await preparing.withNativeTextInput(
+                to           : window.reference,
+                correlationID: turn.correlationID,
+                within       : within,
+                operation    : { @MainActor in
+                    self.actionInFlight = false
+                    self.restoreActionState(previous, reason: .requested)
+                    try await Self.$nativeTextInputID.withValue(id) {
+                        try await operation()
+                    }
+                }
+            )
+            if cleanup.needsRecovery { report([.preparationNotRestored]) }
+            return cleanup
+        } catch {
+            if let failure = error as? NativeTextInputFailure, failure.cleanup.needsRecovery {
+                report([.preparationNotRestored])
+            } else if let failure = error as? InputPreparationFailure,
+                      failure.progress.neededRecovery != nil {
+                report([.preparationNotRestored])
+            }
+            throw error
+        }
     }
 
     /// Removed in the observation cutover, not deprecated: it posted every chunk
@@ -1157,6 +1250,11 @@ public final class AgentSeat {
         _ mode  : ReleaseMode = .returnToUserSeat
     ) async -> WindowReleaseOutcome {
 
+        if let context = nativeTextInputContext, context.window.windowNumber == window.id,
+           let preparing = sender as? any NativeTextInputPreparing {
+            let cleanup = await preparing.cancelNativeTextInput(correlationID: context.turn.correlationID)
+            if cleanup.needsRecovery { report([.preparationNotRestored]) }
+        }
         if stagedWindowNumber == window.id { stagedWindowNumber = nil }
 
         // The return is a placement transition like the adoption, and the
@@ -2054,6 +2152,19 @@ public final class AgentSeat {
         // the adoption wrote with the frame the surface used to be at.
         let recipient       = endpoint?.geometry.window ?? window.reference
 
+        if Self.nativeTextInputID != nil || nativeTextInputContext != nil {
+            guard let context = nativeTextInputContext else {
+                throw InputFailure.nativeTextInputRefused(.contextClosed)
+            }
+            guard Self.nativeTextInputID == context.id else {
+                throw InputFailure.nativeTextInputRefused(.contextMismatch)
+            }
+            try requireNativeTextInputCommand(routed)
+            guard context.turn == turn, recipient.identity == context.window.identity,
+                  recipient.windowNumber == context.window.windowNumber
+            else { throw InputFailure.nativeTextInputRefused(.contextMismatch) }
+        }
+
         var traceContext = InputTraceIdentity.submitted(
             command      : routed,
             window       : recipient,
@@ -2081,6 +2192,9 @@ public final class AgentSeat {
             } ?? false
         )
         let isModalSurface = attestedModalSurface(for: observation) != nil
+        if nativeTextInputContext != nil, isModalSurface {
+            throw InputFailure.nativeTextInputRefused(.unsupported)
+        }
         guard let resolved = platform ?? classification.platform(
             for                : routed,
             ofDrivenApplication: record.platform,
@@ -3074,6 +3188,11 @@ public final class AgentSeat {
 
         reportStrandedKeys()
         isTearingDown = true
+        if let context = nativeTextInputContext,
+           let preparing = sender as? any NativeTextInputPreparing {
+            let cleanup = await preparing.cancelNativeTextInput(correlationID: context.turn.correlationID)
+            if cleanup.needsRecovery { report([.preparationNotRestored]) }
+        }
         stopWindowFollowing()
         if adoptionInFlight {
             await withCheckedContinuation { adoptionWaiters.append($0) }

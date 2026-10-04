@@ -119,8 +119,12 @@ fails closed to an explicit target choice only when AX reports no unique focused
 or main window, or reports contradictory current-window state. The Live campaign
 has not yet been run.
 
+The bounded native composition contract is [ADR 0018](adr/Adr0018BoundNativeTextInputPreparation.md).
 Qt reads its return geometry at adoption, as recorded in
 [ADR 0019](adr/Adr0019QtAdoptionGeometry.md).
+`AgentSeat.withNativeTextInput` preserves a fresh observation and confirmation
+for each physical key while its Qt recipient owns one preparation. It restores
+on completion, deadline and cancellation; it does not provide document rollback.
 
 ## Unqualified builds and Adobe UXP checks
 
