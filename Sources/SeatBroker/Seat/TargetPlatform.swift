@@ -49,8 +49,9 @@ import SeatInput
 ///    Resolve does: it is driven with `QtPlatform`, the recipe measured on
 ///    DaVinci and an owned Qt 6 fixture (Documentation/Driver/Qt.md), whose
 ///    clicks are unprepared, since a prepared one activated a followed dialog,
-///    whose bulk insertion is prepared for 150 ms, and which keeps the window
-///    follower awake a second after a click for the native panels Qt opens late;
+///    whose bulk insertion stays unprepared to preserve Qt Quick focus, and
+///    which keeps the window follower awake a second after a click for the
+///    native panels Qt opens late;
 ///    the bundle ships Adobe's UXP host, `dvauxphost.framework`, which Photoshop
 ///    does: it is driven with `UXPPlatform`, whose attested modal keys use
 ///    recipient priming. Photoshop also selects the measured document-click

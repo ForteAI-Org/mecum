@@ -37,7 +37,7 @@ private final class QtProbeTarget {
     private let ownsStateFile: Bool
     private var nextCommandSequence = 0
 
-    init() throws {
+    init(scriptName: String = "QtProbe.py") throws {
         let environment = ProcessInfo.processInfo.environment
         if let processID = Int32(environment["AGENTSEAT_QT_FIXTURE_PID"] ?? ""),
            let statePath = environment["AGENTSEAT_QT_FIXTURE_STATE"] {
@@ -55,7 +55,7 @@ private final class QtProbeTarget {
             .deletingLastPathComponent()
             .deletingLastPathComponent()
             .deletingLastPathComponent()
-            .appendingPathComponent("Tools/Driver/QtProbe.py")
+            .appendingPathComponent("Tools/Driver/" + scriptName)
         let output = FileManager.default.temporaryDirectory
             .appendingPathComponent("mecum-qt-probe-\(UUID().uuidString).json")
         let person = NSWorkspace.shared.frontmostApplication
@@ -118,6 +118,274 @@ private final class QtProbeTarget {
 struct QtFixtureLiveTests {
 
     @Test(
+        "Qt native QDrag delivers the exact owned MIME payload to another widget",
+        .enabled(
+            if: qtFixtureSkipReason() == nil,
+            Comment(rawValue: qtFixtureSkipReason() ?? "")))
+    func nativeDrag() async throws {
+        let target = try QtProbeTarget(scriptName: "QtNativeDragProbe.py")
+        defer { target.stop() }
+        let original = try WindowReader.windowSnapshot(
+            processID            : target.processID,
+            allowUnvalidatedBuild: true
+        )
+        func state() throws -> [String: Any] {
+            let data = try Data(contentsOf: URL(fileURLWithPath: target.statePath))
+            return try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        }
+        try #require(try state()["fixture"] as? String == "qt-native-drag")
+        let payload = try #require(try state()["payload"] as? String)
+        try #require(payload.hasPrefix("mecum-native-drag-") && payload.count > 32)
+        var failure: (any Error)?
+        try await LiveStage.run(
+            needsFixture : false,
+            needsChrome  : false,
+            configuration: SeatHostConfiguration(
+                restoresUserFocus            : true,
+                allowUnvalidatedFocusRecovery: true
+            )
+        ) { stage in
+            let physicalBefore = stage.fence.snapshot().observedEventCount
+            let person = UserSeatState.capture()
+            var adopted: AdoptedWindow?
+            do {
+                try #require(person.frontmostProcessID != target.processID)
+                adopted = try await stage.seat.adopt(
+                    original.reference,
+                    platform: QtPlatform(),
+                    title   : original.windowTitle
+                )
+                if let window = adopted, !stage.seat.isStaged(window) {
+                    adopted = try await stage.seat.stage(window)
+                }
+                let window = try #require(adopted)
+                let contained = await LivePump.settle(until: {
+                    guard let values = try? state()["destinationFrame"] as? [NSNumber], values.count == 4
+                    else { return false }
+                    return stage.virtualBounds.contains(CGRect(
+                        x     : values[0].doubleValue,
+                        y     : values[1].doubleValue,
+                        width : values[2].doubleValue,
+                        height: values[3].doubleValue
+                    ))
+                }, timeout: 3)
+                try #require(contained)
+                @MainActor
+                func point(_ name: String) throws -> InputLocation {
+                    let values = try #require(state()[name + "Frame"] as? [NSNumber])
+                    try #require(values.count == 4)
+                    let server = try #require(WindowServerProbe.geometry(of: window.id))
+                    let geometry = try #require(WindowGeometryProbe.observation(of: server))
+                    return try #require(InputLocation(
+                        screenPoint: CGPoint(
+                            x: values[0].doubleValue + values[2].doubleValue / 2,
+                            y: values[1].doubleValue + values[3].doubleValue / 2
+                        ),
+                        observedIn: geometry
+                    ))
+                }
+                let turn = try await stage.seat.acquire()
+                var posted: InputReceipt?
+                do {
+                    let observation = try await liveObservation(stage.seat)
+                    try #require(observation.surface.windowNumber == window.id)
+                    let receipt = try await stage.seat.send(
+                        .drag(
+                            from: point("source"),
+                            to  : point("destination")
+                        ),
+                        observation: observation,
+                        turn       : turn
+                    )
+                    posted = receipt
+                    let transferred = await LivePump.settle(until: {
+                        guard let value = try? state() else { return false }
+                        return (value["presses"] as? NSNumber)?.intValue == 1
+                            && (value["dragStarted"] as? NSNumber)?.intValue == 1
+                            && (value["enters"] as? NSNumber)?.intValue ?? 0 > 0
+                            && (value["drops"] as? NSNumber)?.intValue == 1
+                            && value["received"] as? String == payload
+                            && value["dragFinished"] as? Bool == true
+                            && (value["dragResult"] as? NSNumber)?.intValue == 1
+                    }, timeout: 3)
+                    try stage.seat.confirm(receipt, transferred ? .observed : .absent)
+                    posted = nil
+                    _ = await stage.seat.concludeObservation()
+                    try stage.seat.release(turn)
+                    let data = try JSONSerialization.data(
+                        withJSONObject: state(),
+                        options       : .sortedKeys
+                    )
+                    print("QT_NATIVE_DRAG effect=\(transferred) preparation=\(receipt.preparation)"
+                        + " state=\(String(decoding: data, as: UTF8.self))")
+                    try #require(transferred, "Native QDrag did not transfer the owned payload")
+                } catch {
+                    if let posted { try? stage.seat.confirm(posted, .unknown) }
+                    _ = await stage.seat.concludeObservation()
+                    try? stage.seat.release(turn)
+                    throw error
+                }
+            } catch {
+                failure = error
+            }
+            _ = await stage.seat.concludeObservation()
+            if let adopted {
+                let outcome = await stage.seat.release(adopted, .returnToUserSeat)
+                print("QT_NATIVE_DRAG release=\(outcome)")
+                #expect(outcome == .returned)
+            }
+            let physical = stage.fence.snapshot().observedEventCount - physicalBefore
+            let unchanged = UserSeatState.capture() == person
+            print("QT_NATIVE_DRAG physical-events=\(physical) user-seat-preserved=\(unchanged)")
+            #expect(physical == 0)
+            #expect(unchanged)
+        }
+        if let failure { throw failure }
+    }
+
+    @Test(
+        "Qt Quick text, scrolling and an internal cross-item drop have independent effects",
+        .enabled(
+            if: qtFixtureSkipReason() == nil,
+            Comment(rawValue: qtFixtureSkipReason() ?? "")))
+    func quickCommands() async throws {
+        try await runQuickCommands()
+    }
+
+    private func runQuickCommands() async throws {
+        let target = try QtProbeTarget(scriptName: "QtQuickProbe.py")
+        defer { target.stop() }
+        let original = try WindowReader.windowSnapshot(
+            processID: target.processID, allowUnvalidatedBuild: true
+        )
+        func state() throws -> [String: Any] {
+            let data = try Data(contentsOf: URL(fileURLWithPath: target.statePath))
+            return try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        }
+        try #require(try state()["fixture"] as? String == "qt-quick")
+        var failure: (any Error)?
+        try await LiveStage.run(
+            needsFixture: false,
+            needsChrome: false,
+            configuration: SeatHostConfiguration(
+                restoresUserFocus: true, allowUnvalidatedFocusRecovery: true
+            )
+        ) { stage in
+            let physicalBefore = stage.fence.snapshot().observedEventCount
+            let person = UserSeatState.capture()
+            var adopted: AdoptedWindow?
+            do {
+                try #require(person.frontmostProcessID != target.processID)
+                adopted = try await stage.seat.adopt(original.reference, platform: QtPlatform(),
+                                                     title: original.windowTitle)
+                if let window = adopted, !stage.seat.isStaged(window) {
+                    adopted = try await stage.seat.stage(window)
+                }
+                let window = try #require(adopted)
+                let ready = await LivePump.settle(until: {
+                    guard let values = try? state()["fieldFrame"] as? [NSNumber], values.count == 4
+                    else { return false }
+                    return stage.virtualBounds.contains(CGRect(
+                        x: values[0].doubleValue, y: values[1].doubleValue,
+                        width: values[2].doubleValue, height: values[3].doubleValue
+                    ))
+                }, timeout: 3)
+                try #require(ready, "Qt Quick did not publish contained item geometry")
+
+                @MainActor
+                func point(_ name: String) throws -> InputLocation {
+                    let values = try #require(state()[name + "Frame"] as? [NSNumber])
+                    try #require(values.count == 4)
+                    let server = try #require(WindowServerProbe.geometry(of: window.id))
+                    let geometry = try #require(WindowGeometryProbe.observation(of: server))
+                    return try #require(InputLocation(
+                        screenPoint: CGPoint(x: values[0].doubleValue + values[2].doubleValue / 2,
+                                             y: values[1].doubleValue + values[3].doubleValue / 2),
+                        observedIn: geometry
+                    ))
+                }
+
+                @MainActor
+                func send(_ command: InputCommand, effect: @MainActor () throws -> Bool) async throws {
+                    let turn = try await stage.seat.acquire()
+                    var posted: InputReceipt?
+                    do {
+                        let observation = try await liveObservation(stage.seat)
+                        try #require(observation.surface.windowNumber == window.id)
+                        let receipt = try await stage.seat.send(command, observation: observation, turn: turn)
+                        posted = receipt
+                        let changed = await LivePump.settle(until: { (try? effect()) == true }, timeout: 2)
+                        try stage.seat.confirm(receipt, changed ? .observed : .absent)
+                        posted = nil
+                        _ = await stage.seat.concludeObservation()
+                        try stage.seat.release(turn)
+                        print("QT_QUICK command=\(command.kind) effect=\(changed) events=\(receipt.eventCount)"
+                            + " preparation=\(receipt.preparation)")
+                        if !changed {
+                            let data = try JSONSerialization.data(withJSONObject: state(), options: .sortedKeys)
+                            print("QT_QUICK unexpected-state=\(String(decoding: data, as: UTF8.self))")
+                        }
+                        try #require(changed)
+                    } catch {
+                        if let posted { try? stage.seat.confirm(posted, .unknown) }
+                        _ = await stage.seat.concludeObservation()
+                        try? stage.seat.release(turn)
+                        throw error
+                    }
+                }
+
+                try await send(.click(point("button"))) { (try state()["clicks"] as? NSNumber)?.intValue == 1 }
+                try await send(.click(point("field"))) { try state()["activeFocus"] as? Bool == true }
+                try await send(.text("é🧪")) { try state()["text"] as? String == "é🧪" }
+                try await send(.insertText(" qml bulk")) {
+                    let value = try state()
+                    return value["text"] as? String == "é🧪 qml bulk" && value["activeFocus"] as? Bool == true
+                }
+                try await send(.key(virtualKey: 123, text: "", modifiers: .shift)) {
+                    try state()["selectedText"] as? String == "k"
+                }
+                try await send(.scroll(point("scroll"), deltaY: -4)) {
+                    (try state()["scroll"] as? NSNumber)?.doubleValue ?? 0 > 0
+                }
+                let initialSource = try #require(state()["sourceFrame"] as? [NSNumber])
+                try await send(.drag(from: point("source"), to: point("destination"))) {
+                    let value = try state()
+                    guard let source = value["sourceFrame"] as? [NSNumber], source.count == 4,
+                          let destination = value["destinationFrame"] as? [NSNumber], destination.count == 4
+                    else { return false }
+                    let destinationBody = CGRect(
+                        x: destination[0].doubleValue, y: destination[1].doubleValue,
+                        width: destination[2].doubleValue, height: destination[3].doubleValue
+                    )
+                    let sourceHotSpot = CGPoint(x: source[0].doubleValue + source[2].doubleValue / 2,
+                                                y: source[1].doubleValue + source[3].doubleValue / 2)
+                    return (value["drops"] as? NSNumber)?.intValue == 1
+                        && (value["dragEnters"] as? NSNumber)?.intValue ?? 0 > 0
+                        && (value["dragReleases"] as? NSNumber)?.intValue == 1
+                        && source[0].doubleValue > initialSource[0].doubleValue + 250
+                        && destinationBody.contains(sourceHotSpot)
+                }
+                let data = try JSONSerialization.data(withJSONObject: state(), options: .sortedKeys)
+                print("QT_QUICK state=\(String(decoding: data, as: UTF8.self))")
+            } catch {
+                failure = error
+            }
+            _ = await stage.seat.concludeObservation()
+            if let adopted {
+                let outcome = await stage.seat.release(adopted, .returnToUserSeat)
+                print("QT_QUICK release=\(outcome)")
+                #expect(outcome == .returned)
+            }
+            let physical = stage.fence.snapshot().observedEventCount - physicalBefore
+            let unchanged = UserSeatState.capture() == person
+            print("QT_QUICK isolation physical-events=\(physical) user-seat-preserved=\(unchanged)")
+            #expect(physical == 0)
+            #expect(unchanged)
+        }
+        if let failure { throw failure }
+    }
+
+    @Test(
         "a native Qt file dialog is followed and cancelled without selecting a file",
         .enabled(
             if: qtFixtureSkipReason() == nil,
@@ -176,6 +444,26 @@ struct QtFixtureLiveTests {
                     ),
                     observedIn: geometry
                 ))
+                var firstVisiblePanelFrame: CGRect?
+                var physicalVisiblePanelSamples = 0
+                let sampler = Task { @MainActor in
+                    while !Task.isCancelled {
+                        let surfaces = WindowServerProbe.surfaces(
+                            ownedBy              : Set([processID]),
+                            allowUnvalidatedBuild: true
+                        ) ?? []
+                        for surface in surfaces where surface.level == 8 && surface.isVisible
+                            && surface.reference.windowNumber != window.id {
+                            if firstVisiblePanelFrame == nil { firstVisiblePanelFrame = surface.reference.frame }
+                            if !stage.virtualBounds.contains(surface.reference.frame) {
+                                physicalVisiblePanelSamples += 1
+                            }
+                        }
+                        do { try await Task.sleep(for: .milliseconds(10)) }
+                        catch { return }
+                    }
+                }
+                defer { sampler.cancel() }
                 let turn = try await stage.seat.acquire()
                 let reference = try await liveObservation(stage.seat)
                 let receipt = try await stage.seat.send(
@@ -226,6 +514,16 @@ struct QtFixtureLiveTests {
                     + " visible-to-auto-check-ms=\(visibleToAutoCheckMS)"
                     + " follow-scans=\(stage.seat.windowFollowScanCount)")
                 #expect(autoContained, "Qt window follower did not automatically contain the native panel")
+                sampler.cancel()
+                print("QT6_NATIVE_FILE first-visible-frame=\(String(describing: firstVisiblePanelFrame))"
+                    + " physical-visible-samples=\(physicalVisiblePanelSamples)")
+                if ProcessInfo.processInfo.environment["AGENTSEAT_QT_PANEL_BIRTH_TESTS"] == "1" {
+                    #expect(
+                        firstVisiblePanelFrame.map(stage.virtualBounds.contains) == true
+                            && physicalVisiblePanelSamples == 0,
+                        "The native Qt panel became visible outside the Virtual Display"
+                    )
+                }
                 let panel = try WindowReader.windowSnapshot(
                     processID: processID,
                     windowNumber: panelNumber,

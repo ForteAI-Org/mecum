@@ -2,9 +2,9 @@
 
 `QtPlatform` is the explicit policy to pass to `AgentSeat.adopt` and `send` for
 a Qt target. It uses the same window identity, capture and `CGEventPostToPid`
-route as the other families. The policy prepares drags and bulk insertion; it
-leaves clicks, single keys, typed text and scroll unprepared. Bulk insertion
-waits 150 ms after preparation, drags 30 ms. Drag pacing, modifier flags and
+route as the other families. The policy prepares drags; it leaves clicks,
+single keys, typed text, bulk insertion and scroll unprepared. Drags wait 30 ms
+after preparation. Drag pacing, modifier flags and
 held-key repeat pacing use the shared defaults. These are policy choices, not
 evidence that every Qt widget has been qualified.
 
@@ -37,11 +37,11 @@ This tier uses `AGENTSEAT_QT_EDITOR_TESTS=1`; it is separate from the Project
 Manager tier because they require different starting windows. Both editor rows
 and all eight fixture rows passed together on 26A428 after the follower change.
 
-`make qt-fixture-live-tests QT_PYTHON=/absolute/path/to/python` runs eight more
-rows against an owned Qt 6 widget fixture. That interpreter must have
+`make qt-fixture-live-tests QT_PYTHON=/absolute/path/to/python` runs ten more
+rows against owned Qt 6 Widgets and Qt Quick fixtures. That interpreter must have
 `PySide6-Essentials` installed. Each row launches its own fixture in the
 background, reads target-side JSON counters and measured widget frames, then
-closes the fixture. The fixture is in `Tools/Driver/QtProbe.py`; it creates no
+closes the fixture. The widget fixture is in `Tools/Driver/QtProbe.py`; it creates no
 projects or user files. On this host the official PySide6-Essentials 6.11.2
 wheel was installed into a temporary virtual environment, outside the repo.
 
@@ -75,13 +75,14 @@ window from an on-screen row alone.
 | DaVinci editor page controls | `QtPlatform` click | In the disposable `New Project 1` project, background clicks changed Cut `1 → 0`, Edit `0 → 1`, then restored Cut `1` and Edit `0`. The main window returned; no media or project contents were changed. | Passed on Cut and Edit |
 | `send(.key)` | No preparation | Backspace removed one character and Right Arrow collapsed a selection in DaVinci. In Qt 6, `down`, three `repeated` key downs and `up` changed the target's key-down counter by 1, 3 and 0. Other virtual keys and modifier combinations need separate oracles. | Partial |
 | `send(.text)` | No preparation | A typed `x` appended in DaVinci; Qt 6 accepted `é🧪` as two grapheme clusters and four events. Active IME composition remains untested. | Partial |
-| `send(.insertText)` | Prepare, 150 ms | Atomic `qtbgprobe` insertion appeared in DaVinci Search and `qt6bulk` in the Qt 6 line edit. The unprepared AppKit recipe also worked on DaVinci's field. | Passed for simple text |
-| `send(.drag)` | Prepare, shared pacing | DaVinci text selection changed from `{9, 0}` to `{0, 8}`; the Qt 6 slider changed from 0 to 81 along a paced drag between measured widget points. Cross-widget drag and drop remains untested. | Passed on measured drags |
+| `send(.insertText)` | No preparation | Atomic `qtbgprobe` insertion appeared in DaVinci Search and `qt6bulk` in the Qt 6 line edit. The earlier prepared Qt recipe also inserted text, but restored Qt Quick's `TextInput` without active focus. The current unprepared recipe preserves its text and next modified key. | Passed for measured text fields |
+| `send(.drag)` | Prepare, shared pacing | DaVinci text selection changed from `{9, 0}` to `{0, 8}`; the Qt 6 slider changed from 0 to 81 along a paced drag between measured widget points. Qt Quick also accepted one internal drag between measured items. The owned native `QDrag` fixture also transferred its exact MIME payload between widgets; cross-application drop remains untested. | Passed on measured drags, Qt Quick internal drop and native QWidget MIME drop |
 | Custom painted `QWidget` | `QtPlatform` | A fixture-owned canvas handled its own mouse, wheel and key events. Routed commands produced two presses, eight drag moves, two releases, one wheel event and one `k` key press in target-side state, with zero physical HID events and an unchanged User Seat. | Passed on this custom canvas |
 | `send(.click(..., .right))` | No preparation | A Qt 6 line edit opened its menu, and the target's right-click counter incremented. One Qt 6 rerun missed the menu; the following rerun passed. DaVinci's Search field opened a 184 by 164 menu in four consecutive runs after the locator accepted its uniquely unnamed AX text field. | Passed on measured controls; one earlier Qt 6 miss |
 | `withContextMenu` / menu observation / item action | Shared | Qt 6 opened a menu wholly inside the virtual display, captured its own 128 by 26 surface, clicked the target-published action frame, incremented `menuChoices` and verified `chosenItem` closure. DaVinci's 184 by 164 menu was opened and captured in four consecutive runs after the Search locator correction. Its `Select All` label was identified in the image, clicked through the dedicated menu observation, closed as `chosenItem`, and selected all nine temporary Search characters. The query was cleared and Search closed. Earlier DaVinci attempts had stalled. | Passed on both measured menu item actions |
 | `send(.click(..., count: 2))` | No preparation | Four events selected the whole DaVinci Search word, AX range `{0, 9}`; the Qt 6 line edit's double-click counter also incremented. | Passed on text |
 | `send(.scroll)` | No preparation | Qt 6's scroll area changed its target-side offset from 0 to 60 after one wheel event. DaVinci's thumbnail slider stayed at `-50`; it is not a scroll offset oracle. | Passed on Qt 6 scroll area |
+| Qt Quick / QML | `QtPlatform` | The owned `QQuickView` fixture verified a button click, committed Unicode text, bulk insertion followed by Shift+Left selection, vertical wheel scrolling, and one `Drag.Internal` accepted by a measured `DropArea`. Its target-side JSON included text, active focus, selection, wheel axes/modifiers, the moved source frame and accepted-drop counters. | Passed on measured QML controls; Native QWidget drag qualified separately |
 | Modified key / shortcut / held repeat | No preparation, shared flags and pacing | DaVinci's layout-resolved `⌘A` selected all nine Search characters. Qt 6 counted the `down → 3 repeat → up` sequence while the turn held the key. Other modifiers, shortcut destinations and repeat rates are pending. | Partial |
 | Window watch / modal child / return | Shared | DaVinci's New Project opened window `8616`; the watcher adopted and staged it, then a Qt-policy click on Cancel closed it with the foreground app and cursor unchanged in a run with zero physical HID events. The Qt 6 fixture also opened its own modal child, followed window `14306` into the virtual display and cancelled it through a measured button. Qt kept the hidden dialog's WindowServer surface after Cancel, so its logical presence stayed unreadable; the consumer explicitly released that child with `.leaveOnVirtualDisplay` and returned the parent. Focus recovery was enabled for both rows. | Passed on both measured dialogs; explicit child release required on Qt 6 fixture |
 | Qt widget `QFileDialog` | `QtPlatform` and shared watcher | The owned Qt 6 dialog was an adopted 654 by 491 window on the virtual display. Cancel was addressed from the widget's measured button frame; the target reported the dialog closed and `fileDialogAccepted == false`. Its child record was released, the parent returned and the User Seat stayed unchanged with zero physical HID events. | Passed on fixture widget dialog |
@@ -129,6 +130,52 @@ that the parent window was returned. User Seat comparisons begin after the HID
 fence starts, so cursor movement during host startup is not assigned to a
 driver command.
 
+## Current repeatable snapshot
+
+On 2026-10-03, macOS 27.0.1 (26A434), Mac16,1, all ten Qt 6 fixture
+rows passed with PySide6-Essentials 6.11.2, and all seven Project Manager
+rows passed with DaVinci Resolve 21.1.0. Every row reported its final count
+with no skips. Each created display and fence was removed. Input isolation
+rows recorded zero physical events and preserved the User Seat. Build 26A434
+is outside the compatibility ledger, so these receipts remain
+`unvalidatedBuild`. The two editor rows described above were not repeated on
+this build: the current target was Project Manager, with no project opened.
+
+The Qt Quick row reproduced two defects before passing. Preparing bulk
+insertion left `TextInput.activeFocus` false after handback; the following
+Shift+Left command did not select text. Removing that preparation preserved
+focus and selected the final `k` of `é🧪 qml bulk`. The next vertical scroll
+then arrived as a horizontal wheel carrying Shift from the private event
+source. `InputEvents` now writes the Turn's owned flags onto every scroll
+event. A regression first reproduced the leaked flags, and the live wheel
+then reported angle delta `[0, -120]`, no modifiers and a vertical offset of
+72. DaVinci's bulk insertion and subsequent selection also passed with the
+current unprepared Qt policy.
+
+The internal QML drag requires one accepted drop, a source release, measured
+source movement and the source hotspot contained in the destination. Qt can
+accept that drop without another `positionChanged` signal after entry, so
+move-signal count is diagnostic, not the effect oracle. This qualifies
+[Qt Quick's internal Drag](https://doc.qt.io/qt-6/qml-qtquick-drag.html)
+and [DropArea](https://doc.qt.io/qt-6/qml-qtquick-droparea.html) on the owned
+fixture. It does not qualify external drops or IME preedit/commit. A separate
+owned `QWidget` fixture (`Tools/Driver/QtNativeDragProbe.py`) starts actual native
+[QDrag](https://doc.qt.io/qt-6/qdrag.html) from the received mouse movement.
+The drop requires the exact fresh MIME payload, one accepted drop, and a
+finished native operation returning `CopyAction`; the initiating source also
+requires an actual left press. It passed with the ordinary prepared Qt drag,
+zero physical input and the original foreground/cursor preserved. Qt consumed
+the drag release inside its native operation, so a later widget release
+callback is not required. The QML fixture is `Tools/Driver/QtQuickProbe.qml`, launched
+by `Tools/Driver/QtQuickProbe.py`.
+
+Commands used for this snapshot:
+
+```sh
+make qt-fixture-live-tests SWIFT=swift QT_PYTHON=/absolute/path/to/pyside6/python
+make qt-live-tests SWIFT=swift
+```
+
 ## Native panel visibility
 
 A posted Qt click now keeps the window follower awake for at most one second.
@@ -138,6 +185,28 @@ native panel published after the opening Command's first scan, without making
 the watcher poll at rest. Placement confirmation also takes four early 20 ms
 readings before returning to 100 ms polling; it still requires two agreeing
 WindowServer frames of the same identity inside the virtual display.
+
+`make qt-panel-birth-live-tests QT_PYTHON=/absolute/path/to/pyside6/python`
+adds a strict assertion to the native file-dialog row. It samples only visible,
+fixture-owned level-8 WindowServer surfaces every 10 ms from before the opener,
+records the first observed frame, and still cancels the panel and tears down
+after a visibility failure. The current host fails this strict tier: the first
+visible frame was `(315, 162, 881, 442)` on the physical display, with seven
+physical samples before automatic containment. The ordinary cancellation row
+retains its separate functional oracle. The 1,091 ms interval to its automatic
+containment check includes stable-record confirmation; it is not an exact
+pixel exposure duration.
+
+Two temporary opener controls also failed the visibility oracle. Recipient-only
+make-key preparation followed by 300 ms settling produced eight physical
+samples; full AppKit preparation with the same settling produced eight as well.
+Neither changes the native panel's initial display. A window-modal sheet control
+was inconclusive because the existing level-8 locator did not identify its new
+sheet representation. All three overrides were removed. Qt's Cocoa helper uses
+`beginSheetModalForWindow` for a window-modal dialog with a parent and `runModal`
+for the application-modal case, as shown in its
+[native file-dialog implementation](https://raw.githubusercontent.com/qt/qtbase/v6.11.2/src/plugins/platforms/cocoa/qcocoafiledialoghelper.mm).
+This does not grant the Driver control over an external application's choice.
 
 These changes reduce avoidable delay, not the native panel's own presentation
 or DaVinci's WindowServer movement animation. An external follower receives
