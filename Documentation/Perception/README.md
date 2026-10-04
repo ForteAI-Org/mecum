@@ -59,6 +59,8 @@ scene.resolve(target: "Export")               // .found, .ambiguous(n) or .none
   the sorted, count-free evidence string memory accumulates under, and it round-trips.
 - `WindowSurfaceClassifier` answers "is a pop-up open" and "which window do we drive" in one pass;
   a menu-layer window one row tall is a pop-up; every verdict carries the clause that decided it.
+- Empty multiline editors are harvested as `AXTextArea`. Their AX identifier can supply a handle
+  when title and description are absent, as in TextEdit's `First Text View`; frame trust still applies.
 - `AccessibilityFrameTrust`: an accessibility frame is trusted only where it intersects the window
   the window server reports. After a window-server move an app's child frames keep the old
   position (measured twice on Premiere); the rule lives in the core so every adapter obeys it.
@@ -101,7 +103,9 @@ never wrong ones.
 ## Limits
 
 `PopupRowSegmenter` caps rows at 240. The map tier shows up to 8 notable elements per section, 60
-for an open menu. `AccessibilityAugmentation.Limits` defaults to depth 10, 24 tables, 400 elements.
+for an open menu. `AccessibilityAugmentation.Limits` defaults to depth 16, 24 tables, 400 elements.
+The depth includes renderer window containers; Chrome fields measured at depth 10 were excluded
+by the previous ceiling. The deadline and element limits still bound the walk.
 `PopupRowHarvest.Limits` defaults to depth 8, 8 candidate menus, 400 rows.
 `IncrementalTextPlan` reads the whole frame again past 60% of its area or past 10 crops: the crops
 have a measured 17 to 20 ms floor each and break even against one full read at about eight to ten,

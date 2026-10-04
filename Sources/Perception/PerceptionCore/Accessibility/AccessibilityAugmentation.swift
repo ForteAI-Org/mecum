@@ -31,7 +31,7 @@ public enum AccessibilityAugmentation {
         public var isPastDeadline: @Sendable () -> Bool
 
         public init(
-            maxDepth      : Int = 10,
+            maxDepth      : Int = 16,
             maxTables     : Int = 24,
             maxElements   : Int = 400,
             isPastDeadline: @escaping @Sendable () -> Bool = { false }
@@ -142,8 +142,11 @@ public enum AccessibilityAugmentation {
                 }
                 return
             }
-            if role == "AXTextField" || role == "AXPopUpButton", let frame = reader.frame(node) {
-                let handle = column ?? firstText([reader.descriptionText(node), reader.title(node), reader.value(node)])
+            if role == "AXTextField" || role == "AXTextArea" || role == "AXPopUpButton", let frame = reader.frame(node) {
+                let handle = column ?? firstText([
+                    reader.descriptionText(node), reader.title(node),
+                    role == "AXTextArea" ? reader.identifier(node) : nil, reader.value(node)
+                ])
                 if let handle, handle.count <= 48, column != nil || rowName != cleanLabel(handle) {
                     emit(frame, role: role, label: handle, state: nil, clip: clip, container: container,
                          value: firstText([reader.value(node), role == "AXPopUpButton" ? reader.title(node) : nil]),

@@ -15,6 +15,7 @@ final class FakeNode: @unchecked Sendable {
     var role: String?
     var title: String?
     var descriptionText: String?
+    var identifier: String?
     var value: String?
     var numericValue: Int?
     var isEnabled: Bool?
@@ -54,7 +55,7 @@ struct FakeReader: AccessibilityTreeReading {
     func subrole(_ node: FakeNode) -> String? { nil }
     func title(_ node: FakeNode) -> String? { node.title }
     func descriptionText(_ node: FakeNode) -> String? { node.descriptionText }
-    func identifier(_ node: FakeNode) -> String? { nil }
+    func identifier(_ node: FakeNode) -> String? { node.identifier }
     func value(_ node: FakeNode) -> String? { node.value }
     func numericValue(_ node: FakeNode) -> Int? { node.numericValue }
     func isEnabled(_ node: FakeNode) -> Bool? { node.isEnabled }

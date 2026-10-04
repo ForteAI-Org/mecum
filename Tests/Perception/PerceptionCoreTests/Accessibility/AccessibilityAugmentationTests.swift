@@ -107,6 +107,51 @@ struct AccessibilityAugmentationTests {
         #expect(out.map(\.label) == ["Track Name", "Track Name #2"])
     }
 
+    @Test("an empty multiline editor is addressable by description or identifier", arguments: [true, false])
+    func emptyTextArea(namedByDescription: Bool) throws {
+        let body = FakeNode(
+            "AXTextArea",
+            descriptionText: namedByDescription ? "First Text View" : nil,
+            value          : "",
+            frame          : box(120, 200, 600, 400)
+        )
+        body.identifier = namedByDescription ? nil : "First Text View"
+        let root = FakeNode(
+            "AXWindow",
+            frame: window
+        ).adding(body)
+        let elements = AccessibilityAugmentation.elements(
+            under      : root,
+            windowFrame: window,
+            reader     : reader
+        )
+        let editor = try #require(elements.first)
+        #expect(elements.count == 1)
+        #expect(editor.role == "AXTextArea")
+        #expect(editor.label == "First Text View")
+        #expect(editor.bounds == NormalizedRect(
+            x     : 0.02,
+            y     : 0.125,
+            width : 0.6,
+            height: 0.5
+        ))
+    }
+
+    @Test("renderer fields below window containers stay within the bounded walk")
+    func rendererFieldsBelowWindowContainers() throws {
+        var subtree = FakeNode("AXTextField", descriptionText: "Probe Text",
+                               frame: box(120, 200, 300, 40))
+        // The measured Chrome tree puts the page's editable controls at depth ten.
+        for _ in 0..<9 { subtree = FakeNode("AXGroup", frame: window).adding(subtree) }
+        let root = FakeNode("AXWindow", frame: window).adding(subtree)
+        let elements = AccessibilityAugmentation.elements(under: root, windowFrame: window, reader: reader)
+        #expect(try #require(elements.first).label == "Probe Text")
+        #expect(AccessibilityAugmentation.elements(
+            under: root, windowFrame: window, reader: reader,
+            limits: .init(maxDepth: 10)
+        ).isEmpty)
+    }
+
     @Test("the deadline stops the walk with what was read so far")
     func deadlineStopsTheWalk() {
         let rows = (0..<20).map { index in
