@@ -59,8 +59,10 @@ public enum AccessibilityAugmentation {
     // MARK: Harvest
 
     /// Walks one window's tree and returns the harvested elements, normalized to `windowFrame`.
-    /// Preserves named container paths, field values and availability. Duplicate labels within the
-    /// same container take ordinals; labels in different containers remain independently addressable.
+    /// Preserves named container paths, field values and availability. Short native static values
+    /// fill OCR gaps as text, after controls have taken their share of the element budget.
+    /// Duplicate labels within the same container take ordinals; labels in different containers
+    /// remain independently addressable.
     public static func elements<Reader: AccessibilityTreeReading>(
         under window: Reader.Node,
         windowFrame : CGRect,
@@ -69,16 +71,18 @@ public enum AccessibilityAugmentation {
     ) -> [SceneElement] {
         guard windowFrame.width > 0, windowFrame.height > 0 else { return [] }
         var out: [SceneElement] = []
+        var staticText: [SceneElement] = []
         var tables = 0
 
         func emit(_ frame: CGRect, role: String, label: String, state: ControlState?, clip: CGRect,
-                  container: String?, value: String? = nil, isEnabled: Bool? = nil) {
-            guard out.count < limits.maxElements,
+                  container: String?, value: String? = nil, isEnabled: Bool? = nil,
+                  kind: ElementKind = .control) {
+            guard (kind == .text ? staticText.count : out.count) < limits.maxElements,
                   let bounds = AccessibilityFrameTrust.normalized(frame, in: windowFrame),
                   clip.contains(CGPoint(x: frame.midX, y: frame.midY)) else { return }
-            out.append(SceneElement(
-                id    : SceneIdentity.key(kind: .control, label: label, bounds: bounds, isUnlabeled: false),
-                kind  : .control,
+            let element = SceneElement(
+                id    : SceneIdentity.key(kind: kind, label: label, bounds: bounds, isUnlabeled: false),
+                kind  : kind,
                 label : label,
                 bounds: bounds,
                 role  : role,
@@ -86,11 +90,12 @@ public enum AccessibilityAugmentation {
                 value : value,
                 isEnabled: isEnabled,
                 container: container
-            ))
+            )
+            if kind == .text { staticText.append(element) } else { out.append(element) }
         }
 
         func walk(_ node: Reader.Node, _ depth: Int, _ clip: CGRect, _ container: String?,
-                  column: String? = nil, rowName: String? = nil) {
+                  column: String? = nil, rowName: String? = nil, insideControl: Bool = false) {
             guard depth < limits.maxDepth, out.count < limits.maxElements,
                   !limits.isPastDeadline() else { return }
             let role = reader.role(node) ?? ""
@@ -137,10 +142,19 @@ public enum AccessibilityAugmentation {
                     // Otherwise traverse the controls with their own labels and row context.
                     let aligned = cells.count == columns.count && cells.allSatisfy { reader.role($0) == "AXCell" }
                     for (index, cell) in cells.enumerated() {
-                        walk(cell, depth + 2, childClip, owner, column: aligned ? columns[index] : nil, rowName: label)
+                        walk(cell, depth + 2, childClip, owner, column: aligned ? columns[index] : nil,
+                             rowName: label, insideControl: insideControl)
                     }
                 }
                 return
+            }
+            if role == "AXStaticText", !insideControl, let frame = reader.frame(node) {
+                let value = reader.value(node)
+                if let label = firstText([value, reader.title(node)]), label.count <= 48,
+                   rowName != cleanLabel(label) {
+                    emit(frame, role: role, label: label, state: nil, clip: clip, container: container,
+                         value: value, kind: .text)
+                }
             }
             if role == "AXTextField" || role == "AXTextArea" || role == "AXPopUpButton", let frame = reader.frame(node) {
                 let handle = column ?? firstText([
@@ -172,14 +186,16 @@ public enum AccessibilityAugmentation {
                 }
             }
             for child in reader.children(node) {
-                walk(child, depth + 1, childClip, childContainer, column: column, rowName: rowName)
+                walk(child, depth + 1, childClip, childContainer, column: column, rowName: rowName,
+                     insideControl: insideControl || interactiveRoles.contains(role) || role == "AXTextArea")
             }
         }
         walk(window, 0, windowFrame, nil)
+        out.append(contentsOf: staticText.prefix(max(0, limits.maxElements - out.count)))
 
         var seen: [String: Int] = [:]
         for index in out.indices {
-            let key = (out[index].container ?? "") + "\n" + out[index].label
+            let key = out[index].kind.rawValue + "\n" + (out[index].container ?? "") + "\n" + out[index].label
             let count = (seen[key] ?? 0) + 1
             seen[key] = count
             if count > 1 { out[index].label += " #\(count)" }

@@ -65,6 +65,10 @@ scene.resolve(target: "Export")               // .found, .ambiguous(n) or .none
   a menu-layer window one row tall is a pop-up; every verdict carries the clause that decided it.
 - Empty multiline editors are harvested as `AXTextArea`. Their AX identifier can supply a handle
   when title and description are absent, as in TextEdit's `First Text View`; frame trust still applies.
+- Short `AXStaticText` values supplement missing OCR as read-only text. Their native value and
+  trusted frame remain attached; a description such as `Edit field` does not replace the value.
+  Static descendants of interactive controls are excluded. Controls take the element budget first,
+  and static text uses only the remaining slots, within the same depth, deadline and clipping rules.
 - `AccessibilityFrameTrust`: an accessibility frame is trusted only where it intersects the window
   the window server reports. After a window-server move an app's child frames keep the old
   position (measured twice on Premiere); the rule lives in the core so every adapter obeys it.

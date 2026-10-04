@@ -177,6 +177,69 @@ struct AccessibilityAugmentationTests {
 
     // MARK: Merge
 
+    @Test("a missed numeric display keeps its native value as read-only text")
+    func aMissedNumericDisplay() throws {
+        let body = box(500, 250, 230, 408)
+        let display = FakeNode("AXStaticText", descriptionText: "Edit field", value: "0",
+                               frame: box(701, 339, 19, 36))
+        let digit = FakeNode("AXButton", descriptionText: "0", frame: box(564, 599, 48, 48))
+        let root = FakeNode("AXWindow", frame: body).adding(display, digit)
+        let native = AccessibilityAugmentation.elements(under: root, windowFrame: body, reader: reader)
+        let value = try #require(native.first { $0.role == "AXStaticText" })
+        #expect(value.kind == .text)
+        #expect(value.label == "0")
+        #expect(value.value == "0")
+        #expect(value.state == nil)
+        #expect(!AccessibilityAugmentation.interactiveRoles.contains(try #require(value.role)))
+        let scene = SceneSnapshot(
+            bundleID: "com.example.fixture", appName: "Fixture", windowTitle: "Fixture",
+            viewportPixelSize: ViewportPixelSize(width: 230, height: 408), elements: native
+        )
+        guard case .found(let target) = scene.resolve(target: "0", preferNativeControls: true) else {
+            Issue.record("The digit button must remain independently addressable")
+            return
+        }
+        #expect(target.role == "AXButton")
+        #expect(target.bounds != value.bounds)
+    }
+
+    @Test("read-only text cannot consume the control budget")
+    func staticTextDoesNotConsumeTheControlBudget() {
+        let root = FakeNode("AXWindow", frame: window)
+        for index in 0..<8 {
+            root.adding(FakeNode("AXStaticText", value: "\(index)", frame: box(200, 200, 40, 30)))
+        }
+        root.adding(FakeNode("AXButton", title: "Cancel", frame: box(600, 500, 80, 30)))
+        let native = AccessibilityAugmentation.elements(
+            under: root, windowFrame: window, reader: reader, limits: .init(maxElements: 2)
+        )
+        #expect(native.count == 2)
+        #expect(native.first?.label == "Cancel")
+        #expect(native.last?.role == "AXStaticText")
+    }
+
+    @Test("a static caption inside an interactive control is not another display")
+    func staticControlCaptionsAreNotDisplays() {
+        let button = FakeNode("AXButton", title: "0", frame: box(300, 300, 48, 48))
+            .adding(FakeNode("AXStaticText", value: "0", frame: box(310, 310, 18, 24)))
+        let root = FakeNode("AXWindow", frame: window).adding(button)
+        let native = AccessibilityAugmentation.elements(under: root, windowFrame: window, reader: reader)
+        #expect(native.count == 1)
+        #expect(native.first?.role == "AXButton")
+    }
+
+    @Test("static values retain the existing window and scrolling frame guards")
+    func untrustedStaticValuesAreExcluded() {
+        let root = FakeNode("AXWindow", frame: window).adding(
+            FakeNode("AXStaticText", value: "outside", frame: box(2000, 200, 60, 30)),
+            FakeNode("AXStaticText", value: "empty frame", frame: .zero),
+            FakeNode("AXStaticText", descriptionText: "Edit field", frame: box(300, 300, 60, 30)),
+            FakeNode("AXScrollArea", frame: box(200, 200, 200, 100))
+                .adding(FakeNode("AXStaticText", value: "clipped", frame: box(200, 450, 60, 30)))
+        )
+        #expect(AccessibilityAugmentation.elements(under: root, windowFrame: window, reader: reader).isEmpty)
+    }
+
     private func pixel(_ id: String, _ label: String, kind: ElementKind = .text, x: Double, y: Double,
                        w: Double = 0.1, h: Double = 0.02, state: ControlState? = nil) -> SceneElement {
         SceneElement(id: id, kind: kind, label: label, bounds: NormalizedRect(x: x, y: y, width: w, height: h), state: state)
