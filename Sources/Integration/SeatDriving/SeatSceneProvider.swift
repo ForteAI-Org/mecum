@@ -85,11 +85,12 @@ public struct SeatSceneProvider: SceneProviding {
         let matchingRows = try windows.windows(ownedBy: processID).filter { $0.number == observedWindow.id }
         let currentTitle = matchingRows.count == 1 ? matchingRows[0].title ?? "" : ""
         let window = ScenePipeline.Window(
-            bundleID : application.bundleID,
-            appName  : application.name,
-            title    : currentTitle,
-            processID: processID,
-            frame    : frame
+            bundleID    : application.bundleID,
+            appName     : application.name,
+            title       : currentTitle,
+            processID   : processID,
+            frame       : frame,
+            windowNumber: observedWindow.id
         )
         let scene = try await pipeline.perceive(image, of: window)
         return PerceivedWindow(scene: scene, frame: frame)

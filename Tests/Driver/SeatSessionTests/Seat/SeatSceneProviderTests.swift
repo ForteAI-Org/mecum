@@ -28,6 +28,47 @@ struct SeatSceneProviderTests {
         func windows(ownedBy processID: Int32) throws -> [WindowRow] { rows }
     }
 
+    private struct CaptureAugmentation: SceneAugmenting {
+        func augmentation(for processID: pid_t, windowFrame: CGRect) async throws -> [SceneElement] {
+            [element(value: "geometry-only")]
+        }
+
+        func augmentation(
+            for processID: pid_t, windowNumber: Int, windowFrame: CGRect
+        ) async throws -> [SceneElement] {
+            [element(value: "\(processID):\(windowNumber)")]
+        }
+
+        private func element(value: String) -> SceneElement {
+            SceneElement(
+                id: "native-field", kind: .control, label: "Probe Text",
+                bounds: NormalizedRect(x: 0.2, y: 0.2, width: 0.2, height: 0.05),
+                role: "AXTextField", value: value
+            )
+        }
+    }
+
+    @Test("the captured recipient reaches native augmentation despite another window sharing its frame")
+    func capturedIdentityReachesNativeFacts() async throws {
+        let context = try await BorrowedSeatTargetTests.borrowed()
+        let windows = Windows()
+        let number = context.window.id
+        let frame = context.window.reference.frame
+        windows.rows = [
+            WindowRow(layer: 0, frame: frame, title: "Other", number: number + 1),
+            WindowRow(layer: 0, frame: frame, title: "Captured", number: number)
+        ]
+        let provider = SeatSceneProvider(
+            target: context.target,
+            pipeline: ScenePipeline(text: EmptyText(), augmentation: CaptureAugmentation()),
+            windows: windows,
+            identity: { _ in ApplicationIdentity(bundleID: "com.test", name: "Test") }
+        )
+        let scene = try await provider.currentScene(of: context.window.reference.processID)
+        #expect(scene.scene.windowTitle == "Captured")
+        #expect(scene.scene.elements.first?.value == "\(context.window.reference.processID):\(number)")
+    }
+
     @Test("a document change updates the title of the exact captured window")
     func documentTitleChanges() async throws {
         let context = try await BorrowedSeatTargetTests.borrowed()

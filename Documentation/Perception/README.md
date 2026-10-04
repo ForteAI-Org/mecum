@@ -78,6 +78,11 @@ scene.resolve(target: "Export")               // .found, .ambiguous(n) or .none
 - `AccessibilityFrameTrust`: an accessibility frame is trusted only where it intersects the window
   the window server reports. After a window-server move an app's child frames keep the old
   position (measured twice on Premiere); the rule lives in the core so every adapter obeys it.
+- Identified captures carry their Window ID into native augmentation. An identity predicate
+  narrows AX candidates before the existing geometry check, so equally sized, overlapping
+  windows remain distinguishable. An adapter without identity support supplies no native facts
+  for an identified capture. Integration and SeatBroker provide the native ID resolver; the core
+  has no Driver dependency. See [ADR 0026](../Driver/adr/Adr0026BindNativeFactsToCapturedWindow.md).
 - `AccessibilityAugmentation` only adds. A scrolling container clips its children, so a row a
   toolkit reports at a virtual position is never emitted. A harvested element is final once placed:
   a second facet of the same control (a tab's radio button and its combo box) is skipped, never

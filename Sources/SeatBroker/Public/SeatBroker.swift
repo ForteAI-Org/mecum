@@ -7,6 +7,7 @@ import PixelControlState
 import PixelRegions
 import PixelSections
 import VisionText
+import WindowPlacement
 
 /// The piece that brokers seats between an agent and the applications it
 /// uses: it lists targets, reports capabilities and opens sessions. Everything
@@ -37,7 +38,10 @@ public final class SeatBroker {
         regions     : ConnectedComponentSegmenter(),
         regionFilter: MediaRegionFilter(),
         sections    : ColorSectionDetector(),
-        augmentation: AccessibilityAugmenter(budgetSeconds: 0.35),
+        augmentation: AccessibilityAugmenter(
+            budgetSeconds: 0.35,
+            windowNumberResolver: { WindowRelocator.windowNumber(of: $0) }
+        ),
         // Off for now, and the owner's call to put back. Measured on one Slack
         // window of 89 elements, same frame, same scene: perception 2.76 s with
         // the reader and 1.93 s without it, so it renders the frame again per

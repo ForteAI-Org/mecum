@@ -36,6 +36,8 @@ public struct ScenePipeline: Sendable {
         /// the right tree and to judge its frames. Nil skips augmentation for this window.
         public var processID: pid_t?
         public var frame: CGRect?
+        /// The actual captured recipient, when the capture adapter attests it.
+        public var windowNumber: Int?
 
         public init(
             bundleID    : String,
@@ -44,7 +46,8 @@ public struct ScenePipeline: Sendable {
             commands    : [String] = [],
             sectionRects: [NormalizedRect] = [],
             processID   : pid_t? = nil,
-            frame       : CGRect? = nil
+            frame       : CGRect? = nil,
+            windowNumber: Int? = nil
         ) {
             self.bundleID     = bundleID
             self.appName      = appName
@@ -53,6 +56,7 @@ public struct ScenePipeline: Sendable {
             self.sectionRects = sectionRects
             self.processID    = processID
             self.frame        = frame
+            self.windowNumber = windowNumber
         }
     }
 
@@ -183,6 +187,11 @@ public struct ScenePipeline: Sendable {
 
     private func augmentationElements(for window: Window) async throws -> [SceneElement] {
         guard let augmentation, let processID = window.processID, let frame = window.frame else { return [] }
+        if let windowNumber = window.windowNumber {
+            return try await augmentation.augmentation(
+                for: processID, windowNumber: windowNumber, windowFrame: frame
+            )
+        }
         return try await augmentation.augmentation(for: processID, windowFrame: frame)
     }
 

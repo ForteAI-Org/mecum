@@ -22,22 +22,49 @@ public struct AccessibilityAugmenter: SceneAugmenting {
 
     private let budgetSeconds: TimeInterval
     private let messagingTimeoutSeconds: Float
+    private let windowNumberResolver: (@MainActor @Sendable (AXUIElement) -> Int?)?
 
     /// Creates an augmenter. `budgetSeconds` bounds one walk; `messagingTimeoutSeconds` bounds one
     /// message to the app. The walk checks its deadline between nodes; an in-flight message and
     /// its one transient retry can exceed the walk budget.
-    public init(budgetSeconds: TimeInterval = 1.5, messagingTimeoutSeconds: Float = 2) {
+    /// `windowNumberResolver` binds identified captures to a native AX window. An absent or failed
+    /// resolver yields no native facts for such a capture; it never falls back to geometry or focus.
+    public init(
+        budgetSeconds: TimeInterval = 1.5,
+        messagingTimeoutSeconds: Float = 2,
+        windowNumberResolver: (@MainActor @Sendable (AXUIElement) -> Int?)? = nil
+    ) {
         self.budgetSeconds           = budgetSeconds
         self.messagingTimeoutSeconds = messagingTimeoutSeconds
+        self.windowNumberResolver    = windowNumberResolver
     }
 
     public func augmentation(for processID: pid_t, windowFrame: CGRect) async throws -> [SceneElement] {
-        let budget = budgetSeconds, timeout = messagingTimeoutSeconds
+        await read(processID: processID, windowNumber: nil, windowFrame: windowFrame)
+    }
+
+    public func augmentation(
+        for processID: pid_t, windowNumber: Int, windowFrame: CGRect
+    ) async throws -> [SceneElement] {
+        await read(processID: processID, windowNumber: windowNumber, windowFrame: windowFrame)
+    }
+
+    private func read(
+        processID: pid_t, windowNumber: Int?, windowFrame: CGRect
+    ) async -> [SceneElement] {
+        let budget = budgetSeconds, timeout = messagingTimeoutSeconds, resolve = windowNumberResolver
         return await MainActor.run {
+            guard windowNumber == nil || resolve != nil else { return [] }
             let reader = LiveAccessibilityReader()
             let application = reader.application(processID: processID)
             reader.setMessagingTimeout(application, seconds: timeout)
-            guard let window = reader.window(of: application, matching: windowFrame) else { return [] }
+            guard let window = reader.window(
+                of: application, matching: windowFrame,
+                isCapturedWindow: { node in
+                    guard let windowNumber else { return true }
+                    return resolve?(node) == windowNumber
+                }
+            ) else { return [] }
             let deadline = Date().addingTimeInterval(budget)
             return AccessibilityAugmentation.elements(
                 under      : window,

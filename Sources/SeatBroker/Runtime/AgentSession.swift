@@ -384,11 +384,12 @@ public final class AgentSession {
         // frame is trusted only where it intersects that rectangle, and after a
         // move an application's child frames still name the old place.
         let window = ScenePipeline.Window(
-            bundleID : app.bundleID,
-            appName  : app.name,
-            title    : driver.windowTitle(for: delivery.reference.recipient),
-            processID: target.pid,
-            frame    : delivery.geometry.window.frame
+            bundleID    : app.bundleID,
+            appName     : app.name,
+            title       : driver.windowTitle(for: delivery.reference.recipient),
+            processID   : target.pid,
+            frame       : delivery.geometry.window.frame,
+            windowNumber: delivery.geometry.window.windowNumber
         )
         let perceiveStart = ContinuousClock.now
         let scene = try await perception.perceive(image, of: window)

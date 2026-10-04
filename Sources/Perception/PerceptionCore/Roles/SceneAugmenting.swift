@@ -17,4 +17,19 @@ import Foundation
 public protocol SceneAugmenting: Sendable {
 
     func augmentation(for processID: pid_t, windowFrame: CGRect) async throws -> [SceneElement]
+
+    /// Reads only the named capture recipient. Geometry alone cannot distinguish overlapping windows.
+    func augmentation(
+        for processID: pid_t, windowNumber: Int, windowFrame: CGRect
+    ) async throws -> [SceneElement]
+}
+
+extension SceneAugmenting {
+
+    /// An adapter without identity support supplies no native facts for an identified capture.
+    public func augmentation(
+        for processID: pid_t, windowNumber: Int, windowFrame: CGRect
+    ) async throws -> [SceneElement] {
+        []
+    }
 }

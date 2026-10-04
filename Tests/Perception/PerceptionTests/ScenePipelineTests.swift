@@ -40,10 +40,18 @@ struct ScenePipelineTests {
 
         final class Recorder: @unchecked Sendable {
             var calls: [(pid_t, CGRect)] = []
+            var identifiedCalls: [(pid_t, Int, CGRect)] = []
         }
 
         func augmentation(for processID: pid_t, windowFrame: CGRect) async throws -> [SceneElement] {
             seen.calls.append((processID, windowFrame))
+            return elements
+        }
+
+        func augmentation(
+            for processID: pid_t, windowNumber: Int, windowFrame: CGRect
+        ) async throws -> [SceneElement] {
+            seen.identifiedCalls.append((processID, windowNumber, windowFrame))
             return elements
         }
     }
@@ -58,6 +66,51 @@ struct ScenePipelineTests {
     }
 
     private let window = ScenePipeline.Window(bundleID: "com.x", appName: "X", title: "Export")
+
+    struct GeometryOnlyAugmentation: SceneAugmenting {
+        func augmentation(for processID: pid_t, windowFrame: CGRect) async throws -> [SceneElement] {
+            [SceneElement(
+                id: "unbound", kind: .control, label: "Foreign field",
+                bounds: NormalizedRect(x: 0.2, y: 0.2, width: 0.2, height: 0.05)
+            )]
+        }
+    }
+
+    @Test("a geometry-only adapter cannot decorate an identified capture with another window's facts")
+    func identifiedCaptureDoesNotFallBackToGeometry() async throws {
+        let pipeline = ScenePipeline(text: FixedText(runs: []), augmentation: GeometryOnlyAugmentation())
+        var captured = window
+        captured.processID = 4242
+        captured.frame = CGRect(x: 2000, y: 1000, width: 1200, height: 828)
+        captured.windowNumber = 103866
+        let scene = try await pipeline.perceive(try blank(1200, 828), of: captured)
+        #expect(scene.elements.isEmpty)
+    }
+
+    @Test("an identified capture reaches the native adapter without a geometry-only read")
+    func capturedWindowIdentityReachesAugmentation() async throws {
+        let recorder = FixedAugmentation.Recorder()
+        let field = SceneElement(
+            id: "native-field", kind: .control, label: "Probe Text",
+            bounds: NormalizedRect(x: 0.2, y: 0.2, width: 0.2, height: 0.05), role: "AXTextField"
+        )
+        let pipeline = ScenePipeline(
+            text: FixedText(runs: []),
+            augmentation: FixedAugmentation(elements: [field], seen: recorder)
+        )
+        let frame = CGRect(x: 2000, y: 1000, width: 1200, height: 828)
+        var captured = window
+        captured.processID = 4242
+        captured.frame = frame
+        captured.windowNumber = 103866
+        let scene = try await pipeline.perceive(try blank(1200, 828), of: captured)
+        #expect(scene.elements == [field])
+        #expect(recorder.calls.isEmpty)
+        #expect(recorder.identifiedCalls.count == 1)
+        #expect(recorder.identifiedCalls.first?.0 == 4242)
+        #expect(recorder.identifiedCalls.first?.1 == 103866)
+        #expect(recorder.identifiedCalls.first?.2 == frame)
+    }
 
     @Test("two neighboring captured buttons keep their own hit regions")
     func neighboringButtonHitRegions() async throws {

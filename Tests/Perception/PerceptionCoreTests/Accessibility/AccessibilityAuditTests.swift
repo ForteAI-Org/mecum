@@ -139,6 +139,31 @@ struct AccessibilityAuditTests {
         #expect(AccessibilityWindowMatching.window(among: [main, main], capturedFrame: main.frame ?? .zero,
                                                    reader: FakeReader()) == nil)
     }
+    @Test("capture identity disambiguates equal frames without accepting absent or stale recipients")
+    func overlappingWindowIdentity() {
+        let frame = CGRect(x: 2000, y: 1000, width: 1200, height: 828)
+        let captured = FakeNode("AXWindow", frame: frame)
+        let other = FakeNode("AXWindow", frame: frame)
+        let nodes = [other, captured]
+        let reader = FakeReader()
+        #expect(AccessibilityWindowMatching.window(
+            among: nodes, capturedFrame: frame, reader: reader,
+            isCapturedWindow: { $0 === captured }
+        ) === captured)
+        #expect(AccessibilityWindowMatching.window(
+            among: [other], capturedFrame: frame, reader: reader,
+            isCapturedWindow: { $0 === captured }
+        ) == nil)
+        #expect(AccessibilityWindowMatching.window(
+            among: nodes, capturedFrame: frame.offsetBy(dx: 100, dy: 0), reader: reader,
+            isCapturedWindow: { $0 === captured }
+        ) == nil)
+        #expect(AccessibilityWindowMatching.window(
+            among: [captured, captured], capturedFrame: frame, reader: reader,
+            isCapturedWindow: { $0 === captured }
+        ) == nil)
+    }
+
     @Test("neighboring repeated controls are never discarded as duplicate facets")
     func neighboringControls() {
         let bounds = [0.10, 0.135].map { NormalizedRect(x: $0, y: 0.2, width: 0.02, height: 0.03) }

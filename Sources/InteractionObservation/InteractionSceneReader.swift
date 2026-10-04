@@ -22,7 +22,7 @@ public struct InteractionSceneReader: Sendable {
         let image = try await capturer.captureWindow(number: window.number, frame: window.frame)
         return try await pipeline.perceive(image, of: ScenePipeline.Window(
             bundleID: bundleID, appName: appName, title: window.title ?? "",
-            processID: window.processID, frame: window.frame
+            processID: window.processID, frame: window.frame, windowNumber: window.number
         ))
     }
 

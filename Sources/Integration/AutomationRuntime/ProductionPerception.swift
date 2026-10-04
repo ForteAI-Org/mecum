@@ -7,6 +7,7 @@ import PixelSections
 import PixelRegions
 import ScreenCapture
 import VisionText
+import WindowPlacement
 import WindowServerListing
 
 /// ProductionPerception composes the same observation adapters for actions and visual inspection.
@@ -17,7 +18,9 @@ public enum ProductionPerception {
     public static func pipeline() -> ScenePipeline {
         ScenePipeline(text: VisionTextRecognizer(), regions: ConnectedComponentSegmenter(),
                       regionFilter: MediaRegionFilter(), sections: ColorSectionDetector(),
-                      augmentation: AccessibilityAugmenter())
+                      augmentation: AccessibilityAugmenter(
+                          windowNumberResolver: { WindowRelocator.windowNumber(of: $0) }
+                      ))
     }
 
     /// Creates a foreground reader. Excluded processes remain absent from popup-region captures,
