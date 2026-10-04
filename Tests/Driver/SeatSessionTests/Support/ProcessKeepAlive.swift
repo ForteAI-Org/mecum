@@ -28,8 +28,8 @@ enum ProcessKeepAlive {
 
     private static var hasStarted = false
 
-    /// Called by every wait in this bundle, because a wait is the only thing
-    /// that leaves the main queue empty long enough for the loop to give up.
+    /// Started before the first fake Seat can pump adoption or capture, and
+    /// by recovery waits that may run without constructing a Seat.
     static func start() {
         guard !hasStarted else { return }
         hasStarted = true

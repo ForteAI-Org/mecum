@@ -596,10 +596,13 @@ func makeSeat(
     endpoints: EndpointDiscovery = .shipping
 ) -> AgentSeat {
 
+    // Adoption and capture may pump before a recovery wait starts the keepalive.
+    ProcessKeepAlive.start()
+
     // `KeyHold` is process wide and keyed by owner and PID, so a test that
     // presses a key needs a marker of its own: the default one is shared by
     // every seat here, and these suites run in parallel.
-    AgentSeat(
+    return AgentSeat(
         sensing              : sensing,
         placing              : placing,
         sender               : sender,

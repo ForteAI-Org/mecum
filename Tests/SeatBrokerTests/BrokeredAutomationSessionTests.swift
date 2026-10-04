@@ -211,7 +211,11 @@ struct BrokeredAutomationSessionTests {
                                     "arguments": .object(["app": .string("Calculator")])])
             ]))
         }
-        await Self.letTheWaitBegin()
+        let deadline = ContinuousClock.now.advanced(by: .seconds(2))
+        while !broker.queue.entries.contains(where: { $0.label == Self.label }),
+              ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(1))
+        }
         #expect(broker.queue.entries.map(\.label) == ["holder", Self.label])
         #expect(desktop.activity == "Waiting for the computer (1 ahead)")
 
