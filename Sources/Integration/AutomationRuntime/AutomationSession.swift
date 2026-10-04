@@ -113,6 +113,17 @@ public final class AutomationSession: AutomationSessionOperating {
         ) {
             throw AutomationFailure(sentence)
         }
+        if case .contextMenu(let control, let item) = input {
+            return try await SeatContextMenuSelector(target: seat, pipeline: ProductionPerception.pipeline()).select(
+                item: item, on: control,
+                identity: SeatDriving.ApplicationIdentity(
+                    bundleID: application.bundleIdentifier ?? "pid.\(application.processIdentifier)",
+                    name: application.localizedName ?? "application"
+                ),
+                section: section,
+                permissions: ActionPermissions(allowsDestructive: allowsDestructive)
+            )
+        }
         let request = InputRequest(
             processID: application.processIdentifier,
             bundleID: application.bundleIdentifier ?? "pid.\(application.processIdentifier)",

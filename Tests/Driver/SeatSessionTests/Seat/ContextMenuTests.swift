@@ -39,7 +39,7 @@ struct ContextMenuTests {
     /// whole variable of this suite: a target that answers the item click, one
     /// that only answers the Preparation cycle, one that only answers Escape,
     /// and one that answers nothing.
-    private static func ready(
+    static func ready(
         opensAMenu: Bool = true,
         closedBy  : Set<ContextMenuReceipt.Closure> = [.chosenItem, .preparationCycle, .escapeKey],
         profile   : ObservationProfile = .initialLab
