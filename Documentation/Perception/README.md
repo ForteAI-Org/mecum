@@ -88,6 +88,9 @@ scene.resolve(target: "Export")               // .found, .ambiguous(n) or .none
   a second facet of the same control (a tab's radio button and its combo box) is skipped, never
   allowed to overwrite the first one's state. The deadline is a closure the caller supplies; the
   algorithm reads no clock.
+  Native controls and static values also need at least two visible points on each axis after
+  clipping to their container and the capture. Chrome's one-point proxies for offscreen elements
+  supply neither an actionable control nor a visible value; scrolling can make them eligible.
 - `ControlStateReading` fills a gap, it never overrules. The pipeline asks it last, after the
   augmentation stage, and writes a state only onto an element that still carries none, so an
   application that answered for itself always wins. A reading no element covers is dropped rather

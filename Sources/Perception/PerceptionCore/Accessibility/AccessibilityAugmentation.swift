@@ -80,7 +80,11 @@ public enum AccessibilityAugmentation {
         func emit(_ frame: CGRect, role: String, label: String, state: ControlState?, clip: CGRect,
                   container: String?, value: String? = nil, isEnabled: Bool? = nil,
                   kind: ElementKind = .control) {
+            // Chrome reports offscreen controls as one-point edge frames.
+            // Such slivers cannot supply a usable position or an observed value.
+            let visible = frame.intersection(clip).intersection(windowFrame)
             guard (kind == .text ? staticText.count : out.count) < limits.maxElements,
+                  visible.width >= 2, visible.height >= 2,
                   let bounds = AccessibilityFrameTrust.normalized(frame, in: windowFrame),
                   clip.contains(CGPoint(x: frame.midX, y: frame.midY)) else { return }
             let element = SceneElement(

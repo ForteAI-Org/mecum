@@ -57,6 +57,22 @@ struct AccessibilityAuditTests {
         #expect(AccessibilityFrameTrust.normalized(CGRect(x: -10, y: 10, width: 20, height: 20), in: window)
             == NormalizedRect(x: 0, y: 0.1, width: 0.1, height: 0.2))
     }
+
+    @Test("one-point viewport proxies supply no actionable controls or hidden values")
+    func onePointViewportProxiesAreNotElements() {
+        let frame = CGRect(x: 0, y: 0, width: 800, height: 600)
+        let root = FakeNode("AXWindow", frame: frame).adding(
+            FakeNode("AXButton", title: "Visible", frame: CGRect(x: 20, y: 20, width: 120, height: 24)),
+            FakeNode("AXButton", title: "Offscreen Counter", frame: CGRect(x: 20, y: 599, width: 120, height: 1)),
+            FakeNode("AXStaticText", value: "Counter: 0", frame: CGRect(x: 20, y: 599, width: 120, height: 1)),
+            FakeNode("AXTextField", descriptionText: "Offscreen Field", value: "Hidden value",
+                     frame: CGRect(x: 799, y: 30, width: 1, height: 24)),
+            FakeNode("AXButton", title: "Clipped Sliver", frame: CGRect(x: 20, y: 598.75, width: 120, height: 2)))
+        let elements = AccessibilityAugmentation.elements(
+            under: root, windowFrame: frame, reader: FakeReader()
+        )
+        #expect(elements.map(\.label) == ["Visible"])
+    }
     @Test("table controls keep their column label, value and row owner")
     func tableControls() {
         let frame = CGRect(x: 0, y: 0, width: 800, height: 600)
