@@ -958,6 +958,25 @@ extension AgentSeat {
     /// rather than issued: a late capture of the previous selection is not an
     /// observation of the current one.
     public func observe() async -> Result<SeatObservationDelivery, ObservationUnavailable> {
+        await observe(noting: nil)
+    }
+
+    /// `observe()`, with the one difference a consumer in this package needs to record a stop as a stop:
+    /// an observation that ended because its task was cancelled answers `.stopped`, typed, where the
+    /// public `observe()` answers `captureFailed` with the cancellation's text. Every other answer, a
+    /// capture that really failed while the task was cancelled included, is the same
+    /// `ObservationUnavailable`. Nothing else changes: the same attempts, deadline and refusals.
+    package func observeTellingStop() async -> Result<SeatObservationDelivery, ObservationEnd> {
+        let note = ObservationStopNote()
+        switch await observe(noting: note) {
+            case .success(let delivery): return .success(delivery)
+            case .failure(let reason):
+                if note.endedByCancellation, case .captureFailed = reason { return .failure(.stopped) }
+                return .failure(.unavailable(reason))
+        }
+    }
+
+    private func observe(noting note: ObservationStopNote?) async -> Result<SeatObservationDelivery, ObservationUnavailable> {
 
         if let context = menuContext {
             return .failure(.menuInteractionActive(parent: context.parent))
@@ -981,6 +1000,7 @@ extension AgentSeat {
             await takeInRefusedPreexistingMembers(until: deadlineNanoseconds)
             await Task.yield()
             guard !Task.isCancelled else {
+                note?.endedByCancellation = true
                 return .failure(.captureFailed(reason: String(describing: CancellationError())))
             }
             if let context = menuContext {
@@ -1071,7 +1091,8 @@ extension AgentSeat {
             instance           : assignment.instance,
             selectionGeneration: chosen.generation,
             deadlineNanoseconds: deadlineNanoseconds,
-            isMenu             : false
+            isMenu             : false,
+            note               : note
         )
     }
 
@@ -1199,7 +1220,8 @@ extension AgentSeat {
         instance           : ProcessIdentity,
         selectionGeneration: UInt64,
         deadlineNanoseconds: UInt64,
-        isMenu             : Bool
+        isMenu             : Bool,
+        note               : ObservationStopNote? = nil
     ) async -> Result<SeatObservationDelivery, ObservationUnavailable> {
 
         let barrier = observationIssuer.barrier
@@ -1252,9 +1274,13 @@ extension AgentSeat {
             } catch let unavailable as ObservationUnavailable {
                 if case .capabilityUnqualified = unavailable { return .failure(unavailable) }
                 lastFailure = unavailable
+                note?.endedByCancellation = false
                 continue
             } catch {
                 lastFailure = .captureFailed(reason: String(describing: error))
+                // Whether the failure kept for the answer is the task's cancellation, typed, rather than
+                // read back from the text above.
+                note?.endedByCancellation = error is CancellationError
                 continue
             }
 
@@ -1581,4 +1607,19 @@ extension AgentSeat {
         let state = coherentState
         for subscription in stateSubscribers.values { subscription.publish(state) }
     }
+}
+
+/// ObservationEnd is why `AgentSeat.observeTellingStop()` delivered nothing: the observation was stopped
+/// with its task, or the seat's `ObservationUnavailable`. Package scope: the public answer stays
+/// `ObservationUnavailable`, in which a stop is `captureFailed` with the cancellation's text.
+package enum ObservationEnd: Error, Equatable {
+    case stopped
+    case unavailable(ObservationUnavailable)
+}
+
+/// Where one observation notes, typed, that the failure it is about to answer is its task's
+/// cancellation. One per call, so two observations never share it.
+@MainActor
+final class ObservationStopNote {
+    var endedByCancellation = false
 }

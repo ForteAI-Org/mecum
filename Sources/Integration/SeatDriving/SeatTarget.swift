@@ -120,13 +120,19 @@ public final class SeatTarget {
     /// follows the application through a dialog's closure and selects the surviving surface, which
     /// is what the predecessor reading here used to do by hand. Aiming a capture from outside would
     /// produce pixels with no reference, and a Frame nobody can act on.
+    ///
+    /// An observation stopped with this task throws `CancellationError` and is not retried.
     @discardableResult
     public func observe() async throws -> SeatObservationDelivery {
         let seat = try agentSeat()
         let delivered = try await Self.retrying {
-            switch await seat.observe() {
-                case .success(let delivery): return delivery
-                case .failure(let reason)  : throw reason
+            // The seat says, typed, when the observation ended because this task was cancelled: that is a
+            // stop and reaches the caller as `CancellationError`, so it is recorded as one. Any other answer
+            // is the seat's `ObservationUnavailable`, a capture that really failed during a stop included.
+            switch await seat.observeTellingStop() {
+                case .success(let delivery)            : return delivery
+                case .failure(.stopped)                : throw CancellationError()
+                case .failure(.unavailable(let reason)): throw reason
             }
         }
         delivery           = delivered
