@@ -29,14 +29,14 @@ struct SeatSceneProviderTests {
     }
 
     private struct CaptureAugmentation: SceneAugmenting {
-        func augmentation(for processID: pid_t, windowFrame: CGRect) async throws -> [SceneElement] {
-            [element(value: "geometry-only")]
+        func augmentation(for processID: pid_t, windowFrame: CGRect) async throws -> AccessibilityHarvest {
+            AccessibilityHarvest(elements: [element(value: "geometry-only")], quality: .unknown)
         }
 
         func augmentation(
             for processID: pid_t, windowNumber: Int, windowFrame: CGRect
-        ) async throws -> [SceneElement] {
-            [element(value: "\(processID):\(windowNumber)")]
+        ) async throws -> AccessibilityHarvest {
+            AccessibilityHarvest(elements: [element(value: "\(processID):\(windowNumber)")], quality: .unknown)
         }
 
         private func element(value: String) -> SceneElement {

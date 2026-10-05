@@ -29,9 +29,13 @@ struct SeatContextMenuSelectorTests {
         let rows: Rows
         let reads: Reads
 
-        func augmentation(for processID: pid_t, windowFrame: CGRect) -> [SceneElement] { [] }
+        func augmentation(for processID: pid_t, windowFrame: CGRect) -> AccessibilityHarvest { .none }
 
-        func augmentation(for processID: pid_t, windowNumber: Int, windowFrame: CGRect) async -> [SceneElement] {
+        func augmentation(for processID: pid_t, windowNumber: Int, windowFrame: CGRect) async -> AccessibilityHarvest {
+            AccessibilityHarvest(elements: await elements(windowNumber: windowNumber), quality: .unknown)
+        }
+
+        private func elements(windowNumber: Int) async -> [SceneElement] {
             await reads.record(windowNumber)
             if windowNumber != FakeGeometry.menuWindowNumber {
                 return [SceneElement(

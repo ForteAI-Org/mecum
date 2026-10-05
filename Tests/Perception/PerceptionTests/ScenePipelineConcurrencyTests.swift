@@ -24,9 +24,9 @@ struct ScenePipelineConcurrencyTests {
 
     private struct SignalingNative: SceneAugmenting {
         let probe: OverlapProbe
-        func augmentation(for processID: pid_t, windowFrame: CGRect) async throws -> [SceneElement] {
+        func augmentation(for processID: pid_t, windowFrame: CGRect) async throws -> AccessibilityHarvest {
             probe.nativeStarted.signal()
-            return []
+            return .none
         }
     }
 

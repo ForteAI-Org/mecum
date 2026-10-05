@@ -37,22 +37,23 @@ struct ScenePipelineTests {
     struct FixedAugmentation: SceneAugmenting {
         var elements: [SceneElement]
         var seen: Recorder
+        var quality = CaptureQuality.unknown
 
         final class Recorder: @unchecked Sendable {
             var calls: [(pid_t, CGRect)] = []
             var identifiedCalls: [(pid_t, Int, CGRect)] = []
         }
 
-        func augmentation(for processID: pid_t, windowFrame: CGRect) async throws -> [SceneElement] {
+        func augmentation(for processID: pid_t, windowFrame: CGRect) async throws -> AccessibilityHarvest {
             seen.calls.append((processID, windowFrame))
-            return elements
+            return AccessibilityHarvest(elements: elements, quality: quality)
         }
 
         func augmentation(
             for processID: pid_t, windowNumber: Int, windowFrame: CGRect
-        ) async throws -> [SceneElement] {
+        ) async throws -> AccessibilityHarvest {
             seen.identifiedCalls.append((processID, windowNumber, windowFrame))
-            return elements
+            return AccessibilityHarvest(elements: elements, quality: quality)
         }
     }
 
@@ -68,11 +69,11 @@ struct ScenePipelineTests {
     private let window = ScenePipeline.Window(bundleID: "com.x", appName: "X", title: "Export")
 
     struct GeometryOnlyAugmentation: SceneAugmenting {
-        func augmentation(for processID: pid_t, windowFrame: CGRect) async throws -> [SceneElement] {
-            [SceneElement(
+        func augmentation(for processID: pid_t, windowFrame: CGRect) async throws -> AccessibilityHarvest {
+            AccessibilityHarvest(elements: [SceneElement(
                 id: "unbound", kind: .control, label: "Foreign field",
                 bounds: NormalizedRect(x: 0.2, y: 0.2, width: 0.2, height: 0.05)
-            )]
+            )], quality: .unknown)
         }
     }
 
@@ -195,6 +196,30 @@ struct ScenePipelineTests {
         let pipeline = ScenePipeline(text: FixedText(runs: [], failure: Unavailable()))
         let image = try blank(100, 100)
         await #expect(throws: Unavailable.self) { try await pipeline.perceive(image, of: window) }
+    }
+
+    @Test("the capture carries the augmenter's quality, the scene alone is what perceive answers, and no augmenter means an unknown read")
+    func captureQuality() async throws {
+        let row = SceneElement(id: "control|audio13", kind: .control, label: "Audio 13",
+                               bounds: NormalizedRect(x: 0.1, y: 0.1, width: 0.2, height: 0.05), role: "AXRow")
+        let quality = CaptureQuality(walkCompleted: false, stoppedBy: .deadline, windowFound: true, isGrantAvailable: true,
+                                     windowRole: "AXWindow", windowSubrole: "AXStandardWindow", nodesVisited: 40, elementsEmitted: 1)
+        let pipeline = ScenePipeline(
+            text: FixedText(runs: []),
+            augmentation: FixedAugmentation(elements: [row], seen: FixedAugmentation.Recorder(), quality: quality)
+        )
+        var owned = window
+        owned.processID = 42
+        owned.frame = CGRect(x: 0, y: 0, width: 1000, height: 500)
+        let capture = try await pipeline.capture(try blank(1000, 500), of: owned)
+        #expect(capture.quality == quality)
+        #expect(capture.quality.completeness == .partial)
+        #expect(capture.scene.elements.map(\.label) == ["Audio 13"])
+        #expect(try await pipeline.perceive(try blank(1000, 500), of: owned) == capture.scene)
+        let skipped = try await pipeline.capture(try blank(1000, 500), of: window)
+        #expect(skipped.quality == .unknown, "no process and frame, no read")
+        let bare = try await ScenePipeline(text: FixedText(runs: [])).capture(try blank(1000, 500), of: owned)
+        #expect(bare.quality == .unknown, "no augmenter, no read")
     }
 
     @Test("an augmenter runs only with a process and a frame, adds its elements, and the token follows")
