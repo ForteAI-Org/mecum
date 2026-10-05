@@ -111,13 +111,15 @@ func perceptionTests(
 func engine(
     _ name        : String,
     _ dependencies: [String]       = [],
-      settings    : [SwiftSetting] = facility
+      settings    : [SwiftSetting] = facility,
+      resources   : [Resource]?    = nil
 ) -> Target {
 
     .target(
         name         : name,
         dependencies : dependencies.map { .target(name: $0) },
         path         : "Sources/Engine/\(name)",
+        resources    : resources,
         swiftSettings: settings
     )
 }
@@ -346,6 +348,11 @@ let package = Package(
         // `KnowledgeStoring` over one JSON file per application, with backups and write-behind.
         engine("FileKnowledge", ["Memory"], settings: pure),
 
+        // The SQLite foundation of the living memory: one file at a chosen path, schema 1, a serial writer
+        // and a separate reader, typed errors. Imports Memory and the SDK's SQLite3 only; wired nowhere yet.
+        engine("SQLiteMemory", ["Memory"], settings: pure,
+               resources: [.copy("Resources/brain-living-memory-schema.sql")]),
+
         // `SceneProviding` for a window on the real screen: census, capture, pipeline.
         engine("LiveScenes", ["EngineCore", "PerceptionCore", "Perception", "ScreenCapture"], settings: pure),
 
@@ -428,5 +435,8 @@ let package = Package(
                     resources: [.copy("Fixtures/route-corpus.json"), .copy("Fixtures/misfire-corpus.json"),
                                 .copy("Fixtures/misfire-corpus.md")]),
         engineTests("FileKnowledge", ["FileKnowledge", "Memory", "PerceptionCore"]),
+        // The capture and scene fixtures walk a fake accessibility tree through the producer, the merge and
+        // the pure pipeline before they reach the store, so the suite imports the perception modules too.
+        engineTests("SQLiteMemory", ["SQLiteMemory", "Memory", "EngineCore", "PerceptionCore", "Perception"]),
     ]
 )
