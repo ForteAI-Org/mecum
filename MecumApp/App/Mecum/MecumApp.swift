@@ -85,7 +85,8 @@ struct MecumApp: App {
         ) {
             SettingsView(
                 store : model.settings,
-                broker: model.broker
+                broker: model.broker,
+                memory: model.memory
             )
         }
         .windowResizability(.contentMinSize)

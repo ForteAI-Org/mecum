@@ -304,10 +304,14 @@ enum WindowSnapshots {
 
             // Settings, the window and each page alone, as the split may draw its sidebar blank offscreen.
             let broker = SeatBroker(configuration: .init(allowUnvalidatedBuild: true))
+            // The Brain's memory: a directory the run names, else a temporary one prepared through the real
+            // APIs; never the person's.
+            let brainMemory = await Self.snapshotMemory()
             try await write(
                 SettingsView(
                     store : team.connections,
                     broker: broker,
+                    memory: brainMemory,
                     pane  : .provider(.claudeCode)
                 ),
                 width : 720,
@@ -345,11 +349,11 @@ enum WindowSnapshots {
                 to    : output.appending(path: "settings-chat-dark.png")
             )
 
-            // The Brain, from a knowledge directory the run names, since the snapshot store learns nothing.
-            if let knowledge = ProcessInfo.processInfo.environment["MECUM_SNAPSHOT_KNOWLEDGE_DIR"],
-               let app = BrainLibrary.apps(in: URL(filePath: knowledge, directoryHint: .isDirectory)).first {
+            // The Brain, read from that memory as Settings reads it, since the snapshot store learns nothing.
+            let library = await BrainLibrary.load(from: brainMemory)
+            if case .loaded(let apps) = library, let app = apps.first {
                 let brains: [(name: String, page: AnyView)] = [
-                    ("brain-apps", AnyView(BrainSettings(directory: URL(filePath: knowledge, directoryHint: .isDirectory)))),
+                    ("brain-apps", AnyView(BrainSettings(memory: brainMemory, preloaded: library))),
                     ("brain-graph", AnyView(BrainGraphView(simulation: BrainSimulation(graph: BrainGraph(brain: app.brain))))),
                     ("brain-list", AnyView(BrainListView(
                         brain: app.brain,
@@ -368,6 +372,7 @@ enum WindowSnapshots {
                     }
                 }
             }
+            await brainMemory.close()
 
             let connections = syntheticConnections()
             for (name, dark) in [("light", false), ("dark", true)] {
@@ -782,6 +787,21 @@ enum WindowSnapshots {
     /// One connection in each kind of state the sheet draws, recorded rather
     /// than checked. Whether a key is held still comes from the keychain,
     /// which decides only which key actions show; no key is ever drawn.
+    /// The memory the Brain pages are drawn from: `MECUM_SNAPSHOT_KNOWLEDGE_DIR`'s `memory.sqlite` when the
+    /// run names one (a directory prepared through the real APIs, as `BrainFixture` does), else a new
+    /// temporary directory that `BrainFixture` prepares now. Never the person's Knowledge directory, and
+    /// never a JSON file.
+    static func snapshotMemory() async -> MemoryService {
+        let directory: URL
+        if let named = ProcessInfo.processInfo.environment["MECUM_SNAPSHOT_KNOWLEDGE_DIR"] {
+            directory = URL(filePath: named, directoryHint: .isDirectory)
+        } else {
+            directory = await BrainFixture.prepare(in: FileManager.default.temporaryDirectory
+                .appending(path: "mecum-snapshot-brain-\(UUID().uuidString)", directoryHint: .isDirectory))
+        }
+        return MemoryService(directory: directory)
+    }
+
     private static func syntheticConnections() -> ModelSettingsStore {
         let connections = ModelSettingsStore()
         connections.recordCheck(

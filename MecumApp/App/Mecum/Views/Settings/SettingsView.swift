@@ -5,6 +5,7 @@
 //  Created by Eliomar Alejandro Rodriguez Ferrer on 22/09/2026.
 //
 
+import AutomationRuntime
 import ModelTransports
 import SeatBroker
 import SwiftUI
@@ -25,16 +26,21 @@ struct SettingsView: View {
     let store : ModelSettingsStore
     let broker: SeatBroker
 
+    /// The living memory the Brain page reads: the app's, read only.
+    let memory: any MemoryReading
+
     @State private var pane: SettingsPane?
 
     /// - Parameter pane: the page shown first, General unless a snapshot asks for another.
     init(
         store : ModelSettingsStore,
         broker: SeatBroker,
+        memory: any MemoryReading,
         pane  : SettingsPane = .general
     ) {
         self.store  = store
         self.broker = broker
+        self.memory = memory
         _pane       = State(initialValue: pane)
     }
 
@@ -92,10 +98,7 @@ struct SettingsView: View {
         case .virtualDisplay:
             VirtualDisplaySettings(broker: broker)
         case .brain:
-            BrainSettings(directory: WorkspaceLaunch.directory.appending(
-                path         : "Knowledge",
-                directoryHint: .isDirectory
-            ))
+            BrainSettings(memory: memory)
         case .sidebar:
             SidebarSettings()
         case .chat:
