@@ -394,6 +394,16 @@ let package = Package(
             path: "Tools/Engine/mecum-bridge",
             swiftSettings: facility
         ),
+        // The living memory's process helper: a second real process on one store file, driven by lines on its
+        // standard input, for the two-process and crash proofs of `SQLiteMemoryTests` and the cost measures.
+        // Not a product and bundled nowhere.
+        .executableTarget(
+            name: "memory-probe",
+            dependencies: [.target(name: "SQLiteMemory"), .target(name: "Memory"), .target(name: "EngineCore"),
+                           .target(name: "PerceptionCore")],
+            path: "Tools/Engine/memory-probe",
+            swiftSettings: pure
+        ),
 
         // MARK: Perception tests
         perceptionTests("PerceptionCore", ["PerceptionCore"]),
