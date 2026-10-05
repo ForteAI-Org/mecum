@@ -18,21 +18,30 @@ final class MCPChannel {
     let connection: NWConnection
     private var buffer = Data()
 
+    /// The continuation of the `start` under way, taken by the first state that ends it. Network reports
+    /// states on its own queue, so a connection that is ready and then cancelled at once queues both for
+    /// the main actor before the first has cleared the handler; resuming twice would end the process.
+    private var starting: CheckedContinuation<Void, any Error>?
+
     init(_ connection: NWConnection) { self.connection = connection }
 
     func start() async throws {
         try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, any Error>) in
+            starting = continuation
             connection.stateUpdateHandler = { [weak self] state in
                 Task { @MainActor in
-                    guard let self else { return }
+                    guard let self, let continuation = self.starting else { return }
                     switch state {
                     case .ready:
+                        self.starting = nil
                         self.connection.stateUpdateHandler = nil
                         continuation.resume()
                     case .failed(let error):
+                        self.starting = nil
                         self.connection.stateUpdateHandler = nil
                         continuation.resume(throwing: error)
                     case .cancelled:
+                        self.starting = nil
                         self.connection.stateUpdateHandler = nil
                         continuation.resume(throwing: CancellationError())
                     default: break
