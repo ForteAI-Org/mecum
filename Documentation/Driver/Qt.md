@@ -45,6 +45,24 @@ closes the fixture. The fixture is in `Tools/Driver/QtProbe.py`; it creates no
 projects or user files. On this host the official PySide6-Essentials 6.11.2
 wheel was installed into a temporary virtual environment, outside the repo.
 
+The fixture also has a checkbox, `Probe checkbox`, and a list of invented names,
+`Probe people`, for the living memory's desktop cases (a control already in the
+requested state, the same structure with other names). Their state is
+independent of the other widgets: `checkbox` (0 or 1) and `checkboxToggles`;
+`peopleSet` (`A` or `B`), `peopleNames`, `peopleCount`, `selectedPerson`,
+`selectedPersonIndex` (-1 when nothing is selected) and `peopleSelections`, with
+`checkboxFrame`, `peopleFrame` and one `peopleRowFrames` entry per row. The
+command file also takes `setCheckbox` (with a boolean `value`), `toggleCheckbox`,
+`renamePeople`, which shows the other set of names and clears the selection, and
+`resetChoices`, which unchecks the box, shows set `A`, clears the selection and
+sets both counters to zero. The other keys and commands are unchanged. These
+controls are a test fixture: they produce no Watcher input and are not the
+Driver's `AGENTSEAT_FIXTURE_APP`. On 2026-10-03 they were run once on this host
+with PySide6-Essentials 6.10.3 (6.11.2 did not install on the system Python 3.9.6, the one interpreter then):
+the state keys, the four commands and the perception of the checkbox and the names
+passed. A new fixture process applies again the last command left in the command
+file, so a clean reset removes that command first.
+
 The oracle for an input command is a change in DaVinci's own AX value, focus or
 selected range. A posted-event receipt alone is not a pass. The oracle for
 capture is a qualified `SeatFrame` and observation reference bound to the

@@ -7,12 +7,14 @@ from PySide6.QtCore import QTimer, Qt
 from PySide6.QtGui import QColor, QPainter
 from PySide6.QtWidgets import (
     QApplication,
+    QCheckBox,
     QComboBox,
     QDialog,
     QDialogButtonBox,
     QFileDialog,
     QLabel,
     QLineEdit,
+    QListWidget,
     QMenu,
     QPushButton,
     QScrollArea,
@@ -24,6 +26,12 @@ from PySide6.QtWidgets import (
 
 STATE_PATH = Path(sys.argv[1])
 COMMAND_PATH = Path(sys.argv[2]) if len(sys.argv) > 2 else None
+# Invented names, two sets with the same structure: the list shows one set at a time, and
+# `renamePeople` swaps it, so the same scene can be seen with different names.
+PEOPLE_SETS = {
+    "A": ["Alice Rossi", "Bruno Bianchi", "Carla Verdi", "Dino Neri"],
+    "B": ["Elena Gallo", "Fabio Costa", "Giulia Riva", "Ivo Ferri"],
+}
 state = {
     "text": "",
     "selectionStart": -1,
@@ -52,6 +60,14 @@ state = {
     "canvasKeys": 0,
     "canvasKeyText": "",
     "canvasLastX": -1,
+    "checkbox": 0,
+    "checkboxToggles": 0,
+    "peopleSet": "A",
+    "peopleNames": list(PEOPLE_SETS["A"]),
+    "peopleCount": len(PEOPLE_SETS["A"]),
+    "selectedPerson": "",
+    "selectedPersonIndex": -1,
+    "peopleSelections": 0,
 }
 measured_widgets = {}
 active_dialog = None
@@ -70,8 +86,21 @@ def update_geometry():
         if state.get(name) != frame:
             state[name] = frame
             changed = True
+    rows = people_row_frames()
+    if state.get("peopleRowFrames") != rows:
+        state["peopleRowFrames"] = rows
+        changed = True
     if changed:
         publish()
+
+
+def people_row_frames():
+    frames = []
+    for row in range(people.count()):
+        rectangle = people.visualItemRect(people.item(row))
+        origin = people.viewport().mapToGlobal(rectangle.topLeft())
+        frames.append([origin.x(), origin.y(), rectangle.width(), rectangle.height()])
+    return frames
 
 
 def publish():
@@ -162,7 +191,7 @@ app = QApplication(sys.argv)
 app.setApplicationName("Mecum Qt Probe")
 window = QWidget()
 window.setWindowTitle("Mecum Qt Probe")
-window.resize(700, 580)
+window.resize(700, 720)
 layout = QVBoxLayout(window)
 
 field = ProbeLineEdit()
@@ -206,6 +235,54 @@ combo.currentIndexChanged.connect(lambda index: (
     publish(),
 ))
 layout.addWidget(combo)
+
+checkbox = QCheckBox("Probe checkbox")
+checkbox.setAccessibleName("Probe checkbox")
+checkbox.toggled.connect(lambda checked: (
+    state.__setitem__("checkbox", 1 if checked else 0),
+    state.__setitem__("checkboxToggles", state["checkboxToggles"] + 1),
+    publish(),
+))
+layout.addWidget(checkbox)
+
+people = QListWidget()
+people.setAccessibleName("Probe people")
+people.setFixedHeight(96)
+
+
+def sync_selection():
+    # The selection, not the current row: a list may take a current row on focus alone.
+    selected = people.selectedItems()
+    row = people.row(selected[0]) if selected else -1
+    if row >= 0 and row != state["selectedPersonIndex"]:
+        state["peopleSelections"] += 1
+    state["selectedPersonIndex"] = row
+    state["selectedPerson"] = selected[0].text() if selected else ""
+    publish()
+
+
+def show_people(name):
+    people.clear()
+    people.addItems(PEOPLE_SETS[name])
+    state["peopleSet"] = name
+    state["peopleNames"] = list(PEOPLE_SETS[name])
+    state["peopleCount"] = people.count()
+    state["selectedPersonIndex"] = -1
+    state["selectedPerson"] = ""
+    publish()
+
+
+def reset_choices():
+    checkbox.setChecked(False)
+    show_people("A")
+    state["checkboxToggles"] = 0
+    state["peopleSelections"] = 0
+    publish()
+
+
+people.itemSelectionChanged.connect(sync_selection)
+people.addItems(PEOPLE_SETS["A"])
+layout.addWidget(people)
 
 second_window = QWidget()
 second_window.setWindowTitle("Probe Secondary")
@@ -263,6 +340,14 @@ def poll_native_command():
         close_second()
     elif action == "closeFileDialog" and active_file_dialog is not None:
         active_file_dialog.reject()
+    elif action == "setCheckbox":
+        checkbox.setChecked(bool(command.get("value", False)))
+    elif action == "toggleCheckbox":
+        checkbox.toggle()
+    elif action == "renamePeople":
+        show_people("B" if state["peopleSet"] == "A" else "A")
+    elif action == "resetChoices":
+        reset_choices()
     publish()
 
 scroll = QScrollArea()
@@ -359,6 +444,8 @@ measured_widgets.update({
     "modalFrame": modal,
     "fileOpenFrame": file_opener,
     "nativeFileOpenFrame": native_file_opener,
+    "checkboxFrame": checkbox,
+    "peopleFrame": people.viewport(),
 })
 publish()
 window.show()
