@@ -12,11 +12,13 @@ import PerceptionCore
 /// way it learns: by evidence. Every entry point takes the clock as a value.
 public enum BrainUpdater {
 
-    /// IngestStats counts what one ingest did.
+    /// IngestStats counts what one ingest did. `decay` is what the decay this ingest ran retired
+    /// and why, nil when the clock did not tick and no decay ran.
     public struct IngestStats: Sendable, Equatable {
         public var created = 0
         public var updated = 0
         public var skippedAmbiguous = 0
+        public var decay: DecayReport?
         public init() {}
     }
 
@@ -27,12 +29,14 @@ public enum BrainUpdater {
 
     /// Ingests one scene's detections: matches interactive elements to anchors, updates or creates
     /// them, then detects and persists sibling groups. Texts name groups only. `window` is the
-    /// captured window's title letters family; forgetting is scoped to it, nil is unscoped.
+    /// captured window's title letters family; forgetting is scoped to it, nil is unscoped. `keys`
+    /// names what this ingest creates; the default draws the random UUIDs it always drew.
     public static func ingest(
         _ detections: [BrainDetection],
         into brain  : inout UIBrain,
         now         : Date,
-        window      : String? = nil
+        window      : String? = nil,
+        keys        : BrainKeys = .random
     ) -> IngestStats {
         var stats = IngestStats()
         let interactive = detections.filter {
@@ -69,6 +73,7 @@ public enum BrainUpdater {
                     }
                 case .none:
                     var fresh = ObjectAnchor(
+                        anchorKey    : keys.anchorKey(),
                         kind         : detection.kind,
                         label        : detection.label,
                         boundsTypical: detection.bounds,
@@ -93,9 +98,10 @@ public enum BrainUpdater {
         for candidate in SiblingGroupDetector.detectGroups(interactive: interactive, texts: texts) {
             let members = candidate.memberIndices.compactMap { anchorFor[$0] }
             guard members.count >= 3 else { continue }
-            mergeGroup(candidate, members: members, interactive: interactive, into: &brain, now: now, epoch: epoch)
+            mergeGroup(candidate, members: members, interactive: interactive, into: &brain, now: now, epoch: epoch,
+                       keys: keys)
         }
-        if advanced { decay(&brain, now: now) }
+        if advanced { stats.decay = decay(&brain, now: now) }
         return stats
     }
 
@@ -129,7 +135,8 @@ public enum BrainUpdater {
         interactive: [BrainDetection],
         into brain : inout UIBrain,
         now        : Date,
-        epoch      : Int
+        epoch      : Int,
+        keys       : BrainKeys
     ) {
         let axisPositions = candidate.memberIndices.map {
             candidate.axis == .column ? interactive[$0].bounds.x : interactive[$0].bounds.y
@@ -154,9 +161,9 @@ public enum BrainUpdater {
             evictMisaligned(groupIndex: gi, in: &brain)
             assignGroupID(brain.groups[gi].id, to: brain.groups[gi].memberAnchors, in: &brain)
         } else {
-            let group = SiblingGroup(axis: candidate.axis, memberAnchors: members, sharedKind: candidate.sharedKind,
-                                     cellSize: candidate.cellSize, name: candidate.name, lastSeen: now,
-                                     lastSeenEpoch: epoch)
+            let group = SiblingGroup(id: keys.groupID(), axis: candidate.axis, memberAnchors: members,
+                                     sharedKind: candidate.sharedKind, cellSize: candidate.cellSize,
+                                     name: candidate.name, lastSeen: now, lastSeenEpoch: epoch)
             assignGroupID(group.id, to: members, in: &brain)
             brain.groups.append(group)
         }
@@ -169,22 +176,29 @@ public enum BrainUpdater {
     /// wall-clock backstop, is dropped. A protected object is never dropped and sits outside the cap;
     /// the cap keeps the most established unprotected rows. Groups lose dropped members and dissolve
     /// under three members or when stale. Evidence-one transitions die as coincidences, except menu
-    /// reveals; every transition dies when stale. Rows never stamped count as seen now.
+    /// reveals; every transition dies when stale. Rows never stamped count as seen now. Answers what
+    /// was dropped and under which rule, recorded as each rule decides; the report changes nothing
+    /// about what is kept.
+    @discardableResult
     public static func decay(
         _ brain    : inout UIBrain,
         now        : Date,
         maxObjects : Int = 3000,
         retention  : BrainRetention = .standard
-    ) {
+    ) -> DecayReport {
+        var report = DecayReport()
         let epoch = brain.ingestEpoch
         let backstop = now.addingTimeInterval(-retention.backstopDays * 86400)
         let snapshot = brain
         var objects = brain.objects.filter { anchor in
             if anchor.isProtected { return true }
             let unseen = snapshot.unseenFor(window: anchor.window, stamp: anchor.lastSeenEpoch)
-            if anchor.lastSeen < backstop { return false }
-            if unseen >= retention.staleIngests { return false }
-            if anchor.seenCount <= 1 && unseen >= retention.transientIngests { return false }
+            if anchor.lastSeen < backstop { report.anchors[anchor.anchorKey] = .backstop; return false }
+            if unseen >= retention.staleIngests { report.anchors[anchor.anchorKey] = .stale; return false }
+            if anchor.seenCount <= 1 && unseen >= retention.transientIngests {
+                report.anchors[anchor.anchorKey] = .transient
+                return false
+            }
             return true
         }
         let protected = objects.filter(\.isProtected)
@@ -194,6 +208,7 @@ public enum BrainUpdater {
                 lhs.seenCount != rhs.seenCount ? lhs.seenCount > rhs.seenCount : lhs.lastSeen > rhs.lastSeen
             }.prefix(maxObjects))
             let keptKeys = Set(protected.map(\.anchorKey) + unprotected.map(\.anchorKey))
+            for anchor in objects where !keptKeys.contains(anchor.anchorKey) { report.anchors[anchor.anchorKey] = .cap }
             objects = objects.filter { keptKeys.contains($0.anchorKey) }
         }
         let kept = Set(objects.map(\.anchorKey))
@@ -203,6 +218,8 @@ public enum BrainUpdater {
             group.memberAnchors = group.memberAnchors.filter { kept.contains($0) }
             let unseen = max(0, epoch - (group.lastSeenEpoch ?? epoch))
             guard group.memberAnchors.count >= 3, unseen < retention.staleIngests, group.lastSeen >= backstop else {
+                report.groups[group.id] = group.memberAnchors.count < 3 ? .members
+                    : unseen >= retention.staleIngests ? .stale : .backstop
                 for key in group.memberAnchors {
                     if let i = brain.objectIndex(withKey: key) { brain.objects[i].groupID = nil }
                 }
@@ -211,12 +228,18 @@ public enum BrainUpdater {
             return group
         }
         brain.transitions = brain.transitions.filter { transition in
-            guard kept.contains(transition.anchorKey), transition.lastObserved >= backstop else { return false }
+            guard kept.contains(transition.anchorKey) else { report.transitions[transition.key] = .anchor; return false }
+            guard transition.lastObserved >= backstop else { report.transitions[transition.key] = .backstop; return false }
             let unseen = max(0, epoch - (transition.lastObservedEpoch ?? epoch))
-            if unseen >= retention.transitionStaleIngests { return false }
+            if unseen >= retention.transitionStaleIngests { report.transitions[transition.key] = .stale; return false }
             let coincidence = transition.evidence <= 1 && !transition.isMenuReveal
-            return !(coincidence && unseen >= retention.coincidenceIngests)
+            if coincidence && unseen >= retention.coincidenceIngests {
+                report.transitions[transition.key] = .coincidence
+                return false
+            }
+            return true
         }
+        return report
     }
 
     // MARK: Deliberate knowledge
