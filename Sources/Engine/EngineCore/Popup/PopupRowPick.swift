@@ -61,24 +61,45 @@ public enum PopupRowPick {
         return rows
     }
 
+    /// Why no plan was made, in the order the conditions are checked.
+    public enum Refusal: Error, Sendable, Equatable {
+        /// Fewer than two rows: there is no route to count.
+        case tooFewRows(Int)
+        /// The control's current value normalizes to nothing.
+        case currentValueEmpty
+        /// No row carries the control's current value, normalized (`LabelText.normalize`).
+        case currentValueNotAmongRows
+        /// No row carries the wanted item.
+        case targetNotAmongRows
+    }
+
     /// Plans the keys from the control's current value and the wanted element, or nil when either row
     /// cannot be found among the pop-up's rows or the list has a single row.
     /// Set `wraps` to false for a scrolling menu: unseen rows make a wrap through the visible subset invalid.
     public static func plan(rows: [[SceneElement]], currentValue: String, target: SceneElement, wraps: Bool = true) -> Plan? {
-        guard rows.count >= 2 else { return nil }
+        try? planning(rows: rows, currentValue: currentValue, target: target, wraps: wraps).get()
+    }
+
+    /// `plan`, answering why there is none: the same conditions in the same order.
+    public static func planning(rows: [[SceneElement]], currentValue: String, target: SceneElement,
+                                wraps: Bool = true) -> Result<Plan, Refusal> {
+        guard rows.count >= 2 else { return .failure(.tooFewRows(rows.count)) }
         let want = LabelText.normalize(currentValue)
-        guard !want.isEmpty,
-              let currentIndex = rows.firstIndex(where: { $0.contains { LabelText.normalize($0.label) == want } }),
-              let targetIndex = rows.firstIndex(where: { $0.contains { $0.id == target.id } })
-        else { return nil }
+        guard !want.isEmpty else { return .failure(.currentValueEmpty) }
+        guard let currentIndex = rows.firstIndex(where: { $0.contains { LabelText.normalize($0.label) == want } }) else {
+            return .failure(.currentValueNotAmongRows)
+        }
+        guard let targetIndex = rows.firstIndex(where: { $0.contains { $0.id == target.id } }) else {
+            return .failure(.targetNotAmongRows)
+        }
         var delta = targetIndex - currentIndex
         if wraps, abs(delta) > rows.count / 2 { delta += delta > 0 ? -rows.count : rows.count }
-        return Plan(
+        return .success(Plan(
             rowLabels   : rows.map { $0.map(\.label) },
             currentIndex: currentIndex,
             targetIndex : targetIndex,
             delta       : delta
-        )
+        ))
     }
 
     /// The same plan over a list that named its own rows, for a pop-up read through `PopupRowReading`
@@ -89,20 +110,31 @@ public enum PopupRowPick {
     /// every row, scrolled-out ones included, knows how far apart two items really are.
     public static func plan(rows: [PopupRow], currentValue: String, target: String,
                             wraps: Bool = true) -> Plan? {
-        guard rows.count >= 2 else { return nil }
+        try? planning(rows: rows, currentValue: currentValue, target: target, wraps: wraps).get()
+    }
+
+    /// `plan` over named rows, answering why there is none: the same conditions in the same order. A
+    /// wanted item that normalizes to nothing is `targetNotAmongRows`.
+    public static func planning(rows: [PopupRow], currentValue: String, target: String,
+                                wraps: Bool = true) -> Result<Plan, Refusal> {
+        guard rows.count >= 2 else { return .failure(.tooFewRows(rows.count)) }
         let current = LabelText.normalize(currentValue), wanted = LabelText.normalize(target)
-        guard !current.isEmpty, !wanted.isEmpty,
-              let currentIndex = rows.firstIndex(where: { LabelText.normalize($0.title) == current }),
-              let targetIndex = rows.firstIndex(where: { LabelText.normalize($0.title) == wanted })
-        else { return nil }
+        guard !current.isEmpty else { return .failure(.currentValueEmpty) }
+        guard !wanted.isEmpty else { return .failure(.targetNotAmongRows) }
+        guard let currentIndex = rows.firstIndex(where: { LabelText.normalize($0.title) == current }) else {
+            return .failure(.currentValueNotAmongRows)
+        }
+        guard let targetIndex = rows.firstIndex(where: { LabelText.normalize($0.title) == wanted }) else {
+            return .failure(.targetNotAmongRows)
+        }
         var delta = targetIndex - currentIndex
         if wraps, abs(delta) > rows.count / 2 { delta += delta > 0 ? -rows.count : rows.count }
-        return Plan(
+        return .success(Plan(
             rowLabels   : rows.map { [$0.title] },
             currentIndex: currentIndex,
             targetIndex : targetIndex,
             delta       : delta
-        )
+        ))
     }
 
     /// The typeable head of a label for a menu's own type-ahead: leading glyphs dropped, first word

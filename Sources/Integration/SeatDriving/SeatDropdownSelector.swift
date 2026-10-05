@@ -9,6 +9,93 @@ import SeatCore
 import SeatSession
 import WindowPlacement
 
+/// SelectionResult is what one dropdown selection answered and what the selector perceived on the
+/// way: the window before the menu opened, the menu as it read it (nil when none was read) and the
+/// window after it closed (nil when the selection ended before it was read). The perceptions are the
+/// ones the verdict was made from, for the caller's record; the outcome's scene is the last of them.
+public struct SelectionResult: Sendable {
+
+    public let outcome: ActOutcome
+    public let receipt: PopupMenuReceipt?
+    public let before: PerceivedWindow?
+    public let menu: PerceivedWindow?
+    public let after: PerceivedWindow?
+    /// What the selector knew when it decided, for a developer's diagnosis; never in the outcome.
+    public let diagnosis: SelectionDiagnosis
+
+    public init(
+        outcome  : ActOutcome,
+        receipt  : PopupMenuReceipt?,
+        before   : PerceivedWindow? = nil,
+        menu     : PerceivedWindow? = nil,
+        after    : PerceivedWindow? = nil,
+        diagnosis: SelectionDiagnosis = SelectionDiagnosis()
+    ) {
+        self.outcome   = outcome
+        self.receipt   = receipt
+        self.before    = before
+        self.menu      = menu
+        self.after     = after
+        self.diagnosis = diagnosis
+    }
+}
+
+/// SelectionMiss is why a selection ended without the menu being asked to select, told apart where
+/// the selector's own branches tell them apart. The outcome's sentence ("no unique …") is unchanged and
+/// still covers several of these; this is the typed reason beside it.
+public enum SelectionMiss: Error, Sendable, Equatable {
+    /// The dropdown the control names was not resolved before anything opened: `matches` elements of
+    /// the window's scene carried the name, 0 for none and 2 or more for an ambiguous name.
+    case controlNotResolved(matches: Int)
+    /// The menu was read and the item resolved to `matches` of its elements, not exactly one.
+    case itemNotResolved(matches: Int)
+    /// The menu was read and the item resolved, and no arrow route was planned: why for the rows the
+    /// application named (nil when no row reader was given) and for the rows cut out of the pixels.
+    case routeNotPlanned(namedRows: PopupRowPick.Refusal?, paintedRows: PopupRowPick.Refusal)
+    /// The menu operation ended without asking for the selection, and the selector never read a menu.
+    case menuNotRead
+    /// The menu was read and a choice made, and the menu operation still did not ask for the selection.
+    case selectionNotRequested
+}
+
+/// SelectionDiagnosis is what a selection knew when it decided: how the opener was found and which
+/// label it carried (the value the route counts from), which menu path ran, the menu's rows as the
+/// application named them and as the pixels painted them, the route, and the miss. A field is nil when
+/// that step did not run or was not read: nothing here is reconstructed afterwards.
+public struct SelectionDiagnosis: Sendable, Equatable {
+
+    /// Where the opener came from.
+    public enum OpenerSource: String, Sendable, Equatable {
+        /// The window's scene resolved the control.
+        case scene
+        /// The scene did not, and the control's accessibility frame scoped a second reading that did.
+        case accessibilityFrame
+    }
+
+    /// Which menu operation ran.
+    public enum MenuPath: String, Sendable, Equatable {
+        /// The application's own pop-up menu, opened and chosen through accessibility.
+        case nativeMenu
+        /// A custom menu opened by a click and chosen with arrow keys and Return.
+        case keyboardRoute
+    }
+
+    public var openerLabel: String?
+    public var openerSource: OpenerSource?
+    public var menuPath: MenuPath?
+    /// The menu's elements as the selector read them, in order; nil when no menu was read.
+    public var menuLabels: [String]?
+    /// The rows the application named for itself; nil when no row reader was given.
+    public var namedRows: [String]?
+    /// The rows cut out of the menu's pixels, a row's labels together; nil when no route was counted.
+    public var paintedRows: [[String]]?
+    /// The route chosen, as `PopupRowPick.Plan.route` says it; nil when none was.
+    public var route: String?
+    public var miss: SelectionMiss?
+
+    public init() {}
+}
+
 /// SeatDropdownSelector keeps observation, opening, selection and verification in one Seat Turn.
 /// The Driver owns the temporary menu and its cleanup. Perception identifies a row only in a
 /// capture of that menu's attested window, never in the parent application's accessibility tree.
@@ -40,7 +127,7 @@ public struct SeatDropdownSelector {
         dryRun: Bool = false,
         onMenu: @escaping @MainActor @Sendable (ContextMenu) -> Void = { _ in },
         onCapture: @escaping @MainActor @Sendable (String, CGImage) throws -> Void = { _, _ in }
-    ) async throws -> (outcome: ActOutcome, receipt: PopupMenuReceipt?) {
+    ) async throws -> SelectionResult {
         let seat = try target.agentSeat()
         let window = try target.currentWindow()
         let turn = try await seat.acquire()
@@ -69,7 +156,7 @@ public struct SeatDropdownSelector {
         turn: Turn,
         onMenu: @escaping @MainActor @Sendable (ContextMenu) -> Void,
         onCapture: @escaping @MainActor @Sendable (String, CGImage) throws -> Void
-    ) async throws -> (outcome: ActOutcome, receipt: PopupMenuReceipt?) {
+    ) async throws -> SelectionResult {
         let beforeDelivery = try await target.observe()
         let beforeStill = beforeDelivery.frame
         let before = try await perceive(
@@ -91,18 +178,41 @@ public struct SeatDropdownSelector {
             scopedBounds = bounds
             opener = SceneElement(id: value.id, kind: .control, label: value.label, bounds: bounds, role: "AXPopUpButton")
         }
+        var diagnosis = SelectionDiagnosis()
         guard let opener else {
             let labels = before.scene.elements.map(\.label).joined(separator: ", ")
-            return (ActOutcome(.honestMiss, "dropdown '\(control)' is missing or ambiguous. Read: \(labels)", scene: before.scene), nil)
+            if case .ambiguous(let count) = resolution {
+                diagnosis.miss = .controlNotResolved(matches: count)
+            } else {
+                diagnosis.miss = .controlNotResolved(matches: 0)
+            }
+            return SelectionResult(
+                outcome: ActOutcome(.honestMiss, "dropdown '\(control)' is missing or ambiguous. Read: \(labels)", scene: before.scene),
+                receipt: nil, before: before, diagnosis: diagnosis
+            )
         }
+        diagnosis.openerLabel  = opener.label
+        diagnosis.openerSource = scopedBounds == nil ? .scene : .accessibilityFrame
         if !permissions.allowsDestructive,
            ActionPolicy.isDestructive(label: opener.label) || ActionPolicy.isDestructive(label: item) {
-            return (ActOutcome(.refused, "selection requires --allow-destructive", scene: before.scene), nil)
+            return SelectionResult(
+                outcome: ActOutcome(.refused, "selection requires --allow-destructive", scene: before.scene),
+                receipt: nil, before: before, diagnosis: diagnosis
+            )
         }
         if dryRun {
-            return (ActOutcome(.dryRun, "would open '\(opener.label)' and select '\(item)' in its own menu window", scene: before.scene), nil)
+            return SelectionResult(
+                outcome: ActOutcome(.dryRun, "would open '\(opener.label)' and select '\(item)' in its own menu window", scene: before.scene),
+                receipt: nil, before: before, diagnosis: diagnosis
+            )
         }
         var menuScene: SceneSnapshot?
+        var menuWindow: PerceivedWindow?
+        // Written by the menu callbacks as they decide, read once the menu operation has answered.
+        var miss: SelectionMiss?
+        var namedRows: [String]?
+        var paintedRows: [[String]]?
+        var chosenRoute: String?
         @MainActor @Sendable func readItem(_ menu: ContextMenu, fromDisplay: Bool) async throws -> SceneElement? {
             onMenu(menu)
             guard let identityOfMenu = menu.window.identity else { throw SeatDrivingFailure.frameUnusable }
@@ -134,13 +244,17 @@ public struct SeatDropdownSelector {
                     identity: identity, title: "Dropdown", stage: "menu", onCapture: onCapture
                 )
             }
-            menuScene = observed.scene
+            menuScene  = observed.scene
+            menuWindow = observed
             guard observed.frame == menu.frame else { throw SeatDrivingFailure.frameUnusable }
-            guard case .found(let element) = observed.scene.resolve(target: item) else { return nil }
-            return element
+            switch Self.menuItem(item, in: observed.scene) {
+                case .success(let element): return element
+                case .failure(let reason) : miss = reason; return nil
+            }
         }
         let receipt: PopupMenuReceipt
         if try DropdownOpening.canShow(control: opener.label, window: window.title, processID: window.reference.processID) {
+            diagnosis.menuPath = .nativeMenu
             receipt = try await seat.useNativePopupMenu(
                 of: window, turn: turn,
                 opening: {
@@ -159,6 +273,7 @@ public struct SeatDropdownSelector {
                                                observedIn: beforeDelivery.geometry) else {
                 throw SeatDrivingFailure.frameUnusable
             }
+            diagnosis.menuPath = .keyboardRoute
             receipt = try await seat.useDropdownMenu(
                 openedAt: location, of: window, turn: turn, keyInterval: ActionTiming.standard.popupArrow
             ) { [rowReader = popupRows] menu in
@@ -170,14 +285,16 @@ public struct SeatDropdownSelector {
                     ofProcess : window.reference.processID,
                     popupFrame: menu.frame
                 ) ?? []
-                let route = PopupRowPick.plan(rows: named, currentValue: opener.label, target: element.label)
-                    ?? PopupRowPick.plan(
-                        rows        : PopupRowPick.rows(in: scene, windowFrame: menu.frame, popupFrame: menu.frame),
-                        currentValue: opener.label,
-                        target      : element,
-                        wraps       : false
-                    )
-                guard let plan = route else { return nil }
+                let painted = PopupRowPick.rows(in: scene, windowFrame: menu.frame, popupFrame: menu.frame)
+                if rowReader != nil { namedRows = named.map(\.title) }
+                paintedRows = painted.map { $0.map(\.label) }
+                let plan: PopupRowPick.Plan
+                switch Self.route(named: rowReader == nil ? nil : named, painted: painted,
+                                  currentValue: opener.label, target: element) {
+                    case .success(let chosen): plan = chosen
+                    case .failure(let reason): miss = reason; return nil
+                }
+                chosenRoute = plan.route
                 let arrow = plan.delta > 0 ? Key.downArrow : Key.upArrow
                 return Array(repeating: arrow, count: abs(plan.delta)) + [Key.return]
             }
@@ -187,9 +304,17 @@ public struct SeatDropdownSelector {
             afterStill, identity: identity, title: window.title,
             stage: "after", onCapture: onCapture
         )
+        diagnosis.menuLabels  = menuScene?.elements.map(\.label)
+        diagnosis.namedRows   = namedRows
+        diagnosis.paintedRows = paintedRows
+        diagnosis.route       = chosenRoute
         guard receipt.selectionRequested else {
             let labels = menuScene?.elements.map(\.label).joined(separator: ", ") ?? "unreadable"
-            return (ActOutcome(.honestMiss, "no unique '\(item)' in the dropdown; menu closed. Items: \(labels)", scene: after.scene), receipt)
+            diagnosis.miss = miss ?? (menuScene == nil ? .menuNotRead : .selectionNotRequested)
+            return SelectionResult(
+                outcome: ActOutcome(.honestMiss, "no unique '\(item)' in the dropdown; menu closed. Items: \(labels)", scene: after.scene),
+                receipt: receipt, before: before, menu: menuWindow, after: after, diagnosis: diagnosis
+            )
         }
         let verified: Bool
         if let scopedBounds {
@@ -211,7 +336,34 @@ public struct SeatDropdownSelector {
         let message = verified
             ? "selected '\(item)' in menu window #\(receipt.menu.window.windowNumber); the dropdown now reads '\(item)'"
             : "requested '\(item)' in menu window #\(receipt.menu.window.windowNumber), but the dropdown value was not verified"
-        return (ActOutcome(verified ? .foundActed : .actedUnverified, message, scene: after.scene), receipt)
+        return SelectionResult(
+            outcome: ActOutcome(verified ? .foundActed : .actedUnverified, message, scene: after.scene),
+            receipt: receipt, before: before, menu: menuWindow, after: after, diagnosis: diagnosis
+        )
+    }
+
+    /// The menu element `item` names, or why there is not exactly one: the scene's own resolution.
+    static func menuItem(_ item: String, in scene: SceneSnapshot) -> Result<SceneElement, SelectionMiss> {
+        switch scene.resolve(target: item) {
+            case .found(let element)  : .success(element)
+            case .ambiguous(let count): .failure(.itemNotResolved(matches: count))
+            case .none                : .failure(.itemNotResolved(matches: 0))
+        }
+    }
+
+    /// The arrow route from the control's current value to `target`: over the rows the application named
+    /// when there is a plan there (`named` is nil when no row reader was given, which counts as no rows),
+    /// else over the painted rows without wrapping, as always; otherwise why neither has one.
+    static func route(named: [PopupRow]?, painted: [[SceneElement]], currentValue: String,
+                      target: SceneElement) -> Result<PopupRowPick.Plan, SelectionMiss> {
+        let fromNames  = PopupRowPick.planning(rows: named ?? [], currentValue: currentValue, target: target.label)
+        let fromPixels = PopupRowPick.planning(rows: painted, currentValue: currentValue, target: target, wraps: false)
+        switch (fromNames, fromPixels) {
+            case (.success(let plan), _): return .success(plan)
+            case (_, .success(let plan)): return .success(plan)
+            case (.failure(let names), .failure(let pixels)):
+                return .failure(.routeNotPlanned(namedRows: named == nil ? nil : names, paintedRows: pixels))
+        }
     }
 
     private func controlScene(
