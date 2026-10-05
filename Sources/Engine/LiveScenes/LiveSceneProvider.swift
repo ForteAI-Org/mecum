@@ -68,7 +68,11 @@ public struct LiveSceneProvider: SceneProviding {
             processID: processID,
             frame    : frame
         )
-        let scene = try await pipeline.perceive(image, of: window)
-        return PerceivedWindow(scene: scene, frame: frame)
+        let capture = try await pipeline.capture(image, of: window)
+        // The union with an open pop-up is two windows in one picture, not a structural surface.
+        let surface = surfaces.hasOpenPopup
+            ? CaptureSurface.popupUnion
+            : CaptureSurface.classified(role: capture.quality.windowRole, subrole: capture.quality.windowSubrole)
+        return PerceivedWindow(scene: capture.scene, frame: frame, capture: capture.quality, surface: surface)
     }
 }

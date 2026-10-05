@@ -20,6 +20,12 @@ import Foundation
 ///
 /// Generic over the tree reader, so the walk is decided by tests on a fake tree. The deadline is a
 /// closure supplied by the caller: a reusable algorithm does not read the clock itself.
+///
+/// Beside the elements, `harvest` answers the quality of the read (`CaptureQuality`): whether the
+/// walk reached the end of the tree or which limit stopped it, the window's role and subrole, and
+/// what was counted. Each element says where its label came from (`labelOrigin`) and, for a row
+/// and everything inside it, the structural path up to its collection (`collectionPath`), so a
+/// consumer can tell a stable caption from content and a collection from the rows it repeats.
 public enum AccessibilityAugmentation {
 
     /// Bounds on one walk. The deadline is asked before every node; a walk that runs out returns the
@@ -61,45 +67,87 @@ public enum AccessibilityAugmentation {
     /// Walks one window's tree and returns the harvested elements, normalized to `windowFrame`.
     /// Preserves named container paths, field values and availability. Duplicate labels within the
     /// same container take ordinals; labels in different containers remain independently addressable.
+    /// The elements of `harvest`, for a caller that needs no quality.
     public static func elements<Reader: AccessibilityTreeReading>(
         under window: Reader.Node,
         windowFrame : CGRect,
         reader      : Reader,
         limits      : Limits = Limits()
     ) -> [SceneElement] {
-        guard windowFrame.width > 0, windowFrame.height > 0 else { return [] }
-        var out: [SceneElement] = []
-        var tables = 0
+        harvest(under: window, windowFrame: windowFrame, reader: reader, limits: limits).elements
+    }
 
-        func emit(_ frame: CGRect, role: String, label: String, state: ControlState?, clip: CGRect,
-                  container: String?, value: String? = nil, isEnabled: Bool? = nil) {
-            guard out.count < limits.maxElements,
-                  let bounds = AccessibilityFrameTrust.normalized(frame, in: windowFrame),
+    /// Walks one window's tree and returns the harvested elements with the quality of the walk.
+    ///
+    /// The quality is measured, never inferred from the elements: `walkCompleted` is true only when
+    /// no limit and no deadline cut the walk short, and the first limit met is `stoppedBy`. A row
+    /// scrolled out of its container, a frame the trust rule refuses and a label outside the length
+    /// bounds are filtered, not truncated: they are the walk's own rules, applied the same way on
+    /// every capture, and they leave `walkCompleted` alone. A degenerate window frame reads nothing
+    /// and answers `windowFound` false: there was no readable window for this capture.
+    public static func harvest<Reader: AccessibilityTreeReading>(
+        under window: Reader.Node,
+        windowFrame : CGRect,
+        reader      : Reader,
+        limits      : Limits = Limits()
+    ) -> AccessibilityHarvest {
+        let windowRole    = reader.role(window)
+        let windowSubrole = reader.subrole(window)
+        guard windowFrame.width > 0, windowFrame.height > 0 else {
+            return AccessibilityHarvest(elements: [], quality: CaptureQuality(
+                walkCompleted  : false,
+                windowFound    : false,
+                windowRole     : windowRole,
+                windowSubrole  : windowSubrole,
+                nodesVisited   : 0,
+                elementsEmitted: 0
+            ))
+        }
+        var out: [SceneElement] = []
+        var tables       = 0
+        var nodesVisited = 0
+        var stoppedBy: CaptureQuality.StopReason?
+
+        func stop(_ reason: CaptureQuality.StopReason) {
+            if stoppedBy == nil { stoppedBy = reason }
+        }
+
+        func emit(_ frame: CGRect, role: String, label: String, origin: LabelOrigin, state: ControlState?,
+                  clip: CGRect, container: String?, collectionPath: String?, value: String? = nil,
+                  isEnabled: Bool? = nil) {
+            guard out.count < limits.maxElements else { return stop(.elementLimit) }
+            guard let bounds = AccessibilityFrameTrust.normalized(frame, in: windowFrame),
                   clip.contains(CGPoint(x: frame.midX, y: frame.midY)) else { return }
             out.append(SceneElement(
-                id    : SceneIdentity.key(kind: .control, label: label, bounds: bounds, isUnlabeled: false),
-                kind  : .control,
-                label : label,
-                bounds: bounds,
-                role  : role,
-                state : state,
-                value : value,
-                isEnabled: isEnabled,
-                container: container
+                id            : SceneIdentity.key(kind: .control, label: label, bounds: bounds, isUnlabeled: false),
+                kind          : .control,
+                label         : label,
+                bounds        : bounds,
+                role          : role,
+                state         : state,
+                value         : value,
+                isEnabled     : isEnabled,
+                container     : container,
+                labelOrigin   : origin,
+                collectionPath: collectionPath
             ))
         }
 
         func walk(_ node: Reader.Node, _ depth: Int, _ clip: CGRect, _ container: String?,
-                  column: String? = nil, rowName: String? = nil) {
-            guard depth < limits.maxDepth, out.count < limits.maxElements,
-                  !limits.isPastDeadline() else { return }
+                  collectionPath: String?, column: String? = nil, rowName: String? = nil) {
+            guard depth < limits.maxDepth else { return stop(.depthLimit) }
+            guard out.count < limits.maxElements else { return stop(.elementLimit) }
+            guard !limits.isPastDeadline() else { return stop(.deadline) }
+            nodesVisited += 1
             let role = reader.role(node) ?? ""
             var childContainer = container
+            var isNamed = false
             if role == "AXGroup" || tableRoles.contains(role),
                let name = firstText([reader.title(node), reader.descriptionText(node)]),
                !name.hasPrefix("UI_"), name.count <= 80 {
                 let clean = cleanLabel(name)
                 childContainer = container.map { $0 + " / " + clean } ?? clean
+                isNamed = true
             }
             // A scrolling container tightens the clip and prunes a subtree entirely outside it. A plain
             // group also tightens (some toolkits scroll in groups) but is never trusted to prune.
@@ -113,45 +161,60 @@ public enum AccessibilityAugmentation {
                 if !inner.isNull, inner.width >= 8, inner.height >= 8 { childClip = inner }
             }
             if tableRoles.contains(role) {
-                guard tables < limits.maxTables else { return }
+                guard tables < limits.maxTables else { return stop(.tableLimit) }
                 tables += 1
+                // The collection's structural path: the table's own title when it has one, else its
+                // role. A collection inside a row keeps the outer collection: a row's name is content.
+                let collection = collectionPath
+                    ?? (isNamed ? childContainer : container.map { $0 + " / " + role } ?? role)
                 let children = reader.children(node)
                 let columns = children.filter { reader.role($0) == "AXColumn" }.map {
                     firstText([reader.title($0), reader.descriptionText($0)])
                 }
                 for row in children where reader.role(row) == "AXRow" {
-                    if out.count >= limits.maxElements || limits.isPastDeadline() { break }
+                    if out.count >= limits.maxElements { stop(.elementLimit); break }
+                    if limits.isPastDeadline() { stop(.deadline); break }
+                    nodesVisited += 1
                     if let rowFrame = reader.frame(row), rowFrame.height > 0, !childClip.intersects(rowFrame) {
                         continue
                     }
-                    guard let named = deepestNamed(row, reader: reader, isPastDeadline: limits.isPastDeadline) else {
-                        continue
-                    }
+                    let named = deepestNamed(row, reader: reader, isPastDeadline: limits.isPastDeadline)
+                    if limits.isPastDeadline() { stop(.deadline) }
+                    guard let named else { continue }
                     let label = cleanLabel(named.name)
                     guard label.count >= 2, label.count <= 48 else { continue }
-                    emit(named.frame, role: "AXRow", label: label, state: nil, clip: childClip,
-                         container: childContainer, isEnabled: reader.isEnabled(row))
+                    emit(named.frame, role: "AXRow", label: label, origin: .rowContent, state: nil, clip: childClip,
+                         container: childContainer, collectionPath: collection, isEnabled: reader.isEnabled(row))
                     let owner = childContainer.map { $0 + " / " + label } ?? label
                     let cells = reader.children(row)
                     // Only use column order when the table exposes a complete cell-to-column map.
                     // Otherwise traverse the controls with their own labels and row context.
                     let aligned = cells.count == columns.count && cells.allSatisfy { reader.role($0) == "AXCell" }
                     for (index, cell) in cells.enumerated() {
-                        walk(cell, depth + 2, childClip, owner, column: aligned ? columns[index] : nil, rowName: label)
+                        walk(cell, depth + 2, childClip, owner, collectionPath: collection,
+                             column: aligned ? columns[index] : nil, rowName: label)
                     }
                 }
                 return
             }
             if role == "AXTextField" || role == "AXPopUpButton", let frame = reader.frame(node) {
-                let handle = column ?? firstText([reader.descriptionText(node), reader.title(node), reader.value(node)])
-                if let handle, handle.count <= 48, column != nil || rowName != cleanLabel(handle) {
-                    emit(frame, role: role, label: handle, state: nil, clip: clip, container: container,
+                let handle = column.map { ($0, LabelOrigin.column) } ?? firstLabel([
+                    (reader.descriptionText(node), .description),
+                    (reader.title(node), .title),
+                    (reader.value(node), .value),
+                ])
+                if let (handle, origin) = handle, handle.count <= 48, column != nil || rowName != cleanLabel(handle) {
+                    emit(frame, role: role, label: handle, origin: origin, state: nil, clip: clip,
+                         container: container, collectionPath: collectionPath,
                          value: firstText([reader.value(node), role == "AXPopUpButton" ? reader.title(node) : nil]),
                          isEnabled: reader.isEnabled(node))
                 }
             }
             if statefulRoles.contains(role), let frame = reader.frame(node) {
-                let title = column ?? firstText([reader.title(node), reader.descriptionText(node)])
+                let title = column.map { ($0, LabelOrigin.column) } ?? firstLabel([
+                    (reader.title(node), .title),
+                    (reader.descriptionText(node), .description),
+                ])
                 let value = firstText([reader.value(node)])
                 var state: ControlState?
                 if role == "AXCheckBox" || role == "AXRadioButton" {
@@ -162,17 +225,20 @@ public enum AccessibilityAugmentation {
                         default: break
                     }
                 }
-                if let label = title ?? value, label.count <= 48, column != nil || rowName != cleanLabel(label) {
-                    emit(frame, role: role, label: label, state: state, clip: clip, container: container,
+                let labeled = title ?? value.map { ($0, LabelOrigin.value) }
+                if let (label, origin) = labeled, label.count <= 48, column != nil || rowName != cleanLabel(label) {
+                    emit(frame, role: role, label: label, origin: origin, state: state, clip: clip,
+                         container: container, collectionPath: collectionPath,
                          value: role == "AXComboBox" || role == "AXMenuButton" ? value : nil,
                          isEnabled: reader.isEnabled(node))
                 }
             }
             for child in reader.children(node) {
-                walk(child, depth + 1, childClip, childContainer, column: column, rowName: rowName)
+                walk(child, depth + 1, childClip, childContainer, collectionPath: collectionPath,
+                     column: column, rowName: rowName)
             }
         }
-        walk(window, 0, windowFrame, nil)
+        walk(window, 0, windowFrame, nil, collectionPath: nil)
 
         var seen: [String: Int] = [:]
         for index in out.indices {
@@ -181,7 +247,15 @@ public enum AccessibilityAugmentation {
             seen[key] = count
             if count > 1 { out[index].label += " #\(count)" }
         }
-        return out
+        return AccessibilityHarvest(elements: out, quality: CaptureQuality(
+            walkCompleted  : stoppedBy == nil,
+            stoppedBy      : stoppedBy,
+            windowFound    : true,
+            windowRole     : windowRole,
+            windowSubrole  : windowSubrole,
+            nodesVisited   : nodesVisited,
+            elementsEmitted: out.count
+        ))
     }
 
     // MARK: Merge
@@ -197,6 +271,11 @@ public enum AccessibilityAugmentation {
     /// carrying the state and a combo box carrying the same title); the second facet matches the
     /// first and is redundant, so it is skipped rather than allowed to overwrite the state the first
     /// one brought. Measured live on Premiere's tab strip, both ways.
+    ///
+    /// The harvested facts about structure survive the merge: a pixel element that a harvested one
+    /// matches takes its `collectionPath` when it had none, and an upgrade takes the harvested
+    /// label together with its `labelOrigin`. A pixel element that keeps its own label keeps no
+    /// origin: its name came from pixels.
     public static func merge(pixels: [SceneElement], accessibility: [SceneElement]) -> [SceneElement] {
         guard !accessibility.isEmpty else { return pixels }
         var result = pixels
@@ -227,6 +306,7 @@ public enum AccessibilityAugmentation {
             }
             if let index = match {
                 if result[index].container == nil { result[index].container = element.container }
+                if result[index].collectionPath == nil { result[index].collectionPath = element.collectionPath }
                 if result[index].isEnabled == nil { result[index].isEnabled = element.isEnabled }
                 if result[index].value == nil { result[index].value = element.value }
                 guard isInteractive, !upgraded.contains(index) else { continue }
@@ -238,7 +318,9 @@ public enum AccessibilityAugmentation {
                 result[index].value = element.value
                 result[index].isEnabled = element.isEnabled
                 result[index].container = element.container
+                result[index].collectionPath = element.collectionPath
                 result[index].label = element.label
+                result[index].labelOrigin = element.labelOrigin
                 coreKeys[index] = core
                 valueKeys[index] = LabelText.coreKey(element.label)
                 result[index].isUnlabeled = false
@@ -312,5 +394,15 @@ public enum AccessibilityAugmentation {
         candidates
             .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
             .first { !$0.isEmpty && $0 != placeholder }
+    }
+
+    /// The first usable text among the candidates, with the attribute it was read from.
+    private static func firstLabel(_ candidates: [(String?, LabelOrigin)]) -> (String, LabelOrigin)? {
+        for (candidate, origin) in candidates {
+            guard let text = candidate?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !text.isEmpty, text != placeholder else { continue }
+            return (text, origin)
+        }
+        return nil
     }
 }
