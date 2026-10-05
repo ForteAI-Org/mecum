@@ -5,6 +5,7 @@
 //  Created by Eliomar Alejandro Rodriguez Ferrer on 25/09/2026.
 //
 
+import AgentTurn
 import ChatCore
 import Foundation
 import ModelTransports
@@ -239,7 +240,7 @@ struct ContextCompactionTeamTests {
             ["", "mcp__mecum__*"],
             ["", "mcp__mecum__*"],
         ])
-        #expect(calls.map { $0.arguments.contains { $0.contains(WorkerAgentHost.webInstructions) } }
+        #expect(calls.map { $0.arguments.contains { $0.contains(AgentTurnHost.webInstructions) } }
                 == [true, false, false, false])
         await harness.discard()
     }

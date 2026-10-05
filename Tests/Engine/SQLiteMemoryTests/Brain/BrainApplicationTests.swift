@@ -91,6 +91,107 @@ struct BrainApplicationTests {
         await memory.store.close()
     }
 
+    @Test("a record and a naming are keyed by their event alone: NULL phase and ordinal do not let the key in twice")
+    func callKeys() async throws {
+        let memory = try await A.open()
+        try await memory.event("e1")
+        try await memory.event("e2")
+        let record = try A.record("e2", A.element("Send", index: 0), effect: .stateFlip(from: .off, to: .on))
+        let first = try await memory.applications.apply(record)
+        #expect(try await memory.applications.apply(record).receipt == .alreadyApplied)
+        let name = try BrainApplicationCommand.setName("Send button", anchorKey: "anchor-1", in: A.bundle, eventID: "e2", requestedAt: A.t0)
+        #expect(try await memory.applications.apply(name).receipt == .committed)
+        #expect(try await memory.applications.apply(name).receipt == .alreadyApplied)
+        #expect(first.outcome == .noAnchor)
+        #expect(try await memory.count("SELECT count(*) FROM brain_applications WHERE event_id = 'e2'") == 2)
+        #expect(try await memory.count("SELECT count(*) FROM brain_applications WHERE phase IS NULL AND sample_ordinal IS NULL") == 2)
+        await memory.store.close()
+    }
+
+    @Test("no effect, no anchor, an empty ingest and an unknown anchor named are concluded applications, answered again on retry, with no evidence")
+    func noOpsAreConcluded() async throws {
+        let memory = try await A.open()
+        for id in ["e1", "e2", "e3", "e4"] { try await memory.event(id) }
+        let commands = [
+            try A.record("e1", A.element("Send", index: 0), effect: nil),
+            try A.record("e2", A.element("Send", index: 0), effect: .stateFlip(from: .off, to: .on)),
+            try A.observe(try await memory.sample("e3"), []),
+            try BrainApplicationCommand.setName("Ghost", anchorKey: "no-such-anchor", in: A.bundle, eventID: "e4", requestedAt: A.t0),
+        ]
+        let outcomes: [BrainApplicationOutcome] = [.noEffect, .noAnchor, .observed(created: 0, updated: 0, skippedAmbiguous: 0), .notNamed]
+        for (command, outcome) in zip(commands, outcomes) {
+            let first = try await memory.applications.apply(command)
+            #expect(first.receipt == .committed && first.outcome == outcome)
+            let again = try await memory.applications.apply(command)
+            #expect(again.receipt == .alreadyApplied && again.outcome == outcome && again.applicationID == first.applicationID)
+        }
+        #expect(try await memory.texts("SELECT outcome FROM brain_applications ORDER BY application_id") == ["no_effect", "no_anchor", "observed", "not_named"])
+        #expect(try await memory.texts("SELECT text_value FROM memory_operation_arguments WHERE argument_name = 'anchor_key'") == ["no-such-anchor"],
+                "the unknown key is kept as a literal, not as a reference to an anchor")
+        #expect(try await memory.count("SELECT count(*) FROM brain_evidence") == 0)
+        #expect(try await memory.count("SELECT count(*) FROM brain_anchors") == 0)
+        #expect(try await memory.brain() == UIBrain())
+        await memory.store.close()
+    }
+
+    @Test("another command under a concluded key is a conflict, field by field, and nothing moves")
+    func conflictsFieldByField() async throws {
+        let memory = try await A.open()
+        try await memory.event("e1")
+        let sample = try await memory.sample("e1")
+        let detections = A.controls(["Café", "Draft", "Discard"])
+        let base = try A.observe(sample, detections, window: "inbox")
+        _ = try await memory.applications.apply(base)
+        let brain = try await memory.brain()
+        var moved = detections
+        moved[1] = BrainDetection(kind: .control, label: "Draft", bounds: NormalizedRect(x: 0.5, y: detections[1].bounds.y.nextUp, width: 0.03, height: 0.017))
+        let variants: [(String, BrainApplicationCommand)] = [
+            ("window absent", try A.observe(sample, detections, window: nil)),
+            ("window empty", try A.observe(sample, detections, window: "")),
+            ("decomposed é", try A.observe(sample, A.controls(["Cafe\u{301}", "Draft", "Discard"]), window: "inbox")),
+            ("NUL", try A.observe(sample, A.controls(["Café\u{0}", "Draft", "Discard"]), window: "inbox")),
+            ("separator", try A.observe(sample, A.controls(["Café|Draft", "Draft", "Discard"]), window: "inbox")),
+            ("next REAL", try A.observe(sample, moved, window: "inbox")),
+            ("order", try A.observe(sample, [detections[1], detections[0], detections[2]], window: "inbox")),
+            ("pixel-only icon", try A.observe(sample, detections + [BrainDetection(kind: .icon, label: "", bounds: NormalizedRect(x: 0.9, y: 0.9, width: 0.02, height: 0.02))], window: "inbox")),
+            ("requested time", try A.observe(sample, detections, window: "inbox", at: A.t0.addingTimeInterval(0.001))),
+        ]
+        for (name, variant) in variants {
+            let error = await storeError { _ = try await memory.applications.apply(variant) }
+            guard case .identity(let conflict)? = error else {
+                Issue.record("\(name): expected a conflict, got \(String(describing: error))")
+                continue
+            }
+            #expect(conflict.identity == "brain:e1:observe:after:0", Comment(rawValue: name))
+        }
+        let newer = SQLiteBrainApplicationRepository(store: memory.store, algorithmVersion: "brain-updater-2")
+        let versioned = await storeError { _ = try await newer.apply(base) }
+        guard case .identity(let conflict)? = versioned else {
+            Issue.record("a new algorithm version must not re-apply the key, got \(String(describing: versioned))")
+            return
+        }
+        #expect(conflict.storedFingerprint.hasPrefix("v1/brain-updater-1/") && conflict.offeredFingerprint.hasPrefix("v1/brain-updater-2/"))
+        try await memory.event("e2")
+        let flip = try A.record("e2", A.element("Café", index: 0), effect: .menuOpened(labels: ["A", "B"]))
+        _ = try await memory.applications.apply(flip)
+        for (name, variant) in [
+            ("item order", try A.record("e2", A.element("Café", index: 0), effect: .menuOpened(labels: ["B", "A"]))),
+            ("no effect", try A.record("e2", A.element("Café", index: 0), effect: nil)),
+            ("empty list", try A.record("e2", A.element("Café", index: 0), effect: .menuOpened(labels: []))),
+            ("verb", try A.record("e2", A.element("Café", index: 0), effect: .menuOpened(labels: ["A", "B"]), verb: .rightClick)),
+        ] {
+            let error = await storeError { _ = try await memory.applications.apply(variant) }
+            guard case .identity? = error else {
+                Issue.record("\(name): expected a conflict, got \(String(describing: error))")
+                continue
+            }
+        }
+        #expect(try await memory.count("SELECT count(*) FROM brain_applications") == 2)
+        #expect(try await memory.brain()?.objects.map(\.seenCount) == brain?.objects.map(\.seenCount))
+        #expect(try await memory.count("SELECT evidence_count FROM brain_transitions") == 1)
+        await memory.store.close()
+    }
+
     @Test("a late command runs at the application's clock, never earlier than what the brain holds: raw fixtures, another store, reopening, retirements; the event's own time stays")
     func effectiveClock() async throws {
         let memory = try await A.open()
@@ -165,6 +266,35 @@ struct BrainApplicationTests {
         await memory.store.close()
     }
 
+    @Test("references the store does not hold, or that name another application, are typed refusals before anything is written")
+    func references() async throws {
+        let memory = try await A.open()
+        await #expect(throws: BrainApplicationError.missingEvent(eventID: "nowhere")) {
+            _ = try await memory.applications.apply(try A.observe(CaptureSampleKey(eventID: "nowhere", phase: .after), []))
+        }
+        try await memory.event("elsewhere", bundle: A.other)
+        await #expect(throws: BrainApplicationError.eventOfAnotherApplication(eventID: "elsewhere")) {
+            _ = try await memory.applications.apply(try A.observe(CaptureSampleKey(eventID: "elsewhere", phase: .after), []))
+        }
+        try await memory.event("seen", kind: .observation)
+        await #expect(throws: BrainApplicationError.eventIsNotAnAction(eventID: "seen")) {
+            _ = try await memory.applications.apply(try A.record("seen", A.element("Send", index: 0), effect: nil))
+        }
+        await #expect(throws: BrainApplicationError.missingSample(CaptureSampleKey(eventID: "seen", phase: .before))) {
+            _ = try await memory.applications.apply(try A.observe(CaptureSampleKey(eventID: "seen", phase: .before), []))
+        }
+        _ = try await memory.captures.record(MemoryEventRecord(eventID: "global", source: .app, streamID: "w", sourceKey: "global",
+                                                               kind: .action, app: nil, occurredAtMS: 1))
+        await #expect(throws: BrainApplicationError.eventWithoutApp(eventID: "global")) {
+            _ = try await memory.applications.apply(try A.record("global", A.element("Send", index: 0), effect: nil))
+        }
+        #expect(try await memory.count("SELECT count(*) FROM brain_applications") == 0)
+        #expect(try await memory.count("SELECT count(*) FROM memory_operation_arguments") == 0)
+        #expect(try await memory.count("SELECT count(*) FROM brain_apps WHERE bundle_id = 'test.fixture.applications'") == 1,
+                "the application row is the event's, never invented")
+        await memory.store.close()
+    }
+
     @Test("a concluded application's header and input cannot be changed, extended or removed, and its sample keeps its identity")
     func sealedAndKept() async throws {
         let memory = try await A.open()
@@ -190,6 +320,103 @@ struct BrainApplicationTests {
             in: memory.store)
         #expect(orphan?.code.extended == 787, "an argument whose application never comes is refused at the commit")
         #expect(try await memory.applications.application(.observe(sample))?.command.hasSameInput(as: try A.observe(sample, A.controls(["Send"]))) == true)
+        await memory.store.close()
+    }
+
+    @Test("a stored application another hand wrote is refused on the way out by its shape or version; a version this build cannot read is a conflict, not a re-application")
+    func malformedStoredApplications() async throws {
+        let memory = try await A.open()
+        try await memory.event("e1")
+        try await memory.event("e2")
+        try await memory.store.write { transaction in
+            try transaction.execute(
+                "INSERT INTO memory_operation_arguments (brain_application_id, app_id, argument_name, position, value_kind, text_value) VALUES (1, 1, 'mood', 0, 'text', 'x')")
+            try transaction.execute(
+                """
+                INSERT INTO brain_applications (application_id, app_id, event_id, operation, contract_version, algorithm_version,
+                    requested_at_ms, effective_at_ms, outcome) VALUES (1, 1, 'e1', 'record', 1, 'brain-updater-1', 0, 0, 'no_effect')
+                """)
+            try transaction.execute(
+                "INSERT INTO memory_operation_arguments (brain_application_id, app_id, argument_name, position, value_kind, text_value) VALUES (2, 1, 'verb', 0, 'text', 'click')")
+            try transaction.execute(
+                """
+                INSERT INTO brain_applications (application_id, app_id, event_id, operation, contract_version, algorithm_version,
+                    requested_at_ms, effective_at_ms, outcome) VALUES (2, 1, 'e2', 'record', 2, 'brain-updater-9', 0, 0, 'no_effect')
+                """)
+        }
+        await #expect(throws: BrainApplicationError.malformedApplication(applicationID: 1, malformation: .forbiddenArgument("mood"))) {
+            _ = try await memory.applications.application(.record(eventID: "e1"))
+        }
+        await #expect(throws: BrainApplicationError.malformedApplication(applicationID: 1, malformation: .forbiddenArgument("mood"))) {
+            _ = try await memory.applications.apply(try A.record("e1", A.element("Send", index: 0), effect: nil))
+        }
+        await #expect(throws: BrainApplicationError.unsupportedContractVersion(2)) {
+            _ = try await memory.applications.application(.record(eventID: "e2"))
+        }
+        let error = await storeError { _ = try await memory.applications.apply(try A.record("e2", A.element("Send", index: 0), effect: nil)) }
+        guard case .identity? = error else {
+            Issue.record("expected a conflict, got \(String(describing: error))")
+            return
+        }
+        #expect(try await memory.count("SELECT count(*) FROM brain_applications") == 2)
+        await memory.store.close()
+    }
+
+    @Test("the evidence names only what the algorithm's counters moved: anchors seen, groups merged, transitions raised; never an ambiguous candidate, a naming or a record that taught nothing")
+    func evidenceSources() async throws {
+        let memory = try await A.open()
+        try await memory.event("e1")
+        let column = (0..<3).map { BrainDetection(kind: .control, label: "S\($0)", bounds: NormalizedRect(x: 0.2, y: 0.1 + Double($0) * 0.05, width: 0.03, height: 0.017)) }
+        let mute = [BrainDetection(kind: .control, label: "Mute", bounds: NormalizedRect(x: 0.7, y: 0.30, width: 0.03, height: 0.017)),
+                    BrainDetection(kind: .control, label: "Mute", bounds: NormalizedRect(x: 0.7, y: 0.33, width: 0.03, height: 0.017))]
+        let applied = try await memory.applications.apply(try A.observe(try await memory.sample("e1"), column + mute))
+        #expect(applied.outcome == .observed(created: 5, updated: 0, skippedAmbiguous: 0))
+        #expect(try await memory.count("SELECT count(*) FROM brain_evidence WHERE anchor_id IS NOT NULL AND event_id = 'e1'") == 5)
+        #expect(try await memory.count("SELECT count(*) FROM brain_evidence WHERE group_id IS NOT NULL AND event_id = 'e1'") == 1)
+        #expect(try await SQLiteBrainGraphRepository(store: memory.store).evidence(ofEvent: "e1").count == 6,
+                "the register's evidence on the projection's anchors and group is read as valid by the graph's reader: no structural scene is asked for")
+        #expect(try await memory.texts("SELECT DISTINCT assessed_by || ' ' || assessment_version FROM brain_evidence") == ["brain.observe brain-updater-1"])
+        #expect(try await memory.integers("SELECT DISTINCT assessed_at_ms FROM brain_evidence") == [applied.effectiveAtMS])
+
+        try await memory.event("e2")
+        let between = [BrainDetection(kind: .control, label: "Mute", bounds: NormalizedRect(x: 0.7, y: 0.315, width: 0.03, height: 0.017))]
+        let ambiguous = try await memory.applications.apply(try A.observe(try await memory.sample("e2"), between, at: A.t0.addingTimeInterval(1)))
+        #expect(ambiguous.outcome == .observed(created: 0, updated: 0, skippedAmbiguous: 1))
+        #expect(try await memory.count("SELECT count(*) FROM brain_evidence WHERE event_id = 'e2'") == 0, "an ambiguous match proves no identity")
+
+        try await memory.event("e3")
+        let s0 = try #require(try await memory.brain()?.objects.first { $0.label == "S0" }).anchorKey
+        let named = try await memory.applications.apply(try .setName("First switch", anchorKey: s0, in: A.bundle, eventID: "e3", requestedAt: A.t0))
+        #expect(named.outcome == .named(anchorKey: s0))
+        try await memory.event("e4")
+        #expect(try await memory.applications.apply(try A.record("e4", A.element("Unknown", index: 9), effect: .stateFlip(from: .off, to: .on))).outcome == .noAnchor)
+        try await memory.event("e5")
+        #expect(try await memory.applications.apply(try A.record("e5", A.element("S1", index: 0), effect: nil)).outcome == .noEffect)
+        #expect(try await memory.count("SELECT count(*) FROM brain_evidence WHERE event_id IN ('e3', 'e4', 'e5')") == 0)
+
+        try await memory.event("e6")
+        let s1 = SceneElement(id: "s1", kind: .control, label: "S1", bounds: NormalizedRect(x: 0.2, y: 0.15, width: 0.03, height: 0.017))
+        let recorded = try await memory.applications.apply(try A.record("e6", s1, effect: .stateFlip(from: .off, to: .on)))
+        guard case .recorded(let anchor, let transition, 1) = recorded.outcome else {
+            Issue.record("expected a recorded transition, got \(recorded.outcome)")
+            return
+        }
+        #expect(try await memory.texts("SELECT transition_id FROM brain_evidence WHERE event_id = 'e6'") == [transition])
+        #expect(try await memory.texts("SELECT anchor_id FROM brain_transitions WHERE transition_id = ?", [.text(transition)]) == [anchor])
+        try await memory.event("e7")
+        let raised = try await memory.applications.apply(try A.record("e7", s1, effect: .stateFlip(from: .off, to: .on)))
+        #expect(raised.outcome == .recorded(anchorKey: anchor, transitionID: transition, evidence: 2))
+        #expect(try await memory.count("SELECT count(*) FROM brain_evidence WHERE transition_id = ?", [.text(transition)]) == 2)
+        try await memory.event("e8")
+        let platform = SceneElement(id: "p", kind: .control, label: "Platform", bounds: NormalizedRect(x: 0.9, y: 0.05, width: 0.05, height: 0.02))
+        let reveal = try await memory.applications.apply(try A.record("e8", platform, effect: .menuOpened(labels: ["Desktop", "Web"])))
+        guard case .recorded(let revealer, _, 1) = reveal.outcome else {
+            Issue.record("expected a reveal, got \(reveal.outcome)")
+            return
+        }
+        #expect(try await memory.texts("SELECT coalesce(anchor_id, transition_id) FROM brain_evidence WHERE event_id = 'e8' ORDER BY evidence_id").first == revealer,
+                "the anchor a reveal created is supported, then its transition")
+        #expect(try await memory.count("SELECT count(*) FROM brain_evidence WHERE event_id = 'e8'") == 2)
         await memory.store.close()
     }
 

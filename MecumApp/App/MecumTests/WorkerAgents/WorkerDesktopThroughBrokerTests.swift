@@ -5,8 +5,11 @@
 //  Created by Eliomar Alejandro Rodriguez Ferrer on 23/09/2026.
 //
 
+import AgentTurn
 import AppKit
+import AutomationRuntime
 import ChatCore
+import Memory
 import Foundation
 import ModelTransports
 import SeatBroker
@@ -57,13 +60,14 @@ struct WorkerDesktopThroughBrokerTests {
         }
         try #require(!isRunning, "Calculator is already running: quit it, so the row acts only on what it opened")
 
-        let desktop = BrokeredAutomationSession(broker: broker, workerID: UUID(), knowledgeDirectory: knowledge)
-        let host = WorkerAgentHost(workingDirectory: scratch.appending(path: "work"), bridgeExecutable: bridge,
-                                   session: { desktop })
+        let memory  = MemoryService(directory: knowledge)
+        let desktop = BrokeredAutomationSession(broker: broker, workerID: UUID(), memory: memory)
+        let host = AgentTurnHost(workingDirectory: scratch.appending(path: "work"), bridgeExecutable: bridge,
+                                   session: { desktop }, memory: memory)
         var tools  : [String] = []
         var replies: [String] = []
         var failure: (any Error)?
-        let receive: @MainActor (WorkerAgentEvent) -> Void = { event in
+        let receive: @MainActor (AgentTurnEvent) -> Void = { event in
             switch event {
             case .tool(let text):                    tools.append(text)
             case .provider(.assistant(let text)):    replies.append(text)
@@ -86,10 +90,12 @@ struct WorkerDesktopThroughBrokerTests {
         print("WORKER row at the end of the turn:", desktop.activity ?? "nil")
         try await host.close()
         print("WORKER queue after close:", broker.queue.entries.map(\.label))
-        // An absent directory is the Brain having written nothing, which the expectation below reports.
-        let learned = FileManager.default.fileExists(atPath: knowledge.path)
-            ? try FileManager.default.contentsOfDirectory(atPath: knowledge.path) : []
-        print("WORKER knowledge files:", learned)
+        // The Brain as the living memory holds it: Calculator's projection in memory.sqlite, read through the
+        // service the worker wrote with, before it closes. No JSON file is read or expected.
+        let calculator = try await memory.brain(of: "com.apple.calculator")
+        let catalogue  = try await memory.overview().apps.map(\.bundleID)
+        print("WORKER memory applications:", catalogue)
+        await memory.close()
         await broker.queue.shutdown()
         let cleanup = Result { try FileManager.default.removeItem(at: scratch) }
         if let failure { throw failure }
@@ -104,7 +110,6 @@ struct WorkerDesktopThroughBrokerTests {
         #expect(clicks.contains { $0 > opened }, "no click after open_session")
         #expect(!replies.isEmpty, "no answer arrived")
         #expect(broker.queue.entries.isEmpty, "the lease is still held after the host closed")
-        #expect(learned.contains { $0.lowercased().contains("calculator") && $0.hasSuffix(".json") },
-                "the Brain wrote no knowledge file for Calculator")
+        #expect(calculator.map { !$0.objects.isEmpty } == true, "the Brain learned nothing of Calculator in memory.sqlite")
     }
 }

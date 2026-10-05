@@ -5,6 +5,7 @@
 //  Created by Eliomar Alejandro Rodriguez Ferrer on 23/09/2026.
 //
 
+import AgentTurn
 import ChatCore
 import CLIProviders
 import Foundation
@@ -127,7 +128,7 @@ final class WorkerTurnRecorder {
     /// leaves the message as it was. After that it always attempts the
     /// terminal event, and throws the first write that failed, if any.
     func run(
-        _ agent: (ModelSelection, String?, @escaping @MainActor (WorkerAgentEvent) -> Void) async throws -> Void
+        _ agent: (ModelSelection, String?, @escaping @MainActor (AgentTurnEvent) -> Void) async throws -> Void
     ) async throws -> Ending {
         let stored    = try await store.conversation(conversationID)
         let execution = try await store.startExecution(worker: workerID, conversation: conversationID)
@@ -137,7 +138,7 @@ final class WorkerTurnRecorder {
         try await store.update(message: messageID, delivery: .sentToBackend)
         await onRecorded()
 
-        let (events, continuation) = AsyncStream.makeStream(of: WorkerAgentEvent.self)
+        let (events, continuation) = AsyncStream.makeStream(of: AgentTurnEvent.self)
         let writer = Task { @MainActor in
             var state = WriteState(session: resumed)
             for await event in events {
@@ -186,7 +187,7 @@ final class WorkerTurnRecorder {
     }
 
     private func write(
-        _ event  : WorkerAgentEvent,
+        _ event  : AgentTurnEvent,
         execution: UUID,
         provider : ModelProvider,
         state    : inout WriteState

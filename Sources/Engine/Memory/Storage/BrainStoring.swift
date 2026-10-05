@@ -57,6 +57,9 @@ public protocol BrainStoring: BrainReading {
     /// `BrainMemory.observe` scopes it: the empty family is no scope.
     func observe(_ scene: SceneSnapshot, now: Date) async throws -> BrainUpdater.IngestStats
 
+    /// Records what an action taught, with `BrainMemory.record`'s rules, at this clock.
+    func record(_ record: ActionRecord, now: Date) async throws -> BrainRecordOutcome
+
     /// Names an anchor deliberately as `BrainUpdater.setName` does; false when the anchor is unknown.
     func setName(_ name: String, anchorKey: String, in bundleID: String, now: Date) async throws -> Bool
 

@@ -98,10 +98,10 @@ struct InputDeliveryTests {
     // MARK: type_text
 
     @Test("replacing clicks the field, selects what it holds, types, and the value read back decides")
-    func replaceIsVerifiedByTheValue() async {
+    func replaceIsVerifiedByTheValue() async throws {
         let actuator = RecordingActuator()
         let controls = FakeControls(); controls.focused = "My Project"
-        let outcome = await engine(scenes: ScriptedScenes([scene([field(value: "New Project 2")])]),
+        let outcome = try await engine(scenes: ScriptedScenes([scene([field(value: "New Project 2")])]),
                                    actuator: actuator, controls: controls)
             .deliver(request(.typeText("My Project", into: "Project Name", replacing: true)))
         #expect(outcome.kind == .foundActed, Comment(rawValue: outcome.message))
@@ -111,11 +111,11 @@ struct InputDeliveryTests {
     }
 
     @Test("an unreadable field is selected with a triple click, and one read as empty is only clicked, with no key")
-    func replaceSendsNoKeyToAFieldItCannotRead() async {
+    func replaceSendsNoKeyToAFieldItCannotRead() async throws {
         for (value, preparation) in [(nil, [Gesture.click(at: fieldPoint, count: 3)]),
                                      ("",  [Gesture.click(at: fieldPoint)])] as [(String?, [Gesture])] {
             let actuator = RecordingActuator()
-            _ = await engine(scenes: ScriptedScenes([scene([field(value: value)])]), actuator: actuator)
+            _ = try await engine(scenes: ScriptedScenes([scene([field(value: value)])]), actuator: actuator)
                 .deliver(request(.typeText("io la sto usando", into: "Project Name", replacing: true)))
             // Slack's empty composer reads as nothing, and an Up arrow there edits the last message.
             #expect(actuator.gestures == preparation + [.type("io la sto usando")])
@@ -123,10 +123,10 @@ struct InputDeliveryTests {
     }
 
     @Test("a value that is not the typed text is acted_unverified, and says what the field reads")
-    func wrongValueIsUnverified() async {
+    func wrongValueIsUnverified() async throws {
         let actuator = RecordingActuator()
         let controls = FakeControls(); controls.focused = "New Project 2My Project"
-        let outcome = await engine(scenes: ScriptedScenes([scene([field(value: "New Project 2")])]),
+        let outcome = try await engine(scenes: ScriptedScenes([scene([field(value: "New Project 2")])]),
                                    actuator: actuator, controls: controls)
             .deliver(request(.typeText("My Project", into: "Project Name", replacing: true)))
         #expect(outcome.kind == .actedUnverified)
@@ -135,33 +135,33 @@ struct InputDeliveryTests {
     }
 
     @Test("without a focus reading the after-scene's value decides, and no value at all is unverified")
-    func sceneValueIsTheFallback() async {
-        let typed = await engine(scenes: ScriptedScenes([scene([field(value: "New Project 2")]),
+    func sceneValueIsTheFallback() async throws {
+        let typed = try await engine(scenes: ScriptedScenes([scene([field(value: "New Project 2")]),
                                                          scene([field(value: "My Project")])]))
             .deliver(request(.typeText("My Project", into: "Project Name", replacing: true)))
         #expect(typed.kind == .foundActed, Comment(rawValue: typed.message))
-        let unread = await engine(scenes: ScriptedScenes([scene([field(value: nil)])]))
+        let unread = try await engine(scenes: ScriptedScenes([scene([field(value: nil)])]))
             .deliver(request(.typeText("My Project", into: "Project Name", replacing: true)))
         #expect(unread.kind == .actedUnverified)
         #expect(unread.message.contains("no field's value could be read"))
     }
 
     @Test("a short text is typed a key pair per character and a long one is inserted on one event")
-    func shortTypesLongInserts() async {
+    func shortTypesLongInserts() async throws {
         for (count, inserts) in [(ActionEngine.typedTextLimit, false), (ActionEngine.typedTextLimit + 1, true)] {
             let text = String(repeating: "a", count: count)
             let actuator = RecordingActuator()
-            _ = await engine(scenes: ScriptedScenes([scene([field(value: "")])]), actuator: actuator)
+            _ = try await engine(scenes: ScriptedScenes([scene([field(value: "")])]), actuator: actuator)
                 .deliver(request(.typeText(text, into: "Project Name", replacing: true)))
             #expect(actuator.gestures.last == (inserts ? .insert(text) : .type(text)))
         }
     }
 
     @Test("appending moves to the field's end instead of selecting, and expects the old value first")
-    func appendKeepsTheValue() async {
+    func appendKeepsTheValue() async throws {
         let actuator = RecordingActuator()
         let controls = FakeControls(); controls.focused = "Budget 2027"
-        let outcome = await engine(scenes: ScriptedScenes([scene([field(value: "Budget")])]),
+        let outcome = try await engine(scenes: ScriptedScenes([scene([field(value: "Budget")])]),
                                    actuator: actuator, controls: controls)
             .deliver(request(.typeText(" 2027", into: "Project Name", replacing: false)))
         #expect(outcome.kind == .foundActed, Comment(rawValue: outcome.message))
@@ -170,14 +170,14 @@ struct InputDeliveryTests {
     }
 
     @Test("a dry run types nothing, and an empty text is refused")
-    func typeDryRunAndEmpty() async {
+    func typeDryRunAndEmpty() async throws {
         let actuator = RecordingActuator()
-        let rehearsal = await engine(scenes: ScriptedScenes([scene([field(value: "x")])]), actuator: actuator)
+        let rehearsal = try await engine(scenes: ScriptedScenes([scene([field(value: "x")])]), actuator: actuator)
             .deliver(request(.typeText("My Project", into: "Project Name", replacing: true), dryRun: true))
         #expect(rehearsal.kind == .dryRun)
         #expect(rehearsal.message == "would click 'Project Name' at 500,432, select what it holds and type 10 "
             + "characters")
-        let empty = await engine(scenes: ScriptedScenes([scene([field(value: "x")])]), actuator: actuator)
+        let empty = try await engine(scenes: ScriptedScenes([scene([field(value: "x")])]), actuator: actuator)
             .deliver(request(.typeText("", into: "Project Name", replacing: true)))
         #expect(empty.kind == .refused)
         #expect(actuator.gestures.isEmpty)
@@ -186,12 +186,12 @@ struct InputDeliveryTests {
     // MARK: press_key
 
     @Test("Command-Q and Command-W are refused before any event, even with destructive actions allowed")
-    func quitAndCloseAreRefused() async {
+    func quitAndCloseAreRefused() async throws {
         let actuator = RecordingActuator()
         let allowed = ActionPermissions(allowsDestructive: true)
         for chord in [KeyChord(.character("q"), modifiers: .command),
                       KeyChord(.character("w"), modifiers: [.command, .shift])] {
-            let outcome = await engine(scenes: ScriptedScenes([scene([export])]), actuator: actuator,
+            let outcome = try await engine(scenes: ScriptedScenes([scene([export])]), actuator: actuator,
                                        permissions: allowed)
                 .deliver(request(.pressKey(chord, times: 1)))
             #expect(outcome.kind == .refused)
@@ -200,22 +200,22 @@ struct InputDeliveryTests {
     }
 
     @Test("Command-Delete needs the person's permission")
-    func commandDeleteIsDestructive() async {
+    func commandDeleteIsDestructive() async throws {
         let chord = KeyChord(.delete, modifiers: .command)
-        let refused = await engine(scenes: ScriptedScenes([scene([export])]))
+        let refused = try await engine(scenes: ScriptedScenes([scene([export])]))
             .deliver(request(.pressKey(chord, times: 1)))
         #expect(refused.kind == .refused)
         let actuator = RecordingActuator()
-        _ = await engine(scenes: ScriptedScenes([scene([export])]), actuator: actuator,
+        _ = try await engine(scenes: ScriptedScenes([scene([export])]), actuator: actuator,
                          permissions: ActionPermissions(allowsDestructive: true))
             .deliver(request(.pressKey(chord, times: 1)))
         #expect(actuator.gestures == [.key(code: Key.delete, modifiers: .command)])
     }
 
     @Test("a key is found_acted only when the scene changed, and repeats go out as separate presses")
-    func keyIsJudgedByTheScene() async {
+    func keyIsJudgedByTheScene() async throws {
         let actuator = RecordingActuator()
-        let landed = await engine(scenes: ScriptedScenes([scene([export]), scene([export], title: "Render Queue")]),
+        let landed = try await engine(scenes: ScriptedScenes([scene([export]), scene([export], title: "Render Queue")]),
                                   actuator: actuator)
             .deliver(request(.pressKey(KeyChord(.return), times: 1)))
         #expect(landed.kind == .foundActed)
@@ -223,7 +223,7 @@ struct InputDeliveryTests {
         #expect(actuator.gestures == [.key(code: Key.return)])
 
         let repeated = RecordingActuator()
-        let ghost = await engine(scenes: ScriptedScenes([scene([export])]), actuator: repeated)
+        let ghost = try await engine(scenes: ScriptedScenes([scene([export])]), actuator: repeated)
             .deliver(request(.pressKey(KeyChord(.down), times: 3)))
         #expect(ghost.kind == .actedUnverified)
         #expect(ghost.message.hasPrefix("pressed down 3 times: this window did NOT change"))
@@ -232,24 +232,24 @@ struct InputDeliveryTests {
     }
 
     @Test("a letter's chord goes by character, and an unseen Command chord says a menu does not answer here")
-    func menuShortcutNote() async {
+    func menuShortcutNote() async throws {
         let actuator = RecordingActuator()
         let copy = KeyChord(.character("c"), modifiers: .command)
-        let background = await engine(scenes: ScriptedScenes([scene([export])]), actuator: actuator)
+        let background = try await engine(scenes: ScriptedScenes([scene([export])]), actuator: actuator)
             .deliver(request(.pressKey(copy, times: 1)))
         #expect(actuator.gestures == [.character("c", modifiers: .command)])
         #expect(background.kind == .actedUnverified)
         #expect(background.message.contains("does nothing on this background window"))
-        let foreground = await engine(scenes: ScriptedScenes([scene([export])]),
+        let foreground = try await engine(scenes: ScriptedScenes([scene([export])]),
                                       activation: FakeActivation(frontmost: pid))
             .deliver(request(.pressKey(copy, times: 1)))
         #expect(!foreground.message.contains("background window"))
     }
 
     @Test("a key dry run presses nothing")
-    func keyDryRun() async {
+    func keyDryRun() async throws {
         let actuator = RecordingActuator()
-        let outcome = await engine(scenes: ScriptedScenes([scene([export])]), actuator: actuator)
+        let outcome = try await engine(scenes: ScriptedScenes([scene([export])]), actuator: actuator)
             .deliver(request(.pressKey(KeyChord(.character("n"), modifiers: [.command, .shift]), times: 1),
                              dryRun: true))
         #expect(outcome.kind == .dryRun)
@@ -260,11 +260,11 @@ struct InputDeliveryTests {
     // MARK: scroll
 
     @Test("a scroll goes out over its target, down negative, and new rows are its effect")
-    func scrollOverTarget() async {
+    func scrollOverTarget() async throws {
         let actuator = RecordingActuator()
         let row = SceneElement(id: "text|budget", kind: .text, label: "Budget 2027",
                                bounds: NormalizedRect(x: 0.5, y: 0.5, width: 0.1, height: 0.02))
-        let outcome = await engine(scenes: ScriptedScenes([scene([export]), scene([export, row])]),
+        let outcome = try await engine(scenes: ScriptedScenes([scene([export]), scene([export, row])]),
                                    actuator: actuator)
             .deliver(request(.scroll(lines: -3, over: "Export")))
         #expect(outcome.kind == .foundActed, Comment(rawValue: outcome.message))
@@ -273,17 +273,17 @@ struct InputDeliveryTests {
     }
 
     @Test("without a target a scroll turns over the window's centre, and nothing moving is unverified")
-    func scrollOverWindow() async {
+    func scrollOverWindow() async throws {
         let actuator = RecordingActuator()
-        let outcome = await engine(scenes: ScriptedScenes([scene([export])]), actuator: actuator)
+        let outcome = try await engine(scenes: ScriptedScenes([scene([export])]), actuator: actuator)
             .deliver(request(.scroll(lines: 2, over: nil)))
         #expect(actuator.gestures == [.scroll(at: CGPoint(x: 600, y: 500), deltaY: 2)])
         #expect(outcome.kind == .actedUnverified)
         #expect(outcome.message.contains("Nothing moved"))
-        let rehearsal = await engine(scenes: ScriptedScenes([scene([export])]))
+        let rehearsal = try await engine(scenes: ScriptedScenes([scene([export])]))
             .deliver(request(.scroll(lines: 1, over: nil), dryRun: true))
         #expect(rehearsal.message == "would scroll 1 line up over the window's centre at 600,500")
-        let none = await engine(scenes: ScriptedScenes([scene([export])]))
+        let none = try await engine(scenes: ScriptedScenes([scene([export])]))
             .deliver(request(.scroll(lines: 0, over: nil)))
         #expect(none.kind == .refused)
     }
@@ -291,9 +291,9 @@ struct InputDeliveryTests {
     // MARK: drag
 
     @Test("a drag goes from one target to the other, and a mere repaint is unverified")
-    func dragBetweenTargets() async {
+    func dragBetweenTargets() async throws {
         let actuator = RecordingActuator()
-        let outcome = await engine(scenes: ScriptedScenes([scene([export, field(value: nil)], token: "a"),
+        let outcome = try await engine(scenes: ScriptedScenes([scene([export, field(value: nil)], token: "a"),
                                                            scene([export, field(value: nil)], token: "b")]),
                                    actuator: actuator)
             .deliver(request(.drag(from: "Export", to: .target("Project Name"))))
@@ -304,9 +304,9 @@ struct InputDeliveryTests {
     }
 
     @Test("a drag by an offset ends that far away, and a change it caused is found_acted")
-    func dragByOffset() async {
+    func dragByOffset() async throws {
         let actuator = RecordingActuator()
-        let outcome = await engine(scenes: ScriptedScenes([scene([export]), scene([export], title: "Moved")]),
+        let outcome = try await engine(scenes: ScriptedScenes([scene([export]), scene([export], title: "Moved")]),
                                    actuator: actuator)
             .deliver(request(.drag(from: "Export", to: .offset(dx: -40, dy: 10))))
         let end = CGPoint(x: exportPoint.x - 40, y: exportPoint.y + 10)
@@ -315,12 +315,12 @@ struct InputDeliveryTests {
     }
 
     @Test("dropping on a destructive target is refused, and a drag dry run drags nothing")
-    func dragPolicyAndDryRun() async {
+    func dragPolicyAndDryRun() async throws {
         let actuator = RecordingActuator()
-        let refused = await engine(scenes: ScriptedScenes([scene([export, trash])]), actuator: actuator)
+        let refused = try await engine(scenes: ScriptedScenes([scene([export, trash])]), actuator: actuator)
             .deliver(request(.drag(from: "Export", to: .target("Trash"))))
         #expect(refused.kind == .refused)
-        let rehearsal = await engine(scenes: ScriptedScenes([scene([export, field(value: nil)])]), actuator: actuator)
+        let rehearsal = try await engine(scenes: ScriptedScenes([scene([export, field(value: nil)])]), actuator: actuator)
             .deliver(request(.drag(from: "Export", to: .target("Project Name")), dryRun: true))
         #expect(rehearsal.kind == .dryRun)
         #expect(actuator.gestures.isEmpty)
@@ -329,11 +329,11 @@ struct InputDeliveryTests {
     // MARK: context_menu
 
     @Test("a contextual menu opens with a right click and its row is chosen by the pop-up path")
-    func contextMenuChoosesByKeyboard() async {
+    func contextMenuChoosesByKeyboard() async throws {
         let actuator = RecordingActuator()
         let windows = ScriptedWindows([[mainWindow], [popupWindow, mainWindow], [popupWindow, mainWindow],
                                        [popupWindow, mainWindow], [popupWindow, mainWindow], [mainWindow]])
-        let outcome = await engine(scenes: ScriptedScenes([scene([export]), menuScene(["Copy", "Paste"]),
+        let outcome = try await engine(scenes: ScriptedScenes([scene([export]), menuScene(["Copy", "Paste"]),
                                                            scene([export])]),
                                    actuator: actuator, windows: windows)
             .deliver(request(.contextMenu(on: "Export", item: "Paste")))
@@ -344,10 +344,10 @@ struct InputDeliveryTests {
     }
 
     @Test("an item the menu does not offer is an honest miss, and the menu is closed instead of guessed at")
-    func contextMenuMissingItem() async {
+    func contextMenuMissingItem() async throws {
         let actuator = RecordingActuator()
         let windows = ScriptedWindows([[mainWindow], [popupWindow, mainWindow], [mainWindow]])
-        let outcome = await engine(scenes: ScriptedScenes([scene([export]), menuScene(["Copy", "Paste"])]),
+        let outcome = try await engine(scenes: ScriptedScenes([scene([export]), menuScene(["Copy", "Paste"])]),
                                    actuator: actuator, windows: windows)
             .deliver(request(.contextMenu(on: "Export", item: "Rename")))
         #expect(outcome.kind == .honestMiss)
@@ -356,19 +356,19 @@ struct InputDeliveryTests {
     }
 
     @Test("no menu after the right click is unverified, a destructive item is refused, a dry run clicks nothing")
-    func contextMenuEdges() async {
+    func contextMenuEdges() async throws {
         let actuator = RecordingActuator()
-        let noMenu = await engine(scenes: ScriptedScenes([scene([export])]), actuator: actuator)
+        let noMenu = try await engine(scenes: ScriptedScenes([scene([export])]), actuator: actuator)
             .deliver(request(.contextMenu(on: "Export", item: "Copy")))
         #expect(noMenu.kind == .actedUnverified)
         #expect(noMenu.message.contains("no contextual menu could be read"))
         #expect(actuator.confirmations == [.unknown])
 
         let untouched = RecordingActuator()
-        let destructive = await engine(scenes: ScriptedScenes([scene([export])]), actuator: untouched)
+        let destructive = try await engine(scenes: ScriptedScenes([scene([export])]), actuator: untouched)
             .deliver(request(.contextMenu(on: "Export", item: "Move to Trash")))
         #expect(destructive.kind == .refused)
-        let rehearsal = await engine(scenes: ScriptedScenes([scene([export])]), actuator: untouched)
+        let rehearsal = try await engine(scenes: ScriptedScenes([scene([export])]), actuator: untouched)
             .deliver(request(.contextMenu(on: "Export", item: "Copy"), dryRun: true))
         #expect(rehearsal.kind == .dryRun)
         #expect(untouched.gestures.isEmpty)

@@ -5,6 +5,7 @@
 //  Created by Eliomar Alejandro Rodriguez Ferrer on 22/09/2026.
 //
 
+import AutomationRuntime
 import SeatBroker
 import SwiftUI
 
@@ -28,6 +29,9 @@ struct TeamWindowView: View {
 
     /// The broker the workers' desktop goes through, the app's one.
     var broker: SeatBroker
+
+    /// The app's living memory, which the team's workers record in; the app closes it.
+    var memory: MemoryService
 
     /// Told once the team is made, so quitting can write what is typed in it.
     var didOpenTeam: (TeamModel) -> Void
@@ -55,7 +59,8 @@ struct TeamWindowView: View {
                 let model = TeamModel(
                     store      : store,
                     connections: connections,
-                    broker     : broker
+                    broker     : broker,
+                    memory     : memory
                 )
                 didOpenTeam(model)
                 await model.load()

@@ -127,9 +127,21 @@ public struct ActionEngine: Sendable {
     // MARK: Act
 
     /// Performs one request and answers with an outcome a model can act on next.
-    public func act(_ request: ActionRequest) async -> ActOutcome {
+    ///
+    /// Throws `CancellationError` only when the caller's stop cancelled the scene's first reading, before
+    /// any effect: nothing was done, and that is a stop, not a missing scene. A stop after the gesture
+    /// keeps the gesture's outcome.
+    public func act(_ request: ActionRequest) async throws -> ActOutcome {
         let pid = request.processID
-        guard let perceived = await perceive(pid) else {
+        let first: PerceivedWindow?
+        do {
+            first = try await perceiveBeforeEffect(pid)
+        } catch {
+            await report(request, element: nil, before: nil, after: nil, attempt: .notAttempted(reason: "stopped"))
+            throw error
+        }
+        guard let perceived = first else {
+            await report(request, element: nil, before: nil, after: nil, attempt: .notAttempted(reason: "no scene"))
             return ActOutcome(.honestMiss, await noSceneReason(appName: request.appName, processID: pid))
         }
         let scene = perceived.scene
@@ -141,9 +153,12 @@ public struct ActionEngine: Sendable {
                 preferNativeControls: [.click, .doubleClick, .tripleClick].contains(request.verb)
             )
         } catch {
+            await report(request, element: nil, before: perceived, after: nil,
+                         attempt: .notAttempted(reason: error.outcome.kind.rawValue))
             return error.outcome
         }
         if ActionPolicy.isDestructive(label: element.label), !permissions.allowsDestructive {
+            await report(request, element: element, before: perceived, after: nil, attempt: .notAttempted(reason: "refused"))
             return ActOutcome(.refused, "'\(element.label)' looks destructive/irreversible: refused. "
                 + "If you want the agent to do this, the person must allow destructive actions.", scene: scene)
         }
@@ -158,23 +173,28 @@ public struct ActionEngine: Sendable {
         }
         let containingPopup = surfaces.popups.first { $0.insetBy(dx: -4, dy: -4).contains(point) }
         if request.verb == .click, let popup = containingPopup {
-            return await pickInPopup(request, element: element, popupFrame: popup, perceived: perceived)
+            let picked = await pickInPopup(request, element: element, popupFrame: popup, perceived: perceived)
+            await report(request, element: element, before: perceived, after: picked.after, attempt: picked.attempt)
+            return picked.outcome
         }
         if request.verb == .click, surfaces.hasOpenPopup {
             // Clicking through an open menu hits the menu; dismiss it first and say so.
             if request.isDryRun {
+                await report(request, element: element, before: perceived, after: nil, attempt: .notAttempted(reason: "dry run"))
                 return ActOutcome(.dryRun, "a pop-up is open and '\(element.label)' is not one of its items: would "
                     + "Escape it first")
             }
             try? await dependencies.actuator.perform(.key(code: Key.escape), in: pid)
             await pause(timing.popupDismiss)
-            let after = await perceive(pid)?.scene
+            let after = await perceive(pid)
             let dismissed = !(await self.surfaces(pid)).hasOpenPopup
             await dependencies.actuator.confirm(dismissed ? .observed : .unknown, in: pid)
+            await report(request, element: element, before: perceived, after: after,
+                         attempt: .notAttempted(reason: "pop-up dismissed"))
             return ActOutcome(.actedNoop, "a pop-up menu was open and '\(element.label)' is NOT one of its items: "
                 + "closed the menu instead of clicking through it. The scene below is current; act '\(element.label)' "
                     + "again now.",
-                scene: after)
+                scene: after?.scene)
         }
         return await clickVerified(
             request, element: element, at: point, perceived: perceived, surfacesBefore: surfaces, expected: expected
@@ -185,10 +205,19 @@ public struct ActionEngine: Sendable {
 
     /// Delivers one input beyond a click and answers with an outcome a model can act on next: every
     /// target resolved like `act`'s, the gestures through the actuator, the effect judged by perceiving
-    /// again. Only a seen effect is `found_acted`.
-    public func deliver(_ request: InputRequest) async -> ActOutcome {
+    /// again. Only a seen effect is `found_acted`. Throws `CancellationError` only as `act` does: the
+    /// caller's stop cancelled the scene's first reading, before any effect.
+    public func deliver(_ request: InputRequest) async throws -> ActOutcome {
         let pid = request.processID
-        guard let perceived = await perceive(pid) else {
+        let first: PerceivedWindow?
+        do {
+            first = try await perceiveBeforeEffect(pid)
+        } catch {
+            await report(request, target: nil, before: nil, attempt: .notAttempted(reason: "stopped"))
+            throw error
+        }
+        guard let perceived = first else {
+            await report(request, target: nil, before: nil, attempt: .notAttempted(reason: "no scene"))
             return ActOutcome(.honestMiss, await noSceneReason(appName: request.appName, processID: pid))
         }
         switch request.input {
@@ -218,6 +247,7 @@ public struct ActionEngine: Sendable {
         let pid = request.processID
         if request.isDryRun {
             let expectation = expected.map { ": expected effect: \($0.summary)" } ?? ""
+            await report(request, element: element, before: perceived, after: nil, attempt: .notAttempted(reason: "dry run"))
             return ActOutcome(.dryRun, "would \(request.verb.rawValue) '\(element.label)' at "
                 + "\(Int(point.x)),\(Int(point.y))\(expectation)")
         }
@@ -238,29 +268,26 @@ public struct ActionEngine: Sendable {
             }
         } catch {
             await dependencies.actuator.confirm(.unknown, in: pid)
+            await report(request, element: element, before: perceived, after: nil, attempt: .deliveryFailed("\(error)"))
             return ActOutcome(.actedUnverified, "\(request.verb.performed) '\(element.label)': delivery failed: "
                 + "\(error)", scene: nil)
         }
         await pause(timing.clickSettle)
-        guard let after = await perceive(pid)?.scene else {
+        guard let afterWindow = await perceive(pid) else {
             await dependencies.actuator.confirm(.unknown, in: pid)
+            await report(request, element: element, before: perceived, after: nil, attempt: .delivered)
             return ActOutcome(
                 .actedUnverified,
                 "\(request.verb.performed) '\(element.label)': no scene could be read "
                 + "afterwards; describe_scene when the window is back")
         }
+        let after = afterWindow.scene
         let surfacesAfter = await surfaces(pid)
         let effect = Self.gatedEffect(
             before: perceived.scene, after: after, targetID: element.id, popupIsOpen: surfacesAfter.hasOpenPopup
         )
         let verdict = ActVerification.verdict(before: perceived.scene, after: after, effect: effect, expected: expected)
-        await dependencies.observer?.record(ActionRecord(
-            bundleID        : request.bundleID,
-            element         : element,
-            verb            : request.verb,
-            effect          : effect,
-            windowTitleAfter: after.windowTitle
-        ))
+        await report(request, element: element, before: perceived, after: afterWindow, effect: effect, attempt: .delivered)
         let elsewhere = ElsewhereGuide.forUnverifiedAct(
             app: request.appName, before: censusBefore, after: surfacesAfter.verdicts
         )
@@ -303,35 +330,35 @@ public struct ActionEngine: Sendable {
     ) async -> ActOutcome {
         let pid = request.processID
         guard let desired = request.desiredState, desired == .on || desired == .off else {
+            await report(request, element: element, before: perceived, after: nil, attempt: .notAttempted(reason: "refused"))
             return ActOutcome(.refused, "set_toggle needs a desired state of on or off")
         }
         if element.state == desired {
+            await report(request, element: element, before: perceived, after: nil,
+                         attempt: .notAttempted(reason: "already \(desired.rawValue)"))
             return ActOutcome(.actedNoop, "'\(element.label)' is already \(desired.rawValue): nothing to "
                 + "do", scene: perceived.scene)
         }
         if request.isDryRun {
+            await report(request, element: element, before: perceived, after: nil, attempt: .notAttempted(reason: "dry run"))
             return ActOutcome(.dryRun, "would click '\(element.label)' to set it \(desired.rawValue)")
         }
         do { try await dependencies.actuator.perform(.click(at: point), in: pid) }
         catch {
             await dependencies.actuator.confirm(.unknown, in: pid)
+            await report(request, element: element, before: perceived, after: nil, attempt: .deliveryFailed("\(error)"))
             return ActOutcome(.actedUnverified, "set '\(element.label)': delivery failed: \(error)")
         }
         await pause(timing.clickSettle)
-        let after = await perceive(pid)?.scene
+        let afterWindow = await perceive(pid)
+        let after = afterWindow?.scene
         let readBack = await dependencies.controls?.toggleState(at: point, in: pid)
             ?? after?.elements.first(where: { $0.id == element.id })?.state
             ?? after?.elements.first(where: {
                 $0.state != nil && LabelText.normalize($0.label) == LabelText.normalize(element.label)
             })?.state
         let effect = after.flatMap { SceneDifference.effect(before: perceived.scene, after: $0, targetID: element.id) }
-        await dependencies.observer?.record(ActionRecord(
-            bundleID        : request.bundleID,
-            element         : element,
-            verb            : .setToggle,
-            effect          : effect,
-            windowTitleAfter: after?.windowTitle
-        ))
+        await report(request, element: element, before: perceived, after: afterWindow, effect: effect, attempt: .delivered)
         await dependencies.actuator.confirm(readBack == desired ? .observed : .unknown, in: pid)
         switch readBack {
             case desired:
@@ -346,21 +373,37 @@ public struct ActionEngine: Sendable {
         }
     }
 
+    /// Picked is what a pop-up pick answered, with what the engine perceived afterwards and how far
+    /// the gesture got, for the caller's record. A pick attributes no scene effect: it is judged by
+    /// the control's value, so the brain learns nothing from it, as before.
+    private struct Picked {
+        let outcome: ActOutcome
+        let after: PerceivedWindow?
+        let attempt: ActionAttempt
+
+        init(_ outcome: ActOutcome, after: PerceivedWindow? = nil, attempt: ActionAttempt = .delivered) {
+            self.outcome = outcome
+            self.after   = after
+            self.attempt = attempt
+        }
+    }
+
     private func pickInPopup(
         _ request  : ActionRequest,
         element    : SceneElement,
         popupFrame : CGRect,
         perceived  : PerceivedWindow
-    ) async -> ActOutcome {
+    ) async -> Picked {
         let pid = request.processID
         let rows = PopupRowPick.rows(in: perceived.scene, windowFrame: perceived.frame, popupFrame: popupFrame)
         let labels = Set(rows.flatMap { $0.map { LabelText.normalize($0.label) } }.filter { !$0.isEmpty })
         let current = await dependencies.controls?.controlValue(matchingAny: labels, in: pid)
         if let current, let plan = PopupRowPick.plan(rows: rows, currentValue: current, target: element) {
             if request.isDryRun {
-                return ActOutcome(.dryRun, "would pick '\(element.label)' in the open pop-up by keyboard "
+                return Picked(ActOutcome(.dryRun, "would pick '\(element.label)' in the open pop-up by keyboard "
                     + "(\(plan.route)): "
-                    + "row \(plan.targetIndex + 1) of \(plan.rowLabels.count), the highlight starting on '\(current)'")
+                    + "row \(plan.targetIndex + 1) of \(plan.rowLabels.count), the highlight starting on '\(current)'"),
+                    attempt: .notAttempted(reason: "dry run"))
             }
             do {
                 for _ in 0..<abs(plan.delta) {
@@ -371,36 +414,37 @@ public struct ActionEngine: Sendable {
                 try await dependencies.actuator.perform(.key(code: Key.return), in: pid)
             } catch {
                 await dependencies.actuator.confirm(.unknown, in: pid)
-                return ActOutcome(.actedUnverified, "picking '\(element.label)': delivery failed: \(error)")
+                return Picked(ActOutcome(.actedUnverified, "picking '\(element.label)': delivery failed: \(error)"),
+                              attempt: .deliveryFailed("\(error)"))
             }
             await pause(timing.popupCommit)
             let stillOpen = await surfaces(pid).hasOpenPopup
             let value = await dependencies.controls?.controlValue(matchingAny: labels, in: pid)
-            let after = await perceive(pid)?.scene
+            let after = await perceive(pid)
             let picked = value.map { LabelText.normalize($0) == LabelText.normalize(element.label) } ?? false
             await dependencies.actuator.confirm(picked ? .observed : .unknown, in: pid)
             if let value, LabelText.normalize(value) == LabelText.normalize(element.label) {
-                return ActOutcome(.foundActed, "selected '\(element.label)' in the pop-up (keyboard \(plan.route); the "
-                    + "control now reads '\(value)')", scene: after)
+                return Picked(ActOutcome(.foundActed, "selected '\(element.label)' in the pop-up (keyboard \(plan.route); the "
+                    + "control now reads '\(value)')", scene: after?.scene), after: after)
             }
             if stillOpen {
-                return ActOutcome(.actedUnverified, "moved the pop-up highlight (\(plan.route)) but the list is still "
+                return Picked(ActOutcome(.actedUnverified, "moved the pop-up highlight (\(plan.route)) but the list is still "
                     + "open and the control "
-                    + "reads '\(value ?? "?")': describe_scene and act the exact row.", scene: after)
+                    + "reads '\(value ?? "?")': describe_scene and act the exact row.", scene: after?.scene), after: after)
             }
-            return ActOutcome(.actedUnverified, "the pop-up closed but the control reads "
+            return Picked(ActOutcome(.actedUnverified, "the pop-up closed but the control reads "
                 + "'\(value ?? "?")', not '\(element.label)': "
-                + "re-open it and re-decide.", scene: after)
+                + "re-open it and re-decide.", scene: after?.scene), after: after)
         }
         // No control to read the highlight from: the menu's own type-ahead, first word only.
         let typed = PopupRowPick.typeAheadPrefix(for: element.label)
         guard !typed.isEmpty else {
-            return ActOutcome(.honestMiss, "'\(element.label)' has no typeable name for pop-up selection: "
-                + "describe_scene and target a named row.")
+            return Picked(ActOutcome(.honestMiss, "'\(element.label)' has no typeable name for pop-up selection: "
+                + "describe_scene and target a named row."), attempt: .notAttempted(reason: "no typeable name"))
         }
         if request.isDryRun {
-            return ActOutcome(.dryRun, "would type '\(typed)' into the open pop-up, probe for a submenu with →, then "
-                + "Return")
+            return Picked(ActOutcome(.dryRun, "would type '\(typed)' into the open pop-up, probe for a submenu with →, then "
+                + "Return"), attempt: .notAttempted(reason: "dry run"))
         }
         let popupsBefore = (await surfaces(pid)).popups.count
         do {
@@ -410,10 +454,10 @@ public struct ActionEngine: Sendable {
             try await dependencies.actuator.perform(.key(code: Key.rightArrow), in: pid)
             await pause(timing.popupArrow)
             if (await surfaces(pid)).popups.count > popupsBefore {
-                let after = await perceive(pid)?.scene
+                let after = await perceive(pid)
                 await dependencies.actuator.confirm(.observed, in: pid)
-                return ActOutcome(.foundActed, "'\(element.label)' opened a SUBMENU: its items are in the scene "
-                    + "below; act the one you want next.", scene: after)
+                return Picked(ActOutcome(.foundActed, "'\(element.label)' opened a SUBMENU: its items are in the scene "
+                    + "below; act the one you want next.", scene: after?.scene), after: after)
             }
             // Commit only while the list is still open: a Return after it closed would hit the dialog behind it.
             if (await surfaces(pid)).hasOpenPopup {
@@ -422,17 +466,19 @@ public struct ActionEngine: Sendable {
             }
         } catch {
             await dependencies.actuator.confirm(.unknown, in: pid)
-            return ActOutcome(.actedUnverified, "typing '\(typed)': delivery failed: \(error)")
+            return Picked(ActOutcome(.actedUnverified, "typing '\(typed)': delivery failed: \(error)"),
+                          attempt: .deliveryFailed("\(error)"))
         }
-        let after = await perceive(pid)?.scene
+        let after = await perceive(pid)
         let stillOpen = (await surfaces(pid)).hasOpenPopup
         await dependencies.actuator.confirm(stillOpen ? .unknown : .observed, in: pid)
         if stillOpen {
-            return ActOutcome(.actedUnverified, "typed '\(typed)' but a pop-up is still open: that prefix may not "
+            return Picked(ActOutcome(.actedUnverified, "typed '\(typed)' but a pop-up is still open: that prefix may not "
                 + "match a row; "
-                + "describe_scene to read the exact item labels, then act the precise one.", scene: after)
+                + "describe_scene to read the exact item labels, then act the precise one.", scene: after?.scene), after: after)
         }
-        return ActOutcome(.foundActed, "selected '\(element.label)' in the pop-up (keyboard type-ahead)", scene: after)
+        return Picked(ActOutcome(.foundActed, "selected '\(element.label)' in the pop-up (keyboard type-ahead)",
+                                 scene: after?.scene), after: after)
     }
 
     // MARK: The inputs
@@ -490,7 +536,10 @@ public struct ActionEngine: Sendable {
         perceived  : PerceivedWindow
     ) async -> ActOutcome {
         let pid = request.processID
-        guard !text.isEmpty else { return ActOutcome(.refused, "type_text needs a nonempty text") }
+        guard !text.isEmpty else {
+            await report(request, target: nil, before: perceived, attempt: .notAttempted(reason: "refused"))
+            return ActOutcome(.refused, "type_text needs a nonempty text")
+        }
         let element: SceneElement
         do throws(Unresolved) {
             element = try resolved(
@@ -498,11 +547,13 @@ public struct ActionEngine: Sendable {
                 preferNativeControls: true
             )
         } catch {
+            await report(request, target: nil, before: perceived, attempt: .notAttempted(reason: error.outcome.kind.rawValue))
             return error.outcome
         }
         let point = perceived.globalPoint(of: element)
         let inserts = text.count > Self.typedTextLimit
         if request.isDryRun {
+            await report(request, target: element, before: perceived, attempt: .notAttempted(reason: "dry run"))
             return ActOutcome(.dryRun, "would click '\(element.label)' at \(Int(point.x)),\(Int(point.y)), "
                 + (replacing ? "select what it holds" : "move to its end") + " and "
                 + (inserts ? "insert" : "type") + " \(text.count) characters")
@@ -511,14 +562,18 @@ public struct ActionEngine: Sendable {
         let gestures = Self.preparing(field: element.value, at: point, replacing: replacing)
             + [inserts ? .insert(text) : .type(text)]
         if let error = await send(gestures, to: pid) {
+            await report(request, target: element, before: perceived, attempt: .deliveryFailed("\(error)"))
             return ActOutcome(.actedUnverified, "typing into '\(element.label)': delivery failed: \(error)")
         }
         await pause(timing.clickSettle)
-        let after = await perceive(pid)?.scene
+        let afterWindow = await perceive(pid)
+        let after = afterWindow?.scene
         let readBack = await dependencies.controls?.focusedFieldValue(in: pid)
             ?? after?.elements.first(where: { $0.id == element.id })?.value
         let wanted = replacing ? text : element.value.map { $0 + text }
         await dependencies.actuator.confirm(readBack != nil && readBack == wanted ? .observed : .unknown, in: pid)
+        // Typing is judged by the field's value, not by the scenes: no effect is attributed to it.
+        await report(request, target: element, before: perceived, after: afterWindow, attempt: .delivered)
         let composing = inserts ? " A long text goes in as one event, which a field composing with an input "
             + "method drops." : ""
         switch (readBack, wanted) {
@@ -548,29 +603,34 @@ public struct ActionEngine: Sendable {
     ) async -> ActOutcome {
         let pid = request.processID
         if ActionPolicy.closesTheTarget(chord) {
+            await report(request, target: nil, before: perceived, attempt: .notAttempted(reason: "refused"))
             return ActOutcome(.refused, "\(chord) quits or closes what this session drives: refused. Use the "
                 + "window's own control, or close the session.", scene: perceived.scene)
         }
         if ActionPolicy.isDestructive(chord), !permissions.allowsDestructive {
+            await report(request, target: nil, before: perceived, attempt: .notAttempted(reason: "refused"))
             return ActOutcome(.refused, "\(chord) deletes in most applications: refused. If you want the agent "
                 + "to do this, the person must allow destructive actions.", scene: perceived.scene)
         }
         guard (1...InputRequest.maximumKeyPresses).contains(times) else {
+            await report(request, target: nil, before: perceived, attempt: .notAttempted(reason: "refused"))
             return ActOutcome(.refused, "a key is pressed 1 to \(InputRequest.maximumKeyPresses) times")
         }
         let pressed = "pressed \(chord)" + (times > 1 ? " \(times) times" : "")
         if request.isDryRun {
+            await report(request, target: nil, before: perceived, attempt: .notAttempted(reason: "dry run"))
             return ActOutcome(.dryRun, "would press \(chord)" + (times > 1 ? " \(times) times" : "")
                 + " into \(request.appName)'s window")
         }
         await raiseIfNeeded(pid, isPopupOpen: (await surfaces(pid)).hasOpenPopup)
         if let error = await send(Array(repeating: chord.gesture, count: times), to: pid) {
+            await report(request, target: nil, before: perceived, attempt: .deliveryFailed("\(error)"))
             return ActOutcome(.actedUnverified, "\(pressed): delivery failed: \(error)")
         }
         // Only the seat has no activation role, and only there does a menu miss a chord.
         let note = dependencies.activation == nil && chord.modifiers.contains(.command) ? Self.menuShortcutNote : ""
         return await judged(
-            pressed, in: request, before: perceived.scene, targetID: nil,
+            pressed, in: request, target: nil, before: perceived,
             ghost: "If you expected an effect, the key likely reached a control that ignores it: click the "
                 + "control that should receive it first.\(note)",
             repaint: "A key's effect is often only a moved focus or caret, which the scene cannot attribute: "
@@ -586,6 +646,7 @@ public struct ActionEngine: Sendable {
     ) async -> ActOutcome {
         let pid = request.processID
         guard lines != 0, abs(lines) <= InputRequest.maximumScrollLines else {
+            await report(request, target: nil, before: perceived, attempt: .notAttempted(reason: "refused"))
             return ActOutcome(.refused, "a scroll turns 1 to \(InputRequest.maximumScrollLines) lines, up or down")
         }
         var element: SceneElement?
@@ -593,6 +654,7 @@ public struct ActionEngine: Sendable {
             do throws(Unresolved) {
                 element = try resolved(target, section: request.section, in: perceived.scene, appName: request.appName)
             } catch {
+                await report(request, target: nil, before: perceived, attempt: .notAttempted(reason: error.outcome.kind.rawValue))
                 return error.outcome
             }
         }
@@ -601,15 +663,17 @@ public struct ActionEngine: Sendable {
         let amount = "\(abs(lines)) line\(abs(lines) == 1 ? "" : "s") \(lines > 0 ? "up" : "down") over "
             + (element.map { "'\($0.label)'" } ?? "the window's centre")
         if request.isDryRun {
+            await report(request, target: element, before: perceived, attempt: .notAttempted(reason: "dry run"))
             return ActOutcome(.dryRun, "would scroll \(amount) at \(Int(point.x)),\(Int(point.y))")
         }
         let scrolled = "scrolled \(amount)"
         await raiseIfNeeded(pid, isPopupOpen: (await surfaces(pid)).hasOpenPopup)
         if let error = await send([.scroll(at: point, deltaY: lines)], to: pid) {
+            await report(request, target: element, before: perceived, attempt: .deliveryFailed("\(error)"))
             return ActOutcome(.actedUnverified, "\(scrolled): delivery failed: \(error)")
         }
         return await judged(
-            scrolled, in: request, before: perceived.scene, targetID: element?.id,
+            scrolled, in: request, target: element, before: perceived,
             ghost: "Nothing moved: the view may already be at its end, or nothing under that point scrolls; "
                 + "target the scrolling panel itself.",
             repaint: "Observe to see whether other rows came into view."
@@ -628,6 +692,7 @@ public struct ActionEngine: Sendable {
         do throws(Unresolved) {
             element = try resolved(source, section: request.section, in: scene, appName: request.appName)
         } catch {
+            await report(request, target: nil, before: perceived, attempt: .notAttempted(reason: error.outcome.kind.rawValue))
             return error.outcome
         }
         let start = perceived.globalPoint(of: element)
@@ -639,12 +704,16 @@ public struct ActionEngine: Sendable {
                 do throws(Unresolved) {
                     other = try resolved(name, section: request.section, in: scene, appName: request.appName)
                 } catch {
+                    await report(request, target: element, before: perceived,
+                                 attempt: .notAttempted(reason: error.outcome.kind.rawValue))
                     return error.outcome
                 }
                 guard other.id != element.id else {
+                    await report(request, target: element, before: perceived, attempt: .notAttempted(reason: "refused"))
                     return ActOutcome(.refused, "a drag needs two different targets", scene: scene)
                 }
                 if ActionPolicy.isDestructive(label: other.label), !permissions.allowsDestructive {
+                    await report(request, target: element, before: perceived, attempt: .notAttempted(reason: "refused"))
                     return ActOutcome(.refused, "dropping on '\(other.label)' looks destructive/irreversible: "
                         + "refused. If you want the agent to do this, the person must allow destructive actions.",
                         scene: scene)
@@ -652,21 +721,26 @@ public struct ActionEngine: Sendable {
                 finish = perceived.globalPoint(of: other)
                 destination = "'\(other.label)'"
             case .offset(let dx, let dy):
-                guard dx != 0 || dy != 0 else { return ActOutcome(.refused, "a drag needs a nonzero offset") }
+                guard dx != 0 || dy != 0 else {
+                    await report(request, target: element, before: perceived, attempt: .notAttempted(reason: "refused"))
+                    return ActOutcome(.refused, "a drag needs a nonzero offset")
+                }
                 finish = CGPoint(x: start.x + dx, y: start.y + dy)
                 destination = "\(Int(dx)),\(Int(dy)) points away"
         }
         let dragged = "dragged '\(element.label)' to \(destination)"
         if request.isDryRun {
+            await report(request, target: element, before: perceived, attempt: .notAttempted(reason: "dry run"))
             return ActOutcome(.dryRun, "would drag '\(element.label)' from \(Int(start.x)),\(Int(start.y)) to "
                 + "\(destination) at \(Int(finish.x)),\(Int(finish.y))")
         }
         await raiseIfNeeded(pid, isPopupOpen: (await surfaces(pid)).hasOpenPopup)
         if let error = await send([.drag(from: start, to: finish)], to: pid) {
+            await report(request, target: element, before: perceived, attempt: .deliveryFailed("\(error)"))
             return ActOutcome(.actedUnverified, "\(dragged): delivery failed: \(error)")
         }
         return await judged(
-            dragged, in: request, before: scene, targetID: element.id,
+            dragged, in: request, target: element, before: perceived,
             ghost: "If you expected an effect, the press likely did not pick anything up: try a handle, a row "
                 + "or the exact label.",
             repaint: "A drag that only moves things adds, removes and retitles nothing, so it cannot be told "
@@ -684,36 +758,42 @@ public struct ActionEngine: Sendable {
     ) async -> ActOutcome {
         let pid = request.processID
         guard !LabelText.normalize(item).isEmpty else {
+            await report(request, target: nil, before: perceived, attempt: .notAttempted(reason: "refused"))
             return ActOutcome(.refused, "context_menu needs the item's title")
         }
         let element: SceneElement
         do throws(Unresolved) {
             element = try resolved(target, section: request.section, in: perceived.scene, appName: request.appName)
         } catch {
+            await report(request, target: nil, before: perceived, attempt: .notAttempted(reason: error.outcome.kind.rawValue))
             return error.outcome
         }
         if ActionPolicy.isDestructive(label: item), !permissions.allowsDestructive {
+            await report(request, target: element, before: perceived, attempt: .notAttempted(reason: "refused"))
             return ActOutcome(.refused, "'\(item)' looks destructive/irreversible: refused. If you want the agent "
                 + "to do this, the person must allow destructive actions.", scene: perceived.scene)
         }
         let point = perceived.globalPoint(of: element)
         if request.isDryRun {
+            await report(request, target: element, before: perceived, attempt: .notAttempted(reason: "dry run"))
             return ActOutcome(.dryRun, "would right-click '\(element.label)' at \(Int(point.x)),\(Int(point.y)) "
                 + "and choose '\(item)' in the contextual menu by keyboard")
         }
         let before = await surfaces(pid)
         await raiseIfNeeded(pid, isPopupOpen: before.hasOpenPopup)
         if let error = await send([.click(at: point, button: .right)], to: pid) {
+            await report(request, target: element, before: perceived, attempt: .deliveryFailed("\(error)"))
             return ActOutcome(.actedUnverified, "right-clicking '\(element.label)': delivery failed: \(error)")
         }
         await pause(timing.clickSettle)
         let popups = (await surfaces(pid)).popups
         guard let menu = popups.first(where: { !before.popups.contains($0) }) ?? popups.first,
               let opened = await perceive(pid) else {
-            let after = await perceive(pid)?.scene
+            let after = await perceive(pid)
             await dependencies.actuator.confirm(.unknown, in: pid)
+            await report(request, target: element, before: perceived, after: after, attempt: .delivered)
             return ActOutcome(.actedUnverified, "right-clicked '\(element.label)' but no contextual menu could be "
-                + "read, so nothing was chosen: observe; this element may have no menu of its own", scene: after)
+                + "read, so nothing was chosen: observe; this element may have no menu of its own", scene: after?.scene)
         }
         let rows = PopupRowPick.rows(in: opened.scene, windowFrame: opened.frame, popupFrame: menu)
         let wanted = LabelText.normalize(item)
@@ -722,17 +802,21 @@ public struct ActionEngine: Sendable {
             try? await dependencies.actuator.perform(.key(code: Key.escape), in: pid)
             await pause(timing.popupDismiss)
             let closed = !(await surfaces(pid)).hasOpenPopup
-            let after = await perceive(pid)?.scene
+            let after = await perceive(pid)
             await dependencies.actuator.confirm(closed ? .observed : .unknown, in: pid)
+            await report(request, target: element, before: perceived, menu: opened, after: after,
+                         attempt: .notAttempted(reason: "no such item"))
             let offered = rows.compactMap { $0.first?.label }.prefix(14).map { "'\($0)'" }
             return ActOutcome(.honestMiss, "no item '\(item)' in the contextual menu of '\(element.label)'"
                 + (offered.isEmpty ? "" : ": it offered \(offered.joined(separator: ", "))")
-                + (closed ? "; the menu was closed" : "; the menu may still be open, observe"), scene: after)
+                + (closed ? "; the menu was closed" : "; the menu may still be open, observe"), scene: after?.scene)
         }
         let choice = ActionRequest(
             processID: pid, bundleID: request.bundleID, appName: request.appName, target: row.label, verb: .click
         )
-        return await pickInPopup(choice, element: row, popupFrame: menu, perceived: opened)
+        let picked = await pickInPopup(choice, element: row, popupFrame: menu, perceived: opened)
+        await report(request, target: element, before: perceived, menu: opened, after: picked.after, attempt: picked.attempt)
+        return picked.outcome
     }
 
     // MARK: Helpers
@@ -782,6 +866,52 @@ public struct ActionEngine: Sendable {
         }
     }
 
+    /// Reports what an action saw and did to the observer, when there is one. The observer never
+    /// answers: a record is written or dropped after the outcome is decided.
+    private func report(
+        _ request: ActionRequest,
+        element  : SceneElement?,
+        before   : PerceivedWindow?,
+        after    : PerceivedWindow?,
+        effect   : SceneEffect? = nil,
+        attempt  : ActionAttempt
+    ) async {
+        guard let observer = dependencies.observer else { return }
+        await observer.record(ActionRecord(
+            bundleID        : request.bundleID,
+            element         : element,
+            verb            : request.verb,
+            effect          : effect,
+            windowTitleAfter: after?.scene.windowTitle,
+            before          : before,
+            after           : after,
+            attempt         : attempt
+        ))
+    }
+
+    /// Reports what an input saw and did to the observer, when there is one.
+    private func report(
+        _ request: InputRequest,
+        target   : SceneElement?,
+        before   : PerceivedWindow?,
+        menu     : PerceivedWindow? = nil,
+        after    : PerceivedWindow? = nil,
+        effect   : SceneEffect? = nil,
+        attempt  : ActionAttempt
+    ) async {
+        guard let observer = dependencies.observer else { return }
+        await observer.record(InputRecord(
+            bundleID: request.bundleID,
+            input   : request.input,
+            target  : target,
+            before  : before,
+            menu    : menu,
+            after   : after,
+            effect  : effect,
+            attempt : attempt
+        ))
+    }
+
     /// Delivers the gestures in order and answers the error that stopped them, nil when all went out.
     /// A failure closes the delivery as unknown: what went out before it is never repeated.
     private func send(_ gestures: [Gesture], to processID: pid_t) async -> (any Error)? {
@@ -794,33 +924,37 @@ public struct ActionEngine: Sendable {
         }
     }
 
-    /// An input with no reading of its own is judged by the two scenes alone, and its delivery closed
-    /// with what they showed. `ghost` and `repaint` are what to do next when nothing was attributed.
+    /// An input with no reading of its own is judged by the two scenes alone, its delivery closed
+    /// with what they showed, and its record reported with the effect they attributed. `ghost` and
+    /// `repaint` are what to do next when nothing was attributed.
     private func judged(
         _ performed: String,
         in request : InputRequest,
-        before     : SceneSnapshot,
-        targetID   : String?,
+        target     : SceneElement?,
+        before     : PerceivedWindow,
         ghost      : String,
         repaint    : String
     ) async -> ActOutcome {
         let pid = request.processID
         await pause(timing.clickSettle)
-        guard let after = await perceive(pid)?.scene else {
+        guard let afterWindow = await perceive(pid) else {
             await dependencies.actuator.confirm(.unknown, in: pid)
+            await report(request, target: target, before: before, attempt: .delivered)
             return ActOutcome(.actedUnverified, "\(performed): no scene could be read afterwards; observe when "
                 + "the window is back")
         }
+        let after = afterWindow.scene
         let effect = Self.gatedEffect(
-            before: before, after: after, targetID: targetID ?? "", popupIsOpen: (await surfaces(pid)).hasOpenPopup
+            before: before.scene, after: after, targetID: target?.id ?? "", popupIsOpen: (await surfaces(pid)).hasOpenPopup
         )
-        let verdict = ActVerification.verdict(before: before, after: after, effect: effect)
+        let verdict = ActVerification.verdict(before: before.scene, after: after, effect: effect)
         let delivery: DeliveryEffect = switch verdict {
             case .landed        : .observed
             case .ghost         : .absent
             case .unattributable: .unknown
         }
         await dependencies.actuator.confirm(delivery, in: pid)
+        await report(request, target: target, before: before, after: afterWindow, effect: effect, attempt: .delivered)
         switch verdict {
             case .landed(let effect, _):
                 return ActOutcome(.foundActed, "\(performed): \(effect.summary)", scene: after)
@@ -860,6 +994,19 @@ public struct ActionEngine: Sendable {
 
     private func perceive(_ processID: pid_t) async -> PerceivedWindow? {
         try? await dependencies.scenes.currentScene(of: processID)
+    }
+
+    /// The scene before any effect: a reading the caller's stop cancelled is thrown as the
+    /// `CancellationError` the scene source threw, typed; any other failure is nil, the honest no-scene
+    /// outcome with its advice.
+    private func perceiveBeforeEffect(_ processID: pid_t) async throws(CancellationError) -> PerceivedWindow? {
+        do {
+            return try await dependencies.scenes.currentScene(of: processID)
+        } catch let stop as CancellationError {
+            throw stop
+        } catch {
+            return nil
+        }
     }
 
     private func surfaces(_ processID: pid_t) async -> WindowSurfaces {

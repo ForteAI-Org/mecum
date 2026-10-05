@@ -58,6 +58,7 @@ struct MecumApp: App {
                 launch     : workspace,
                 connections: model.settings,
                 broker     : model.broker,
+                memory     : model.memory,
                 didOpenTeam: { delegate.teams.add($0) }
             )
             // The delegate is made by AppKit and the model by SwiftUI, so

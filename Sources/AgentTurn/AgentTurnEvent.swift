@@ -1,5 +1,5 @@
 //
-//  WorkerAgentEvent.swift
+//  AgentTurnEvent.swift
 //  Mecum
 //
 //  Created by Eliomar Alejandro Rodriguez Ferrer on 23/09/2026.
@@ -9,9 +9,9 @@ import ChatCore
 import CLIProviders
 import Foundation
 
-/// WorkerAgentEvent is what one agent turn reports, in the order it happened:
+/// AgentTurnEvent is what one agent turn reports, in the order it happened:
 /// the provider's own events, and each line Mecum's tools record.
-enum WorkerAgentEvent: Sendable, Equatable {
+public enum AgentTurnEvent: Sendable, Equatable {
 
     /// A decoded line of the provider's JSONL stream.
     case provider(ProviderEvent)

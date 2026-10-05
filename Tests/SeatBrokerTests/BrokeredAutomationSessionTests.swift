@@ -8,8 +8,10 @@
 import AppKit
 import AutomationMCP
 import AutomationRuntime
+import EngineCore
 import Foundation
 import LocalMCP
+import Memory
 import PerceptionCore
 import SeatCore
 import SeatDriving
@@ -28,6 +30,17 @@ struct BrokeredAutomationSessionTests {
 
     private static let workerID = UUID()
     private static let label    = workerID.uuidString
+
+    /// The context of one call, as the tools would pass it: the worker as the stream, no trace.
+    private static func context() -> ActionContext {
+        ActionContext(source: .app, streamID: label)
+    }
+
+    /// A memory of its own for a session, in a temporary directory nothing else uses.
+    private static func memory() -> MemoryService {
+        MemoryService(directory: FileManager.default.temporaryDirectory
+            .appendingPathComponent("mecum-brokered-\(UUID().uuidString)", isDirectory: true))
+    }
 
     private struct Opened: Error {}
 
@@ -66,13 +79,13 @@ struct BrokeredAutomationSessionTests {
             .perceivedThroughTheEngine,
         idleWindow: Duration = BrokeredAutomationSession.idleWindow,
         waitIdle  : @escaping BrokeredAutomationSession.IdleWaiting = { try await Task.sleep(for: $0) },
+        memory    : MemoryService = memory(),
         seating   : @escaping BrokeredAutomationSession.Seating
     ) -> BrokeredAutomationSession {
         BrokeredAutomationSession(
             broker            : broker,
             workerID          : workerID,
-            knowledgeDirectory: FileManager.default.temporaryDirectory
-                .appendingPathComponent("mecum-brokered-\(UUID().uuidString)", isDirectory: true),
+            memory            : memory,
             allowsDestructive : false,
             missingGrant      : { missing },
             requestGrants     : requests,
@@ -103,7 +116,8 @@ struct BrokeredAutomationSessionTests {
         } else {
             { try await Task.sleep(for: $0) }
         }
-        return session(broker, perceiving: { _, _ in scene }, idleWindow: idleWindow, waitIdle: waitIdle) {
+        return session(broker, perceiving: { _, _ in PerceivedWindow(scene: scene, frame: .zero) },
+                       idleWindow: idleWindow, waitIdle: waitIdle) {
             session, _, _ in
             opens()
             if let holding { session.holdWithoutAdopting(holding, name: "Test") }
@@ -136,7 +150,7 @@ struct BrokeredAutomationSessionTests {
             throw Opened()
         }
 
-        await #expect(throws: Opened.self) { try await desktop.open(application: "Calculator", window: nil) }
+        await #expect(throws: Opened.self) { try await desktop.open(application: "Calculator", window: nil, context: Self.context()) }
 
         #expect(during.map(\.label) == [Self.label])
         #expect(during.map(\.state) == [.acting])
@@ -160,7 +174,7 @@ struct BrokeredAutomationSessionTests {
         let desktop = Self.session(broker, seating: BrokeredAutomationSession.seatedByTheBroker)
 
         let refusal = await #expect(throws: SeatBrokerError.self) {
-            try await desktop.open(application: "No Such Application 5f0c", window: nil)
+            try await desktop.open(application: "No Such Application 5f0c", window: nil, context: Self.context())
         }
         guard case .applicationNotResolved? = refusal else {
             Issue.record("expected applicationNotResolved, got \(String(describing: refusal))")
@@ -180,7 +194,7 @@ struct BrokeredAutomationSessionTests {
         }
 
         // The target has no seat, so perception refuses; the Brain is flushed and the target stopped.
-        await #expect(throws: (any Error).self) { try await desktop.open(application: "Test", window: nil) }
+        await #expect(throws: (any Error).self) { try await desktop.open(application: "Test", window: nil, context: Self.context()) }
 
         #expect(broker.queue.entries.isEmpty)
         #expect(desktop.id == nil)
@@ -242,7 +256,7 @@ struct BrokeredAutomationSessionTests {
                 throw Opened()
             }
             let refusal = await #expect(throws: AutomationFailure.self) {
-                try await desktop.open(application: "Calculator", window: nil)
+                try await desktop.open(application: "Calculator", window: nil, context: Self.context())
             }
             #expect(refusal?.description.contains("macOS \(name) permission") == true)
             #expect(refusal?.description.contains("System Settings > Privacy & Security") == true)
@@ -261,7 +275,7 @@ struct BrokeredAutomationSessionTests {
         }
 
         let refusal = await #expect(throws: AutomationFailure.self) {
-            try await desktop.open(application: "TextEdit", window: nil)
+            try await desktop.open(application: "TextEdit", window: nil, context: Self.context())
         }
 
         let sentence = refusal?.description ?? ""
@@ -301,7 +315,7 @@ struct BrokeredAutomationSessionTests {
     func anIdleHolderReleasesWhenAnEntryStartsWaiting() async throws {
         let broker  = SeatBroker()
         let desktop = try Self.seated(broker)
-        try await desktop.turn { _ = try await desktop.open(application: "Test", window: nil) }
+        try await desktop.turn { _ = try await desktop.open(application: "Test", window: nil, context: Self.context()) }
         #expect(desktop.activity == "Using Test")
 
         let waiter = Task { try await broker.queue.acquire("Mecum") }
@@ -311,7 +325,7 @@ struct BrokeredAutomationSessionTests {
         #expect(desktop.id == nil)
         #expect(broker.queue.entries.map(\.label) == ["Mecum"])
         // The next turn's tools find no session, and the sentence leads the agent to open_session again.
-        let refusal = await #expect(throws: AutomationFailure.self) { try await desktop.observe() }
+        let refusal = await #expect(throws: AutomationFailure.self) { try await desktop.observe(context: Self.context()) }
         #expect(refusal?.description == "No live application session. Use windows and open_session, then observe.")
         lease.giveBack()
     }
@@ -323,12 +337,12 @@ struct BrokeredAutomationSessionTests {
         let desktop = try Self.seated(broker)
         var waiter: Task<SeatLease, any Error>?
         try await desktop.turn {
-            _ = try await desktop.open(application: "Test", window: nil)
+            _ = try await desktop.open(application: "Test", window: nil, context: Self.context())
             waiter = Task { try await broker.queue.acquire("Mecum") }
             await Self.letTheWaitBegin()
             #expect(broker.queue.entries.map(\.state) == [.acting, .waiting])
             #expect(desktop.activity == "Using Test")
-            #expect(try await desktop.observe().appName == "Test")
+            #expect(try await desktop.observe(context: Self.context()).appName == "Test")
         }
         #expect(desktop.activity == nil)
         let lease = try #require(try await waiter?.value)
@@ -344,7 +358,7 @@ struct BrokeredAutomationSessionTests {
         #expect(!desktop.holdsComputer)
 
         let holder = try await broker.queue.acquire("holder")
-        let open   = Task { try await desktop.open(application: "Test", window: nil) }
+        let open   = Task { try await desktop.open(application: "Test", window: nil, context: Self.context()) }
         await Self.letTheWaitBegin()
         #expect(desktop.activity == "Waiting for the computer (1 ahead)")
         #expect(!desktop.holdsComputer)
@@ -368,7 +382,7 @@ struct BrokeredAutomationSessionTests {
         #expect(!desktop.hasScreen && desktop.makeScreenView(contentsScale: 2) == nil)
 
         let holder = try await broker.queue.acquire("holder")
-        let open   = Task { try await desktop.open(application: "Test", window: nil) }
+        let open   = Task { try await desktop.open(application: "Test", window: nil, context: Self.context()) }
         await Self.letTheWaitBegin()
         #expect(!desktop.hasScreen && desktop.makeScreenView(contentsScale: 2) == nil, "waiting is not watching")
 
@@ -386,9 +400,9 @@ struct BrokeredAutomationSessionTests {
     func aLoneHolderKeepsTheSeatAcrossTurns() async throws {
         let broker  = SeatBroker()
         let desktop = try Self.seated(broker)
-        try await desktop.turn { _ = try await desktop.open(application: "Test", window: nil) }
+        try await desktop.turn { _ = try await desktop.open(application: "Test", window: nil, context: Self.context()) }
         await Self.letTheWaitBegin()
-        try await desktop.turn { _ = try await desktop.observe() }
+        try await desktop.turn { _ = try await desktop.observe(context: Self.context()) }
         await Self.letTheWaitBegin()
 
         #expect(desktop.activity == "Using Test")
@@ -406,9 +420,9 @@ struct BrokeredAutomationSessionTests {
         let second = UUID()
         let one = Self.session(broker, workerID: first) { _, _, _ in throw Opened() }
         let two = Self.session(broker, workerID: second) { _, _, _ in throw Opened() }
-        let early = Task { try await one.open(application: "Calculator", window: nil) }
+        let early = Task { try await one.open(application: "Calculator", window: nil, context: Self.context()) }
         await Self.letTheWaitBegin()
-        let later = Task { try await two.open(application: "Calculator", window: nil) }
+        let later = Task { try await two.open(application: "Calculator", window: nil, context: Self.context()) }
         await Self.letTheWaitBegin()
 
         #expect(broker.queue.entries.map(\.label) == ["Mecum", first.uuidString, second.uuidString])
@@ -445,7 +459,7 @@ struct BrokeredAutomationSessionTests {
     func anIdleHolderReleasesWhenTheIdleWindowElapses() async throws {
         let broker  = SeatBroker()
         let desktop = try Self.seated(broker, idleWindow: .milliseconds(50))
-        try await desktop.turn { _ = try await desktop.open(application: "Test", window: nil) }
+        try await desktop.turn { _ = try await desktop.open(application: "Test", window: nil, context: Self.context()) }
         #expect(desktop.activity == "Using Test")
 
         await Self.until { !desktop.holdsComputer }
@@ -463,7 +477,7 @@ struct BrokeredAutomationSessionTests {
         let idle    = IdleClock()
         var opens   = 0
         let desktop = try Self.seated(broker, idleWindow: .milliseconds(50), idle: idle, opens: { opens += 1 })
-        try await desktop.turn { _ = try await desktop.open(application: "Test", window: nil) }
+        try await desktop.turn { _ = try await desktop.open(application: "Test", window: nil, context: Self.context()) }
         let session = desktop.id
         await Self.until { idle.pendingCount == 1 }
         #expect(idle.waits == [.milliseconds(50)])
@@ -473,7 +487,7 @@ struct BrokeredAutomationSessionTests {
             await idle.elapseOldest()
             await Self.letTheWaitBegin()
             #expect(desktop.holdsComputer)
-            let scene = try await desktop.observe()
+            let scene = try await desktop.observe(context: Self.context())
             #expect(scene.appName == "Test")
         }
         #expect(opens == 1)
@@ -494,7 +508,7 @@ struct BrokeredAutomationSessionTests {
         let broker  = SeatBroker()
         let idle    = IdleClock()
         let desktop = try Self.seated(broker, idle: idle)
-        try await desktop.turn { _ = try await desktop.open(application: "Test", window: nil) }
+        try await desktop.turn { _ = try await desktop.open(application: "Test", window: nil, context: Self.context()) }
 
         let lease = try await Task { try await broker.queue.acquire("Mecum") }.value
 
@@ -517,14 +531,14 @@ struct BrokeredAutomationSessionTests {
     func aTurnLongerThanTheIdleWindowIsNeverReleasedInside() async throws {
         let broker  = SeatBroker()
         let desktop = try Self.seated(broker, idleWindow: .milliseconds(30))
-        try await desktop.turn { _ = try await desktop.open(application: "Test", window: nil) }
+        try await desktop.turn { _ = try await desktop.open(application: "Test", window: nil, context: Self.context()) }
         let session = desktop.id
 
         try await desktop.turn {
             try await Task.sleep(for: .milliseconds(200))
             #expect(desktop.holdsComputer)
             #expect(desktop.id == session)
-            #expect(try await desktop.observe().appName == "Test")
+            #expect(try await desktop.observe(context: Self.context()).appName == "Test")
         }
         #expect(desktop.id == session)
 
@@ -540,11 +554,11 @@ struct BrokeredAutomationSessionTests {
         let idle    = IdleClock()
         var opens   = 0
         let desktop = try Self.seated(broker, idle: idle, opens: { opens += 1 })
-        try await desktop.turn { _ = try await desktop.open(application: "Test", window: nil) }
+        try await desktop.turn { _ = try await desktop.open(application: "Test", window: nil, context: Self.context()) }
 
         await desktop.close()
         #expect(!desktop.holdsComputer)
-        try await desktop.turn { _ = try await desktop.open(application: "Test", window: nil) }
+        try await desktop.turn { _ = try await desktop.open(application: "Test", window: nil, context: Self.context()) }
         #expect(opens == 2)
         await Self.until { idle.pendingCount == 2 }
         #expect(idle.pendingCount == 2)
@@ -573,7 +587,7 @@ struct BrokeredAutomationSessionTests {
         for pid in [launched, found] {
             let idle    = IdleClock()
             let desktop = try Self.seated(broker, idle: idle, holding: pid)
-            try await desktop.turn { _ = try await desktop.open(application: "Test", window: nil) }
+            try await desktop.turn { _ = try await desktop.open(application: "Test", window: nil, context: Self.context()) }
             // Nothing is finished with while the window has not elapsed.
             #expect(asked == (pid == launched ? [] : [launched]))
             await idle.elapseOldest()
@@ -583,6 +597,69 @@ struct BrokeredAutomationSessionTests {
 
         #expect(asked == [launched])
         #expect(ledger.provenance(of: launched) == .alreadyRunning)
+        #expect(broker.queue.entries.isEmpty)
+    }
+
+    @Test("an observation is recorded in the owner's memory as the call's current sample and observed by the brain",
+          .timeLimit(.minutes(1)))
+    func anObservationIsRecordedUnderTheCallsContext() async throws {
+        let dock = try #require(NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.dock")
+            .first?.processIdentifier)
+        let memory = Self.memory()
+        let broker = SeatBroker()
+        let scene  = SceneSnapshot(bundleID: "com.apple.dock", appName: "Test", windowTitle: "Test Window",
+                                   viewportPixelSize: ViewportPixelSize(width: 10, height: 10), elements: [
+            SceneElement(id: "control|export", kind: .control, label: "Export",
+                         bounds: NormalizedRect(x: 0.1, y: 0.1, width: 0.1, height: 0.05), role: "AXButton"),
+            SceneElement(id: "control|cancel", kind: .control, label: "Cancel",
+                         bounds: NormalizedRect(x: 0.4, y: 0.1, width: 0.1, height: 0.05), role: "AXButton"),
+        ])
+        let window = PerceivedWindow(scene: scene, frame: CGRect(x: 0, y: 0, width: 800, height: 600),
+                                     capture: CaptureQuality(walkCompleted: true, windowFound: true, isGrantAvailable: true),
+                                     surface: .window)
+        let desktop = Self.session(broker, perceiving: { _, _ in window }, memory: memory) { _, _, _ in
+            (TargetApp(pid: dock, bundleID: "com.apple.dock", name: "Test", bundleURL: nil, windows: []), SeatTarget())
+        }
+        // The call is planned by the tools before the session runs it; here by hand, as the tools would.
+        let context = Self.context()
+        _ = try await memory.record(try AgentCallRecord(
+            event  : context.event(app: AppContextIdentity(bundleID: "com.apple.dock"), occurredAtMS: memory.clock.calendarMS()),
+            request: .openSession(app: "Test", window: nil)
+        ))
+        try await desktop.turn {
+            let enriched = try await desktop.open(application: "Test", window: nil, context: context)
+            #expect(enriched.elements.count == 2)
+            #expect(desktop.application?.bundleID == "com.apple.dock")
+        }
+        let report = try #require(desktop.lastReport)
+        // The open's first scene is the session's own observation: another event, with the application named.
+        #expect(report.eventID != context.eventID)
+        let observation = try #require(try await memory.event(report.eventID))
+        #expect(observation.kind == .observation && observation.app?.bundleID == "com.apple.dock")
+        #expect(observation.originEventID == context.eventID, "the observation keeps the open_session it was taken for")
+        #expect(observation.parentEventID == nil, "and is no batch step")
+        #expect(observation.streamID == Self.label && observation.sessionID == desktop.id?.uuidString)
+        #expect(try await memory.sample(CaptureSampleKey(eventID: context.eventID, phase: .current)) == nil,
+                "the call that opened keeps no sample: its event could not name the application")
+        #expect(report.samples == [.current])
+        #expect(report.notes.isEmpty, "\(report.notes)")
+        #expect(report.learned == .observed(created: 2, updated: 0, skippedAmbiguous: 0))
+        let key = CaptureSampleKey(eventID: report.eventID, phase: .current)
+        let sample = try #require(try await memory.sample(key))
+        #expect(sample.quality.completeness == .complete && sample.sessionRevision == 1)
+        #expect(sample.elements.map(\.label) == ["Export", "Cancel"])
+        #expect(try await memory.brain(of: "com.apple.dock")?.objects.count == 2)
+        // A second observation of the same scene is a new sample under its own call, seen again by the brain.
+        let second = ActionContext(source: .app, streamID: Self.label, sessionID: desktop.id?.uuidString)
+        _ = try await memory.record(try AgentCallRecord(
+            event  : second.event(app: AppContextIdentity(bundleID: "com.apple.dock"), occurredAtMS: memory.clock.calendarMS()),
+            request: .observe
+        ))
+        try await desktop.turn { _ = try await desktop.observe(context: second) }
+        #expect(desktop.lastReport?.learned == .observed(created: 0, updated: 2, skippedAmbiguous: 0))
+        #expect(try await memory.sample(CaptureSampleKey(eventID: second.eventID, phase: .current))?.sessionRevision == 2)
+        await desktop.close()
+        await memory.close()
         #expect(broker.queue.entries.isEmpty)
     }
 

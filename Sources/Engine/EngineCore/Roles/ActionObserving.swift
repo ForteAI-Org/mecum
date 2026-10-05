@@ -17,12 +17,16 @@ public enum ActionAttempt: Sendable, Equatable {
     case deliveryFailed(String)
 }
 
-/// ActionRecord is what one performed action taught: the element, the verb, and the effect the
-/// scenes attributed to it, or none. Memory turns records into evidence; the engine only writes them.
+/// ActionRecord is what one action taught and saw: the element, the verb, the effect the scenes
+/// attributed to it (or none), and the perceptions the engine actually used, `before` the gesture
+/// and `after` it, each with its capture quality. `element` is nil when the target named no element:
+/// the record then carries what was perceived and that nothing was attempted. Memory turns records
+/// with an effect into evidence; the engine only writes them. The windows are optional because the
+/// older callers of the init did not have them; the engine always passes what it perceived.
 public struct ActionRecord: Sendable, Equatable {
 
     public let bundleID: String
-    public let element: SceneElement
+    public let element: SceneElement?
     public let verb: ActionVerb
     public let effect: SceneEffect?
     public let windowTitleAfter: String?
@@ -32,7 +36,7 @@ public struct ActionRecord: Sendable, Equatable {
 
     public init(
         bundleID        : String,
-        element         : SceneElement,
+        element         : SceneElement?,
         verb            : ActionVerb,
         effect          : SceneEffect?,
         windowTitleAfter: String?,

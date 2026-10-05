@@ -179,6 +179,36 @@ enum BrainFixtures {
             return stats
         }
 
+        /// Records as `BrainMemory.record` does on the reference, and through the repository.
+        @discardableResult
+        func record(
+            _ element: SceneElement,
+            verb     : ActionVerb = .click,
+            effect   : SceneEffect,
+            at now   : Date,
+            _ sourceLocation: SourceLocation = #_sourceLocation
+        ) async throws -> BrainRecordOutcome {
+            let detection = BrainDetection(element), trigger = TransitionTrigger(verb)
+            var key: String?
+            if case .found(let found) = BrainMatcher.match(detection, in: reference) { key = found }
+            if key == nil, case .menuOpened = effect {
+                _ = BrainUpdater.ingest([detection], into: &reference, now: now, keys: referenceKeys)
+                if case .found(let found) = BrainMatcher.match(detection, in: reference) { key = found }
+            }
+            var expected = BrainRecordOutcome.noAnchor
+            if let key {
+                let evidence = BrainUpdater.recordTransition(anchorKey: key, trigger: trigger, effect: effect.encoded,
+                                                             into: &reference, now: now)
+                expected = .recorded(anchorKey: key, evidence: evidence)
+            }
+            let outcome = try await memory.brain.record(
+                ActionRecord(bundleID: bundle, element: element, verb: verb, effect: effect, windowTitleAfter: nil), now: now
+            )
+            #expect(outcome == expected, "the record decided differently", sourceLocation: sourceLocation)
+            try await check(sourceLocation)
+            return outcome
+        }
+
         @discardableResult
         func setName(_ name: String, anchorKey: String, at now: Date, _ sourceLocation: SourceLocation = #_sourceLocation) async throws -> Bool {
             let expected = BrainUpdater.setName(name, anchorKey: anchorKey, into: &reference, now: now)

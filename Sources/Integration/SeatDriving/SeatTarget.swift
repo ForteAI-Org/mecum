@@ -177,14 +177,17 @@ public final class SeatTarget {
         return WindowServerProbe.geometry(of: window.id)?.frame ?? window.reference.frame
     }
 
-    /// Returns the window to the person's displays and takes the virtual display down. A borrowed
-    /// target only forgets its seat and its observation: the host and the seat are left as they are.
-    public func stop() async {
+    /// Returns the window to the person's displays and takes the virtual display down, and answers what
+    /// happened to each window and to the display. A borrowed target only forgets its seat and its
+    /// observation: the host and the seat are left as they are, and the answer is empty.
+    @discardableResult
+    public func stop() async -> SeatTargetRelease {
+        var windows: [Int: WindowReleaseOutcome] = [:]
         if !isBorrowed, let seat, let adopted {
             for companion in seat.adoptedWindows where companion.id != adopted.id {
-                _ = await seat.release(companion, .returnToUserSeat)
+                windows[companion.id] = await seat.release(companion, .returnToUserSeat)
             }
-            _ = await seat.release(adopted, .returnToUserSeat)
+            windows[adopted.id] = await seat.release(adopted, .returnToUserSeat)
         }
         adopted = nil
         seat = nil
@@ -192,7 +195,10 @@ public final class SeatTarget {
         deliverySpent = false
         lastCapturedWindow = nil
         lastWindowGeometry = nil
-        if !isBorrowed { _ = await host.stop() }
+        guard !isBorrowed else { return SeatTargetRelease(windows: windows, teardown: nil) }
+        // The teardown lets go of whatever the seat still held, a window it followed included.
+        let teardown = await host.stop()
+        return SeatTargetRelease(windows: windows.merging(teardown.windows) { released, _ in released }, teardown: teardown)
     }
 
     private static func retrying<T>(_ body: () async throws -> T) async throws -> T {
@@ -205,5 +211,33 @@ public final class SeatTarget {
             }
         }
         throw lastError
+    }
+}
+
+/// SeatTargetRelease is what `SeatTarget.stop` did: each window it let go, released by the target or by
+/// the host's teardown, with what happened to it, and the teardown itself. A window that did not come
+/// back is a fact for whoever stopped the target to say, never a return that happened.
+nonisolated public struct SeatTargetRelease: Sendable, Equatable {
+
+    /// Every window let go, by window number.
+    public let windows: [Int: WindowReleaseOutcome]
+
+    /// The host's teardown; nil for a borrowed target, which tears nothing down.
+    public let teardown: TeardownReport?
+
+    public init(windows: [Int: WindowReleaseOutcome], teardown: TeardownReport?) {
+        self.windows  = windows
+        self.teardown = teardown
+    }
+
+    /// The windows that are not back on the person's displays: refused, or left on the virtual one.
+    /// A window that vanished is not among them: it is gone, which the release reports.
+    public var windowsNotReturned: [Int] {
+        windows.filter { $0.value == .refused || $0.value == .leftOnVirtualDisplay }.keys.sorted()
+    }
+
+    /// True when every window came back or vanished and the display and the fence are gone.
+    public var isComplete: Bool {
+        windowsNotReturned.isEmpty && (teardown.map { $0.displayRemoved && $0.fenceReleased } ?? true)
     }
 }

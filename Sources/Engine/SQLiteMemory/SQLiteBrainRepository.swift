@@ -73,6 +73,28 @@ public struct SQLiteBrainRepository: BrainStoring {
         )
     }
 
+    public func record(_ record: ActionRecord, now: Date) async throws -> BrainRecordOutcome {
+        guard let effect = record.effect else { return .noEffect }
+        guard let element = record.element else { return .noAnchor }
+        let keys      = self.keys
+        let detection = BrainDetection(element)
+        let trigger   = TransitionTrigger(record.verb)
+        return try await mutate(record.bundleID, now: now) { brain, now in
+            var key: String?
+            var retired = DecayReport()
+            if case .found(let found) = BrainMatcher.match(detection, in: brain) { key = found }
+            if key == nil, case .menuOpened = effect {
+                retired = BrainUpdater.ingest([detection], into: &brain, now: now, keys: keys).decay ?? DecayReport()
+                if case .found(let found) = BrainMatcher.match(detection, in: brain) { key = found }
+            }
+            guard let key else { return (BrainRecordOutcome.noAnchor, retired) }
+            let evidence = BrainUpdater.recordTransition(
+                anchorKey: key, trigger: trigger, effect: effect.encoded, into: &brain, now: now
+            )
+            return (.recorded(anchorKey: key, evidence: evidence), retired)
+        }
+    }
+
     public func setName(_ name: String, anchorKey: String, in bundleID: String, now: Date) async throws -> Bool {
         try await mutate(bundleID, now: now) { brain, now in
             (BrainUpdater.setName(name, anchorKey: anchorKey, into: &brain, now: now), DecayReport())

@@ -95,7 +95,7 @@ struct BorrowedSeatSpikeTests {
         print("SPIKE opened \(opened.name) pid \(pid), window '\(session.target?.title ?? "")'")
 
         let borrowed = try session.borrowedSeatTarget()
-        let runtime  = EngineRuntime(knowledgeDirectory: knowledge, seat: borrowed)
+        let runtime  = EngineRuntime(memory: MemoryService(directory: knowledge), seat: borrowed)
 
         let perceived: PerceivedWindow
         do { perceived = try await runtime.scenes.currentScene(of: pid) }
@@ -115,7 +115,7 @@ struct BorrowedSeatSpikeTests {
         }
         if let control {
             print("SPIKE act: click \(control.role ?? "") '\(control.label)' #\(control.id)")
-            let outcome = await runtime.engine(allowsDestructive: false).act(ActionRequest(
+            let outcome = try await runtime.engine(allowsDestructive: false).act(ActionRequest(
                 processID: pid,
                 bundleID : opened.bundleID,
                 appName  : opened.name,
@@ -131,7 +131,6 @@ struct BorrowedSeatSpikeTests {
             Issue.record("PERCEPTION: no control labelled by accessibility to click, so no act was tried")
         }
 
-        await runtime.finish()
         await borrowed.stop()
         do {
             let observation = try await session.observe()

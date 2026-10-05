@@ -80,6 +80,35 @@ struct BrainProjectionGuardTests {
         await memory.store.close()
     }
 
+    @Test("an effect the vocabulary cannot store and rebuild exactly is refused before the commit, with the anchor the reveal would have created")
+    func unrepresentableEffectRefused() async throws {
+        let twin = try await F.Twin()
+        let element = F.element("c|new", "Fresh", x: 0.4, y: 0.4)
+        let record = ActionRecord(bundleID: F.bundle, element: element, verb: .click,
+                                  effect: .menuOpened(labels: ["Open", ""]), windowTitleAfter: nil)
+        await #expect(throws: BrainProjectionError.unrepresentableEffect("menuOpened:Open|", .notCanonical)) {
+            _ = try await twin.memory.brain.record(record, now: F.t0)
+        }
+        #expect(try await twin.memory.load() == nil, "nothing of the refused mutation reached the file")
+        #expect(try await twin.memory.integers("SELECT count(*) FROM brain_anchors") == [0])
+        let again = try await twin.memory.brain.record(
+            ActionRecord(bundleID: F.bundle, element: element, verb: .click, effect: .menuOpened(labels: ["Open"]), windowTitleAfter: nil), now: F.t0
+        )
+        // The deterministic generator handed a key to the rolled-back body; the store is usable, the key sequence moved on.
+        #expect(again == .recorded(anchorKey: "anchor-2", evidence: 1))
+        let loaded = try #require(try await twin.memory.load())
+        #expect(loaded.objects.count == 1 && loaded.transitions.map(\.effect) == ["menuOpened:Open"])
+        #expect(throws: BrainProjectionError.unrepresentableEffect("teleport:x", .undecodable)) {
+            _ = try TransitionEffectRecord(effect: "teleport:x")
+        }
+        #expect(throws: BrainProjectionError.unrepresentableEffect("stateFlip:off", .undecodable)) {
+            _ = try TransitionEffectRecord(effect: "stateFlip:off")
+        }
+        #expect(try TransitionEffectRecord(effect: "menuOpened:A|B").items == ["A", "B"], "a separator inside a label is already lost in the string")
+        #expect(try TransitionEffectRecord(effect: "menuOpened:").items.isEmpty)
+        await twin.close()
+    }
+
     @Test("a schema 1 file of the earlier form, without the current group column, is refused by name and left untouched")
     func oldFormRefused() async throws {
         let url = try temporaryDatabase()
@@ -149,6 +178,73 @@ struct BrainProjectionGuardTests {
         #expect(try await store.read { try $0.query("SELECT current_group_id FROM brain_anchors") { try $0.text(0) } } == ["g1"])
         #expect(try await store.read { try $0.query("PRAGMA foreign_key_check") { _ in () } }.isEmpty)
         await store.close()
+    }
+
+    @Test("a stored row another hand wrote is refused on the way out by its code or shape, never read as a lesser row")
+    func malformedRowsRefused() async throws {
+        let twin = try await F.Twin()
+        try await twin.ingest(F.scene(["Target", "B", "C"]), at: F.t0)
+        try await twin.record(F.element("c|target", "Target", x: 0.5, y: 0.1), effect: .menuOpened(labels: ["Go"]), at: F.t0)
+        let memory = twin.memory
+        let target = try #require(twin.anchor(labeled: "Target"))
+        let key = target.anchorKey, bounds = target.boundsTypical
+        let transitionID = try #require(try await memory.texts("SELECT transition_id FROM brain_transitions").first)
+        let cases: [(sql: String, undo: String, error: BrainProjectionError)] = [
+            ("UPDATE brain_anchors SET kind = 'gadget' WHERE anchor_id = '\(key)'",
+             "UPDATE brain_anchors SET kind = 'control' WHERE anchor_id = '\(key)'",
+             .unknownElementKind("gadget")),
+            ("UPDATE brain_anchors SET typical_x = 1e999 WHERE anchor_id = '\(key)'",
+             "UPDATE brain_anchors SET typical_x = \(bounds.x) WHERE anchor_id = '\(key)'",
+             .malformedRow(table: "brain_anchors", id: key, malformation: .nonFiniteNumber("typical_x"))),
+            ("UPDATE brain_anchors SET typical_width = NULL WHERE anchor_id = '\(key)'",
+             "UPDATE brain_anchors SET typical_width = \(bounds.width) WHERE anchor_id = '\(key)'",
+             .malformedRow(table: "brain_anchors", id: key, malformation: .missingColumn("typical_width"))),
+            ("UPDATE brain_anchors SET anchor_scope = 'collection' WHERE anchor_id = '\(key)'",
+             "UPDATE brain_anchors SET anchor_scope = 'control' WHERE anchor_id = '\(key)'",
+             .unknownAnchorScope("collection")),
+            ("UPDATE brain_transitions SET status = 'rejected' WHERE transition_id = '\(transitionID)'",
+             "UPDATE brain_transitions SET status = 'trusted' WHERE transition_id = '\(transitionID)'",
+             .unknownTransitionStatus("rejected")),
+            ("UPDATE brain_transitions SET status = 'candidate' WHERE transition_id = '\(transitionID)'",
+             "UPDATE brain_transitions SET status = 'trusted' WHERE transition_id = '\(transitionID)'",
+             .malformedRow(table: "brain_transitions", id: transitionID, malformation: .statusContradictsEvidence)),
+            ("UPDATE brain_transitions SET effect_kind = 'teleport' WHERE transition_id = '\(transitionID)'",
+             "UPDATE brain_transitions SET effect_kind = 'menuOpened' WHERE transition_id = '\(transitionID)'",
+             .unknownEffectKind("teleport")),
+            ("UPDATE brain_transitions SET effect_text = 'extra' WHERE transition_id = '\(transitionID)'",
+             "UPDATE brain_transitions SET effect_text = NULL WHERE transition_id = '\(transitionID)'",
+             .malformedEffect("menuOpened", .forbiddenText)),
+            ("UPDATE brain_transitions SET trigger_kind = 'tap' WHERE transition_id = '\(transitionID)'",
+             "UPDATE brain_transitions SET trigger_kind = 'click' WHERE transition_id = '\(transitionID)'",
+             .unknownTrigger("tap")),
+            ("UPDATE brain_transition_menu_items SET position = 5 WHERE transition_id = '\(transitionID)'",
+             "UPDATE brain_transition_menu_items SET position = 0 WHERE transition_id = '\(transitionID)'",
+             .malformedRow(table: "brain_transitions", id: transitionID, malformation: .itemPositionsNotContiguous)),
+        ]
+        for (sql, undo, expected) in cases {
+            try await memory.store.write { try $0.execute(sql) }
+            await #expect(throws: expected, Comment(rawValue: sql)) { _ = try await memory.load() }
+            try await memory.store.write { try $0.execute(undo) }
+        }
+        #expect(try await memory.load() == twin.reference, "every edit was undone")
+        try await memory.store.write { try $0.execute("UPDATE brain_anchors SET label_source = 'user' WHERE anchor_id = '\(key)'") }
+        #expect(try await memory.load()?.objects.first { $0.anchorKey == key }?.labelSource == .user, "a source the vocabulary knows reads back as itself")
+        try await memory.store.write { try $0.execute("UPDATE brain_anchors SET label_source = NULL WHERE anchor_id = '\(key)'") }
+
+        try await memory.store.write { transaction in
+            try transaction.execute(
+                "INSERT INTO brain_scenes (scene_id, app_id, title_bucket, scene_kind, first_seen_ms, last_seen_ms) VALUES ('structural', 1, 'export', 'dialog', 0, 0)"
+            )
+            try transaction.execute("UPDATE brain_transitions SET from_scene_id = 'structural' WHERE transition_id = ?", [.text(transitionID)])
+        }
+        // A transition from a structural scene is not the projection's: since the general graph
+        // (S2 completion) it is a general arc, read by its own contract, and the projection no
+        // longer holds it. It used to be refused as `sourceIsNotTheAppScope`.
+        let without = try #require(try await memory.load())
+        #expect(without.transitions.count == twin.reference.transitions.count - 1, "the projection holds only what it owns")
+        let arc = try #require(try await SQLiteBrainGraphRepository(store: memory.store).arc(transitionID))
+        #expect(arc.fromSceneID == "structural")
+        await twin.close()
     }
 
     @Test("a clock that runs backwards is refused by the file's own check, the mutation is rolled back and the store goes on")

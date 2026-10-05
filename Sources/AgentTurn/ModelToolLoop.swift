@@ -28,7 +28,7 @@ import ModelTransports
 /// loop keeps every call and result. `summarize` compacts that history into a
 /// summary the caller sends instead. A failure is never retried.
 @MainActor
-final class ModelToolLoop {
+public final class ModelToolLoop {
 
     // ponytail: a fixed ceiling of 100 tool rounds per turn; make it a setting if real work needs more.
     static let toolRoundLimit = 100
@@ -61,7 +61,7 @@ final class ModelToolLoop {
     /// The window a loop turn on `selection` runs in: the `num_ctx` Mecum sends
     /// Ollama, else what the provider's catalogue states for the model, and nil
     /// when it states none.
-    static func contextWindow(
+    public static func contextWindow(
         of selection: ModelSelection,
         settings    : ProviderSettings,
         catalogue   : [ModelInfo]
@@ -89,13 +89,13 @@ final class ModelToolLoop {
         history      : [TurnMessage],
         prompt       : String,
         contextWindow: Int? = nil,
-        onEvent      : @escaping @MainActor (WorkerAgentEvent) -> Void
+        onEvent      : @escaping @MainActor (AgentTurnEvent) -> Void
     ) async throws {
         let hasTools = try await transport.capabilities().supportsTools
         let tools    = hasTools ? try Self.definitions() : []
         var messages = [TurnMessage(
             role: .system,
-            text: WorkerAgentHost.instructions(
+            text: AgentTurnHost.instructions(
                 role    : role,
                 hasTools: hasTools
             )
@@ -177,7 +177,7 @@ final class ModelToolLoop {
         + "concise, a few hundred words at most, and write only the summary."
 
     /// What a later turn is sent before a summary, in place of the messages it replaced.
-    static let summaryPreface = "Summary of the conversation before this point, which replaces it:\n\n"
+    public static let summaryPreface = "Summary of the conversation before this point, which replaces it:\n\n"
 
     /// Asks the model for a summary of `history`, which a later turn is sent
     /// in place of it, in one call with no tools, so it needs no desktop.

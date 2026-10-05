@@ -5,6 +5,7 @@
 //  Created by Eliomar Alejandro Rodriguez Ferrer on 23/09/2026.
 //
 
+import AgentTurn
 import ChatCore
 import Foundation
 import ModelTransports
@@ -39,7 +40,7 @@ struct WorkerSessionResumeTests {
             worker = try await store.createWorker(name: "Nova", appearance: appearance).id
             try await store.configure(worker: worker, selection: Self.claude)
             conversation = try await store.createConversation(participants: [worker]).id
-            let host = WorkerAgentHost(workingDirectory: work, bridgeExecutable: standIn,
+            let host = AgentTurnHost(workingDirectory: work, bridgeExecutable: standIn,
                                         session: { DesktopUnavailableSession() }, agents: agents)
 
             // The first turn starts a session, and the provider's id is stored with its provider.
@@ -55,7 +56,7 @@ struct WorkerSessionResumeTests {
 
         // A relaunch: a new store on the same directory and a new host.
         let store = try WorkspaceStore.opening(in: directory)
-        let host  = WorkerAgentHost(workingDirectory: work, bridgeExecutable: standIn,
+        let host  = AgentTurnHost(workingDirectory: work, bridgeExecutable: standIn,
                                         session: { DesktopUnavailableSession() }, agents: agents)
         #expect(try await Self.turn(store, host, worker, conversation) == .completed)
         #expect(try Self.resumed(log).last == "claude-session-1")
@@ -78,7 +79,7 @@ struct WorkerSessionResumeTests {
     /// One recorded turn, the way `TeamModel` runs it.
     private static func turn(
         _ store       : WorkspaceStore,
-        _ host        : WorkerAgentHost,
+        _ host        : AgentTurnHost,
         _ worker      : UUID,
         _ conversation: UUID
     ) async throws -> WorkerTurnRecorder.Ending {

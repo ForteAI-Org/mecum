@@ -19,33 +19,55 @@ import ModelTransports
 /// the next turn in `session` is counted from. The limits are the account's, as
 /// the provider last reported them. Every other field is nil or empty when the
 /// provider did not report it.
-nonisolated struct TurnUsage: Sendable, Hashable, Codable {
+nonisolated public struct TurnUsage: Sendable, Hashable, Codable {
 
     /// The `payloadVersion` a `turnUsage` event is written with. A row at any
     /// other version is skipped, never guessed at.
-    static let payloadVersion = 1
+    public static let payloadVersion = 1
 
-    let provider     : ModelProvider
+    public let provider     : ModelProvider
 
     /// The model as the provider named it, else as the turn's selection did.
-    let model        : String?
+    public let model        : String?
 
     /// The provider session the turn ran in, nil for a turn through Mecum's own loop.
-    let session      : String?
+    public let session      : String?
 
-    let turn         : ProviderUsage.Tokens
-    let sessionTotal : ProviderUsage.Tokens?
-    let contextTokens: Int?
-    let contextWindow: Int?
-    let rateLimits   : [ProviderUsage.RateLimit]
+    public let turn         : ProviderUsage.Tokens
+    public let sessionTotal : ProviderUsage.Tokens?
+    public let contextTokens: Int?
+    public let contextWindow: Int?
+    public let rateLimits   : [ProviderUsage.RateLimit]
 
     /// True for the turn a compaction ran, whose tokens count in the lifetime but which is no
     /// message: it is never the last message, nor one of the messages counted. Nil in every
     /// payload written before compaction existed, and read as false.
-    var isCompaction : Bool? = nil
+    public var isCompaction : Bool? = nil
+
+    public init(
+        provider     : ModelProvider,
+        model        : String?,
+        session      : String?,
+        turn         : ProviderUsage.Tokens,
+        sessionTotal : ProviderUsage.Tokens?,
+        contextTokens: Int?,
+        contextWindow: Int?,
+        rateLimits   : [ProviderUsage.RateLimit],
+        isCompaction : Bool? = nil
+    ) {
+        self.provider      = provider
+        self.model         = model
+        self.session       = session
+        self.turn          = turn
+        self.sessionTotal  = sessionTotal
+        self.contextTokens = contextTokens
+        self.contextWindow = contextWindow
+        self.rateLimits    = rateLimits
+        self.isCompaction  = isCompaction
+    }
 
     /// The payload a `turnUsage` event stores.
-    func encoded() throws -> Data {
+    public func encoded() throws -> Data {
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .secondsSince1970
         encoder.outputFormatting     = .sortedKeys
@@ -53,7 +75,7 @@ nonisolated struct TurnUsage: Sendable, Hashable, Codable {
     }
 
     /// A stored payload, or nil when it is not one this build can read.
-    static func decoded(_ payload: Data) -> TurnUsage? {
+    public static func decoded(_ payload: Data) -> TurnUsage? {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .secondsSince1970
         // Absence is the documented result: a row this build cannot read is skipped.
@@ -67,7 +89,7 @@ nonisolated struct TurnUsage: Sendable, Hashable, Codable {
 // Token counts add up across turns, and a running total less the one before is a turn's own.
 nonisolated extension ProviderUsage.Tokens {
 
-    static func + (
+    public static func + (
         lhs: Self,
         rhs: Self
     ) -> Self {
@@ -81,7 +103,7 @@ nonisolated extension ProviderUsage.Tokens {
     }
 
     /// What `lhs` counts past `rhs`, never below zero.
-    static func - (
+    public static func - (
         lhs: Self,
         rhs: Self
     ) -> Self {

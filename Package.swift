@@ -183,7 +183,7 @@ let package = Package(
     products : [
         .library(name: "MecumChat",
                  targets: ["ChatCore", "CLIProviders", "FileConversations", "LocalMCP",
-                           "AutomationRuntime", "AutomationMCP"]),
+                           "AutomationRuntime", "AutomationMCP", "AgentTurn"]),
         .library(
             name: "MecumDriver",
             targets: ["SeatCore", "PrivateSymbols", "VirtualScreens", "WindowPlacement",
@@ -285,7 +285,7 @@ let package = Package(
             "SeatBroker",
             ["SeatBroker", "PerceptionCore", "SeatCore", "SeatCapture",
              "SeatSession", "SeatInput", "TargetReader", "EngineCore", "ModelTransports",
-             "SeatDriving", "AutomationRuntime", "Engine", "AutomationMCP", "LocalMCP"]
+             "SeatDriving", "AutomationRuntime", "Engine", "AutomationMCP", "LocalMCP", "Memory"]
         ),
         brokerTests("ModelTransports", ["ModelTransports"]),
 
@@ -370,20 +370,32 @@ let package = Package(
         .target(name: "FileConversations", dependencies: ["ChatCore"],
                 path: "Sources/Chat/FileConversations", swiftSettings: pure),
         .target(name: "LocalMCP", path: "Sources/Chat/LocalMCP", swiftSettings: facility),
+        // The composition root owns the living memory's SQLite adapter: `MemoryService` opens one
+        // `memory.sqlite` per Knowledge directory and hands the pure roles to the engine and the sessions.
         integration("AutomationRuntime", ["Perception", "VisionText", "PixelSections", "PixelRegions", "WindowServerListing", "AccessibilityFacts",
                     "ScreenCapture", "Engine", "EngineCore", "HIDActuation", "AccessibilityActions",
-                    "WorkspaceActivation", "Memory", "FileKnowledge", "LiveScenes", "PerceptionCore",
+                    "WorkspaceActivation", "Memory", "SQLiteMemory", "LiveScenes", "PerceptionCore",
                     "SeatDriving", "SeatCore", "SeatSession", "PrivateSymbols"]),
-        integration("AutomationMCP", ["AutomationRuntime", "LocalMCP", "EngineCore", "PerceptionCore",
+        integration("AutomationMCP", ["AutomationRuntime", "LocalMCP", "EngineCore", "Memory", "PerceptionCore",
                                      "PrivateSymbols", "SeatCore", "WindowServerListing"]),
+        // The one turn of an agent over a desktop session, run the same way by the app's worker and by
+        // `mecum chat`: the tools, the loopback host and the connection file, the provider child or
+        // Mecum's own loop over a model transport, the events in order, what the turn cost, and the
+        // cleanup. Imports SeatBroker for the line the broker's session adds to the instructions.
+        .target(name: "AgentTurn",
+                dependencies: ["AutomationMCP", "AutomationRuntime", "ChatCore", "CLIProviders", "LocalMCP",
+                               "Memory", "ModelTransports", "SeatBroker"].map { .target(name: $0) },
+                path: "Sources/AgentTurn", swiftSettings: facility),
         // The foreground command line: windows, scene, act, memory. What a model host does, by hand.
+        // Its chat drives the desktop through the broker's session, the app's one, so it links SeatBroker.
         .executableTarget(
             name: "mecum",
             dependencies: ["Perception", "PerceptionCore", "VisionText", "WindowServerListing", "AccessibilityFacts",
                            "ScreenCapture", "Engine", "EngineCore", "HIDActuation", "AccessibilityActions",
-                           "WorkspaceActivation", "Memory", "FileKnowledge", "LiveScenes",
+                           "WorkspaceActivation", "Memory", "LiveScenes",
                            "SeatDriving", "SeatCore", "SeatSession", "PrivateSymbols", "AutomationRuntime",
-                           "ChatCore", "CLIProviders", "FileConversations", "LocalMCP", "AutomationMCP", "SceneOverlay"].map { .target(name: $0) },
+                           "ChatCore", "CLIProviders", "FileConversations", "LocalMCP", "AutomationMCP", "SceneOverlay",
+                           "SeatBroker", "AgentTurn", "ModelTransports"].map { .target(name: $0) },
             path: "Tools/Engine/mecum",
             swiftSettings: facility
         ),
@@ -422,12 +434,32 @@ let package = Package(
 
         // MARK: Engine tests
         .testTarget(name: "ChatTests", dependencies: ["ChatCore", "CLIProviders", "FileConversations", "LocalMCP",
-                                                    "AutomationMCP", "AutomationRuntime", "EngineCore", "PerceptionCore"],
+                                                    "AutomationMCP", "AutomationRuntime", "EngineCore", "Memory",
+                                                    "PerceptionCore", "SQLiteMemory"],
                     path: "Tests/Chat", resources: [.copy("Fixtures")], swiftSettings: facility),
+        // The composition root's memory service, context and recorder, proven on temporary databases: no seat,
+        // no provider, no desktop.
+        .testTarget(name: "AutomationRuntimeTests",
+                    dependencies: ["AutomationRuntime", "SQLiteMemory", "Memory", "EngineCore", "PerceptionCore"],
+                    path: "Tests/Integration/AutomationRuntimeTests", swiftSettings: facility),
+        // The chat host's controlled proofs drive the broker's session with the queue's own seats and a
+        // scripted provider over the real loopback host, so the suite imports those modules too.
         .testTarget(
             name: "MecumCLITests",
-            dependencies: ["mecum", "EngineCore", "PerceptionCore", "ChatCore", "AutomationRuntime", "Perception"],
+            dependencies: ["mecum", "EngineCore", "PerceptionCore", "ChatCore", "AutomationRuntime", "Perception",
+                           "SeatBroker", "SeatCore", "SeatDriving", "AutomationMCP", "LocalMCP", "CLIProviders",
+                           "FileConversations", "AgentTurn", "ModelTransports", "Memory"],
             path: "Tests/Engine/MecumCLITests",
+            swiftSettings: facility
+        ),
+        // The turn core's controlled proofs: stand-in command lines (shell fixtures), scripted transports,
+        // recorded provider output and rollouts under `Fixtures`, a desktop that refuses; no seat, no provider.
+        .testTarget(
+            name: "AgentTurnTests",
+            dependencies: ["AgentTurn", "AutomationMCP", "AutomationRuntime", "ChatCore", "CLIProviders",
+                           "EngineCore", "LocalMCP", "ModelTransports", "PerceptionCore", "SeatBroker"],
+            path: "Tests/AgentTurnTests",
+            resources: [.copy("Fixtures")],
             swiftSettings: facility
         ),
         engineTests("EngineCore", ["EngineCore", "PerceptionCore"]),

@@ -1,15 +1,18 @@
-import AutomationMCP
+import AgentTurn
 import AutomationRuntime
 import ChatCore
-import CLIProviders
 import Darwin
 import FileConversations
 import Foundation
-import LocalMCP
-import PrivateSymbols
+import ModelTransports
+import SeatBroker
+import SeatDriving
 
-/// ChatCommand composes the terminal, provider adapter, transcript store and one ephemeral MCP host.
-/// Provider processes may exit between turns; the Seat belongs to this process until release or shutdown.
+/// ChatCommand composes the terminal chat: the options, the conversation and its leases, the provider,
+/// the desktop (one `SeatBroker` for this process and one `BrokeredAutomationSession` for the chat, the
+/// app's way to the computer) and the `ChatHost` that drives them through the turn core the app's worker
+/// runs with (`AgentTurnHost`), with the signals that stop it. Provider processes may exit between turns;
+/// the desktop belongs to this process until release or shutdown.
 enum ChatCommand {
     static func run(arguments: [String]) async throws {
         let options = try ChatOptions(arguments: arguments)
@@ -57,6 +60,11 @@ enum ChatCommand {
         guard let selected = conversation, let executable = ChatMenu.executable(selected.provider.rawValue) else {
             throw ChatMenu.problem("The selected provider CLI is not installed or is missing from PATH.")
         }
+        // An effort the command line does not take for this model is refused here, before the first turn.
+        if let effort = options.effort,
+           let refusal = AgentTurnHost.effortRefusal(effort, commandLine: selected.provider, model: selected.model) {
+            throw ChatMenu.problem(refusal)
+        }
         let lease = try store.lease(selected.id)
         // One CLI chat host at a time owns the Driver. Provider turn subprocesses share that owner.
         let hostStore = try ConversationStore(directory: support.appendingPathComponent("ChatHost"))
@@ -66,56 +74,57 @@ enum ChatCommand {
         try transcript.save()
         let knowledge = options.knowledgeDirectory.map { URL(fileURLWithPath: ($0 as NSString).expandingTildeInPath) }
             ?? support.appendingPathComponent("Knowledge", isDirectory: true)
-        let tools = ChatTools(session: AutomationSession(knowledgeDirectory: knowledge,
-                                                        allowsDestructive: options.allowDestructive))
-        tools.record = { text in
-            print("  \(text.prefix(240))")
-            try transcript.append(.tool, text)
+        // The living memory of the Knowledge directory, the app's and the vertical commands' too: one
+        // memory.sqlite under it, opened now so its state is said before the first turn, closed by the host.
+        let memory   = MemoryService(directory: knowledge)
+        let workerID = UUID()
+        // The desktop is the app's: the broker carries the research opt-in as its configuration, and the
+        // session waits in its queue under an id stable for this chat (§22.3). Nothing opens a seat apart.
+        let broker = SeatBroker(configuration: SeatBrokerConfiguration(allowUnvalidatedBuild: options.allowUnvalidated))
+        if options.allowUnvalidated { print("seat: research opt-in for an unvalidated macOS build") }
+        let desktop = BrokeredAutomationSession(
+            broker            : broker,
+            workerID          : workerID,
+            memory            : memory,
+            allowsDestructive : options.allowDestructive
+        )
+        if let folder = options.selectDiagnostics {
+            let directory = URL(fileURLWithPath: (folder as NSString).expandingTildeInPath, isDirectory: true)
+            desktop.selectionDiagnostics = SelectionDiagnostics(directory: directory)
+            print("select diagnostics: writing each select's images and diagnosis under \(directory.path)")
         }
-        if options.allowUnvalidated {
-            FacilityGate.researchOptInForUnvalidatedBuilds = true
-            print("seat: research opt-in for an unvalidated macOS build")
-        }
-        let router = MCPRouter(tools: ChatTools.definitions) { name, arguments in
-            try await tools.call(name, arguments)
-        }
-        let host = LocalMCPHost(router: router)
-        let temporary = FileManager.default.temporaryDirectory.appendingPathComponent("mecum-chat-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: temporary, withIntermediateDirectories: false,
-                                                 attributes: [.posixPermissions: 0o700])
-        defer {
-            do { try FileManager.default.removeItem(at: temporary) }
-            catch { fputs("mecum: could not remove temporary chat configuration: \(error)\n", stderr) }
-        }
-        let connectionFile = temporary.appendingPathComponent("connection.json")
-        let working = history.appendingPathComponent("ProviderWorkspace", isDirectory: true)
-        try FileManager.default.createDirectory(at: working, withIntermediateDirectories: true,
-                                                 attributes: [.posixPermissions: 0o700])
-        let endpoint = try await host.start()
-        defer { host.stop() }
-        try JSONEncoder().encode(endpoint).write(to: connectionFile, options: .atomic)
-        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: connectionFile.path)
-        let provider = CLIProvider()
-        var shutdown: Task<Void, Never>?
-        let signals = ChatSignals {
-            router.pause()
-            provider.cancel()
-            shutdown = Task {
-                await router.drain()
-                await tools.session.close()
-                await provider.waitUntilStopped()
-                do { try transcript.append(.interrupted, "Interrupted. Inspect the current app state before continuing.") }
-                catch { fputs("mecum: transcript save failed: \(error)\n", stderr) }
-                host.stop()
-                do { try FileManager.default.removeItem(at: temporary) }
-                catch { fputs("mecum: temporary cleanup failed: \(error)\n", stderr) }
-                print("\nStopped; conversation saved. Resume with --resume \(selected.id.uuidString)")
+        // The turn core (tools, router, loopback host, connection file, provider child) is the host's,
+        // started on the first turn; the broker and its queue stay this command's.
+        let host = ChatHost(
+            broker          : broker,
+            desktop         : desktop,
+            transcript      : transcript,
+            memory          : memory,
+            workerID        : workerID,
+            executable      : executable,
+            bridgeExecutable: executablePath,
+            workingDirectory: history.appendingPathComponent("ProviderWorkspace", isDirectory: true),
+            role            : options.role,
+            effort          : options.effort,
+            allowsWebSearch : options.webSearch
+        )
+        let stopped = "\nStopped; conversation saved. Resume with --resume \(selected.id.uuidString)"
+        let signals = TerminalSignals { _ in
+            // The provider is interrupted now; the exit waits for the cleanup, the host's one task.
+            let cleanup = host.stop()
+            Task { @MainActor in
+                await cleanup.value
+                print(stopped)
                 exit(130)
             }
         }
         defer { signals.stop() }
         print("\nMecum chat · \(selected.provider.displayName) · \(selected.model ?? "provider default")")
         print("Conversation: \(selected.id.uuidString)")
+        print(await memory.ready().sentence)
+        // The invocation's turn configuration, which a saved conversation does not keep.
+        print("Turns: effort \(options.effort?.rawValue ?? "provider default") · web search "
+              + "\(options.webSearch ? "on" : "off") · role \(options.role == nil ? "none" : "set")")
         if !selected.entries.isEmpty {
             print("Resuming saved context; application state will be observed again.")
             for entry in selected.entries.filter({ $0.kind == .user || $0.kind == .assistant }).suffix(4) {
@@ -123,66 +132,14 @@ enum ChatCommand {
             }
         }
         print("/help for commands. Ctrl+C stops and releases the Seat.\n")
-        var next = options.prompt
         do {
-            while true {
-                let line: String?
-                if let pending = next { line = pending; next = nil }
-                else if interactive { line = await ChatMenu.read("You › ") }
-                else { break }
-                guard let line else { break }
-                let message = line.trimmingCharacters(in: .whitespacesAndNewlines)
-                if message.isEmpty { continue }
-                if message == "/quit" || message == "/exit" { break }
-                if message == "/help" { print(ChatOptions.usage); continue }
-                if message == "/model" {
-                    transcript.conversation.model = try await ChatMenu.model(selected.provider)
-                    try transcript.save()
-                    continue
-                }
-                if message == "/release" {
-                    await tools.session.close()
-                    try transcript.append(.tool, "User released the Seat. Any previous session ID is now stale.")
-                    print("Seat released.")
-                    continue
-                }
-                if message == "/status" {
-                    let result = try await tools.call("status", .object([:]))
-                    print(String(decoding: try JSONEncoder().encode(result), as: UTF8.self))
-                    continue
-                }
-                if message.hasPrefix("/") { print("Unknown command. Use /help."); continue }
-                try transcript.append(.user, message)
-                let turn = ProviderTurn(
-                    provider: selected.provider, model: transcript.conversation.model,
-                    sessionID: transcript.conversation.providerSessionID, prompt: message,
-                    instructions: ChatTools.instructions, bridgeExecutable: executablePath,
-                    connectionFile: connectionFile.path, workingDirectory: working.path
-                )
-                do {
-                    try await provider.run(turn, executable: executable) { event in try transcript.event(event) }
-                } catch {
-                    if let shutdown { await shutdown.value; return }
-                    router.pause()
-                    await router.drain()
-                    await tools.session.close()
-                    router.resume()
-                    try transcript.append(.error, error.localizedDescription)
-                    print("Chat error: \(error.localizedDescription)")
-                    if !interactive { throw error }
-                }
-                if options.once { break }
+            try await host.run(prompt: options.prompt, interactive: interactive, once: options.once) {
+                await ChatMenu.read("You › ")
             }
-            router.pause()
-            await router.drain()
-            await tools.session.close()
-            try transcript.save()
-        } catch {
-            if let shutdown { await shutdown.value; return }
-            router.pause()
-            await router.drain()
-            await tools.session.close()
-            throw error
+        } catch is ChatStopped {
+            // The signal's own task may print and exit first; whichever runs first ends the process.
+            print(stopped)
+            exit(130)
         }
     }
 

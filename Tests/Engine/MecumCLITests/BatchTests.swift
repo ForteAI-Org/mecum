@@ -1,4 +1,5 @@
 import EngineCore
+import Memory
 import PerceptionCore
 import Testing
 @testable import mecum
@@ -17,13 +18,14 @@ struct BatchTests {
         #expect(plan.application == "Pro Tools")
         #expect(plan.invocation.options["window"] == "New Paths")
         #expect(plan.steps.count == 3)
-        guard case .select(let control, let item) = plan.steps[0], case .act(let action) = plan.steps[1] else {
+        guard case .select(let control, let item) = plan.steps[0].request,
+              case .act(let target, let verb, let value, let section) = plan.steps[1].request else {
             Issue.record("wrong step types")
             return
         }
         #expect(control == "Mono" && item == "Stereo")
-        #expect(action.target == "Auto-create sub paths")
-        #expect(action.verb == .setToggle && action.desiredState == .on)
+        #expect(target == "Auto-create sub paths" && section == nil)
+        #expect(verb == .setToggle && value == .on)
         #expect(plan.invocation.options["verb"] == nil)
     }
 
@@ -129,5 +131,51 @@ struct BatchTests {
             return calls
         }
         #expect(await task.value == [1])
+    }
+
+    // MARK: The header's escapes (S3-e correction)
+
+    @Test("an escape in the header stays an escape: a literal app, window or knowledge, and the real boundary after it")
+    func literalHeaderValues() throws {
+        let window = try BatchPlan(arguments: ["batch", "App", "--window", "--", "--Window", "--seat", "--", "act", "Create"])
+        #expect(window.application == "App" && window.invocation.options["window"] == "--Window")
+        #expect(window.steps.map(\.summary) == ["act target=\"Create\" verb=click"])
+        let app = try BatchPlan(arguments: ["batch", "--", "--App", "--window", "W", "--seat", "--", "press_key", "return"])
+        #expect(app.application == "--App" && app.invocation.options["window"] == "W" && app.steps.count == 1)
+        let knowledge = try BatchPlan(arguments: ["batch", "App", "--knowledge", "--", "--", "--window", "--", "--then", "--seat",
+                                                  "--", "type_text", "Name", "--", "--then", "--then", "act", "OK"])
+        #expect(knowledge.invocation.options["knowledge"] == "--" && knowledge.invocation.options["window"] == "--then")
+        #expect(knowledge.steps.map(\.summary) == ["type_text target=\"Name\" text=<6 characters> replace=true",
+                                                   "act target=\"OK\" verb=click"])
+        // The old form, unchanged: the first -- after a complete header is the boundary.
+        let plain = try BatchPlan(arguments: header + ["act", "Create"])
+        #expect(plain.invocation.options["window"] == "New Paths" && plain.steps.count == 1)
+    }
+
+    @Test("a malformed header is refused before anything runs", arguments: [
+        ["batch", "App", "--window", "--"],
+        ["batch", "App", "--window", "--", "--W", "--seat"],
+        ["batch", "App", "--window", "--seat", "--", "act", "Create"],
+        ["batch", "App", "--window", "W", "--seat", "act", "Create"],
+        ["batch", "--"],
+        ["batch", "App", "--window", "W", "--seat", "--knowledge"],
+        ["batch", "App", "--window", "--", "--W", "--seat", "--", "act"],
+        ["batch", "App", "Other", "--window", "W", "--seat", "--", "act", "Create"],
+    ])
+    func malformedHeaders(_ words: [String]) {
+        #expect(throws: (any Error).self) { try BatchPlan(arguments: words) }
+    }
+
+    @Test("the header's end is found by the grammar: an escaped -- is a word, the first other -- ends it")
+    func headerEnd() throws {
+        func end(_ words: [String]) throws -> Int? {
+            try Words.headerEnd(words.dropFirst(), spec: CommandSpecs.batch, requiredPositionals: 1)
+        }
+        #expect(try end(["batch", "App", "--seat", "--", "act"]) == 3)
+        #expect(try end(["batch", "App", "--window", "--", "--", "--", "act"]) == 5)
+        #expect(try end(["batch", "--", "--", "--seat", "--"]) == 4)
+        #expect(try end(["batch", "App", "--seat"]) == nil)
+        #expect(throws: UsageError.self) { try end(["batch", "App", "--window", "--"]) }
+        #expect(throws: UsageError.self) { try end(["batch", "--"]) }
     }
 }

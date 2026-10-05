@@ -5,6 +5,7 @@
 //  Created by Eliomar Alejandro Rodriguez Ferrer on 25/09/2026.
 //
 
+import AgentTurn
 import ChatCore
 import SwiftUI
 

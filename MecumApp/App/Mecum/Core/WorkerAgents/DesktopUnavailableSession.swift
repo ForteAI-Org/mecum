@@ -30,24 +30,24 @@ final class DesktopUnavailableSession: AutomationSessionOperating {
         "No app is open. This version cannot open apps for workers."
     )
 
-    func open(application: String, window: String?) async throws -> SceneSnapshot {
+    func open(application: String, window: String?, context: ActionContext) async throws -> SceneSnapshot {
         throw AutomationFailure(Self.refusal)
     }
 
-    func observe() async throws -> SceneSnapshot {
+    func observe(context: ActionContext) async throws -> SceneSnapshot {
         throw Self.noSession
     }
 
-    func act(target: String, verb: ActionVerb, section: String?, desiredState: ControlState?) async throws
-        -> ActOutcome {
+    func act(target: String, verb: ActionVerb, section: String?, desiredState: ControlState?,
+             context: ActionContext) async throws -> ActOutcome {
         throw Self.noSession
     }
 
-    func select(control: String, item: String) async throws -> ActOutcome {
+    func select(control: String, item: String, context: ActionContext) async throws -> ActOutcome {
         throw Self.noSession
     }
 
-    func deliver(_ input: InputRequest.Input, section: String?) async throws -> ActOutcome {
+    func deliver(_ input: InputRequest.Input, section: String?, context: ActionContext) async throws -> ActOutcome {
         throw Self.noSession
     }
 

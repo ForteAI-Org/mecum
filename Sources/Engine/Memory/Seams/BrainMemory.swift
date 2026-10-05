@@ -9,18 +9,32 @@ import EngineCore
 import Foundation
 import PerceptionCore
 
-/// BrainMemory fills the engine's two memory seams from the brain behind a `KnowledgeStoring`: it
-/// answers what a verb on an element is expected to do from trusted transitions, and it records what
-/// each performed action taught. It also observes scenes into the brain and enriches them from it.
-/// The clock arrives at construction; nothing here reads the wall.
-public actor BrainMemory: EffectExpecting, ActionObserving {
+/// BrainMemory fills the engine's expectation seam from the stored brain and carries what a producer
+/// teaches it to the brain's applications: it answers what a verb on an element is expected to do
+/// from trusted transitions, it enriches scenes from the projection, and it turns an observed scene
+/// or a performed action into one `BrainApplicationCommand`, applied once per key by the store
+/// (`BrainApplicationStoring`), so a retry of the same fact moves no counter. Where the brain learns
+/// is unchanged: a scene observed by `open_session`, `observe` or the `scene` command is ingested;
+/// an action with an effect is recorded against its element's anchor; nothing else teaches.
+///
+/// Reads come from `BrainReading`; a read that fails answers no opinion (no expectation, the scene
+/// as it was), since neither seam may fail an action. A write that fails is thrown to the producer,
+/// which reports the memory as degraded and goes on. The clock arrives at construction; nothing
+/// here reads the wall.
+public actor BrainMemory: EffectExpecting {
 
-    private let store: any KnowledgeStoring
+    private let brains: any BrainReading
+    private let applications: any BrainApplicationStoring
     private let clock: @Sendable () -> Date
 
-    public init(store: any KnowledgeStoring, clock: @escaping @Sendable () -> Date) {
-        self.store = store
-        self.clock = clock
+    public init(
+        brains      : any BrainReading,
+        applications: any BrainApplicationStoring,
+        clock       : @escaping @Sendable () -> Date
+    ) {
+        self.brains       = brains
+        self.applications = applications
+        self.clock        = clock
     }
 
     // MARK: EffectExpecting
@@ -32,8 +46,7 @@ public actor BrainMemory: EffectExpecting, ActionObserving {
         on element : SceneElement,
         in bundleID: String
     ) async -> SceneEffect? {
-        guard let knowledge = try? await store.load(bundleID: bundleID) else { return nil }
-        let brain = knowledge.brain
+        guard let brain = try? await brains.brain(of: bundleID) else { return nil }
         guard case .found(let key) = BrainMatcher.match(BrainDetection(element), in: brain) else { return nil }
         let trigger = TransitionTrigger(verb)
         return brain.transitions
@@ -42,51 +55,36 @@ public actor BrainMemory: EffectExpecting, ActionObserving {
             .sceneEffect
     }
 
-    // MARK: ActionObserving
+    // MARK: What a producer teaches
 
-    /// Records the effect against the element's anchor. An element with no anchor yet that revealed a
-    /// menu is anchored first, because a session once learned nothing from a right-click that opened
-    /// a context menu and re-guessed menu titles blind the next time. The role forbids failing the
-    /// action, so a store error drops the record.
-    public func record(_ record: ActionRecord) async {
-        guard let effect = record.effect else { return }
-        let now = clock()
-        let detection = BrainDetection(record.element)
-        let trigger = TransitionTrigger(record.verb)
-        do {
-            try await store.mutate(bundleID: record.bundleID) { knowledge in
-                var key: String?
-                if case .found(let found) = BrainMatcher.match(detection, in: knowledge.brain) { key = found }
-                if key == nil, case .menuOpened = effect {
-                    _ = BrainUpdater.ingest([detection], into: &knowledge.brain, now: now)
-                    if case .found(let found) = BrainMatcher.match(detection, in: knowledge.brain) { key = found }
-                }
-                guard let key else { return }
-                _ = BrainUpdater.recordTransition(anchorKey: key, trigger: trigger, effect: effect.encoded,
-                                                  into: &knowledge.brain, now: now)
-            }
-        } catch {
-            return
-        }
+    /// Records what an action taught, keyed by the event of the call that performed it: the record's
+    /// effect against its element's anchor, with the rules the brain always had (no effect teaches
+    /// nothing; an element with no anchor teaches nothing unless it revealed a menu). Nil when the
+    /// record carries no effect or no element, which is no application at all. `requestedAt` is the
+    /// instant the application is asked for, part of what the store compares a retry against: a
+    /// producer passes the call's own instant (its event's), so the same call is the same command;
+    /// nil reads the clock.
+    public func record(_ record: ActionRecord, eventID: String, requestedAt: Date? = nil) async throws -> BrainApplicationResult? {
+        guard record.effect != nil, record.element != nil else { return nil }
+        let command = try BrainApplicationCommand.record(record, eventID: eventID, requestedAt: requestedAt ?? clock())
+        return try await applications.apply(command)
+    }
+
+    /// Ingests a scene's elements into its application's brain, scoped to the window's title
+    /// family, keyed by the real sample the scene was captured as. `requestedAt` as in `record`.
+    @discardableResult
+    public func observe(_ scene: SceneSnapshot, sample: CaptureSampleKey, requestedAt: Date? = nil) async throws -> BrainApplicationResult {
+        let command = try BrainApplicationCommand.observe(scene, sample: sample, requestedAt: requestedAt ?? clock())
+        return try await applications.apply(command)
     }
 
     // MARK: Scenes
 
-    /// Ingests a scene's elements into its application's brain, scoped to the window's title family.
-    @discardableResult
-    public func observe(_ scene: SceneSnapshot) async throws -> BrainUpdater.IngestStats {
-        let now = clock()
-        let detections = scene.elements.map(BrainDetection.init)
-        let window = LabelText.letters(scene.windowTitle)
-        return try await store.mutate(bundleID: scene.bundleID) { knowledge in
-            BrainUpdater.ingest(detections, into: &knowledge.brain, now: now, window: window.isEmpty ? nil : window)
-        }
-    }
-
-    /// The scene with its elements annotated from the brain; the scene itself when the store has none.
+    /// The scene with its elements annotated from the brain; the scene itself when the store has
+    /// none, or cannot be read.
     public func enrich(_ scene: SceneSnapshot) async -> SceneSnapshot {
-        guard let knowledge = try? await store.load(bundleID: scene.bundleID) else { return scene }
-        let elements = knowledge.brain.enrich(scene.elements)
+        guard let brain = try? await brains.brain(of: scene.bundleID) else { return scene }
+        let elements = brain.enrich(scene.elements)
         guard elements != scene.elements else { return scene }
         return SceneSnapshot(
             bundleID         : scene.bundleID,

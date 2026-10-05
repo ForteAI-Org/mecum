@@ -39,10 +39,12 @@ REPORTS   := Documentation/Driver/compatibility
 # 2026-09-24 (`swift package describe --type json`, type "test"), after the
 # app's own modules and their tests moved into the app, where `MecumTests` runs;
 # 28 on 2026-09-30, with `SQLiteMemoryTests` for the living memory's store;
+# 29 on 2026-10-02, with `AgentTurnTests` for the turn core the app and the chat share;
+# 30 on 2026-10-02, with `AutomationRuntimeTests` for the memory service, context and recorder.
 # This is the bundle count, not a test count, because test counts move with every
 # ticket (987 to 1018 in one day) and a number nobody updates stops meaning
 # anything, while a new test target is rare and worth failing over.
-UNIT_BUNDLES := 28
+UNIT_BUNDLES := 30
 
 # The seat cycle, alone in its own process.
 HOST_CYCLE_TESTS := 1

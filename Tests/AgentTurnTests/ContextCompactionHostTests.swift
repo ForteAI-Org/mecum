@@ -10,7 +10,7 @@ import ChatCore
 import Foundation
 import ModelTransports
 import Testing
-@testable import Mecum
+@testable import AgentTurn
 
 /// The Claude session and the Codex thread the fixtures were recorded in, sanitized as they are.
 private let claudeSession = "6a1474ca-08f7-4357-b19c-3f154fb27eaa"
@@ -105,8 +105,8 @@ struct ContextCompactionHostTests {
         in root: URL,
         agent  : URL,
         as chat: ChatProvider
-    ) -> WorkerAgentHost {
-        WorkerAgentHost(
+    ) -> AgentTurnHost {
+        AgentTurnHost(
             workingDirectory: root.appending(path: "work"),
             bridgeExecutable: agent,
             session         : { DesktopUnavailableSession() },
@@ -265,7 +265,7 @@ struct ContextCompactionHostTests {
         ))
         #expect(usage.sessionTotal?.input == 49255)
         #expect(usage.contextTokens == 1205)
-        #expect(try received(in: root) == WorkerAgentHost.codexCompactionPrompt)
+        #expect(try received(in: root) == AgentTurnHost.codexCompactionPrompt)
         let sent  = try arguments(in: root)
         let limit = try #require(sent.firstIndex(of: "model_auto_compact_token_limit=1000"))
         #expect(sent[limit - 1] == "-c")
@@ -310,6 +310,93 @@ struct ContextCompactionHostTests {
             #expect(failure.description == "Codex answered without compacting the conversation.")
         }
         try await host.close()
+    }
+
+    /// The chat's entry runs the same compaction with the command line's defaults: no model, no effort.
+    @Test func theCommandLineEntryCompactsAsTheAppDoes() async throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let agent = try standIn(in: root, "cat '\(fixture("claude-compact-plain").path)'")
+        let host  = host(in: root, agent: agent, as: .claude)
+        let done = try await host.compact(commandLine: .claude, model: nil, sessionID: claudeSession, role: nil)
+        try await host.close()
+        #expect(done.compaction == ContextCompaction(provider: .claudeCode, trigger: .manual, preTokens: 3561, postTokens: 1395,
+                                                     contextWindow: 1_000_000, summary: nil))
+        #expect(done.usage == nil)
+        #expect(try received(in: root) == "/compact")
+        let sent = try arguments(in: root)
+        #expect(!sent.contains("--model"), "the command line's default model is left to it")
+        #expect(!sent.contains("--effort"))
+        #expect(sent[try #require(sent.firstIndex(of: "--resume")) + 1] == claudeSession)
+    }
+
+    /// A Codex compaction through the chat's entry: the same rollout check and the same count from the
+    /// usage passed, with the command line's default model.
+    @Test func theCommandLineEntryCompactsCodexAndCountsItsTurn() async throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let home    = root.appending(path: "codex")
+        let rollout = todaysFolder(in: home.appending(path: "sessions")).appending(path: "rollout-x-\(codexThread).jsonl")
+        try FileManager.default.createDirectory(at: rollout.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try FileManager.default.copyItem(at: fixture("codex-rollout-excerpt"), to: rollout)
+        let agent = try standIn(
+            in: root,
+            """
+            /usr/bin/python3 - <<'PY'
+            import datetime, json
+            now = datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%dT%H:%M:%S.%f')[:-3] + 'Z'
+            count = {"type": "token_count", "rate_limits": None, "info": {"model_context_window": 258400,
+                     "last_token_usage": {"input_tokens": 1200, "output_tokens": 5}}}
+            with open('\(rollout.path)', 'a') as file:
+                file.write(json.dumps({"timestamp": now, "type": "compacted", "payload": {"message": ""}}) + "\\n")
+                file.write(json.dumps({"timestamp": now, "type": "event_msg", "payload": count}) + "\\n")
+            PY
+            cat '\(fixture("codex-lowlimit").path)'
+            """
+        )
+        let host = host(in: root, agent: agent, as: .codex)
+        let before = TurnUsage(provider: .codex, model: nil, session: codexThread, turn: ProviderUsage.Tokens(input: 16357),
+                               sessionTotal: ProviderUsage.Tokens(input: 32701, cacheReads: 27904, output: 44, reasoning: 32),
+                               contextTokens: 16396, contextWindow: 258_400, rateLimits: [])
+        let done = try await host.compact(commandLine: .codex, model: nil, sessionID: codexThread, role: nil,
+                                          lastUsage: before, inheritedEnvironment: ["CODEX_HOME": home.path])
+        try await host.close()
+        #expect(done.compaction == ContextCompaction(provider: .codex, trigger: .manual, preTokens: 16396, postTokens: 1205,
+                                                     contextWindow: 258_400, summary: nil))
+        let usage = try #require(done.usage)
+        #expect(usage.turn.input == 49255 - 32701, "counted from the usage passed, never twice")
+        #expect(try received(in: root) == AgentTurnHost.codexCompactionPrompt)
+        #expect(!(try arguments(in: root)).contains("--model"), "the command line's default model")
+    }
+
+    /// A refused /compact, no session, an effort the command line does not take, and a Codex turn that
+    /// did not compact: each a failure through the chat's entry, nothing invented.
+    @Test func theCommandLineEntryFailsWithoutInventingAResult() async throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let refused = try standIn(in: root, "cat '\(fixture("claude-compact-disabled").path)'")
+        let host = host(in: root, agent: refused, as: .claude)
+        await #expect(throws: AutomationFailure.self) {
+            _ = try await host.compact(commandLine: .claude, model: nil, sessionID: claudeSession, role: nil)
+        }
+        await #expect(throws: AutomationFailure.self) {
+            _ = try await host.compact(commandLine: .claude, model: nil, sessionID: nil, role: nil)
+        }
+        await #expect(throws: AutomationFailure.self) {
+            _ = try await host.compact(commandLine: .claude, model: "claude-haiku-4-5", effort: .high, sessionID: claudeSession, role: nil)
+        }
+        try await host.close()
+        let home = root.appending(path: "codex")
+        let codex = try standIn(in: root, "cat '\(fixture("codex-lowlimit").path)'")
+        let codexHost = self.host(in: root, agent: codex, as: .codex)
+        do {
+            _ = try await codexHost.compact(commandLine: .codex, model: nil, sessionID: codexThread, role: nil,
+                                            inheritedEnvironment: ["CODEX_HOME": home.path])
+            Issue.record("A Codex turn that did not compact counted as a compaction.")
+        } catch let failure as AutomationFailure {
+            #expect(failure.description == "Codex answered without compacting the conversation.")
+        }
+        try await codexHost.close()
     }
 
     @Test func aStopDuringACompactionEndsItAndItsChild() async throws {

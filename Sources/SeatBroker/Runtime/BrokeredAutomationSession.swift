@@ -27,9 +27,11 @@ import VisionText
 /// It is made for one worker and owns at most one lease at a time. `open` checks the grants,
 /// waits in the queue under the worker's id, opens the application through the granted
 /// session and perceives and acts through Ron's `EngineRuntime` over a target borrowed from that
-/// session's seat, so the scenes, the engine and the Brain are the command line's. `close` flushes
-/// the Brain, ends the borrow, finishes with the application as its provenance says and gives the
-/// lease back, which parks the seat warm for the next entry.
+/// session's seat, so the scenes, the engine and the Brain are the command line's. Every call
+/// records what it saw under the caller's `ActionContext`, through the owner's `MemoryService`
+/// (the samples, the brain's learning), and leaves its report for the adapter that records the
+/// call. `close` ends the borrow, finishes with the application as its provenance says and gives
+/// the lease back, which parks the seat warm for the next entry; the memory is the owner's to close.
 ///
 /// The seat is kept after a turn for `idleWindow` without another turn, then closed, so a quick
 /// follow-up reuses the open session and the window comes back soon after. A new turn cancels
@@ -51,9 +53,10 @@ public final class BrokeredAutomationSession: AutomationSessionOperating {
     typealias Seating = @MainActor (AgentSession, _ application: String, _ window: String?) async throws
         -> (opened: TargetApp, target: SeatTarget)
 
-    /// Reads the scene of the application `pid` through `runtime`. A seam for the controlled tests;
-    /// the public init perceives through Ron's engine.
-    typealias Perceiving = @MainActor (EngineRuntime, _ pid: pid_t) async throws -> SceneSnapshot
+    /// Reads the window of the application `pid` through `runtime`, with its capture quality. A seam
+    /// for the controlled tests; the public init perceives through Ron's engine. What is read is
+    /// recorded and enriched by the session, not by the seam.
+    typealias Perceiving = @MainActor (EngineRuntime, _ pid: pid_t) async throws -> PerceivedWindow
 
     /// Returns once `window` has passed, or throws when cancelled. A seam for the controlled tests,
     /// which let the window elapse when they choose; the public init sleeps on the task's clock.
@@ -63,6 +66,21 @@ public final class BrokeredAutomationSession: AutomationSessionOperating {
     /// a quick follow-up ("and what is the first one called?") still finds the session and its
     /// context, and the window comes back to the person's screen soon after the worker goes quiet.
     static let idleWindow: Duration = .seconds(30)
+
+    /// A developer's record of each `select` of this session, the images the selector perceived and why
+    /// it decided (`SelectionDiagnostics`); nil, the default, writes nothing. `mecum chat` sets it with
+    /// `--diagnose-select <directory>`; the app never does. It changes no outcome and nothing recorded.
+    public var selectionDiagnostics: SelectionDiagnostics?
+
+    /// What an agent over this session is told beyond `AutomationTools.instructions`, whose text is
+    /// written around `windows`: its `open_session` goes through `AgentSession.open`, which launches an
+    /// installed application that is not running and records that it did, so the application is quit
+    /// again when the session is finished with it. The app's worker and `mecum chat` both run with
+    /// this line, after the base text, so the two entries declare the one capability in one wording.
+    public static let openingInstructions = "open_session also opens an installed application that is "
+        + "not running yet: find it with apps and pass its bundleID to open_session. When several match and "
+        + "the conversation does not make clear which one the person means, ask them which one, naming the "
+        + "candidates, before opening either."
 
     /// Where the session is with the computer, which is what the worker's row reads.
     enum Phase: Equatable {
@@ -77,9 +95,12 @@ public final class BrokeredAutomationSession: AutomationSessionOperating {
     public private(set) var id: UUID?
     private(set) var phase = Phase.idle
 
+    /// What the last call left for its record (`AutomationSessionOperating.lastReport`).
+    @ObservationIgnored public private(set) var lastReport: CallRecorder.Report?
+
     @ObservationIgnored private let broker: SeatBroker
     @ObservationIgnored private let label: String
-    @ObservationIgnored private let knowledgeDirectory: URL
+    @ObservationIgnored private let memory: MemoryService
     @ObservationIgnored private let allowsDestructive: Bool
     @ObservationIgnored private let missingGrant: @MainActor () -> PermissionKind?
     @ObservationIgnored private let requestGrants: @MainActor () -> Void
@@ -91,25 +112,26 @@ public final class BrokeredAutomationSession: AutomationSessionOperating {
     @ObservationIgnored private var lease: SeatLease?
     @ObservationIgnored private var target: SeatTarget?
     @ObservationIgnored private var runtime: EngineRuntime?
-    @ObservationIgnored private var application: NSRunningApplication?
+    @ObservationIgnored private var openApplication: NSRunningApplication?
     @ObservationIgnored private var closing: Task<Void, Never>?
     @ObservationIgnored private var isInTurn = false
     @ObservationIgnored private var idleRelease: Task<Void, Never>?
+    @ObservationIgnored private var revision: Int64 = 0
 
     /// `workerID` labels this session's entry in `SeatQueue.entries` as its `uuidString`, so two
     /// workers with one name still read their own position; no view shows that label.
-    /// `knowledgeDirectory` is the Brain's, the command line's own, so what either learns applies
-    /// to both. The broker is retained for the life of this session.
+    /// `memory` is the owner's living memory of the Knowledge directory, the command line's own, so
+    /// what either learns applies to both. The broker is retained for the life of this session.
     public convenience init(
         broker            : SeatBroker,
         workerID          : UUID,
-        knowledgeDirectory: URL,
+        memory            : MemoryService,
         allowsDestructive : Bool = false
     ) {
         self.init(
             broker            : broker,
             workerID          : workerID,
-            knowledgeDirectory: knowledgeDirectory,
+            memory            : memory,
             allowsDestructive : allowsDestructive,
             missingGrant      : { Permissions.firstMissing(of: [.screenRecording, .accessibility, .postEvent]) },
             requestGrants     : { _ = broker.requestMissingPermissions() },
@@ -125,17 +147,15 @@ public final class BrokeredAutomationSession: AutomationSessionOperating {
         return (opened, try session.borrowedSeatTarget())
     }
 
-    /// Ron's scene provider over the borrowed target, observed and enriched by the Brain.
+    /// Ron's scene provider over the borrowed target.
     static let perceivedThroughTheEngine: Perceiving = { runtime, pid in
-        let perceived = try await runtime.scenes.currentScene(of: pid)
-        _ = try await runtime.memory.observe(perceived.scene)
-        return await runtime.memory.enrich(perceived.scene)
+        try await runtime.scenes.currentScene(of: pid)
     }
 
     init(
         broker            : SeatBroker,
         workerID          : UUID,
-        knowledgeDirectory: URL,
+        memory            : MemoryService,
         allowsDestructive : Bool,
         missingGrant      : @escaping @MainActor () -> PermissionKind?,
         requestGrants     : @escaping @MainActor () -> Void,
@@ -146,7 +166,7 @@ public final class BrokeredAutomationSession: AutomationSessionOperating {
     ) {
         self.broker             = broker
         self.label              = workerID.uuidString
-        self.knowledgeDirectory = knowledgeDirectory
+        self.memory             = memory
         self.allowsDestructive  = allowsDestructive
         self.missingGrant       = missingGrant
         self.requestGrants      = requestGrants
@@ -200,11 +220,16 @@ public final class BrokeredAutomationSession: AutomationSessionOperating {
         return "Waiting for the computer (\(index) ahead)"
     }
 
+    /// The application this session drives, as the memory names it; nil while none is open.
+    public var application: AppContextIdentity? {
+        openApplication.map(AppContextIdentity.init)
+    }
+
     /// Checks the grants, waits for a seat, opens the application on it and returns the first
-    /// scene, which the Brain observes. A missing grant is asked for through the broker and
-    /// refused at once, before the queue. Any failure after the seat was granted closes, so the
-    /// seat is given back before this throws; a cancellation is thrown as it came.
-    public func open(application word: String, window title: String?) async throws -> SceneSnapshot {
+    /// scene, recorded and observed under `context` as an observation is. A missing grant is asked
+    /// for through the broker and refused at once, before the queue. Any failure after the seat was
+    /// granted closes, so the seat is given back before this throws; a cancellation is thrown as it came.
+    public func open(application word: String, window title: String?, context: ActionContext) async throws -> SceneSnapshot {
         // A release between turns may still be finishing; this open comes after it.
         await closing?.value
         guard phase == .idle, closing == nil else {
@@ -229,14 +254,16 @@ public final class BrokeredAutomationSession: AutomationSessionOperating {
             try Task.checkCancellation()
             let seated = try await seating(lease.session, word, title)
             target  = seated.target
-            runtime = EngineRuntime(knowledgeDirectory: knowledgeDirectory, seat: seated.target)
+            runtime = EngineRuntime(memory: memory, seat: seated.target)
             guard let pid = seated.opened.pid, let running = NSRunningApplication(processIdentifier: pid) else {
                 throw AutomationFailure("\(seated.opened.name) opened and then could not be found running.")
             }
-            application = running
+            openApplication = running
             phase = .holding(application: seated.opened.name)
             id = UUID()
-            let scene = try await observe()
+            // The call's event was planned before the application was known, so the first scene is the
+            // session's own observation: another event of the same producer, trace and session, with the app.
+            let scene = try await observe(context: context.another(sessionID: id?.uuidString), asOwnObservation: true)
             watchQueue(for: lease)
             return scene
         } catch {
@@ -269,17 +296,31 @@ public final class BrokeredAutomationSession: AutomationSessionOperating {
         }
     }
 
-    public func observe() async throws -> SceneSnapshot {
+    /// Perceives the window and records it as the call's `current` sample, which the Brain observes;
+    /// the scene answered is the enriched one.
+    public func observe(context: ActionContext) async throws -> SceneSnapshot {
+        try await observe(context: context, asOwnObservation: false)
+    }
+
+    private func observe(context: ActionContext, asOwnObservation: Bool) async throws -> SceneSnapshot {
         let (application, runtime, _) = try current()
+        let perceived: PerceivedWindow
         do {
-            return try await perceiving(runtime, application.processIdentifier)
+            perceived = try await perceiving(runtime, application.processIdentifier)
         } catch {
             throw Self.refusal(for: error)
         }
+        revision += 1
+        let recorder = runtime.recorder(for: context, sessionRevision: revision)
+        let scene = asOwnObservation
+            ? await recorder.observe(perceived, recordingObservationOf: AppContextIdentity(application))
+            : await recorder.observe(perceived)
+        lastReport = await recorder.report()
+        return scene
     }
 
-    public func act(target: String, verb: ActionVerb, section: String?, desiredState: ControlState?) async throws
-        -> ActOutcome {
+    public func act(target: String, verb: ActionVerb, section: String?, desiredState: ControlState?,
+                    context: ActionContext) async throws -> ActOutcome {
         let (application, runtime, seat) = try current()
         guard try seat.agentSeat().state == .ready else {
             throw AutomationFailure("The Seat is not ready for input. Observe, then close and reopen if "
@@ -294,10 +335,13 @@ public final class BrokeredAutomationSession: AutomationSessionOperating {
             appName: application.localizedName ?? "application",
             target: target, verb: verb, section: section, desiredState: desiredState
         )
-        return await runtime.engine(allowsDestructive: allowsDestructive).act(request)
+        let recorder = runtime.recorder(for: context, sessionRevision: revision)
+        let outcome  = try await runtime.engine(allowsDestructive: allowsDestructive, observer: recorder).act(request)
+        lastReport   = await recorder.report()
+        return outcome
     }
 
-    public func deliver(_ input: InputRequest.Input, section: String?) async throws -> ActOutcome {
+    public func deliver(_ input: InputRequest.Input, section: String?, context: ActionContext) async throws -> ActOutcome {
         let (application, runtime, seat) = try current()
         guard try seat.agentSeat().state == .ready else {
             throw AutomationFailure("The Seat is not ready for input. Observe, then close and reopen if "
@@ -310,25 +354,42 @@ public final class BrokeredAutomationSession: AutomationSessionOperating {
             input    : input,
             section  : section
         )
-        return await runtime.engine(allowsDestructive: allowsDestructive).deliver(request)
+        let recorder = runtime.recorder(for: context, sessionRevision: revision)
+        let outcome  = try await runtime.engine(allowsDestructive: allowsDestructive, observer: recorder).deliver(request)
+        lastReport   = await recorder.report()
+        return outcome
     }
 
-    public func select(control: String, item: String) async throws -> ActOutcome {
-        let (application, _, target) = try current()
+    public func select(control: String, item: String, context: ActionContext) async throws -> ActOutcome {
+        let (application, runtime, target) = try current()
         let selector = SeatDropdownSelector(target: target, pipeline: ScenePipeline(text: VisionTextRecognizer()))
-        let result = try await selector.select(
-            control: control, item: item,
-            identity: SeatDriving.ApplicationIdentity(
-                bundleID: application.bundleIdentifier ?? "pid.\(application.processIdentifier)",
-                name: application.localizedName ?? "application"
-            ),
-            permissions: ActionPermissions(allowsDestructive: allowsDestructive),
-            dryRun: false
-        )
+        let recorder = runtime.recorder(for: context, sessionRevision: revision)
+        let probe = selectionDiagnostics?.probe(callID: context.eventID, control: control, item: item,
+                                                windowNumber: try? target.currentWindow().id)
+        let result: SelectionResult
+        do {
+            result = try await selector.select(
+                control: control, item: item,
+                identity: SeatDriving.ApplicationIdentity(
+                    bundleID: application.bundleIdentifier ?? "pid.\(application.processIdentifier)",
+                    name: application.localizedName ?? "application"
+                ),
+                permissions: ActionPermissions(allowsDestructive: allowsDestructive),
+                dryRun: false,
+                onMenu: { probe?.menuObserved($0) },
+                onCapture: { probe?.capture($0, $1) }
+            )
+        } catch {
+            probe?.finish(error)
+            throw error
+        }
+        probe?.finish(result)
+        await recorder.record(before: result.before, menu: result.menu, after: result.after)
+        lastReport = await recorder.report()
         return result.outcome
     }
 
-    /// Flushes the Brain, ends the borrow, finishes with the application and gives the seat back.
+    /// Ends the borrow, finishes with the application and gives the seat back.
     ///
     /// The cleanup runs in a task of its own, so a cancelled caller still gives the seat back and a
     /// second call waits for the first. What finishing leaves the person to do (an application the
@@ -337,17 +398,15 @@ public final class BrokeredAutomationSession: AutomationSessionOperating {
         idleRelease?.cancel()
         idleRelease = nil
         if let closing { await closing.value; return }
-        let runtime = self.runtime
         let target  = self.target
         let lease   = self.lease
         self.runtime = nil
         self.target  = nil
         self.lease   = nil
-        application  = nil
+        openApplication = nil
         id           = nil
         let cleanup = Task {
-            await runtime?.finish()
-            await target?.stop()
+            if let target { await target.stop() }
             if let lease {
                 if let left = await lease.session.finishUsingApp() {
                     Self.log.error("A worker's session closed with this left to do: \(left, privacy: .public)")
@@ -424,7 +483,7 @@ public final class BrokeredAutomationSession: AutomationSessionOperating {
     }
 
     private func current() throws -> (NSRunningApplication, EngineRuntime, SeatTarget) {
-        guard let application, !application.isTerminated, let runtime, let target else {
+        guard let application = openApplication, !application.isTerminated, let runtime, let target else {
             throw AutomationFailure("No live application session. Use windows and open_session, then observe.")
         }
         return (application, runtime, target)

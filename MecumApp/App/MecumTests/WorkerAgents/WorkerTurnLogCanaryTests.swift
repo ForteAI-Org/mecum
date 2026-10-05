@@ -5,6 +5,7 @@
 //  Created by Eliomar Alejandro Rodriguez Ferrer on 23/09/2026.
 //
 
+import AgentTurn
 import ChatCore
 import CLIProviders
 import Darwin
@@ -59,7 +60,7 @@ struct WorkerTurnLogCanaryTests {
                 let recorder = WorkerTurnRecorder(store: turn.store, workspaceID: turn.workspace,
                                                   workerID: turn.worker, conversationID: turn.conversation,
                                                   messageID: message) {}
-                let host = WorkerAgentHost(workingDirectory: root.appending(path: "work"),
+                let host = AgentTurnHost(workingDirectory: root.appending(path: "work"),
                                            bridgeExecutable: executable, session: { DesktopUnavailableSession() },
                                            agents: { _ in (.codex, executable) })
                 endings.append(try await recorder.run { frozen, session, emit in

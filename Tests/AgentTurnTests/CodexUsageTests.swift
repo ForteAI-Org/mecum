@@ -10,7 +10,7 @@ import CLIProviders
 import Foundation
 import ModelTransports
 import Testing
-@testable import Mecum
+@testable import AgentTurn
 
 /// The thread the fixtures were recorded in, sanitized as they are.
 private let thread = "01a0d908-f54a-7322-92e6-76acc3b6eab7"
@@ -88,16 +88,16 @@ private func place(
 struct CodexUsageTests {
 
     @Test func aTurnIsTheSessionTotalLessTheOneBeforeInTheSameSession() throws {
-        let one = WorkerAgentHost.turnUsage(
+        let one = AgentTurnHost.turnUsage(
             try reported("codex-turn1"),
-            selection: luna,
+            model    : TurnModel(luna),
             session  : thread,
             lastUsage: nil,
             rollout  : nil
         )
-        let two = WorkerAgentHost.turnUsage(
+        let two = AgentTurnHost.turnUsage(
             try reported("codex-compact"),
-            selection: luna,
+            model    : TurnModel(luna),
             session  : thread,
             lastUsage: one,
             rollout  : nil
@@ -115,9 +115,9 @@ struct CodexUsageTests {
         #expect(two.sessionTotal?.input == 32701)
         #expect(two.model == "gpt-5.6-luna")
 
-        let otherSession = WorkerAgentHost.turnUsage(
+        let otherSession = AgentTurnHost.turnUsage(
             try reported("codex-compact"),
-            selection: luna,
+            model    : TurnModel(luna),
             session  : "another-thread",
             lastUsage: one,
             rollout  : nil
@@ -213,7 +213,7 @@ struct CodexUsageTests {
             ).utf8
         ).write(to: rollout)
 
-        let host = WorkerAgentHost(
+        let host = AgentTurnHost(
             workingDirectory: root.appending(path: "work"),
             bridgeExecutable: standIn,
             session         : { DesktopUnavailableSession() },
@@ -247,5 +247,43 @@ struct CodexUsageTests {
         #expect(last.contextWindow == 111_111)
         #expect(last.rateLimits.map(\.windowMinutes) == [10080])
         #expect(last.provider == .codex)
+    }
+
+    /// The chat's entry, `run(commandLine:)`, counts a Codex turn from the usage it is passed, as the
+    /// app's does; without it, the session total counts from the session's start. Same stand-in.
+    @Test func theCommandLineEntryCountsFromTheUsageItIsPassed() async throws {
+        let root = try temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let stdout  = root.appending(path: "stdout.jsonl")
+        let standIn = root.appending(path: "agent")
+        try Data("#!/bin/sh\n/bin/cat >/dev/null\n/bin/cat '\(stdout.path)'\n".utf8).write(to: standIn)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: standIn.path)
+        let home = root.appending(path: "codex")
+        let host = AgentTurnHost(
+            workingDirectory: root.appending(path: "work"),
+            bridgeExecutable: standIn,
+            session         : { DesktopUnavailableSession() },
+            agents          : { _ in (.codex, standIn) }
+        )
+        func turn(_ name: String, session: String?, lastUsage: TurnUsage?) async throws -> TurnUsage? {
+            try? FileManager.default.removeItem(at: stdout)
+            try FileManager.default.copyItem(at: fixture(name), to: stdout)
+            var reported: [TurnUsage] = []
+            try await host.run(prompt: "Say ok.", commandLine: .codex, model: nil, sessionID: session, role: nil,
+                               lastUsage: lastUsage, inheritedEnvironment: ["CODEX_HOME": home.path]) { event in
+                if case .usage(let usage) = event { reported.append(usage) }
+                if case .provider(.usage) = event { Issue.record("The provider's own usage was passed on.") }
+            }
+            #expect(reported.count <= 1, "one usage per turn")
+            return reported.first
+        }
+        let first  = try #require(try await turn("codex-turn1", session: nil, lastUsage: nil))
+        let second = try #require(try await turn("codex-compact", session: thread, lastUsage: first))
+        let alone  = try #require(try await turn("codex-compact", session: thread, lastUsage: nil))
+        try await host.close()
+        #expect(first.turn.input == 16344)
+        #expect(second.turn.input == 16357, "the session total less the one before: no double count")
+        #expect(alone.turn.input == alone.sessionTotal?.input, "without the earlier usage the total counts from the start")
+        #expect(second.model == nil || second.model?.isEmpty == false, "no model is filled in by the entry")
     }
 }

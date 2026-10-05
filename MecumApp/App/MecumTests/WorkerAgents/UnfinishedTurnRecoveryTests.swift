@@ -5,6 +5,7 @@
 //  Created by Eliomar Alejandro Rodriguez Ferrer on 23/09/2026.
 //
 
+import AgentTurn
 import ChatCore
 import CLIProviders
 import Darwin
@@ -29,7 +30,7 @@ struct UnfinishedTurnRecoveryTests {
         echo '{"type":"turn.completed"}'
         """)
         let turn = try await TurnInStore(directory: root.appending(path: "store"))
-        let host = WorkerAgentHost(workingDirectory: root.appending(path: "work"), bridgeExecutable: standIn,
+        let host = AgentTurnHost(workingDirectory: root.appending(path: "work"), bridgeExecutable: standIn,
                                    session: { DesktopUnavailableSession() }, agents: { _ in (.codex, standIn) })
         let ending = try await turn.recorder.run { frozen, session, emit in
             try await host.run(prompt: "p", selection: frozen, sessionID: session, role: nil, onEvent: emit)

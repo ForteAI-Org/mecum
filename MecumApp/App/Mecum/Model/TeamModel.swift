@@ -5,6 +5,7 @@
 //  Created by Eliomar Alejandro Rodriguez Ferrer on 22/09/2026.
 //
 
+import AgentTurn
 import AppKit
 import AutomationRuntime
 import ChatCore
@@ -127,7 +128,18 @@ final class TeamModel {
 
     /// One agent host per conversation, kept for the process so its turns share
     /// one loopback host. The provider session lives on the conversation.
-    private var hosts: [UUID: WorkerAgentHost] = [:]
+    private var hosts: [UUID: AgentTurnHost] = [:]
+
+    /// The living memory of the workspace's Knowledge directory, the command
+    /// line's own: every worker's desktop records its samples and the brain's
+    /// learning in it, and every worker's tools record their calls, each worker
+    /// as its own stream and each message as a trace. The app's (`AppModel`),
+    /// shared with Settings and every team, and closed by the app; a team
+    /// closes it with its agent hosts only when it made its own (`ownsMemory`).
+    let memory: MemoryService
+
+    /// Whether this team made its memory, as a test does, and so closes it.
+    private let ownsMemory: Bool
 
     /// The command line that answers for a provider, and the bridge it launches for Mecum's tools.
     private let agents          : (ModelProvider) throws -> (ChatProvider, URL)
@@ -174,9 +186,10 @@ final class TeamModel {
         store           : WorkspaceStore,
         connections     : ModelSettingsStore,
         broker          : SeatBroker,
-        agents          : @escaping (ModelProvider) throws -> (ChatProvider, URL) = WorkerAgentHost.agent(for:),
+        agents          : @escaping (ModelProvider) throws -> (ChatProvider, URL) = AgentTurnHost.agent(for:),
         bridgeExecutable: URL = Bundle.main.bundleURL.appending(path: "Contents/Helpers/mecum-bridge"),
-        preferences     : UserDefaults = .standard
+        preferences     : UserDefaults = .standard,
+        memory          : MemoryService? = nil
     ) {
         self.store            = store
         self.connections      = connections
@@ -184,6 +197,10 @@ final class TeamModel {
         self.agents           = agents
         self.bridgeExecutable = bridgeExecutable
         self.preferences      = preferences
+        self.memory           = memory ?? MemoryService(
+            directory: WorkspaceLaunch.directory.appending(path: "Knowledge", directoryHint: .isDirectory)
+        )
+        self.ownsMemory       = memory == nil
     }
 
     // MARK: Reading
@@ -499,6 +516,7 @@ final class TeamModel {
                             history        : history,
                             lastUsage      : lastUsage,
                             allowsWebSearch: searchesWeb,
+                            traceID        : message.id.uuidString,
                             onEvent        : emit
                         )
                     }
@@ -537,11 +555,11 @@ final class TeamModel {
     private func agentHost(
         of conversationID: UUID,
         for workerID     : UUID
-    ) -> (host: WorkerAgentHost, desktop: BrokeredAutomationSession) {
+    ) -> (host: AgentTurnHost, desktop: BrokeredAutomationSession) {
         if let existing = hosts[conversationID], let held = desktops[workerID] { return (existing, held) }
 
         let desktop = self.desktop(for: workerID)
-        let host    = WorkerAgentHost(
+        let host    = AgentTurnHost(
             workingDirectory: workingFolder(of: conversationID),
             bridgeExecutable: bridgeExecutable,
             session         : { desktop },
@@ -553,7 +571,9 @@ final class TeamModel {
                     settings : connections.providerSettings,
                     catalogue: connections.catalogues[selection.provider] ?? []
                 )
-            }
+            },
+            memory          : memory,
+            streamID        : workerID.uuidString
         )
         hosts[conversationID] = host
         return (host, desktop)
@@ -707,7 +727,7 @@ final class TeamModel {
     }
 
     /// Compacts the worker's context in `conversationID` as a turn of its own,
-    /// through the conversation's agent host (`WorkerAgentHost.compact`). It
+    /// through the conversation's agent host (`AgentTurnHost.compact`). It
     /// starts only while the worker is not answering, and a message sent
     /// meanwhile waits in the composer, as one does behind a running turn. It
     /// records `contextCompacted`, with a Codex compaction's usage before it, and
@@ -863,16 +883,13 @@ final class TeamModel {
 
     /// A new desktop session for the worker, kept so its row can read it. It
     /// waits in the queue under the worker's id, never its name, so two workers
-    /// with one name each read their own position. The Brain's directory is the
-    /// command line's, so what either learns applies to both.
+    /// with one name each read their own position. The memory is the workspace's,
+    /// the command line's own, so what either learns applies to both.
     private func desktop(for workerID: UUID) -> BrokeredAutomationSession {
         let desktop = BrokeredAutomationSession(
-            broker            : broker,
-            workerID          : workerID,
-            knowledgeDirectory: WorkspaceLaunch.directory.appending(
-                path         : "Knowledge",
-                directoryHint: .isDirectory
-            )
+            broker  : broker,
+            workerID: workerID,
+            memory  : memory
         )
         desktops[workerID] = desktop
         return desktop
@@ -920,7 +937,9 @@ final class TeamModel {
     var hasAgentHosts: Bool { !hosts.isEmpty }
 
     /// Ends every agent host before quitting: a running turn stops, the
-    /// loopback hosts close and their temporary directories go. A directory
+    /// loopback hosts close and their temporary directories go, and a living
+    /// memory this team made is closed once nothing is left that writes to it
+    /// (the app's own is the app's to close). A directory
     /// that could not be removed is reported rather than forgotten.
     func closeAgentHosts() async {
         let closing = hosts
@@ -936,6 +955,7 @@ final class TeamModel {
                 )
             }
         }
+        if ownsMemory { await memory.close() }
     }
 
     /// Tells the transcript the open conversation changed; a turn in another
