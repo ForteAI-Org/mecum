@@ -49,9 +49,10 @@ struct WorkerAgentHostTests {
     The act verbs are click, double_click, triple_click, right_click and set_toggle; select picks a dropdown item.
     type_text clicks a field and types into it, replacing what it holds unless replace is false.
     insert_text preserves the current focus and selection and inserts one payload. Use it only after
-    establishing that focus, such as a dialog's initially selected name. It does not select all or append
-    by itself. expected_value is the complete resulting field value, not just the inserted text.
-    An opaque field remains acted_unverified: observe, never replay; verify its committed effect separately.
+    establishing that focus. An initially selected name may lose focus as a dialog settles; when uncertain,
+    click the intended field and independently verify the desired selection before inserting. It does not
+    select all or append by itself. expected_value is the complete resulting value, not just the inserted text.
+    An opaque field remains acted_unverified: never replay; verify its committed effect separately.
     press_key presses return, tab, escape, space, delete, an arrow, a letter, a digit, / or ~, with optional modifiers.
     scroll turns the wheel up or down over a target or the window; there is no horizontal scroll.
     drag goes from one target to another or by an offset; context_menu right-clicks a target and picks an item.
@@ -78,7 +79,10 @@ struct WorkerAgentHostTests {
     private static let appLine = "In this app, open_session also opens an installed application that is "
         + "not running yet: find it with apps and pass its bundleID to open_session. When several match and "
         + "the conversation does not make clear which one the person means, ask them which one, naming the "
-        + "candidates, before opening either."
+        + "candidates, before opening either. Each message from the person begins with Mecum's seat line, "
+        + "which replaces the status call for that turn. When it names an open session, observe it by that ID "
+        + "before acting; to continue in the last application it names, call open_session with that "
+        + "application directly."
 
     @Test func theCLITextIsUnchangedAndARoleComesAfterIt() throws {
         #expect(AutomationTools.instructions == Self.cliInstructions)
@@ -162,29 +166,35 @@ struct WorkerAgentHostTests {
         #expect(status["structuredContent"]["session"] == .null)
     }
 
-    /// Closing the host while its provider child runs, as quitting does. The
-    /// stand-in ignores SIGINT and SIGTERM, so only the escalation ends it.
-    @Test func aResumedCodexSessionIsToldChangedInstructionsOnce() async throws {
+    /// Current instructions accompany a resumed message once for each CLI provider.
+    @Test(arguments: [false, true])
+    func aResumedCLISessionIsToldChangedInstructionsOnce(_ usesClaude: Bool) async throws {
         let root = URL.temporaryDirectory.appending(path: "mecum-instructions-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         defer { remove(root) }
-        // A stand-in for Codex: it keeps the message it was given and starts or resumes session s1.
+        // Each CLI stand-in keeps the received message and reports the same resumed session.
         let received = root.appending(path: "received")
         let standIn  = root.appending(path: "agent")
-        try Data("""
-        #!/bin/sh
-        cat > '\(received.path)'
+        let replies = usesClaude ? """
+        echo '{"type":"system","subtype":"init","session_id":"s1"}'
+        echo '{"type":"result","result":"Done"}'
+        """ : """
         echo '{"type":"thread.started","thread_id":"s1"}'
         echo '{"type":"item.completed","item":{"type":"agent_message","text":"Done"}}'
         echo '{"type":"turn.completed"}'
+        """
+        try Data("""
+        #!/bin/sh
+        cat > '\(received.path)'
+        \(replies)
 
         """.utf8).write(to: standIn)
         try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: standIn.path)
 
         let host = WorkerAgentHost(workingDirectory: root.appending(path: "work"), bridgeExecutable: standIn,
                                    session: { DesktopUnavailableSession() },
-                                   agents: { _ in (.codex, standIn) })
-        let selection = ModelSelection(provider: .codex, model: "", effort: .medium)
+                                   agents: { _ in (usesClaude ? .claude : .codex, standIn) })
+        let selection = ModelSelection(provider: usesClaude ? .claudeCode : .codex, model: "", effort: .medium)
         func message(session: String?, role: String?) async throws -> String {
             try await host.run(prompt: "Hello", selection: selection, sessionID: session, role: role) { _ in }
             return try String(contentsOf: received, encoding: .utf8)
@@ -197,6 +207,36 @@ struct WorkerAgentHostTests {
         #expect(try await message(session: "s1", role: "Edit video.") == "Hello")
         #expect(try await message(session: "older", role: "Edit video.").hasPrefix("Your instructions changed"),
                 "a session this host never recorded is told too")
+        try await host.close()
+    }
+
+    @Test func theSeatLineOpensThePersonsMessageAfterAnyReminderAndIsNeverReported() async throws {
+        let root = URL.temporaryDirectory.appending(path: "mecum-seat-\(UUID().uuidString)")
+        defer { remove(root) }
+        let (standIn, received) = try codexStandIn(in: root)
+        let seat = "Mecum seat: no session is open. The last one was on Safari (com.apple.Safari)."
+
+        let host = WorkerAgentHost(
+            workingDirectory: root.appending(path: "work"),
+            bridgeExecutable: standIn,
+            session         : { DesktopUnavailableSession() },
+            agents          : { _ in (.codex, standIn) },
+            seatLine        : { seat }
+        )
+        let selection = ModelSelection(provider: .codex, model: "", effort: .medium)
+        var events    = [WorkerAgentEvent]()
+        func message(session: String?, role: String?) async throws -> String {
+            try await host.run(prompt: "Hello", selection: selection, sessionID: session, role: role) {
+                events.append($0)
+            }
+            return try String(contentsOf: received, encoding: .utf8)
+        }
+        let reminder = WorkerAgentHost.changedInstructions(WorkerAgentHost.instructions(role: "Edit video."))
+
+        #expect(try await message(session: nil, role: nil) == seat + "\n\nHello")
+        #expect(try await message(session: "s1", role: "Edit video.") == reminder + seat + "\n\nHello")
+        #expect(!events.isEmpty)
+        #expect(!events.contains { String(describing: $0).contains("Mecum seat") })
         try await host.close()
     }
 
@@ -347,6 +387,24 @@ struct WorkerAgentHostTests {
         #expect(!sessions.isEmpty && sessions.allSatisfy { $0 == first })
         #expect(replies.joined().lowercased().contains("windows"))
         try await host.close()
+    }
+
+    /// A stand-in for Codex in `root`, which keeps the message it was given in `received` and
+    /// starts or resumes session s1.
+    private func codexStandIn(in root: URL) throws -> (agent: URL, received: URL) {
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let received = root.appending(path: "received")
+        let standIn  = root.appending(path: "agent")
+        try Data("""
+        #!/bin/sh
+        cat > '\(received.path)'
+        echo '{"type":"thread.started","thread_id":"s1"}'
+        echo '{"type":"item.completed","item":{"type":"agent_message","text":"Done"}}'
+        echo '{"type":"turn.completed"}'
+
+        """.utf8).write(to: standIn)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: standIn.path)
+        return (standIn, received)
     }
 
     private func script(_ body: String) throws -> URL {

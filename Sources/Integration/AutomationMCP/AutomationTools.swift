@@ -57,9 +57,10 @@ public final class AutomationTools {
     The act verbs are click, double_click, triple_click, right_click and set_toggle; select picks a dropdown item.
     type_text clicks a field and types into it, replacing what it holds unless replace is false.
     insert_text preserves the current focus and selection and inserts one payload. Use it only after
-    establishing that focus, such as a dialog's initially selected name. It does not select all or append
-    by itself. expected_value is the complete resulting field value, not just the inserted text.
-    An opaque field remains acted_unverified: observe, never replay; verify its committed effect separately.
+    establishing that focus. An initially selected name may lose focus as a dialog settles; when uncertain,
+    click the intended field and independently verify the desired selection before inserting. It does not
+    select all or append by itself. expected_value is the complete resulting value, not just the inserted text.
+    An opaque field remains acted_unverified: never replay; verify its committed effect separately.
     press_key presses return, tab, escape, space, delete, an arrow, a letter, a digit, / or ~, with optional modifiers.
     scroll turns the wheel up or down over a target or the window; there is no horizontal scroll.
     drag goes from one target to another or by an offset; context_menu right-clicks a target and picks an item.

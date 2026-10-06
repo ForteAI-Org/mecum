@@ -701,7 +701,8 @@ final class TeamModel {
                     settings : connections.providerSettings,
                     catalogue: connections.catalogues[selection.provider] ?? []
                 )
-            }
+            },
+            seatLine        : { desktop.turnStatus }
         )
         hosts[conversationID] = host
         return (host, desktop)

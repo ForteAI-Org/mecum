@@ -129,14 +129,14 @@ private final class Harness {
         try #require(UsageWording.ringContext(of: team.usage[atlas]) != nil)
     }
 
-    /// What each call to the stand-in was sent, in order.
+    /// What each call to the stand-in was sent, in order, after the seat line a turn opens with.
     func calls() throws -> [String] {
         let log   = root.appending(path: "log")
         let names = try FileManager.default.contentsOfDirectory(atPath: log.path).sorted()
         return try names.map { name in
             let call = try JSONSerialization.jsonObject(with: Data(contentsOf: log.appending(path: name)))
                 as? [String: Any]
-            return call?["received"] as? String ?? ""
+            return String((call?["received"] as? String ?? "").trimmingPrefix(freshSeatLine))
         }
     }
 

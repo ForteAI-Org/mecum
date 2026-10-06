@@ -106,6 +106,12 @@ as its provenance says, and the lease is given back, so the worker's row goes
 back to its role. The idle wait is tied to the lease it was started under, so
 one that outlives a close, whether by hand or by the queue, closes nothing.
 
+Each turn's prompt opens with the seat as the turn begins
+(`BrokeredAutomationSession.turnStatus`): the live session's ID with its
+application and window, or, once released, the application and window the last
+session had. The agent observes or reopens it directly, with no `status` or
+`windows` call first. Nothing reopens on its own.
+
 ## After a crash
 
 A process that ends without `applicationShouldTerminate` (a crash, `kill -9`)

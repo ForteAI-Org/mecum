@@ -533,6 +533,30 @@ struct BrokeredAutomationSessionTests {
         #expect(desktop.screenFrame == .zero)
     }
 
+    @Test("a turn's seat line names the live session, and once it is released the application it had",
+          .timeLimit(.minutes(1)))
+    func theTurnStatusNamesTheLiveSessionOrTheLastApplication() async throws {
+        let broker  = SeatBroker()
+        let idle    = IdleClock()
+        let desktop = try Self.seated(broker, idle: idle)
+        #expect(desktop.turnStatus == "Mecum seat: no session is open.")
+
+        try await desktop.turn { _ = try await desktop.open(application: "Test", window: nil) }
+        let id   = try #require(desktop.id)
+        var live = ""
+        try await desktop.turn { live = desktop.turnStatus }
+        #expect(live == "Mecum seat: session \(id.uuidString) is open on Test (test.process), window \"Test\". "
+            + "Observe it with this session ID before acting.")
+
+        // The first turn's wait was cancelled by the second, whose wait then releases the seat.
+        await idle.elapseOldest()
+        await idle.elapseOldest()
+        await Self.until { !desktop.holdsComputer }
+        #expect(desktop.id == nil)
+        #expect(desktop.turnStatus == "Mecum seat: no session is open. "
+            + "The last one was on Test (test.process), window \"Test\".")
+    }
+
     @Test("a worker alone keeps the seat across its turns")
     func aLoneHolderKeepsTheSeatAcrossTurns() async throws {
         let broker  = SeatBroker()

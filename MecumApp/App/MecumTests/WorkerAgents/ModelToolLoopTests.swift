@@ -171,6 +171,63 @@ private final class RecordingSession: AutomationSessionOperating {
     }
 }
 
+/// A desktop with one session whose scene never changes, so an action's scene goes as its changes
+/// only while the scene the model read is remembered.
+@MainActor
+private final class UnchangingSession: AutomationSessionOperating {
+
+    let id: UUID? = UUID()
+
+    private let scene = SceneSnapshot(
+        bundleID         : "test.app",
+        appName          : "Test",
+        windowTitle      : "Test",
+        viewportPixelSize: ViewportPixelSize(width: 10, height: 10),
+        elements         : (1...5).map {
+            SceneElement(
+                id    : "e\($0)",
+                kind  : .control,
+                label : "Button \($0)",
+                bounds: NormalizedRect(x: 0.1, y: 0.1 * Double($0), width: 0.2, height: 0.05)
+            )
+        }
+    )
+
+    func open(
+        application: String,
+        window     : String?
+    ) async throws -> SceneSnapshot {
+        scene
+    }
+
+    func observe() async throws -> SceneSnapshot { scene }
+
+    func act(
+        target      : String,
+        verb        : ActionVerb,
+        section     : String?,
+        desiredState: ControlState?
+    ) async throws -> ActOutcome {
+        ActOutcome(.foundActed, "Clicked.", scene: scene)
+    }
+
+    func select(
+        control: String,
+        item   : String
+    ) async throws -> ActOutcome {
+        throw AutomationFailure("Unused.")
+    }
+
+    func deliver(
+        _ input: InputRequest.Input,
+        section: String?
+    ) async throws -> ActOutcome {
+        throw AutomationFailure("Unused.")
+    }
+
+    func close() async {}
+}
+
 @MainActor
 @Suite("Mecum's own loop over a model provider")
 struct ModelToolLoopTests {
@@ -271,13 +328,15 @@ struct ModelToolLoopTests {
             transport: transport,
             role     : "Answer in Italian.",
             history  : [],
-            prompt   : "Hello"
+            prompt   : "Hello",
+            seat     : "Mecum seat: no session is open."
         ) { events.append($0) }
 
         #expect(events == [.provider(.assistant("Ciao.")), .provider(.completed)])
         let sent         = try #require(transport.sent.first)
         let instructions = try #require(sent.messages.first?.text)
         #expect(sent.tools.isEmpty)
+        #expect(sent.messages.last?.text == "Hello", "no seat line for a model that cannot use one")
         #expect(instructions == WorkerAgentHost.textOnlyInstructions + "\n\nYour role:\nAnswer in Italian.")
         for name in AutomationTools.definitions.compactMap({ $0["name"].string }) where name.count > 6 {
             #expect(!instructions.contains(name))
@@ -382,6 +441,59 @@ struct ModelToolLoopTests {
         #expect(usage.provider == .ollama)
         #expect(usage.model == "qwen3:8b")
         #expect(usage.session == nil && usage.sessionTotal == nil && usage.rateLimits.isEmpty)
+    }
+
+    @Test func aLoopTurnOpensWithTheSeatLineAndSendsItsFirstActionsSceneWhole() async throws {
+        let session   = UnchangingSession()
+        let id        = try #require(session.id).uuidString
+        let observe   = ToolCall(
+            id       : "call_0",
+            name     : "observe",
+            arguments: Data(#"{"session":"\#(id)"}"#.utf8)
+        )
+        let act       = ToolCall(
+            id       : "call_1",
+            name     : "act",
+            arguments: Data(#"{"session":"\#(id)","target":"Button 1"}"#.utf8)
+        )
+        let transport = ScriptedTransport(
+            supportsTools: true,
+            rounds       : [
+                [.toolCall(observe), .completed(usage)],
+                [.toolCall(act), .completed(usage)],
+                [.delta("Done."), .completed(usage)],
+                [.toolCall(act), .completed(usage)],
+                [.delta("Done again."), .completed(usage)],
+            ]
+        )
+        let seat      = "Mecum seat: session \(id) is open on Test (test.app), window \"Test\"."
+        let host      = WorkerAgentHost(
+            workingDirectory: URL.temporaryDirectory.appending(path: "mecum-loop-\(UUID().uuidString)"),
+            bridgeExecutable: URL(fileURLWithPath: "/nonexistent"),
+            session         : { session },
+            agents          : { _ in throw AutomationFailure("A loop turn asked for a command line.") },
+            transports      : { _ in transport },
+            seatLine        : { seat }
+        )
+        var events    = [WorkerAgentEvent]()
+        for prompt in ["Click Button 1.", "Again."] {
+            try await host.run(
+                prompt   : prompt,
+                selection: ollama,
+                sessionID: nil,
+                role     : nil
+            ) { events.append($0) }
+        }
+
+        let sent = transport.sent
+        #expect(sent.count == 5)
+        #expect(sent[0].messages.last?.text == seat + "\n\nClick Button 1.")
+        #expect(sent[3].messages.last?.text == seat + "\n\nAgain.")
+        // Within a turn an action's scene is its changes; the next turn's first one is whole again.
+        #expect(sent[2].messages.last?.text.contains(#""changes""#) == true)
+        #expect(sent[4].messages.last?.text.contains(#""scene""#) == true)
+        #expect(sent[4].messages.last?.text.contains(#""changes""#) == false)
+        #expect(!events.contains { String(describing: $0).contains("Mecum seat") })
     }
 
     @Test func aModelOutsideOllamaTakesItsWindowFromTheCatalogue() {

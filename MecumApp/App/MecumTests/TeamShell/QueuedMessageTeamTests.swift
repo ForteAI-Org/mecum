@@ -170,14 +170,14 @@ private final class Harness {
         await team.send()
     }
 
-    /// What each call to the stand-in was sent, in order.
+    /// What each call to the stand-in was sent, in order, after the seat line a turn opens with.
     func calls() throws -> [String] {
         let log   = root.appending(path: "log")
         let names = try FileManager.default.contentsOfDirectory(atPath: log.path).sorted()
         return try names.map { name in
             let call = try JSONSerialization.jsonObject(with: Data(contentsOf: log.appending(path: name)))
                 as? [String: Any]
-            return call?["received"] as? String ?? ""
+            return String((call?["received"] as? String ?? "").trimmingPrefix(freshSeatLine))
         }
     }
 
@@ -344,7 +344,11 @@ struct QueuedMessageTeamTests {
         try await harness.idle()
         try await harness.settle()
 
-        #expect(try harness.calls() == ["one", "again"])
+        let reminded = WorkerAgentHost.changedInstructions(
+            WorkerAgentHost.instructions(role: nil, searchesWeb: true)
+        ) + freshSeatLine + "again"
+        #expect(try harness.calls() == ["one", reminded],
+                "a stopped turn did not record instruction delivery")
         #expect(try await harness.personMessages() == ["one", "again"])
         #expect(harness.queued == ["two"])
         #expect(try await harness.storedQueue() == ["two"])
@@ -362,7 +366,11 @@ struct QueuedMessageTeamTests {
         await harness.team.sendQueuedNow()
         try await harness.waitForCalls(2)
 
-        #expect(try harness.calls() == ["one", "two"])
+        let reminded = WorkerAgentHost.changedInstructions(
+            WorkerAgentHost.instructions(role: nil, searchesWeb: true)
+        ) + freshSeatLine + "two"
+        #expect(try harness.calls() == ["one", reminded],
+                "stopping the first turn leaves its instruction delivery unrecorded")
         #expect(try await harness.personMessages() == ["one", "two"])
         #expect(harness.queued == ["three"])
         #expect(harness.team.isAnswering(harness.atlas))
@@ -483,7 +491,11 @@ struct QueuedMessageTeamTests {
 
         await relaunched.sendQueuedNow()
         try await harness.waitForCalls(2)
-        #expect(try harness.calls() == ["one", "two"])
+        let reminded = WorkerAgentHost.changedInstructions(
+            WorkerAgentHost.instructions(role: nil, searchesWeb: true)
+        ) + freshSeatLine + "two"
+        #expect(try harness.calls() == ["one", reminded],
+                "a stopped turn before relaunch leaves its instruction delivery unrecorded")
         #expect(relaunched.queue.map(\.text) == ["three"])
 
         await relaunched.closeAgentHosts()

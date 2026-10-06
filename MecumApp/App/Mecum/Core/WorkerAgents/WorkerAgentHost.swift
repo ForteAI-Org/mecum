@@ -51,6 +51,7 @@ final class WorkerAgentHost {
     private let agents          : (ModelProvider) throws -> (ChatProvider, URL)
     private let transports      : (ModelSelection) -> any ModelTransport
     private let contextWindows  : (ModelSelection) -> Int?
+    private let seatLine        : @MainActor () -> String?
 
     private var temporary     : URL?
     private var connectionFile: URL?
@@ -89,13 +90,17 @@ final class WorkerAgentHost {
     /// `transports` makes the transport a loop turn talks through, once per
     /// turn, so it reads the connection settings as they are then, and
     /// `contextWindows` names the window that turn's model runs in, nil when
-    /// nothing states it (`ModelToolLoop.contextWindow`).
+    /// nothing states it (`ModelToolLoop.contextWindow`). `seatLine` describes
+    /// the seat as a turn begins (`BrokeredAutomationSession.turnStatus`), nil
+    /// when there is none to describe; it goes ahead of the prompt the provider
+    /// receives and is never recorded.
     convenience init(
         workingDirectory: URL,
         bridgeExecutable: URL,
         session         : () -> any AutomationSessionOperating,
         transports      : @escaping (ModelSelection) -> any ModelTransport = { $0.transport() },
-        contextWindows  : @escaping (ModelSelection) -> Int?               = { _ in nil }
+        contextWindows  : @escaping (ModelSelection) -> Int?               = { _ in nil },
+        seatLine        : @escaping @MainActor () -> String?               = { nil }
     ) {
         self.init(
             workingDirectory: workingDirectory,
@@ -103,7 +108,8 @@ final class WorkerAgentHost {
             session         : session,
             agents          : Self.agent(for:),
             transports      : transports,
-            contextWindows  : contextWindows
+            contextWindows  : contextWindows,
+            seatLine        : seatLine
         )
     }
 
@@ -115,13 +121,15 @@ final class WorkerAgentHost {
         session         : () -> any AutomationSessionOperating,
         agents          : @escaping (ModelProvider) throws -> (ChatProvider, URL),
         transports      : @escaping (ModelSelection) -> any ModelTransport = { $0.transport() },
-        contextWindows  : @escaping (ModelSelection) -> Int?               = { _ in nil }
+        contextWindows  : @escaping (ModelSelection) -> Int?               = { _ in nil },
+        seatLine        : @escaping @MainActor () -> String?               = { nil }
     ) {
         self.workingDirectory = workingDirectory
         self.bridgeExecutable = bridgeExecutable
         self.agents           = agents
         self.transports       = transports
         self.contextWindows   = contextWindows
+        self.seatLine         = seatLine
         let tools  = AutomationTools(session: session())
         let router = MCPRouter(tools: AutomationTools.definitions) { name, arguments in
             try await tools.call(name, arguments)
@@ -133,11 +141,15 @@ final class WorkerAgentHost {
     }
 
     /// What this app adds to the command line's text: its `open_session` launches an installed
-    /// application, found with `apps`, which the base text, written around `windows`, does not say.
+    /// application, found with `apps`, which the base text, written around `windows`, does not say,
+    /// and each message begins with the seat line, which `mecum chat` does not send.
     static let appInstructions = "In this app, open_session also opens an installed application that is "
         + "not running yet: find it with apps and pass its bundleID to open_session. When several match and "
         + "the conversation does not make clear which one the person means, ask them which one, naming the "
-        + "candidates, before opening either."
+        + "candidates, before opening either. Each message from the person begins with Mecum's seat line, "
+        + "which replaces the status call for that turn. When it names an open session, observe it by that ID "
+        + "before acting; to continue in the last application it names, call open_session with that "
+        + "application directly."
 
     /// What a command line that may search the web is told after the app's line.
     static let webInstructions = "You can search the web and read web pages with your web tools when a task "
@@ -183,6 +195,10 @@ final class WorkerAgentHost {
     /// `allowsWebSearch` lets a command line search the web and read pages with
     /// its own tools, each reported as a `.tool` record (`WebToolRecords`); a
     /// loop turn ignores it.
+    ///
+    /// The seat line is read as the turn begins and goes ahead of `prompt` in
+    /// what the provider receives, never in what is reported. The scene the
+    /// model last read is forgotten, so the turn's first action sends its scene whole.
     func run(
         prompt              : String,
         selection           : ModelSelection,
@@ -200,6 +216,9 @@ final class WorkerAgentHost {
         self.onEvent    = onEvent
         isStopRequested = false
         defer { self.onEvent = nil }
+        // A loop turn is not resent earlier tool results, and a resumed context may have been compacted.
+        tools.forgetScene()
+        let seat = seatLine()
 
         if WorkerAnswer(provider: selection.provider) == .modelLoop {
             let loop  = ModelToolLoop { [tools] name, arguments in try await tools.call(name, arguments) }
@@ -211,6 +230,7 @@ final class WorkerAgentHost {
                     role         : role,
                     history      : history,
                     prompt       : prompt,
+                    seat         : seat,
                     contextWindow: contextWindows(selection)
                 ) { event in
                     guard case .provider(.usage(let reported)) = event else { return onEvent(event) }
@@ -237,15 +257,16 @@ final class WorkerAgentHost {
                                     + "Details: \(bridgeExecutable.path)")
         }
         let connection = try await start()
-        // Codex keeps the instructions a session began with and ignores new ones when it resumes,
-        // so a session that began with others is given the current ones once, ahead of the message.
+        // Resumed CLI histories can retain earlier guidance. Remind a session once when its
+        // instructions change, in the current message as well as the provider configuration.
         let instructions = Self.instructions(
             role       : role,
             searchesWeb: allowsWebSearch
         )
-        var message      = prompt
-        if chatProvider == .codex, let sessionID, deliveredInstructions(to: sessionID) != instructions {
-            message = Self.changedInstructions(instructions) + prompt
+        // The seat line opens the person's message, so a reminder puts the text explaining it first.
+        var message      = seat.map { $0 + "\n\n" + prompt } ?? prompt
+        if let sessionID, deliveredInstructions(to: sessionID) != instructions {
+            message = Self.changedInstructions(instructions) + message
         }
         reportedSession = nil
         reportedUsage   = nil
@@ -273,7 +294,7 @@ final class WorkerAgentHost {
                 default:                onEvent(.provider(event))
                 }
             }
-            if chatProvider == .codex, let session = reportedSession ?? sessionID {
+            if let session = reportedSession ?? sessionID {
                 record(instructions, deliveredTo: session)
             }
             await reportUsage(

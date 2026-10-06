@@ -12,6 +12,10 @@ import SeatBroker
 import Testing
 @testable import Mecum
 
+/// What a turn's prompt begins with for a worker that never opened an application
+/// (`BrokeredAutomationSession.turnStatus`); the team suites read their stand-ins' prompts after it.
+let freshSeatLine = "Mecum seat: no session is open.\n\n"
+
 /// A reply's quote through `TeamModel`, as the composer drives it: kept with
 /// the draft across a switch and a relaunch, carried by the next send, and
 /// given to the worker's agent above the message, from a command line and
@@ -254,7 +258,7 @@ struct ReplyQuoteTeamTests {
             contentsOf: root.appending(path: "received.txt"),
             encoding  : .utf8
         )
-        #expect(received == "> Capture\n> and layout.\n\nWhich first?")
+        #expect(received == freshSeatLine + "> Capture\n> and layout.\n\nWhich first?")
         #expect(try await store.messages(in: try #require(team.conversation?.id)).map(\.text) == ["Which first?", "ok"])
         #expect(team.problem == nil)
         await team.closeAgentHosts()

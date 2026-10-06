@@ -97,6 +97,10 @@ public final class BrokeredAutomationSession: AutomationSessionOperating {
     @ObservationIgnored private var isInTurn = false
     @ObservationIgnored private var idleRelease: Task<Void, Never>?
 
+    /// The application the last successful `open` seated, with its window's title in the first scene,
+    /// empty when the scene had none. Kept across `close`, so a later turn can name it.
+    @ObservationIgnored private var lastOpened: (name: String, bundleID: String, window: String)?
+
     /// `workerID` labels this session's entry in `SeatQueue.entries` as its `uuidString`, so two
     /// workers with one name still read their own position; no view shows that label.
     /// `knowledgeDirectory` is the Brain's, the command line's own, so what either learns applies
@@ -192,6 +196,22 @@ public final class BrokeredAutomationSession: AutomationSessionOperating {
         return lease.session.windowFrame
     }
 
+    /// The seat as a worker's turn begins, which Mecum puts ahead of the turn's prompt so the agent
+    /// needs no status call: the live session to observe by its ID, or the application the last one had.
+    ///
+    /// Read inside `turn`, so no idle release is pending and a close already under way reads as no
+    /// session. Nothing waits in the queue then: an `open` waits only inside a turn's tool call.
+    public var turnStatus: String {
+        let last = lastOpened.map { app in
+            "\(app.name) (\(app.bundleID))" + (app.window.isEmpty ? "" : ", window \"\(app.window)\"")
+        }
+        guard let id else {
+            return "Mecum seat: no session is open." + (last.map { " The last one was on \($0)." } ?? "")
+        }
+        return "Mecum seat: session \(id.uuidString) is open" + (last.map { " on \($0)" } ?? "")
+            + ". Observe it with this session ID before acting."
+    }
+
     /// "Waiting for the computer", with how many entries are ahead when exactly one waiting entry
     /// carries `label`. Entries list the acting ones first and the waiting ones in arrival order,
     /// so an entry's index is the number ahead of it.
@@ -238,6 +258,7 @@ public final class BrokeredAutomationSession: AutomationSessionOperating {
             phase = .holding(application: seated.opened.name)
             id = UUID()
             let scene = try await observe()
+            lastOpened = (seated.opened.name, seated.opened.bundleID, scene.windowTitle)
             watchQueue(for: lease)
             return scene
         } catch {

@@ -80,6 +80,9 @@ final class ModelToolLoop {
     /// left (its input and output), and `contextWindow`. A turn whose provider
     /// reported no count reports none.
     ///
+    /// `seat`, Mecum's seat line, goes ahead of `prompt` when the model can
+    /// call tools; one without tools is told it cannot use apps.
+    ///
     /// Throws `CancellationError` after `stop`, once a tool call in flight has
     /// finished; the transport's failure, in the provider's words; or a failure
     /// naming `toolRoundLimit` when the model keeps calling tools.
@@ -88,6 +91,7 @@ final class ModelToolLoop {
         role         : String?,
         history      : [TurnMessage],
         prompt       : String,
+        seat         : String? = nil,
         contextWindow: Int? = nil,
         onEvent      : @escaping @MainActor (WorkerAgentEvent) -> Void
     ) async throws {
@@ -101,9 +105,10 @@ final class ModelToolLoop {
             )
         )]
         messages += history
+        let asked = if hasTools, let seat { seat + "\n\n" + prompt } else { prompt }
         messages.append(TurnMessage(
             role: .user,
-            text: prompt
+            text: asked
         ))
 
         var spent  : ProviderUsage.Tokens?

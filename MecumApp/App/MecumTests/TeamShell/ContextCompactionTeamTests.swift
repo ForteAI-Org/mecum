@@ -136,14 +136,15 @@ private final class Harness {
         await team.send()
     }
 
-    /// What each call to the stand-in was given, in order.
+    /// What each call to the stand-in was given, in order, after the seat line a turn opens with.
     func calls() throws -> [(arguments: [String], received: String)] {
         let log   = root.appending(path: "log")
         let names = try FileManager.default.contentsOfDirectory(atPath: log.path).sorted()
         return try names.map { name in
             let call = try JSONSerialization.jsonObject(with: Data(contentsOf: log.appending(path: name)))
                 as? [String: Any]
-            return (call?["arguments"] as? [String] ?? [], call?["received"] as? String ?? "")
+            let received = call?["received"] as? String ?? ""
+            return (call?["arguments"] as? [String] ?? [], String(received.trimmingPrefix(freshSeatLine)))
         }
     }
 
@@ -233,7 +234,10 @@ struct ContextCompactionTeamTests {
         try await harness.idle()
 
         let calls = try harness.calls()
-        #expect(calls.map(\.received) == ["Hello", "/compact", "Again", "/compact"])
+        let reminded = WorkerAgentHost.changedInstructions(
+            WorkerAgentHost.instructions(role: nil, searchesWeb: false)
+        ) + freshSeatLine + "Again"
+        #expect(calls.map(\.received) == ["Hello", "/compact", reminded, "/compact"])
         func tools(_ arguments: [String]) -> [String] {
             ["--tools", "--allowedTools"].map { flag in
                 arguments.firstIndex(of: flag).map { arguments[$0 + 1] } ?? "missing"
@@ -292,7 +296,11 @@ struct ContextCompactionTeamTests {
         try await harness.idle()
 
         #expect(harness.team.usage[harness.worker]?.context?.fraction == 0.95)
-        #expect(try harness.calls().map(\.received) == ["Hello", "Again"])
+        let reminded = WorkerAgentHost.changedInstructions(
+            WorkerAgentHost.instructions(role: nil, searchesWeb: true)
+        ) + freshSeatLine + "Again"
+        #expect(try harness.calls().map(\.received) == ["Hello", reminded],
+                "a failed turn did not record instruction delivery")
         #expect(try await harness.events(.contextCompacted).isEmpty)
         await harness.discard()
     }
