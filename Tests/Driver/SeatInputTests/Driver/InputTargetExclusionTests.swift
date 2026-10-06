@@ -139,9 +139,13 @@ struct InputTargetExclusionTests {
         in exclusion: InputTargetExclusion,
         processID  : Int32
     ) async {
-        for _ in 0..<1_000 {
+        // Yield counts do not bound scheduling time: under load they can expire
+        // before the child task gets a turn. Wait for the queue state instead.
+        let clock = ContinuousClock()
+        let deadline = clock.now.advanced(by: .seconds(1))
+        while clock.now < deadline {
             if exclusion.waitingCount(processID: processID) == expected { return }
-            await Task.yield()
+            try? await Task.sleep(for: .milliseconds(1))
         }
         Issue.record("waiter did not enter the exclusion queue")
     }
