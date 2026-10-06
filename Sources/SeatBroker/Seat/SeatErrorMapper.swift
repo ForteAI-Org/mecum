@@ -470,6 +470,28 @@ enum SeatErrorMapper {
         }
     }
 
+    /// The note an observation carries about windows of `application` open on the person's
+    /// screen, outside the seat, and nil when there are none. `describe` names one Window ID,
+    /// with its title and kind where they are known.
+    ///
+    /// It is only for those windows, because only there can the person do anything; a window
+    /// the application hid is nobody's to close. It says to go on with the scene, because a
+    /// worker told about a window it could not see stopped and waited for the person.
+    static func notice(
+        for shown  : [Int],
+        application: String,
+        describe   : (Int) -> String
+    ) -> String? {
+        guard !shown.isEmpty else { return nil }
+        let names = shown.map(describe).joined(separator: ", ")
+        let (verb, pronoun) = shown.count == 1 ? ("is", "it") : ("are", "them")
+        let note = "\(names) of \(application) \(verb) open on the person's screen, outside the seat, "
+            + "so this scene does not show \(pronoun) and the seat cannot act on \(pronoun). Continue "
+            + "with this window; if you need \(pronoun), ask the person to close \(pronoun) or bring "
+            + "\(pronoun) back, then observe again."
+        return note.prefix(1).uppercased() + note.dropFirst()
+    }
+
     private static func sentence(_ failure: ObservationAdmissionRefusal) -> String {
         switch failure {
         case .foreignReference:

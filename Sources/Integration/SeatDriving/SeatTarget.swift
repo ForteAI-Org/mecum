@@ -120,6 +120,9 @@ public final class SeatTarget {
     /// The virtual display, once started.
     public var displayID: CGDirectDisplayID? { host.displayID }
 
+    /// The windows of the application the last observation saw on the person's screen, outside the seat.
+    package var lastShownOutsideSeat: [WindowIdentity] { delivery?.shownOutsideSeat ?? [] }
+
     /// One observation of the selected window: the Frame and the reference the next Command is
     /// admitted under, kept here so the gesture that follows a scene is posted under the very
     /// picture that scene was read from. ScreenCaptureKit sometimes answers a one-shot with no
@@ -130,12 +133,15 @@ public final class SeatTarget {
     /// follows the application through a dialog's closure and selects the surviving surface, which
     /// is what the predecessor reading here used to do by hand. Aiming a capture from outside would
     /// produce pixels with no reference, and a Frame nobody can act on.
+    ///
+    /// A seat that has lost its target is observed all the same: its own observation selects the
+    /// application's window again, which is what closing and reopening the session used to do.
     @discardableResult
     public func observe() async throws -> SeatObservationDelivery {
         let seat = try agentSeat()
-        _ = try currentWindow()
+        try verifyCurrentWindow(of: seat)
         let delivered = try await Self.retrying {
-            _ = try self.currentWindow()
+            try self.verifyCurrentWindow(of: seat)
             switch await seat.observe() {
                 case .success(let delivery): return delivery
                 case .failure(let reason)  : throw reason
@@ -178,8 +184,8 @@ public final class SeatTarget {
     /// One still of the whole virtual display: the only capture that holds both the window and a
     /// pop-up floating beside it, because a window filter captures exactly one window.
     public func displayStill() async throws -> SeatFrame {
-        // A display crop cannot establish the opening identity; qualify the selected window first.
-        if initialWindow != nil { _ = try await observe() }
+        // A display crop cannot establish the opening identity or a lost target; observe first.
+        if initialWindow != nil || seat?.currentTarget == nil { _ = try await observe() }
         // A stopped borrow has no seat and must not read the owner's display, which may show another window.
         guard seat != nil, let displayID = host.displayID else { throw SeatDrivingFailure.notAdopted }
         return try await Self.retrying {
@@ -210,6 +216,12 @@ public final class SeatTarget {
         lastWindowGeometry = nil
         initialWindow = nil
         if !isBorrowed { _ = await host.stop() }
+    }
+
+    /// Checks the window the seat targets against the opening one, and passes a seat with no target.
+    private func verifyCurrentWindow(of seat: AgentSeat) throws {
+        guard seat.currentTarget != nil || adopted != nil else { return }
+        _ = try currentWindow()
     }
 
     private func verifyInitialWindow(_ observed: WindowIdentity?) throws {

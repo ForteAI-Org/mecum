@@ -787,11 +787,11 @@ struct AppWindowFollowTests {
         #expect(sensing.additionalWindows[stranger.windowNumber] == stranger)
     }
 
-    @Test("a window left open that cannot be moved is refused, and the seat stays suspended")
+    @Test("a window left open that cannot be moved is refused, and the target is observed with it named")
     func aWindowLeftOpenThatCannotBeMovedIsRefused() async throws {
         let sensing = FakeSensing()
         let placing = FakePlacing()
-        let (seat, _, leftOpen) = try await Self.seatWithWindowLeftOpen(
+        let (seat, first, leftOpen) = try await Self.seatWithWindowLeftOpen(
             sensing  : sensing,
             placing  : placing,
             following: true,
@@ -803,12 +803,15 @@ struct AppWindowFollowTests {
         placing.frameError = NoWindowElement.refused
         let movesBefore = placing.moves.count
         seat.refreshTargetReadings()
-        let outcome = await seat.observe()
-
-        guard case .failure(.suspended) = outcome else {
-            Issue.record("the observation was not refused: \(outcome)")
+        guard case .success(let delivery) = await seat.observe() else {
+            Issue.record("a window the seat cannot take in must not suspend the observation of its target")
             return
         }
+        #expect(delivery.reference.recipient == first.reference.identity)
+        #expect(delivery.causesElsewhere.contains { cause in
+            guard case .containmentNotVerified(let blocks) = cause else { return false }
+            return blocks.contains(.surfaceOutsideSeat(windowNumber: leftOpen.windowNumber))
+        }, "and the window left outside travels with it")
         #expect(placing.moves.count == movesBefore, "nothing is written for a surface that cannot take it")
         #expect(!seat.adoptedWindows.map(\.id).contains(leftOpen.windowNumber))
         await log.drain()
@@ -830,12 +833,12 @@ struct AppWindowFollowTests {
         sensing.userMayBeSwitchingApplications = true
         let movesBefore = placing.moves.count
         seat.refreshTargetReadings()
-        let outcome = await seat.observe()
-
-        guard case .failure(.suspended) = outcome else {
-            Issue.record("the observation was not refused: \(outcome)")
+        // The target is observed meanwhile; the window waiting outside is named, not moved.
+        guard case .success(let waiting) = await seat.observe() else {
+            Issue.record("a window waiting for the person must not suspend the observation of the target")
             return
         }
+        #expect(!waiting.causesElsewhere.isEmpty)
         #expect(placing.moves.count == movesBefore, "the follower's own stand-down holds this path too")
         #expect(!seat.adoptedWindows.map(\.id).contains(leftOpen.windowNumber))
 

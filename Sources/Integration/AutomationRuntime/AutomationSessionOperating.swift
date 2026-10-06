@@ -22,6 +22,9 @@ public protocol AutomationSessionOperating: AnyObject {
     func close() async
     /// Any work left after the latest completed close, such as an application deferring its quit.
     var closeWarning: String? { get }
+    /// What the latest scene went ahead without: other windows of the application it does not
+    /// show, such as one left on the person's screen, in one sentence; nil when there are none.
+    var seatNotice: String? { get }
     /// The applications `open` can open that `query` names, best first, or all of them when it is nil.
     /// Read-only: it needs no open session and opens nothing.
     func applications(matching query: String?) async throws -> [ApplicationCandidate]
@@ -32,6 +35,8 @@ public protocol AutomationSessionOperating: AnyObject {
 public extension AutomationSessionOperating {
 
     var closeWarning: String? { nil }
+
+    var seatNotice: String? { nil }
 
     func windowCandidates(ownedBy processID: pid_t) throws -> [WindowRow] {
         try WindowServerWindowListing().windows(ownedBy: processID)

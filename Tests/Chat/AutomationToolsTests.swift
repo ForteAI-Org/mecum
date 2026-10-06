@@ -77,6 +77,24 @@ struct AutomationToolsTests {
         }
     }
 
+    @Test("a scene the seat took without another window of the application carries its notice")
+    func aSceneCarriesTheSeatNotice() async throws {
+        let session = SyntheticSession()
+        let id = try #require(session.id)
+        var records: [String] = []
+        let tools = AutomationTools(session: session)
+        tools.record = { records.append($0) }
+
+        _ = try await tools.call("observe", .object(["session": .string(id.uuidString)]))
+        #expect(records.last?.contains("\"notice\"") == false)
+
+        session.seatNotice = "window 7 is on the person's screen"
+        _ = try await tools.call("observe", .object(["session": .string(id.uuidString)]))
+        #expect(records.last?.contains("window 7 is on the person's screen") == true)
+        _ = try await tools.call("status", .object([:]))
+        #expect(records.last?.contains("\"notice\"") == false, "only an answer with a scene carries it")
+    }
+
     @Test
     func staleSessionCannotReachTheDriver() async throws {
         let session = SyntheticSession()
@@ -552,6 +570,7 @@ private final class CatalogueSession: AutomationSessionOperating {
 private final class SyntheticSession: AutomationSessionOperating {
     var id: UUID? = UUID()
     var closeWarning: String?
+    var seatNotice: String?
     var calls: [String] = []
     var openedWindowTitles: [String?] = []
     var results: [ActOutcomeKind] = []

@@ -226,6 +226,10 @@ move again after adoption. The existing deadline and rollback apply; ordinary
 full-size and in-place windows retain their confirmation rules. See
 [ADR 0025](adr/Adr0025ConfirmStashedPlacementPosition.md).
 
+A window of the application the seat cannot take in is named beside the
+observation of the target instead of suspending it, and a withdrawn target
+with nothing to take over is kept. See [ADR 0032](adr/Adr0032ObserveTheTargetBesideWindowsElsewhere.md).
+
 Moving another already-open window into the seat can change the application's
 front order. The identity currently placed by an adoption transaction is
 excluded from application recency, while its geometry, visibility and modal

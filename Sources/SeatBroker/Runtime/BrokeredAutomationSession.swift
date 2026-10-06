@@ -628,6 +628,40 @@ public final class BrokeredAutomationSession: AutomationSessionOperating {
         return (application, runtime, target)
     }
 
+    /// The windows of the application the latest scene saw on the person's screen, outside the seat,
+    /// each named by its window server title and the kind the seat read, in the worker's sentence.
+    public var seatNotice: String? {
+        guard let target, let application else { return nil }
+        let seat = try? target.agentSeat()
+        return SeatErrorMapper.notice(
+            for        : target.lastShownOutsideSeat.map(\.windowNumber),
+            application: application.localizedName ?? "the application"
+        ) { number in
+            Self.windowName(number, role: seat?.surfaceRole(ofWindow: number))
+        }
+    }
+
+    /// "window 7631 "Change Clip Speed" (dialog)", leaving out what nothing could read.
+    static func windowName(
+        _ number: Int,
+        role    : SurfaceRole?
+    ) -> String {
+        let row = CGWindowID(exactly: number).flatMap {
+            (CGWindowListCopyWindowInfo(.optionIncludingWindow, $0) as? [[String: Any]])?.first
+        }
+        let title = row?[kCGWindowName as String] as? String ?? ""
+        let kind: String? = switch role {
+            case .document?        : "window"
+            case .dialog?          : "dialog"
+            case .interactivePanel?: "panel"
+            case .contextualMenu?  : "menu"
+            case .tooltip?         : "tooltip"
+            case .decoration?      : "decoration"
+            case nil               : nil
+        }
+        return "window \(number)" + (title.isEmpty ? "" : " \"\(title)\"") + (kind.map { " (\($0))" } ?? "")
+    }
+
     /// The refusal for a missing grant: which one, that nothing was opened, and what to do.
     static func refusal(missing kind: PermissionKind) -> String {
         let (name, pane) = switch kind {

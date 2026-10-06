@@ -333,8 +333,21 @@ public final class AutomationTools {
             value = .object(result)
         default: throw AutomationFailure("Unknown tool: \(name)")
         }
-        try record?("← \(name) \(String(decoding: try JSONEncoder().encode(value), as: UTF8.self))")
-        return MCPRouter.toolResult(value)
+        let answered = Self.noted(value, session.seatNotice)
+        try record?("← \(name) \(String(decoding: try JSONEncoder().encode(answered), as: UTF8.self))")
+        return MCPRouter.toolResult(answered)
+    }
+
+    /// `value` with the seat's note about windows its scene does not show, when it carries a scene.
+    private static func noted(
+        _ value : JSONValue,
+        _ notice: String?
+    ) -> JSONValue {
+        guard let notice, case .object(var object) = value,
+              object["scene"] != nil || object["observation"] != nil
+        else { return value }
+        object["notice"] = .string(notice)
+        return .object(object)
     }
 
     private func perform(_ step: Step) async throws -> ActOutcome {

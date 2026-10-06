@@ -416,6 +416,7 @@ extension AgentSeat {
                 the application withdrew window \(identity.windowNumber, privacy: .public),                 which the window server still shows: confirming its closure
                 """)
             noteSurfaceGone(identity.windowNumber, evidence: .applicationWithdrewTheWindow)
+            guard !keepsWithdrawnTarget(identity) else { continue }
             _ = dropDestroyedRecord(identity.windowNumber)
         }
 
@@ -579,6 +580,12 @@ extension AgentSeat {
                 reason: .detected
             )
         )
+        // A target kept through its withdrawal is let go once another window took over.
+        if let displaced, let kept = session[displaced]?.window.reference.identity,
+           logicalClosureEvidence[kept] == .withdrawn,
+           assignmentKit.inventory.surfaces[displaced]?.identity != kept {
+            _ = dropDestroyedRecord(displaced)
+        }
         publishCoherentState()
     }
 
@@ -1213,6 +1220,13 @@ extension AgentSeat {
         publishCoherentState()
     }
 
+    /// What the last qualified reading said a member window is, nil when nothing said.
+    package func surfaceRole(ofWindow windowNumber: Int) -> SurfaceRole? {
+        assignmentKit.inventory.surfaces[windowNumber].flatMap {
+            selectionKit.core.facts[$0.identity]?.role
+        }
+    }
+
     /// Asks the selection nucleus for this surface explicitly, which is what a
     /// consumer's own target change is. A refusal is reported through the causes
     /// of the gate and never worked around here.
@@ -1303,6 +1317,37 @@ extension AgentSeat {
         if stagedWindowNumber == windowNumber { stagedWindowNumber = nil }
         releaseLedger[windowNumber] = .vanished
         eventChannel.yield(.windowReleased(windowNumber: windowNumber, outcome: .vanished))
+        return true
+    }
+
+    /// Whether a window its application withdrew is the operating target with
+    /// nothing held to hand the target to, and is therefore kept.
+    ///
+    /// The window server still shows it, and an application can stop listing
+    /// its window for a moment. A DaVinci Resolve run reached `notAdopted` after
+    /// an inspector value was edited, with its window still on screen, and this
+    /// drop is the path in the code that leaves the seat with no target at all:
+    /// nothing brought it back short of closing the session. Kept, the record
+    /// stays the target with its platform and its return, the selection takes
+    /// it back once it is listed again, and it is let go when another held
+    /// window takes over.
+    private func keepsWithdrawnTarget(_ identity: WindowIdentity) -> Bool {
+
+        let number = identity.windowNumber
+        guard session.currentTargetNumber == number,
+              session[number]?.window.reference.identity == identity,
+              session.predecessor(of: number) == nil
+        else { return false }
+        if let selected = selectionKit.selected?.surface,
+           selected != identity,
+           session[selected.windowNumber]?.window.reference.identity == selected {
+            return false
+        }
+        logicalClosureEvidence[identity] = .withdrawn
+        AgentSeat.observationLog.notice("""
+            window \(number, privacy: .public) is the operating target and nothing held can \
+            take over: keeping it until it is listed again or another window takes over
+            """)
         return true
     }
 
@@ -1408,7 +1453,14 @@ extension AgentSeat {
         guard session[selectedPicture.surface.windowNumber]?.window.reference.identity
                 == selectedPicture.surface
         else {
-            return .failure(.suspended([.containmentNotVerified(blocks: ["selected surface is not owned"])]))
+            // A selected window the seat could not take in is named where it is.
+            let number = selectedPicture.surface.windowNumber
+            guard assignmentKit.inventory.surfaces[number]?.presence == .outsideSeat else {
+                return .failure(.suspended([.containmentNotVerified(blocks: ["selected surface is not owned"])]))
+            }
+            return .failure(.suspended([SeatSuspensionCause(
+                .containmentNotVerified(blocks: [.surfaceOutsideSeat(windowNumber: number)])
+            )]))
         }
         guard !monitorHealth.blocksInput else {
             return .failure(.suspended([.monitorSharedFault]))
@@ -1421,6 +1473,11 @@ extension AgentSeat {
         if case .suspended(_, let reported) = operability {
             causes = reported.filter { $0 != .observationMissing }
         }
+        // A cause about other windows of the application only travels with the
+        // delivery: it does not hold back the picture of this one (ADR 0032).
+        let observed  = observedWindowNumbers(of: selected.surface)
+        let elsewhere = causes.filter { Self.isElsewhere($0, observing: observed) }
+        causes.removeAll { elsewhere.contains($0) }
         guard causes.isEmpty else {
             return .failure(.suspended(causes.map(SeatSuspensionCause.init)))
         }
@@ -1466,7 +1523,7 @@ extension AgentSeat {
         } else {
             region = nil
         }
-        return await captureAndIssue(
+        let delivered = await captureAndIssue(
             surface            : picture.surface,
             role               : picture.role,
             region             : region,
@@ -1475,6 +1532,90 @@ extension AgentSeat {
             deadlineNanoseconds: deadlineNanoseconds,
             isMenu             : false
         )
+        guard case .success(var delivery) = delivered, !elsewhere.isEmpty else { return delivered }
+        delivery.causesElsewhere  = elsewhere
+        delivery.shownOutsideSeat = windowsShownOutsideSeat(among: elsewhere)
+        return .success(delivery)
+    }
+
+    /// The windows `causes` put outside the seat that the window server shows on
+    /// screen right now, outside the Virtual Display: the one case the person
+    /// can do anything about.
+    ///
+    /// A window its application hid or ordered out, one whose visibility did
+    /// not decide inside the seat and one missing from the reading are none of
+    /// them. Told about DaVinci Resolve's hidden Project Manager as though it
+    /// were open, a worker stopped and asked the person to close a window
+    /// nobody could see.
+    private func windowsShownOutsideSeat(among causes: [SelectionSuspension]) -> [WindowIdentity] {
+        var numbers: Set<Int> = []
+        for case .containmentNotVerified(let blocks) in causes {
+            for case .surfaceOutsideSeat(let number) in blocks { numbers.insert(number) }
+        }
+        return numbers.sorted().compactMap { number in
+            guard let member = assignmentKit.inventory.surfaces[number],
+                  member.presence == .outsideSeat, !member.isOrderedOut,
+                  let shown = sensing.windowGeometry(of: number),
+                  shown.identity == member.identity,
+                  !sensing.virtualDisplayBounds.contains(shown.frame)
+            else { return nil }
+            return member.identity
+        }
+    }
+
+    /// The Window IDs one observation of `selected` shows: the surface and
+    /// every host its picture climbs to, as `observationPicture(for:)` climbs.
+    private func observedWindowNumbers(of selected: WindowIdentity) -> Set<Int> {
+        var numbers: Set<Int> = [selected.windowNumber]
+        var current = selected
+        while let host = selectionKit.attachedHost(of: current),
+              numbers.insert(host.windowNumber).inserted {
+            current = host
+        }
+        return numbers
+    }
+
+    /// Whether a cause speaks only of windows an observation does not show, so
+    /// the observation goes ahead and carries it instead of being refused.
+    ///
+    /// A window of the application left on the person's screen, one whose
+    /// visibility did not decide, one missing from the last reading and one
+    /// whose move was refused are each a fact about that window and not about
+    /// the one observed: DaVinci Resolve opens its Qt editors and menus where
+    /// the person's pointer is, and each of them suspended the whole seat.
+    /// Everything else still refuses: a modal block or a modal doubt, a reading
+    /// that cannot carry the whole application, an attribution in doubt, and
+    /// any cause about the observed surface itself. A handover deadline is the
+    /// sum of the windows it waited for, so it goes with them.
+    private nonisolated static func isElsewhere(
+        _ cause           : SelectionSuspension,
+        observing observed: Set<Int>
+    ) -> Bool {
+
+        switch cause {
+            case .visibilityUncertain(let surface):
+                return !observed.contains(surface.windowNumber)
+            case .containmentNotVerified(let blocks):
+                var namesAnotherWindow = false
+                for block in blocks {
+                    switch block {
+                        case .surfaceOutsideSeat(let number), .surfaceAbsent(let number),
+                             .surfaceUnverified(let number), .attemptSpent(let number),
+                             .destinationUnusable(let number), .effectRefused(let number, _),
+                             .surfaceDeadlineExpired(let number, _), .surfaceStalled(let number, _, _):
+                            guard !observed.contains(number) else { return false }
+                            namesAnotherWindow = true
+                        case .handoverDeadlineExpired, .handoverStalled:
+                            continue
+                        case .notAssigned, .readingUnavailable, .inventoryNotQualified,
+                             .attributionUncertain:
+                            return false
+                    }
+                }
+                return namesAnotherWindow
+            default:
+                return false
+        }
     }
 
     /// Brings the Selected Target back on stage when the fold read it as a Stage

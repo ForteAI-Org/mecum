@@ -428,3 +428,47 @@ private let everySuspensionCause: [SeatSuspensionCause] = [
     #expect(unreadable.contains("so the seat could not take it out and left it where it is"))
     #expect(unreadable.contains("Tell the person to take that window out of fullscreen, then open it again."))
 }
+
+@Test func everyRemotePanelRefusalSaysWhatToDoAndOnlyARefusedActionMayHaveActed() {
+    // A worker reads these on both paths: here, and printed as the error's description.
+    let refusals: [(RemoteContentActuationRefusal, String)] = [
+        (.gestureUnmeasured, "Scrolling or dragging inside a file panel is not supported"),
+        (.pixelDropdown, "a click on it would bring its application to the front"),
+        (.noElementAtPoint, "name a button, a row or a field"),
+        (.outsideRemoteContent, "Observe again and name a control of the window"),
+        (.unreadable, "Observe again before retrying"),
+        (.unsupportedRole("AXSlider"), "Nothing clickable is at that point (AXSlider)"),
+        (.opensMenu("AXPopUpButton"), "Use select with this control and the item, or context_menu"),
+        (.actionRefused(action: "AXPress", code: -25200), "the action may have taken effect. Observe before retrying"),
+        (.selectionNotVerified("AXImage"), "Switch the view to list view"),
+        (.columnView, "in a column view, where a click cannot select yet"),
+    ]
+    for (refusal, phrase) in refusals {
+        let message = SeatErrorMapper.message(for: refusal)
+        #expect(message.contains(phrase), "\(refusal)")
+        #expect(message == "\(refusal)" && message == refusal.localizedDescription,
+                "the mapper and a printed error read the same sentence")
+        #expect(refusal.mayHaveTakenEffect == (message.contains("may have taken effect")))
+    }
+    #expect(!SeatErrorMapper.message(for: RemoteContentActuationRefusal.unreadable).contains("may have taken effect"))
+}
+
+@Test func onlyAWindowOnThePersonsScreenIsNamedAndTheWorkerGoesOn() throws {
+    let one = try #require(SeatErrorMapper.notice(
+        for        : [7_700],
+        application: "DaVinci Resolve",
+        describe   : { "window \($0) \"Project Manager\" (panel)" }
+    ))
+    #expect(one.hasPrefix("Window 7700 \"Project Manager\" (panel) of DaVinci Resolve is open on the "
+        + "person's screen, outside the seat"))
+    #expect(one.contains("Continue with this window; if you need it, ask the person to close it"))
+    #expect(!one.lowercased().contains("stop"))
+    let two = try #require(SeatErrorMapper.notice(
+        for        : [7_700, 7_701],
+        application: "Resolve",
+        describe   : { "window \($0)" }
+    ))
+    #expect(two.contains("window 7701 of Resolve are open on the person's screen"))
+    #expect(SeatErrorMapper.notice(for: [], application: "Resolve", describe: { "\($0)" }) == nil,
+            "a window the application hid, or one undecided inside the seat, gives no notice")
+}

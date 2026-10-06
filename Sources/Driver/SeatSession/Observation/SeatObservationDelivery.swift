@@ -53,6 +53,18 @@ nonisolated public struct SeatObservationDelivery: Sendable {
     /// parent.
     public var role: ObservedSurfaceRole { reference.role }
 
+    /// The causes about other windows of the application that this observation
+    /// went ahead without: a window left on the person's screen, one whose
+    /// visibility did not decide, one missing from the last reading. They are
+    /// facts of the instant the observation was taken and are read again at
+    /// the next one; they grant nothing and refuse nothing on their own.
+    package internal(set) var causesElsewhere: [SelectionSuspension] = []
+
+    /// The windows among `causesElsewhere` the window server showed on the
+    /// person's screen, outside the seat, when the observation was taken. A
+    /// window its application hid, or one undecided inside the seat, is not one.
+    package internal(set) var shownOutsideSeat: [WindowIdentity] = []
+
     package init(
         frame    : SeatFrame,
         reference: SeatObservationReference,
