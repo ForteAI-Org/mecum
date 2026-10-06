@@ -170,7 +170,8 @@ struct WorkerAgentHostTests {
         }
         #expect(records.last?.hasPrefix("← open_session error: Computer access is unavailable") == true)
         let status = try await tools.call("status", .object([:]))
-        #expect(status["structuredContent"]["session"] == .null)
+        let text = try #require(status["content"].array?.first?["text"].string)
+        #expect(try JSONDecoder().decode(JSONValue.self, from: Data(text.utf8))["session"] == .null)
     }
 
     /// Current instructions accompany a resumed message once for each CLI provider.

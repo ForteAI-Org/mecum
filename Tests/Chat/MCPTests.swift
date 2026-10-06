@@ -65,7 +65,8 @@ struct MCPTests {
             try await channel.start()
             try await channel.write(.object(["token": .string(endpoint.token), "message": request("tools/call")]))
             let answer = try #require(try await channel.read())
-            #expect(answer["result"]["structuredContent"]["status"].string == "ok")
+            #expect(answer["result"]["structuredContent"] == .null)
+            #expect(answer["result"].payload["status"].string == "ok")
             channel.close()
         }
         #expect(calls == 2)

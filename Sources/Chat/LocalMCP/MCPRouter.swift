@@ -70,13 +70,15 @@ public final class MCPRouter {
         }
     }
 
+    /// A tool's value as one text item of JSON, and nothing else. No tool declares an output schema, so
+    /// the protocol asks for no `structuredContent`, and a client that shows both reads every scene twice.
     public static func toolResult(_ value: JSONValue, isError: Bool = false) -> JSONValue {
         let text: String
         do { text = String(decoding: try JSONEncoder().encode(value), as: UTF8.self) }
         catch { text = "Could not encode tool result: \(error)" }
         return .object([
             "content": .array([.object(["type": .string("text"), "text": .string(text)])]),
-            "structuredContent": value, "isError": .bool(isError)
+            "isError": .bool(isError)
         ])
     }
 

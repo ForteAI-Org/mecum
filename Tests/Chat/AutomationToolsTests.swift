@@ -477,6 +477,7 @@ extension AutomationToolsTests {
 
         session.scene = Self.scene(Self.rows.map { $0 == "Track 7 volume" ? "Track 7 muted" : $0 })
         let acted = try await tools.call("act", .object(["session": id, "target": .string("Track 7")]))
+        #expect(acted["structuredContent"] == .null)
         let observation = acted.payload["observation"]
         let changes = try #require(observation["changes"].string)
         #expect(observation["scene"] == .null)

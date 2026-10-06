@@ -374,7 +374,9 @@ struct ModelToolLoopTests {
             JSONValue.self,
             from: Data(answered.text.utf8)
         )
-        #expect(decoded == expected["structuredContent"])
+        let sent = try #require(expected["content"].array?.first?["text"].string)
+        #expect(decoded == (try JSONDecoder().decode(JSONValue.self, from: Data(sent.utf8))))
+        #expect(expected["structuredContent"] == .null)
         #expect(answered.text.contains(#""status":"error""#))
     }
 
