@@ -7,13 +7,21 @@ public final class MCPRouter {
     public typealias Call = @MainActor (String, JSONValue) async throws -> JSONValue
     private let tools: [JSONValue]
     private let call: Call
+    private let instructions: String
     private var isBusy = false
+    private var activeRequestID: JSONValue?
     private var activeCall: Task<JSONValue, any Error>?
     public private(set) var isAcceptingTools = true
 
-    public init(tools: [JSONValue], call: @escaping Call) {
+    public init(
+        tools: [JSONValue],
+        instructions: String = "Use windows, then open_session. All actions stay on the background Seat. "
+            + "Observe after resuming a conversation. Never repeat an unverified action blindly.",
+        call: @escaping Call
+    ) {
         self.tools = tools
         self.call = call
+        self.instructions = instructions
     }
 
     public func pause() {
@@ -32,7 +40,12 @@ public final class MCPRouter {
         guard request["jsonrpc"].string == "2.0", let method = request["method"].string else {
             return error(id, -32600, "Invalid JSON-RPC request.")
         }
-        if id == .null { return nil }
+        if id == .null {
+            if method == "notifications/cancelled", request["params"]["requestId"] == activeRequestID {
+                activeCall?.cancel()
+            }
+            return nil
+        }
         do {
             let result: JSONValue
             switch method {
@@ -43,8 +56,7 @@ public final class MCPRouter {
                     "protocolVersion": .string(supported.contains(requested) ? requested : "2025-11-25"),
                     "capabilities": .object(["tools": .object([:])]),
                     "serverInfo": .object(["name": .string("mecum"), "version": .string("0.1.0")]),
-                    "instructions": .string("Use windows, then open_session. All actions stay on the background Seat. "
-                                            + "Observe after resuming a conversation. Never repeat an unverified action blindly.")
+                    "instructions": .string(instructions)
                 ])
             case "ping": result = .object([:])
             case "tools/list": result = .object(["tools": .array(tools)])
@@ -56,7 +68,8 @@ public final class MCPRouter {
                     return error(id, -32602, "Unknown tool.")
                 }
                 isBusy = true
-                defer { isBusy = false; activeCall = nil }
+                activeRequestID = id
+                defer { isBusy = false; activeCall = nil; activeRequestID = nil }
                 do {
                     let task = Task { try await call(name, request["params"]["arguments"]) }
                     activeCall = task

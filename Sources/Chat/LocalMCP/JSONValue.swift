@@ -1,7 +1,7 @@
 import Foundation
 
 /// JSONValue is the transport's bounded, Sendable JSON vocabulary. It contains no application behavior.
-public enum JSONValue: Codable, Sendable, Equatable {
+nonisolated public enum JSONValue: Codable, Sendable, Equatable {
     case object([String: JSONValue]), array([JSONValue]), string(String), number(Double), bool(Bool), null
 
     public init(from decoder: any Decoder) throws {
@@ -32,6 +32,7 @@ public enum JSONValue: Codable, Sendable, Equatable {
     public var string: String? { if case .string(let value) = self { value } else { nil } }
     public var bool: Bool? { if case .bool(let value) = self { value } else { nil } }
 
+    @MainActor
     public static func encoding<T: Encodable>(_ value: T) throws -> JSONValue {
         try JSONDecoder().decode(Self.self, from: JSONEncoder().encode(value))
     }

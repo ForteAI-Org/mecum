@@ -1,65 +1,119 @@
 import Foundation
 import Network
 
-/// LocalMCPHost bridges authenticated loopback JSON frames to MCPRouter. The host, not provider children,
-/// owns its lifetime. Provider reconnections preserve the application session; stop closes every connection.
+/// LocalMCPHost serves authenticated JSON frames on loopback only. Legacy chat hosts retain their
+/// router between provider connections; external clients create an isolated session per connection.
+/// stop closes admission and sockets; stopAndDrain also joins session cleanup before returning.
 @MainActor
 public final class LocalMCPHost {
-    private let router: MCPRouter
+    private let makeSession: @MainActor () -> MCPHostSession
+    private let maximumConnections: Int
     private let token = UUID().uuidString + UUID().uuidString
     private var listener: NWListener?
     private var channels: [UUID: MCPChannel] = [:]
+    private var tasks: [UUID: Task<Void, Never>] = [:]
+    public var onConnectionCount: (@MainActor (Int) -> Void)?
+    private var authenticated = Set<UUID>()
 
-    public init(router: MCPRouter) { self.router = router }
+    public convenience init(router: MCPRouter) {
+        self.init(maximumConnections: 16) {
+            MCPHostSession(router: router, cancelsOnDisconnect: false)
+        }
+    }
+
+    public init(
+        maximumConnections: Int = 16,
+        makeSession: @escaping @MainActor () -> MCPHostSession
+    ) {
+        self.maximumConnections = max(1, min(16, maximumConnections))
+        self.makeSession = makeSession
+    }
 
     public func start() async throws -> LocalConnection {
+        guard listener == nil, tasks.isEmpty else { throw CocoaError(.fileWriteFileExists) }
         let parameters = NWParameters.tcp
         parameters.requiredLocalEndpoint = .hostPort(host: "127.0.0.1", port: .any)
         let listener = try NWListener(using: parameters)
         self.listener = listener
         listener.newConnectionHandler = { [weak self] connection in
-            Task { @MainActor in await self?.serve(connection) }
+            Task { @MainActor in self?.accept(connection) }
         }
-        let port: UInt16 = try await withCheckedThrowingContinuation { continuation in
-            listener.stateUpdateHandler = { state in
-                switch state {
-                case .ready:
-                    listener.stateUpdateHandler = nil
-                    if let port = listener.port { continuation.resume(returning: port.rawValue) }
-                    else { continuation.resume(throwing: CocoaError(.fileReadUnknown)) }
-                case .failed(let error):
-                    listener.stateUpdateHandler = nil
-                    continuation.resume(throwing: error)
-                default: break
+        do {
+            let port: UInt16 = try await withCheckedThrowingContinuation { continuation in
+                listener.stateUpdateHandler = { state in
+                    switch state {
+                    case .ready:
+                        listener.stateUpdateHandler = nil
+                        if let port = listener.port { continuation.resume(returning: port.rawValue) }
+                        else { continuation.resume(throwing: CocoaError(.fileReadUnknown)) }
+                    case .failed(let error):
+                        listener.stateUpdateHandler = nil
+                        continuation.resume(throwing: error)
+                    case .cancelled:
+                        listener.stateUpdateHandler = nil
+                        continuation.resume(throwing: CancellationError())
+                    default: break
+                    }
                 }
+                listener.start(queue: .global(qos: .userInitiated))
             }
-            listener.start(queue: .global(qos: .userInitiated))
+            return LocalConnection(port: port, token: token)
+        } catch {
+            stop()
+            throw error
         }
-        return LocalConnection(port: port, token: token)
     }
 
     public func stop() {
         listener?.cancel()
         listener = nil
         for channel in channels.values { channel.close() }
-        channels.removeAll()
     }
 
-    private func serve(_ connection: NWConnection) async {
-        guard listener != nil else { connection.cancel(); return }
+    public func stopAndDrain() async {
+        stop()
+        for task in tasks.values { await task.value }
+    }
+
+    private func accept(_ connection: NWConnection) {
+        guard listener != nil, channels.count < maximumConnections else { connection.cancel(); return }
         let id = UUID()
         let channel = MCPChannel(connection)
         channels[id] = channel
-        defer { channels.removeValue(forKey: id); channel.close() }
+        tasks[id] = Task { [self] in
+            await serve(channel, id: id)
+            tasks.removeValue(forKey: id)
+        }
+    }
+
+    private func serve(_ channel: MCPChannel, id: UUID) async {
+        var peer: MCPPeer?
+        let authenticationDeadline = Task {
+            do { try await Task.sleep(for: .seconds(5)) } catch { return }
+            if !authenticated.contains(id) { channel.close() }
+        }
+        defer {
+            authenticationDeadline.cancel()
+            authenticated.remove(id)
+            channels.removeValue(forKey: id)
+            channel.close()
+            onConnectionCount?(authenticated.count)
+        }
         do {
             try await channel.start()
             while let envelope = try await channel.read() {
-                guard envelope["token"].string == token else { return }
-                let reply = await router.handle(envelope["message"])
-                try await channel.write(reply ?? .null)
+                guard envelope["token"].string == token else { break }
+                if peer == nil {
+                    peer = MCPPeer(channel: channel, session: makeSession())
+                    authenticated.insert(id)
+                    authenticationDeadline.cancel()
+                    onConnectionCount?(authenticated.count)
+                }
+                try peer?.receive(envelope["message"])
             }
         } catch {
-            // A disconnected provider is expected between turns. The host retains its Seat until close.
+            // EOF, authentication rejection and socket failure all join the same session cleanup.
         }
+        await peer?.finish()
     }
 }

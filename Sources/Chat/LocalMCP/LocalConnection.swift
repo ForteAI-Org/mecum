@@ -17,24 +17,34 @@ public struct LocalConnection: Codable, Sendable {
 final class MCPChannel {
     let connection: NWConnection
     private var buffer = Data()
+    private var hasStarted = false
+    private var isClosed = false
+    private var startContinuation: CheckedContinuation<Void, any Error>?
 
     init(_ connection: NWConnection) { self.connection = connection }
 
     func start() async throws {
-        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, any Error>) in
+        guard !isClosed else { throw CancellationError() }
+        guard !hasStarted else { throw CocoaError(.fileReadUnknown) }
+        hasStarted = true
+        try await withCheckedThrowingContinuation { continuation in
+            startContinuation = continuation
             connection.stateUpdateHandler = { [weak self] state in
                 Task { @MainActor in
-                    guard let self else { return }
+                    guard let self, let pending = self.startContinuation else { return }
                     switch state {
                     case .ready:
+                        self.startContinuation = nil
                         self.connection.stateUpdateHandler = nil
-                        continuation.resume()
+                        pending.resume()
                     case .failed(let error):
+                        self.startContinuation = nil
                         self.connection.stateUpdateHandler = nil
-                        continuation.resume(throwing: error)
+                        pending.resume(throwing: error)
                     case .cancelled:
+                        self.startContinuation = nil
                         self.connection.stateUpdateHandler = nil
-                        continuation.resume(throwing: CancellationError())
+                        pending.resume(throwing: CancellationError())
                     default: break
                     }
                 }
@@ -77,5 +87,12 @@ final class MCPChannel {
         }
     }
 
-    func close() { connection.cancel() }
+    func close() {
+        isClosed = true
+        connection.cancel()
+        // A stop can arrive before Network starts delivering state callbacks.
+        let pending = startContinuation
+        startContinuation = nil
+        pending?.resume(throwing: CancellationError())
+    }
 }
