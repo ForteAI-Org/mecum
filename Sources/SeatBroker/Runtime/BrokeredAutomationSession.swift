@@ -336,7 +336,8 @@ public final class BrokeredAutomationSession: AutomationSessionOperating {
             throw AutomationFailure(sentence)
         }
         if case .contextMenu(let control, let item) = input {
-            return try await SeatContextMenuSelector(target: seat, pipeline: ProductionPerception.pipeline()).select(
+            let selector = SeatContextMenuSelector(target: seat, pipeline: ProductionPerception.pipeline())
+            let chosen = try await selector.select(
                 item: item, on: control,
                 identity: SeatDriving.ApplicationIdentity(
                     bundleID: application.bundleIdentifier ?? "pid.\(application.processIdentifier)",
@@ -348,6 +349,7 @@ public final class BrokeredAutomationSession: AutomationSessionOperating {
                     contextMenusOnTextFieldsOnly: Self.drawsMenusUnderThePointer(application)
                 )
             )
+            return await enriched(chosen, by: runtime)
         }
         let request = InputRequest(
             processID: application.processIdentifier,
@@ -356,11 +358,11 @@ public final class BrokeredAutomationSession: AutomationSessionOperating {
             input    : input,
             section  : section
         )
-        return await runtime.engine(
+        return await enriched(runtime.engine(
             allowsDestructive           : allowsDestructive,
             contextMenusOnTextFieldsOnly: Self.drawsMenusUnderThePointer(application),
             selectsFieldsByTripleClick  : try seat.agentSeat().holdsRemoteFilePanel
-        ).deliver(request)
+        ).deliver(request), by: runtime)
     }
 
     public func menu(path: String) async throws -> ActOutcome {
@@ -459,7 +461,7 @@ public final class BrokeredAutomationSession: AutomationSessionOperating {
     }
 
     public func select(control: String, item: String) async throws -> ActOutcome {
-        let (application, _, target) = try current()
+        let (application, runtime, target) = try current()
         let selector = SeatDropdownSelector(target: target, pipeline: ProductionPerception.pipeline())
         let result = try await selector.select(
             control: control, item: item,
@@ -470,7 +472,7 @@ public final class BrokeredAutomationSession: AutomationSessionOperating {
             permissions: ActionPermissions(allowsDestructive: allowsDestructive),
             dryRun: false
         )
-        return result.outcome
+        return await enriched(result.outcome, by: runtime)
     }
 
     /// Flushes the Brain, ends the borrow, finishes with the application and gives the seat back.
@@ -581,6 +583,13 @@ public final class BrokeredAutomationSession: AutomationSessionOperating {
         )
         if case .qtToolkit = choice { return true }
         return false
+    }
+
+    /// `outcome` with its scene enriched by the Brain, so an action's scene reads like an observed one.
+    /// The engine already recorded the transition, so the scene is not observed again.
+    private func enriched(_ outcome: ActOutcome, by runtime: EngineRuntime) async -> ActOutcome {
+        guard let scene = outcome.scene else { return outcome }
+        return ActOutcome(outcome.kind, outcome.message, scene: await runtime.memory.enrich(scene))
     }
 
     private func current() throws -> (NSRunningApplication, EngineRuntime, SeatTarget) {

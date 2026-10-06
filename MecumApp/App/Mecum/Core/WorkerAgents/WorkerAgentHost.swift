@@ -348,6 +348,7 @@ final class WorkerAgentHost {
         onEvent         = { _ in }
         isStopRequested = false
         defer { onEvent = nil }
+        tools.forgetScene()
 
         if WorkerAnswer(provider: selection.provider) == .modelLoop {
             let loop  = ModelToolLoop { _, _ in throw AutomationFailure("A summary calls no tool.") }

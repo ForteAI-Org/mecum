@@ -383,6 +383,100 @@ extension AutomationToolsTests {
     }
 }
 
+extension AutomationToolsTests {
+    /// A window titled `title` whose one section lists a control for each of `rows`.
+    private static func scene(_ rows: [String], title: String = "Synthetic New Paths") -> SceneSnapshot {
+        SceneSnapshot(
+            bundleID         : "test.synthetic",
+            appName          : "Synthetic Mixer",
+            windowTitle      : title,
+            viewportPixelSize: ViewportPixelSize(width: 400, height: 200),
+            elements         : rows.enumerated().map { index, label in
+                SceneElement(id: "row\(index)", kind: .control, label: label,
+                             bounds: NormalizedRect(x: 0.1, y: 0.04 * Double(index), width: 0.2, height: 0.03),
+                             section: "Tracks")
+            },
+            sections         : [SceneSection(name: "Tracks",
+                                             bounds: NormalizedRect(x: 0, y: 0, width: 1, height: 1))]
+        )
+    }
+
+    private static let rows = (1...20).map { "Track \($0) volume" }
+
+    @Test
+    func anActionSendsOnlyTheChangesSinceTheSceneTheModelRead() async throws {
+        let session = SyntheticSession()
+        let tools = AutomationTools(session: session)
+        let id = JSONValue.string(try #require(session.id).uuidString)
+        session.scene = Self.scene(Self.rows)
+        let observed = try await tools.call("observe", .object(["session": id]))["structuredContent"]
+        #expect(observed["scene"].string == session.scene.text())
+        #expect(observed["changes"] == .null)
+
+        session.scene = Self.scene(Self.rows.map { $0 == "Track 7 volume" ? "Track 7 muted" : $0 })
+        let acted = try await tools.call("act", .object(["session": id, "target": .string("Track 7")]))
+        let observation = acted["structuredContent"]["observation"]
+        let changes = try #require(observation["changes"].string)
+        #expect(observation["scene"] == .null)
+        #expect(observation["since"] == observed["revision"])
+        #expect(changes.contains("\nSection: Tracks"))
+        #expect(changes.contains("\n-     [control] Track 7 volume"))
+        #expect(changes.contains("\n+     [control] Track 7 muted"))
+        #expect(!changes.contains("Track 8"))
+
+        #expect(observation["revision"] == .number(2))
+        let again = try await tools.call("act", .object(["session": id, "target": .string("Track 7")]))
+        #expect(again["structuredContent"]["observation"]["changes"] == .string("Unchanged since revision 2."))
+    }
+
+    @Test("an action's scene of another window, or one that changed in most of its lines, is sent whole",
+          arguments: [true, false])
+    func anotherWindowOrALargeChangeSendsTheWholeScene(_ isAnotherWindow: Bool) async throws {
+        let session = SyntheticSession()
+        let tools = AutomationTools(session: session)
+        let id = JSONValue.string(try #require(session.id).uuidString)
+        session.scene = Self.scene(Self.rows)
+        _ = try await tools.call("observe", .object(["session": id]))
+        let after = isAnotherWindow ? Self.scene(Self.rows, title: "Another window")
+            : Self.scene(Self.rows.map { $0 + " (soloed)" })
+        session.scene = after
+        let acted = try await tools.call("act", .object(["session": id, "target": .string("Track 1")]))
+        #expect(acted["structuredContent"]["observation"]["scene"].string == after.text())
+        #expect(acted["structuredContent"]["observation"]["changes"] == .null)
+    }
+
+    @Test
+    func anActionAfterTheSceneIsForgottenSendsItWhole() async throws {
+        let session = SyntheticSession()
+        let tools = AutomationTools(session: session)
+        let id = JSONValue.string(try #require(session.id).uuidString)
+        session.scene = Self.scene(Self.rows)
+        _ = try await tools.call("observe", .object(["session": id]))
+
+        tools.forgetScene()
+        let acted = try await tools.call("act", .object(["session": id, "target": .string("Track 1")]))
+        #expect(acted["structuredContent"]["observation"]["scene"].string == session.scene.text())
+        #expect(acted["structuredContent"]["observation"]["changes"] == .null)
+    }
+
+    @Test
+    func closingTheSessionForgetsTheSceneTheModelRead() async throws {
+        let session = SyntheticSession()
+        let tools = AutomationTools(session: session)
+        let id = try #require(session.id)
+        session.scene = Self.scene(Self.rows)
+        _ = try await tools.call("observe", .object(["session": .string(id.uuidString)]))
+        _ = try await tools.call("close_session", .object(["session": .string(id.uuidString)]))
+        // The synthetic session takes its old ID back: only a forgotten baseline makes this scene whole.
+        session.id = id
+        let acted = try await tools.call("act", .object([
+            "session": .string(id.uuidString), "target": .string("Track 1")
+        ]))
+        #expect(acted["structuredContent"]["observation"]["scene"].string == session.scene.text())
+        #expect(acted["structuredContent"]["observation"]["changes"] == .null)
+    }
+}
+
 /// CatalogueSession answers only apps, with a fixed list, and has no session to open.
 @MainActor
 private final class CatalogueSession: AutomationSessionOperating {
@@ -424,9 +518,9 @@ private final class SyntheticSession: AutomationSessionOperating {
     var sections: [String?] = []
     var discoveryRows: [WindowRow] = []
     var discoveryReads: [pid_t] = []
-    private let scene = SceneSnapshot(bundleID: "test.synthetic", appName: "Synthetic Mixer",
-                                      windowTitle: "Synthetic New Paths",
-                                      viewportPixelSize: ViewportPixelSize(width: 400, height: 200), elements: [])
+    var scene = SceneSnapshot(bundleID: "test.synthetic", appName: "Synthetic Mixer",
+                              windowTitle: "Synthetic New Paths",
+                              viewportPixelSize: ViewportPixelSize(width: 400, height: 200), elements: [])
 
     func open(application: String, window: String?) async throws -> SceneSnapshot {
         calls.append("open")

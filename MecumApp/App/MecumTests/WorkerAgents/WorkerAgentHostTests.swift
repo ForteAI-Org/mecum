@@ -36,9 +36,14 @@ struct WorkerAgentHostTests {
     the intended window. Never observe the ended ID or replay the input that preceded its disappearance.
     Never call close_session because a task is done: Mecum releases the Seat by itself when it is no longer
     needed. Call it only when the person asks you to release the Seat, or before calling open_session again.
-    Follow newly opened dialogs by observing again. select needs the CURRENT dropdown label/value.
+    An action result's observation is the scene taken just after the action settled: read it, do not observe again.
+    Observe only when a result has none, when a dialog or window may still be opening, or before repeating an
+    acted_unverified action whose observation shows no effect, since that scene is taken moments after acting.
+    An action result's observation may carry only the changes since an earlier revision of the scene;
+    observe gives the full scene, for example after the conversation was compacted.
+    select needs the CURRENT dropdown label/value.
     Prefer set_toggle with explicit on/off over blindly clicking checkboxes.
-    On ambiguous, inspect the candidates and disambiguate. On acted_unverified or transport failure, observe;
+    On ambiguous, inspect the candidates and disambiguate. On a transport failure, observe;
     never automatically replay an action that may already have happened. Missing permissions require the
     user to fix macOS access; do not retry in another terminal or foreground route.
     The act verbs are click, double_click, triple_click, right_click and set_toggle; select picks a dropdown item.
@@ -50,7 +55,6 @@ struct WorkerAgentHostTests {
     press_key presses return, tab, escape, space, delete, an arrow, a letter, a digit, / or ~, with optional modifiers.
     scroll turns the wheel up or down over a target or the window; there is no horizontal scroll.
     drag goes from one target to another or by an offset; context_menu right-clicks a target and picks an item.
-    A key, scroll or drag is verified only by a visible change: on acted_unverified, observe before repeating it.
     menu reaches the app's menu bar by a path such as "File > Save As...": a path that ends on a menu lists its
     items and presses nothing, one that ends on an item presses it. Use it for a command the window shows no
     control for. Shortcuts a menu resolves (Command-C, Command-V, Command-A, Command-Z) do nothing on this

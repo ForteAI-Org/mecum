@@ -13,9 +13,18 @@ public final class AutomationTools {
     public let session: any AutomationSessionOperating
     public var record: ((String) throws -> Void)?
     private var revision = 0
+    /// The lines of the last scene sent to the model, with its session and revision: what an action's
+    /// changes are taken against.
+    private var seen: (session: UUID, revision: Int, lines: [String])?
 
     public init(session: any AutomationSessionOperating) {
         self.session = session
+    }
+
+    /// Forgets the scene the model last read, so the next action's scene is sent whole: for a new
+    /// turn or a compacted context, which may no longer hold that scene.
+    public func forgetScene() {
+        seen = nil
     }
 
     /// The base instructions every provider turn over these tools runs with, in the CLI and the app alike.
@@ -35,9 +44,14 @@ public final class AutomationTools {
     the intended window. Never observe the ended ID or replay the input that preceded its disappearance.
     Never call close_session because a task is done: Mecum releases the Seat by itself when it is no longer
     needed. Call it only when the person asks you to release the Seat, or before calling open_session again.
-    Follow newly opened dialogs by observing again. select needs the CURRENT dropdown label/value.
+    An action result's observation is the scene taken just after the action settled: read it, do not observe again.
+    Observe only when a result has none, when a dialog or window may still be opening, or before repeating an
+    acted_unverified action whose observation shows no effect, since that scene is taken moments after acting.
+    An action result's observation may carry only the changes since an earlier revision of the scene;
+    observe gives the full scene, for example after the conversation was compacted.
+    select needs the CURRENT dropdown label/value.
     Prefer set_toggle with explicit on/off over blindly clicking checkboxes.
-    On ambiguous, inspect the candidates and disambiguate. On acted_unverified or transport failure, observe;
+    On ambiguous, inspect the candidates and disambiguate. On a transport failure, observe;
     never automatically replay an action that may already have happened. Missing permissions require the
     user to fix macOS access; do not retry in another terminal or foreground route.
     The act verbs are click, double_click, triple_click, right_click and set_toggle; select picks a dropdown item.
@@ -49,7 +63,6 @@ public final class AutomationTools {
     press_key presses return, tab, escape, space, delete, an arrow, a letter, a digit, / or ~, with optional modifiers.
     scroll turns the wheel up or down over a target or the window; there is no horizontal scroll.
     drag goes from one target to another or by an offset; context_menu right-clicks a target and picks an item.
-    A key, scroll or drag is verified only by a visible change: on acted_unverified, observe before repeating it.
     menu reaches the app's menu bar by a path such as "File > Save As...": a path that ends on a menu lists its
     items and presses nothing, one that ends on an item presses it. Use it for a command the window shows no
     control for. Shortcuts a menu resolves (Command-C, Command-V, Command-A, Command-Z) do nothing on this
@@ -133,20 +146,21 @@ public final class AutomationTools {
                  ["app": text, "window": text], ["app"]),
             tool("observe", "Read a fresh scene in this session, including its current dialog. Required after resuming chat.",
                  session, ["session"], readOnly: true),
-            tool("act", "Resolve a current label or element ID, act, and verify. set_toggle requires value on/off. "
-                 + "Never automatically repeat acted_unverified. Typing, keys, scrolling, drags and contextual "
-                 + "menus have their own tools.",
+            tool("act", "Resolve a current label or element ID, act, and verify; observation is the scene after "
+                 + "acting. set_toggle requires value on/off. Never automatically repeat acted_unverified. "
+                 + "Typing, keys, scrolling, drags and contextual menus have their own tools.",
                  session.merging(action, uniquingKeysWith: { $1 }), ["session", "target"]),
             tool("select", "Choose a visible dropdown item and verify its new value. control is its current value/label.",
                  session.merging(["control": text, "item": text], uniquingKeysWith: { $1 }),
                  ["session", "control", "item"]),
             input("type_text", "Resolve a current field label or element ID, click it and type text into it. "
                   + "replace (default true) selects what the field holds first; false adds the text at its end. "
-                  + "Verified by reading the field's value back. On acted_unverified observe; never retype blindly."),
+                  + "Verified by reading the field's value back. On acted_unverified read its observation; "
+                  + "never retype blindly."),
             input("insert_text", "Insert one intact text payload at the already established focus and selection. "
                   + "Does not click, move the caret or select text. Optional expected_value is the complete resulting "
                   + "field value, verified only by native focused-field readback. Opaque fields remain unverified; "
-                  + "observe and verify the committed effect separately. Never replay blindly."),
+                  + "verify the committed effect separately. Never replay blindly."),
             input("press_key", "Press one key into the window, optionally with modifiers held and repeated count "
                   + "times. Command-Q and Command-W are refused. A shortcut a menu resolves (Command-C, Command-V, "
                   + "Command-A, Command-Z) does nothing on this background window: use menu, a control or context_menu. "
@@ -171,11 +185,15 @@ public final class AutomationTools {
             tool("menu", "List or press an item of the application's menu bar, through accessibility and without "
                  + "bringing the application forward. path names it from the menu bar down, such as "
                  + "\"File > Save As...\" or \"Layer > New > Layer...\". A path that ends on a menu answers its items; "
-                 + "one that ends on an item presses it. Disabled, hiding and destructive items are refused.",
+                 + "one that ends on an item presses it and answers with the scene after it. Listings do not "
+                 + "activate the application: enabled flags and editing history may be stale in the background. "
+                 + "A complete command path is read again during qualified preparation. Disabled, hiding and "
+                 + "destructive items are refused.",
                  session.merging(["path": text], uniquingKeysWith: { $1 }), ["session", "path"]),
             tool("press", "Press a button of the application's dialog or alert in front by its title, through "
                  + "accessibility. For a button a click cannot reach: the click was refused, or the scene shows the "
-                 + "button as text. Disabled and destructive buttons are refused.",
+                 + "button as text. Answers with the scene after the press. Disabled and destructive buttons are "
+                 + "refused.",
                  session.merging(["button": text], uniquingKeysWith: { $1 }), ["session", "button"]),
             tool("close_session", "Return the application's windows and release its Seat. Only when the person "
                  + "asks, or before calling open_session again; never to finish a task, since Mecum releases the "
@@ -185,9 +203,14 @@ public final class AutomationTools {
     }
 
     public func call(_ name: String, _ arguments: JSONValue) async throws -> JSONValue {
+        let before = seen
+        // A session that ended leaves no scene to compare the next one against.
+        defer { if session.id == nil { seen = nil } }
         do {
             return try await dispatch(name, arguments)
         } catch {
+            // A failed call reaches the model without its scenes, so the baseline stays the one it read.
+            seen = before
             let guidance = session.id == nil
                 ? "Use status and list current windows before opening a new session."
                 : "Observe before any retry."
@@ -310,11 +333,72 @@ public final class AutomationTools {
         }
     }
 
-    private func observation(_ scene: SceneSnapshot) -> JSONValue {
+    /// The scene as the model reads it, which becomes the baseline. An action's scene of the same
+    /// window as the baseline is sent as its `changes` since that revision when they are under half its size.
+    private func observation(_ scene: SceneSnapshot, changesOnly: Bool = false) -> JSONValue {
         revision += 1
-        return .object(["session": session.id.map { .string($0.uuidString) } ?? .null,
-                        "revision": .number(Double(revision)), "observedAt": .string(Date().ISO8601Format()),
-                        "scene": .string(scene.text())])
+        let text  = scene.text()
+        let lines = text.split(separator: "\n").map(String.init)
+        var values: [String: JSONValue] = [
+            "session": session.id.map { .string($0.uuidString) } ?? .null,
+            "revision": .number(Double(revision)), "observedAt": .string(Date().ISO8601Format())
+        ]
+        if changesOnly, let seen, seen.session == session.id, seen.lines.first == lines.first {
+            let changes = Self.changes(from: seen.lines, to: lines, since: seen.revision)
+            // ponytail: a fixed cut at half the scene, unmeasured; a diff just under it still costs half.
+            // Tune it from measured runs.
+            if changes.count * 2 < text.count {
+                values["changes"] = .string(changes)
+                values["since"] = .number(Double(seen.revision))
+            }
+        }
+        if values["changes"] == nil { values["scene"] = .string(text) }
+        seen = session.id.map { (session: $0, revision: revision, lines: lines) }
+        return .object(values)
+    }
+
+    /// The lines `new` removes from `old` (`- `) and adds (`+ `), in scene order, each element line
+    /// after the unindented line it belongs to, such as its `Section:` line; one line when none changed.
+    private static func changes(from old: [String], to new: [String], since base: Int) -> String {
+        let difference = new.difference(from: old)
+        guard !difference.isEmpty else { return "Unchanged since revision \(base)." }
+        var removed  = Set<Int>()
+        var inserted = Set<Int>()
+        for change in difference {
+            switch change {
+            case .remove(let offset, _, _): removed.insert(offset)
+            case .insert(let offset, _, _): inserted.insert(offset)
+            }
+        }
+        var out = ["Changes since revision \(base); an element line belongs to the section line above it."]
+        var section: String?
+        var shown: String?
+        var (i, j) = (0, 0)
+        while i < old.count || j < new.count {
+            let (mark, line): (String, String)
+            if removed.contains(i) {
+                (mark, line) = ("- ", old[i])
+                i += 1
+            } else if inserted.contains(j) {
+                (mark, line) = ("+ ", new[j])
+                j += 1
+            } else {
+                guard i < old.count, j < new.count else { break }
+                if old[i].first?.isWhitespace == false { section = old[i] }
+                i += 1
+                j += 1
+                continue
+            }
+            if line.first?.isWhitespace == false {
+                section = line
+                shown = line
+            } else if let section, section != shown {
+                out.append(section)
+                shown = section
+            }
+            out.append(mark + line)
+        }
+        return out.joined(separator: "\n")
     }
 
     private func outcome(_ outcome: ActOutcome) -> JSONValue {
@@ -322,7 +406,7 @@ public final class AutomationTools {
             "status": .string(outcome.kind.rawValue), "message": .string(outcome.message),
             "session": session.id.map { .string($0.uuidString) } ?? .null
         ]
-        if let scene = outcome.scene { values["observation"] = observation(scene) }
+        if let scene = outcome.scene { values["observation"] = observation(scene, changesOnly: true) }
         return .object(values)
     }
 
