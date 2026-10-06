@@ -33,13 +33,14 @@ BASELINES := Tests/Driver/Benchmarks/Baselines
 BENCH_OUT := .build/bench
 REPORTS   := Documentation/Driver/compatibility
 
-# The unit tier runs unfiltered, so every test target in Package.swift reports
-# one summary line, the Driver's, the Engine's and the broker's alike: 28 after
-# InteractionTests joined the package. The app's own tests remain in MecumTests.
-# This is the bundle count, not a test count, because test counts move with every
-# ticket (987 to 1018 in one day) and a number nobody updates stops meaning
-# anything, while a new test target is rare and worth failing over.
-UNIT_BUNDLES := 28
+# SwiftPM filters out SeatSession and reports 25 Swift Testing summaries.
+# Filtering also omits the empty Swift Testing companions of the two XCTest-only
+# targets; their XCTest tests still run. SeatSession's 674 tests run separately
+# through the synchronous native entry point, for 26 required summaries:
+# AppKit RunLoop pumping can also end this otherwise pure bundle before its
+# async main reports completion.
+# The app's own tests remain in MecumTests. This is a run count, not a test count.
+UNIT_BUNDLES := 26
 
 # The seat cycle, alone in its own process.
 HOST_CYCLE_TESTS := 1
@@ -111,12 +112,13 @@ help:
 
 # `--no-parallel` is load bearing, and it is fact 3 of the header: a pumping
 # wait holds the main queue, so concurrent suites starve the recovery loops.
-test:
+test: native-test-runner
 	@$(PYTHON) Tools/Driver/Scripts/test-run-tier.py
+	@$(PYTHON) Tools/Driver/Scripts/test-unit-command.py
 	@$(PYTHON) Tools/Driver/Scripts/test-focus-latency.py
 	@$(PYTHON) Tools/Driver/Scripts/test-compat-report.py
 	@bash Tools/Driver/Scripts/test-seatbench-contract.sh
-	@TIER_BUNDLES=$(UNIT_BUNDLES) $(TIER) unit - $(SWIFT) test --no-parallel
+	@TIER_BUNDLES=$(UNIT_BUNDLES) $(TIER) unit - bash Tools/Driver/Scripts/unit-test-command.sh $(SWIFT)
 
 # The synchronous entry point survives native RunLoop returns during capture.
 # It loads the same built Swift Testing bundle; each tier still checks its count.

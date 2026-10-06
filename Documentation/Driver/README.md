@@ -260,7 +260,12 @@ defects to work around.
 **A green exit status from a tier is not evidence that the tier ran.** Native
 capture could return through Swift async main and exit before the test's
 completion summary. Both Host processes and each Adobe UXP row use a synchronous native runner
-around the same built Swift Testing bundle. The Host tier still
+around the same built Swift Testing bundle. The pure SeatSession unit bundle
+uses it too: its AppKit RunLoop pumping can terminate the async runner before
+completion. Other unit targets remain in SwiftPM, including their XCTest
+tests. The unit tier requires 25 Swift Testing summaries there and one from
+SeatSession; filtering omits the two empty Swift Testing companions of the
+XCTest-only targets. The Host tier still
 keeps the seat cycle apart from the display suites; UXP keeps each row in its
 own process. Every tier asserts its reported count. An incomplete run therefore
 fails even if the process exited zero.
