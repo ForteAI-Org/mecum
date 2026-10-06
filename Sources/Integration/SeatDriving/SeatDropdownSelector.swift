@@ -85,7 +85,9 @@ public struct SeatDropdownSelector {
         )
         var opener: SceneElement?
         var scopedBounds: NormalizedRect?
-        let resolution = before.scene.resolve(target: control)
+        // A native popup and its static caption can share a name. Prefer the control;
+        // two actual controls with that name must still remain ambiguous.
+        let resolution = before.scene.resolve(target: control, preferNativeControls: true)
         if case .found(let element) = resolution {
             opener = element
         } else if case .none = resolution,
@@ -94,7 +96,7 @@ public struct SeatDropdownSelector {
                   before.frame.contains(frame),
                   let bounds = AccessibilityFrameTrust.normalized(frame, in: before.frame),
                   let scoped = try await controlScene(beforeStill, bounds: bounds, identity: identity, title: window.title),
-                  case .found(let value) = scoped.resolve(target: control) {
+                  case .found(let value) = scoped.resolve(target: control, preferNativeControls: true) {
             scopedBounds = bounds
             opener = SceneElement(id: value.id, kind: .control, label: value.label, bounds: bounds, role: "AXPopUpButton")
         }
