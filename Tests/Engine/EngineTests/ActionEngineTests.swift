@@ -486,6 +486,36 @@ struct ActionEngineTests {
         #expect(unverified.message.contains("does not show"))
     }
 
+    @Test("in a remote file panel a click on a popup or a menu button is refused and nothing presses it",
+          arguments: ["AXPopUpButton", "AXMenuButton"])
+    func remotePanelMenuOpenerIsRefused(role: String) async {
+        let popup = SceneElement(id: "control|where", kind: .control, label: "Where:", bounds: rect(0.3, 0.4),
+                                 role: role, value: "Downloads")
+        let controls = FakeControls(); controls.pressSucceeds = true
+        let actuator = RecordingActuator()
+        let outcome = await engine(scenes: ScriptedScenes([scene([popup])]), actuator: actuator, controls: controls,
+                                   permissions: ActionPermissions(refusesMenuOpeningClicks: true))
+            .act(request("Where:"))
+        #expect(outcome.kind == .refused)
+        #expect(outcome.message == ActionPolicy.menuOpeningRefusal(role: role))
+        #expect(outcome.message.contains("Use select"))
+        #expect(controls.pressed.isEmpty, "the native press would open the service's menu")
+        #expect(actuator.gestures.isEmpty)
+    }
+
+    @Test("in a remote file panel any other click goes to the seat, never to a native press by label")
+    func remotePanelClickSkipsTheNativePress() async {
+        let save = SceneElement(id: "control|save", kind: .control, label: "Save", bounds: rect(0.8, 0.9),
+                                role: "AXButton")
+        let controls = FakeControls(); controls.pressSucceeds = true
+        let actuator = RecordingActuator()
+        _ = await engine(scenes: ScriptedScenes([scene([save])]), actuator: actuator, controls: controls,
+                         permissions: ActionPermissions(refusesMenuOpeningClicks: true))
+            .act(request("Save"))
+        #expect(controls.pressed.isEmpty)
+        #expect(actuator.gestures.count == 1)
+    }
+
     @Test("where menus open under the person's pointer, right_click is refused off a text field")
     func rightClickOutsideTheSeatIsRefused() async {
         let actuator = RecordingActuator()

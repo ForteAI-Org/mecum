@@ -143,6 +143,11 @@ public enum DropdownOpening {
         LiveAccessibilityReader().frame(try uniqueControl(label: label, in: window))
     }
 
+    /// Reads the native value of one exact dropdown, without opening it.
+    public static func value(control label: String, in window: Window) throws -> String? {
+        LiveAccessibilityReader().value(try uniqueControl(label: label, in: window))
+    }
+
     private static func uniqueControl(label: String, in scope: Window) throws -> AXUIElement {
         let reader = LiveAccessibilityReader()
         let application = reader.application(processID: scope.processID)
@@ -180,7 +185,8 @@ public enum DropdownOpening {
         func visit(_ node: AXUIElement, _ depth: Int) {
             guard depth < 16 else { return }
             let role = value(node, kAXRoleAttribute) as? String ?? ""
-            if [kAXPopUpButtonRole, kAXComboBoxRole].contains(role),
+            // A menu button opens its menu by AXPress too: a file panel's view mode is one.
+            if [kAXPopUpButtonRole, kAXComboBoxRole, kAXMenuButtonRole].contains(role),
                (value(node, kAXTitleAttribute) as? String)?.caseInsensitiveCompare(label) == .orderedSame
                 || (value(node, kAXValueAttribute) as? String)?.caseInsensitiveCompare(label) == .orderedSame
                 || (value(node, kAXDescriptionAttribute) as? String)?.caseInsensitiveCompare(label) == .orderedSame {

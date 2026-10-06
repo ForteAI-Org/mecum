@@ -158,6 +158,10 @@ without application activation. The proof repeats before the first post, and
 incompatible caller overrides refuse. See
 [ADR 0016](adr/Adr0016UXPModalKeysWithStaleFocus.md).
 
+A click or a remembered field's text on an out of process file panel's content
+is actuated through accessibility and posts no event; see
+[ADR 0031](adr/Adr0031ActuateRemotePanelContentThroughAccessibility.md).
+
 `make uxp-live-tests` runs eight dedicated Photoshop modal, document and editing
 rows with `UXPPlatform`. Leave Photoshop in the background with only one
 disposable RGB PNG open in Pro Editor mode, on an approved desktop in exclusive use, and name

@@ -173,6 +173,22 @@ struct EndpointDiscovery {
         .failure(.subtreeUnreadable(surface: chain.surface))
     }
 
+    /// The applications whose ordinary windows take their clicks through
+    /// accessibility, as a remote panel's content does (ADR 0031). The one
+    /// place this scope is decided; add a bundle identifier to widen it.
+    static let accessibilityClickedApplications: Set<String> = ["com.apple.finder"]
+
+    /// Whether `window` belongs to one of `accessibilityClickedApplications`.
+    var clicksThroughAccessibility: (WindowIdentity) -> Bool = { _ in false }
+
+    /// A click on a qualified remote panel's content, acted on through the
+    /// assigned application's accessibility instead of posted (ADR 0031).
+    var remoteActuation: (
+        Int32, InputCommand, ResolvedInputEndpoint
+    ) -> Result<RemoteContentActuation, RemoteContentActuationRefusal> = { _, _, _ in
+        .failure(.unreadable)
+    }
+
     /// The readings the shipping seat takes.
     static let shipping = EndpointDiscovery(
         pointer: { processID, point, chain, generation in
@@ -239,6 +255,15 @@ struct EndpointDiscovery {
             DialogEndpointResolver<AXUIElement>
                 .accessibility(assignedProcessID: processID)
                 .windowlessContentEndpoint(at: point, within: chain, selectionGeneration: generation)
+        },
+        clicksThroughAccessibility: { window in
+            NSRunningApplication(processIdentifier: pid_t(window.processID))?.bundleIdentifier
+                .map(accessibilityClickedApplications.contains) ?? false
+        },
+        remoteActuation: { processID, command, endpoint in
+            RemoteContentActuator<AXUIElement>
+                .accessibility(assignedProcessID: processID)
+                .actuate(command, endpoint: endpoint)
         }
     )
 }

@@ -242,8 +242,12 @@ final class FakeSensing: SeatSensing, @unchecked Sendable {
     /// wants to know is that the action polled rather than guessed.
     private(set) var menuReadCount = 0
 
+    /// The menu windows of another process, such as the panel service drawing
+    /// a remote file panel's content, whose popups open menus of its own.
+    var menusOfOtherProcesses: [Int32: [WindowReference]] = [:]
+
     func menuWindows(ownedBy processID: Int32) -> [WindowReference] {
-        guard processID == targetPID else { return [] }
+        guard processID == targetPID else { return menusOfOtherProcesses[processID] ?? [] }
         menuReadCount += 1
         return menus
     }

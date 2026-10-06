@@ -58,7 +58,8 @@ public struct EngineRuntime {
     public func engine(
         allowsDestructive           : Bool,
         contextMenusOnTextFieldsOnly: Bool = false,
-        selectsFieldsByTripleClick  : Bool = false
+        selectsFieldsByTripleClick  : Bool = false,
+        refusesMenuOpeningClicks    : Bool = false
     ) -> ActionEngine {
         ActionEngine(
             ActionEngine.Dependencies(
@@ -73,7 +74,8 @@ public struct EngineRuntime {
             permissions: ActionPermissions(
                 allowsDestructive           : allowsDestructive,
                 contextMenusOnTextFieldsOnly: contextMenusOnTextFieldsOnly,
-                selectsFieldsByTripleClick  : selectsFieldsByTripleClick
+                selectsFieldsByTripleClick  : selectsFieldsByTripleClick,
+                refusesMenuOpeningClicks    : refusesMenuOpeningClicks
             )
         )
     }

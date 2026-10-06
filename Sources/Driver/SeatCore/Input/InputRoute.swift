@@ -15,6 +15,11 @@ public enum PostRoute: String, Sendable, Equatable {
 
     /// `SLEventPostToPid`, one private call, resolved and gated per build.
     case skyLightProcess
+
+    /// No event at all: an accessibility action or attribute write on the
+    /// element under the point of an out of process panel's content, whose
+    /// routed events activate the host application (ADR 0031).
+    case accessibilityAction
 }
 
 /// InputRoute records where the events of one send actually went: which call

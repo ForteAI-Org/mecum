@@ -149,6 +149,17 @@ public struct SeatDropdownSelector {
             return element
         }
         let receipt: PopupMenuReceipt
+        // A remote file panel's popup is opened and chosen through accessibility alone,
+        // and its pixel opener is refused by the seat (ADR 0031).
+        let remotePanel = seat.holdsRemoteFilePanel
+        var remoteListing: String?
+        @MainActor @Sendable func chooseRemotely(_ menu: ContextMenu) async throws -> Bool {
+            let roots = RemoteMenuChoice.roots(host: window.reference.processID, menuOwner: menu.window.processID)
+            let outcome = try RemoteMenuChoice.accessibility.choose(item, in: menu.frame, under: roots)
+            guard case .missing(let listing) = outcome else { return true }
+            remoteListing = listing
+            return false
+        }
         if try DropdownOpening.canShow(control: opener.label, in: nativeWindow) {
             receipt = try await seat.useNativePopupMenu(
                 of: window, turn: turn,
@@ -156,6 +167,7 @@ public struct SeatDropdownSelector {
                     try DropdownOpening.show(control: opener.label, in: nativeWindow)
                 }
             ) { menu in
+                if remotePanel { return try await chooseRemotely(menu) }
                 guard try await readItem(menu, fromDisplay: false) != nil else { return false }
                 try Task.checkCancellation()
                 try DropdownOpening.select(item: item, in: menu.frame, processID: window.reference.processID)
@@ -198,11 +210,18 @@ public struct SeatDropdownSelector {
             stage: "after", onCapture: onCapture
         )
         guard receipt.selectionRequested else {
-            let labels = menuScene?.elements.map(\.label).joined(separator: ", ") ?? "unreadable"
+            let labels = remoteListing
+                ?? menuScene?.elements.map(\.label).joined(separator: ", ")
+                ?? "unreadable"
             return (ActOutcome(.honestMiss, "no unique '\(item)' in the dropdown; menu closed. Items: \(labels)", scene: after.scene), receipt)
         }
         let verified: Bool
-        if let scopedBounds {
+        if remotePanel {
+            // The popup's own value, by its label or, once changed, by the value it now holds.
+            let value = (try? DropdownOpening.value(control: opener.label, in: nativeWindow))
+                ?? (try? DropdownOpening.value(control: item, in: nativeWindow))
+            verified = value.map { LabelText.normalize($0) == LabelText.normalize(item) } ?? false
+        } else if let scopedBounds {
             let scoped = try await controlScene(afterStill, bounds: scopedBounds, identity: identity, title: window.title)
             if let scoped, case .found(let value) = scoped.resolve(target: item) {
                 verified = LabelText.normalize(value.label) == LabelText.normalize(item)

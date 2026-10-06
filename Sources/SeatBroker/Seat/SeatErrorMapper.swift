@@ -31,6 +31,8 @@ enum SeatErrorMapper {
             sentence(refusal)
         case let retired as InputEndpointInvalidation:
             sentence(retired)
+        case let refusal as RemoteContentActuationRefusal:
+            refusal.description
         case let stop as SeatInterruption:
             "The seat stopped: " + stop.issues.map(sentence).joined(separator: "; ") + "."
         case let failure as InputPreparationFailure:

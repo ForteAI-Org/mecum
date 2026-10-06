@@ -152,6 +152,10 @@ public struct ActionEngine: Sendable {
            let refusal = menuOutsideTheSeat(on: element, appName: request.appName, scene: scene) {
             return refusal
         }
+        if request.verb != .rightClick, permissions.refusesMenuOpeningClicks,
+           let role = element.role, ActionPolicy.menuOpeningRoles.contains(role) {
+            return ActOutcome(.refused, ActionPolicy.menuOpeningRefusal(role: role), scene: scene)
+        }
         let point = perceived.globalPoint(of: element)
         let surfaces = await surfaces(pid)
         let expected = await dependencies.expectations?.expectedEffect(
@@ -240,7 +244,8 @@ public struct ActionEngine: Sendable {
         // The census after activation on purpose: raising an application floats its own palettes.
         let censusBefore = await surfaces(pid).verdicts
         var openedByPress = false
-        if request.verb == .click, let controls = dependencies.controls {
+        // In a remote file panel the seat's own route acts on the control instead.
+        if request.verb == .click, !permissions.refusesMenuOpeningClicks, let controls = dependencies.controls {
             openedByPress = await controls.pressControl(labelled: element.label, in: pid)
         }
         do {

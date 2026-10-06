@@ -649,6 +649,113 @@ nonisolated package struct DialogEndpointResolver<Node> {
         return answer
     }
 
+    /// The nodes under one point, innermost first, up to and without the first
+    /// one naming the surface, when they prove the point is in the remote
+    /// content `endpoint` names. A remote actuation acts on one of them and on
+    /// nothing else (ADR 0031). It reads, as everything here does.
+    ///
+    /// The descent from the hit test's node is `pointerEndpoint`'s, by the
+    /// smallest containing child; the walk up goes through `AXParent`. Every
+    /// node belongs to the surface's process or the content's, and names the
+    /// content's window, no window, or the surface, which ends the walk. A node
+    /// naming any other window, a read that failed, more than 64 steps or 300 ms
+    /// refuse. A path naming no window at all is proved only for an endpoint
+    /// attested from the surface's own subtree, `remoteContentOfSurface`, as the
+    /// windowless field of Resolve's Go to Folder sheet was.
+    package func remoteContentPath(
+        at point   : CGPoint,
+        of endpoint: ResolvedInputEndpoint
+    ) -> Result<[Node], RemoteContentActuationRefusal> {
+
+        let surface = endpoint.logicalSurface
+        let content = endpoint.identity
+        let (deadline, overflow) = now().addingReportingOverflow(300_000_000)
+        guard !overflow, endpoint.relation == .remoteContent else { return .failure(.outsideRemoteContent) }
+        var node: Node
+        switch innermostNode(at: point) {
+            case .success(let found): node = found
+            case .failure(let refusal): return .failure(refusal)
+        }
+        var path: [Node] = []
+        var namesContent = false
+        while true {
+            guard now() < deadline, path.count <= 64 else { return .failure(.unreadable) }
+            guard let process = nodeProcess(node),
+                  process == surface.processID || process == content.processID
+            else { return .failure(.outsideRemoteContent) }
+            switch windowReading(node) {
+                case .window(let number) where number == surface.windowNumber:
+                    guard !path.isEmpty, namesContent || endpoint.evidence == .remoteContentOfSurface
+                    else { return .failure(.outsideRemoteContent) }
+                    return .success(path)
+                case .window(let number) where number == content.windowNumber:
+                    namesContent = true
+                case .window:
+                    return .failure(.outsideRemoteContent)
+                case .windowless:
+                    break
+                case .unreadable:
+                    return .failure(.unreadable)
+            }
+            path.append(node)
+            guard let above = parent(node) else { return .failure(.unreadable) }
+            node = above
+        }
+    }
+
+    /// The nodes under one point of the surface's own content, innermost first, up to and without
+    /// the surface's own `AXWindows` entry, for an ordinary window whose clicks go through
+    /// accessibility, Finder's (ADR 0031). Every node belongs to the surface's process and names
+    /// the surface or no window. Another window, another process, a failed read, more than 64 steps
+    /// or 300 ms refuse, and so does a path that never meets the window's entry.
+    package func ownContentPath(
+        at point   : CGPoint,
+        of endpoint: ResolvedInputEndpoint
+    ) -> Result<[Node], RemoteContentActuationRefusal> where Node: Equatable {
+
+        let surface = endpoint.logicalSurface
+        let (deadline, overflow) = now().addingReportingOverflow(300_000_000)
+        guard !overflow, endpoint.relation == .logicalSurface, endpoint.identity == surface,
+              let window = windowNode(surface.windowNumber)
+        else { return .failure(.outsideRemoteContent) }
+        var node: Node
+        switch innermostNode(at: point) {
+            case .success(let found): node = found
+            case .failure(let refusal): return .failure(refusal)
+        }
+        var path: [Node] = []
+        while node != window {
+            guard now() < deadline, path.count <= 64 else { return .failure(.unreadable) }
+            guard nodeProcess(node) == surface.processID else { return .failure(.outsideRemoteContent) }
+            switch windowReading(node) {
+                case .window(let number) where number == surface.windowNumber: break
+                case .windowless: break
+                case .window: return .failure(.outsideRemoteContent)
+                case .unreadable: return .failure(.unreadable)
+            }
+            path.append(node)
+            guard let above = parent(node) else { return .failure(.outsideRemoteContent) }
+            node = above
+        }
+        return path.isEmpty ? .failure(.noElementAtPoint) : .success(path)
+    }
+
+    /// The innermost node under a point: the hit test's, then by the smallest containing child, as
+    /// `pointerEndpoint` descends.
+    private func innermostNode(at point: CGPoint) -> Result<Node, RemoteContentActuationRefusal> {
+        guard var node = nodeAtPoint(point) ?? nodeAtPoint(point) else { return .failure(.noElementAtPoint) }
+        descent: for _ in 0..<Self.maximumDepth {
+            switch children(node) {
+                case .leaf: break descent
+                case .unreadable: return .failure(.unreadable)
+                case .children(let values):
+                    guard let below = smallestChild(of: values, containing: point) else { break descent }
+                    node = below
+            }
+        }
+        return .success(node)
+    }
+
     /// `true` for a node of the surface's process that names the surface,
     /// `false` for one that names no window, nil for another window, another
     /// process or a read that failed: the test every node of a windowless path
@@ -906,12 +1013,44 @@ nonisolated package struct DialogEndpointResolver<Node> {
     /// says whose it is.
     ///
     /// This entry reads no focus: it is what says whose content a modal surface
-    /// draws, whether or not any of it is focused.
+    /// draws, whether or not any of it is focused. The window is attested as
+    /// `endpoint` attests a recipient, drawn inside the surface, so it answers
+    /// what a Command over that content would be addressed to (ADR 0031). A
+    /// sheet is found under its host's `AXWindows` entry, the only place
+    /// accessibility lists it: TextEdit's Save sheet on 05/10/2026.
     package func foreignContentWindow(within chain: SurfaceChain) -> Int? {
-        guard let window = windowNode(chain.surface.windowNumber),
-              focusedWindow(window, matches: chain)
+        guard let window = surfaceNode(within: chain),
+              focusedWindow(window, matches: chain),
+              let named = namedWindows(under: window, within: chain, atMost: .max)
         else { return nil }
-        return foreignContentWindow(of: window, within: chain)
+        var foreign: [Int] = []
+        for number in named.sorted() {
+            guard let owner = identity(number) else { return nil }
+            if owner.process != chain.surface.process { foreign.append(number) }
+        }
+        guard foreign.count == 1, let only = foreign.first,
+              case .success = endpoint(
+                  kind                   : .pointer,
+                  windowNumber           : only,
+                  accessibilityProcessID : chain.surface.processID,
+                  within                 : chain,
+                  selectionGeneration    : 0,
+                  focusedNodeWindowNumber: nil
+              )
+        else { return nil }
+        return only
+    }
+
+    /// The surface's own node: its `AXWindows` entry, or for a sheet, the one
+    /// child of its host's entry that names it.
+    private func surfaceNode(within chain: SurfaceChain) -> Node? {
+        if let node = windowNode(chain.surface.windowNumber) { return node }
+        guard chain.host != chain.surface,
+              let host = windowNode(chain.host.windowNumber),
+              case .children(let values) = children(host)
+        else { return nil }
+        let sheets = values.filter { nodeWindow($0) == chain.surface.windowNumber }
+        return sheets.count == 1 ? sheets.first : nil
     }
 
     private func foreignContentWindow(of surfaceNode: Node, within chain: SurfaceChain) -> Int? {

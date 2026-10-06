@@ -8,6 +8,7 @@
 import CoreGraphics
 import EngineCore
 import Foundation
+import SeatCapture
 import SeatCore
 import SeatInput
 import SeatSession
@@ -24,9 +25,9 @@ import SeatSession
 /// of gestures, and the succession is the consumer's to orchestrate.
 ///
 /// A click is routed only through that observation's own window geometry, so a point outside the
-/// observed window is refused rather than posted somewhere: pop-ups are chosen with the keyboard,
-/// and the engine already does so. The application is never activated; the seat never raises
-/// anything.
+/// observed window, or outside the region a hosted sheet's picture covers, is refused rather than
+/// posted somewhere: pop-ups are chosen with the keyboard, and the engine already does so. The
+/// application is never activated; the seat never raises anything.
 public actor SeatActuator: Actuating {
 
     private let target: SeatTarget
@@ -46,7 +47,7 @@ public actor SeatActuator: Actuating {
                 guard (1...InputCommand.maximumClickCount).contains(count) else {
                     throw SeatDrivingFailure.gestureUnsupported("a \(count)-click")
                 }
-                let location = try routed(point, in: observation.geometry)
+                let location = try routed(point, in: observation)
                 let mouse: SeatCore.MouseButton = button == .left ? .left : .right
                 receipts.append(try await seat.send(
                     .click(location, button: mouse, count: count),
@@ -54,7 +55,7 @@ public actor SeatActuator: Actuating {
                     turn       : turn
                 ))
             case .scroll(let point, let deltaY, _):
-                let location = try routed(point, in: observation.geometry)
+                let location = try routed(point, in: observation)
                 receipts.append(try await seat.send(
                     .scroll(location, deltaY: Int32(deltaY)),
                     observation: observation.reference,
@@ -74,8 +75,8 @@ public actor SeatActuator: Actuating {
             case .drag(let start, let end):
                 // Both ends are routed under the one observation, so a drag leaving the window is refused.
                 let path = InputCommand.drag(
-                    from: try routed(start, in: observation.geometry),
-                    to  : try routed(end, in: observation.geometry)
+                    from: try routed(start, in: observation),
+                    to  : try routed(end, in: observation)
                 )
                 receipts.append(try await seat.send(path, observation: observation.reference, turn: turn))
         }
@@ -109,12 +110,38 @@ public actor SeatActuator: Actuating {
     }
 
     /// The point under the observation the Command will be admitted with, or a refusal when it
-    /// falls outside the window that observation is of.
-    private func routed(_ point: CGPoint, in geometry: WindowGeometryObservation) throws -> InputLocation {
-        guard let location = InputLocation(screenPoint: point, observedIn: geometry) else {
+    /// falls outside the window that observation is of, or outside the region its picture covers.
+    private func routed(_ point: CGPoint, in observation: SeatObservationDelivery) throws -> InputLocation {
+        let region: CGRect? = if case .attestedWindowRegion? = observation.captureTarget {
+            observation.frame.geometry.screenRect
+        } else {
+            nil
+        }
+        guard let location = Self.location(of: point, in: observation.geometry, region: region) else {
             throw SeatDrivingFailure.pointOutsideTarget(point)
         }
         return location
+    }
+
+    /// A point inside the observed window, or inside the region a hosted sheet's picture covers. A
+    /// sheet can extend past its host (TextEdit's Save sheet, 05/10/2026, once expanded), and the
+    /// picture covers both: such a point keeps the host's geometry, and the seat admits it against
+    /// the sheet's own attested frame or refuses it.
+    static func location(
+        of point   : CGPoint,
+        in geometry: WindowGeometryObservation,
+        region     : CGRect?
+    ) -> InputLocation? {
+        if let location = InputLocation(screenPoint: point, observedIn: geometry) { return location }
+        guard let region, point.x.isFinite, point.y.isFinite,
+              point.x >= region.minX, point.y >= region.minY, point.x < region.maxX, point.y < region.maxY
+        else { return nil }
+        let origin = geometry.window.frame.origin
+        return InputLocation(
+            screenPoint       : point,
+            windowPointFromTop: CGPoint(x: point.x - origin.x, y: point.y - origin.y),
+            observedIn        : geometry
+        )
     }
 
     private static func modifiers(_ modifiers: KeyModifiers) -> Modifiers {

@@ -347,11 +347,13 @@ public final class BrokeredAutomationSession: AutomationSessionOperating {
             appName: application.localizedName ?? "application",
             target: target, verb: verb, section: section, desiredState: desiredState
         )
-        return await runtime.engine(
+        let remotePanel = try seat.agentSeat().holdsRemoteFilePanel
+        return await enriched(runtime.engine(
             allowsDestructive           : allowsDestructive,
             contextMenusOnTextFieldsOnly: Self.drawsMenusUnderThePointer(application),
-            selectsFieldsByTripleClick  : try seat.agentSeat().holdsRemoteFilePanel
-        ).act(request)
+            selectsFieldsByTripleClick  : remotePanel,
+            refusesMenuOpeningClicks    : remotePanel
+        ).act(request), by: runtime)
     }
 
     public func deliver(_ input: InputRequest.Input, section: String?) async throws -> ActOutcome {

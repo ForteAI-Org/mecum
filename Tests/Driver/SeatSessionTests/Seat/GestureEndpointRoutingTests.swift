@@ -89,6 +89,17 @@ struct GestureEndpointRoutingTests {
         /// replaced between the discovery and the boundary is expressed.
         var afterResolving: (() -> Void)?
 
+        /// What an accessibility actuation of remote content answers, and every
+        /// Command it was asked to act on.
+        var actuation: (InputCommand, ResolvedInputEndpoint)
+            -> Result<RemoteContentActuation, RemoteContentActuationRefusal> = { _, _ in
+                .success(RemoteContentActuation(action: "AXPress", role: "AXButton", textField: nil))
+            }
+        var actuated: [(command: InputCommand, endpoint: ResolvedInputEndpoint)] = []
+
+        /// Whether the window's application takes its clicks through accessibility, as Finder does.
+        var clicksThroughAccessibility = false
+
         var discovery: EndpointDiscovery {
             EndpointDiscovery(
                 pointer: { [self] _, point, _, _ in
@@ -122,7 +133,12 @@ struct GestureEndpointRoutingTests {
                     return focusedContentKeyboardAnswer
                         ?? .failure(.subtreeUnreadable(surface: chain.surface))
                 },
-                foreignContentWindow: { [self] _, _ in foreignContentWindow }
+                foreignContentWindow: { [self] _, _ in foreignContentWindow },
+                clicksThroughAccessibility: { [self] _ in clicksThroughAccessibility },
+                remoteActuation: { [self] _, command, endpoint in
+                    actuated.append((command, endpoint))
+                    return actuation(command, endpoint)
+                }
             )
         }
     }
@@ -241,7 +257,8 @@ struct GestureEndpointRoutingTests {
 
     // MARK: The measured remote recipe
 
-    @Test("a click train over the panel keeps its recipient and count", arguments: [1, 2, 3, 32])
+    @Test("a click train over the panel reaches its accessibility actuation whole, posting nothing",
+          arguments: [1, 2, 3, 32])
     func theRemoteContentIsTheRecipient(count: Int) async throws {
 
         let panel      = try await Self.panel()
@@ -269,28 +286,22 @@ struct GestureEndpointRoutingTests {
             turn       : turn
         )
 
-        let addressed = try #require(panel.sender.addressed.last)
-        // The three fields the driver keys off this one reference: field 51,
-        // field 52 and `postToPid`, all three the content's and none the host's.
-        #expect(addressed.window.identity == remote)
-        #expect(addressed.window.windowNumber == Self.remoteWindowNumber)
-        #expect(addressed.window.identity?.ownerConnectionID == remote.ownerConnectionID)
-        #expect(addressed.window.processID == remote.processID)
-        #expect(addressed.window.processID != panel.host.reference.processID)
-        #expect(addressed.window.processID != panel.sheet.reference.processID)
-
-        // The recipe is the measured one and not the host's, although the host
-        // is the family that prepares.
-        #expect(addressed.platform is AppKitPlatform)
-        #expect(addressed.platform.preparation(for: Self.click(at: point)) == .none)
+        // Posted into the content, a click activates the host (ADR 0031).
+        #expect(panel.sender.sent.isEmpty, "no event reaches either process")
+        #expect(receipt.eventCount == 0)
+        #expect(receipt.route.poster == .accessibilityAction)
+        #expect(receipt.route.windowNumber == Self.remoteWindowNumber)
+        #expect(receipt.route.ownerConnectionID == remote.ownerConnectionID)
+        let actuated = try #require(panel.discovery.actuated.last)
+        #expect(panel.discovery.actuated.count == 1)
+        #expect(actuated.endpoint.identity == remote)
         #expect(panel.seat.session[panel.sheet.id]?.platform is ChromiumPlatform,
                 "the surface record still carries its own application's family")
 
         // The screen point is carried through; only the window-local half is
         // measured again, from the endpoint's own origin.
-        let sent = try #require(panel.sender.sent.last?.command)
-        guard case .click(let location, _, let sentCount) = sent else {
-            Issue.record("the Command that went out was not the click")
+        guard case .click(let location, _, let sentCount) = actuated.command else {
+            Issue.record("the Command actuated was not the click")
             return
         }
         #expect(sentCount == count)
@@ -309,7 +320,7 @@ struct GestureEndpointRoutingTests {
 
     // MARK: One endpoint for the whole gesture
 
-    @Test("a drag is resolved once, from the point of the down, and never switches process")
+    @Test("a drag over the panel is resolved once, from the point of the down, and refused unposted")
     func theWholeGestureStaysOnTheDownEndpoint() async throws {
 
         let panel       = try await Self.panel()
@@ -338,23 +349,16 @@ struct GestureEndpointRoutingTests {
             InputLocation(screenPoint: $0, windowPointFromTop: .zero)
         })
 
-        let turn    = try await panel.seat.acquire()
-        let receipt = try await panel.seat.send(drag, observation: observation, turn: turn)
+        let turn = try await panel.seat.acquire()
+        // No accessibility counterpart of a drag was measured (ADR 0031).
+        await #expect(throws: RemoteContentActuationRefusal.gestureUnmeasured) {
+            try await panel.seat.send(drag, observation: observation, turn: turn)
+        }
 
         #expect(panel.discovery.points == [points[0]],
                 "one gesture is one resolution, and it is the point of the down")
-        #expect(panel.sender.addressed.count == 1)
-        #expect(panel.sender.addressed.last?.window.identity == remote)
-
-        guard case .drag(let routed, _) = try #require(panel.sender.sent.last?.command) else {
-            Issue.record("the Command that went out was not the drag")
-            return
-        }
-        #expect(routed.map(\.screenPoint) == points)
-        #expect(routed.allSatisfy { $0.observedGeometry?.window.identity == remote },
-                "every step and the release are expressed against the down's endpoint")
-
-        try panel.seat.confirm(receipt, .unknown)
+        #expect(panel.sender.sent.isEmpty)
+        #expect(panel.discovery.actuated.isEmpty)
         try panel.seat.release(turn)
     }
 
@@ -459,7 +463,7 @@ struct GestureEndpointRoutingTests {
         try seat.release(turn)
     }
 
-    @Test("an endpoint that expires during driver preparation posts nothing")
+    @Test("an endpoint that expires during the gate's preparation actuates and posts nothing")
     func anExpiredEndpointAtTheFinalBoundaryPostsNothing() async throws {
         let panel       = try await Self.panel()
         let observation = try await observedReference(panel.seat)
@@ -476,7 +480,7 @@ struct GestureEndpointRoutingTests {
         ))
         panel.discovery.identities[Self.remoteWindowNumber] = remote
         var reachedPreparation = false
-        panel.sender.onSendWait = {
+        panel.sender.gate.setPreparation { _ in
             reachedPreparation = true
             try? await Task.sleep(for: .milliseconds(150))
         }
@@ -491,6 +495,7 @@ struct GestureEndpointRoutingTests {
         }
         #expect(reachedPreparation, "the endpoint must expire during preparation, not before it")
         #expect(panel.sender.sent.isEmpty)
+        #expect(panel.discovery.actuated.isEmpty)
         try panel.seat.release(turn)
     }
 

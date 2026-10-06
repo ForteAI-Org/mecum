@@ -36,6 +36,16 @@ public enum ActionPolicy {
         return ["q", "w"].contains(character.lowercased())
     }
 
+    /// The roles whose press opens a menu the panel service of a remote file panel owns.
+    public static let menuOpeningRoles: Set<String> = ["AXPopUpButton", "AXMenuButton"]
+
+    /// Why a click on such a control in a remote file panel was refused, in the seat's own words:
+    /// `RemoteContentActuationRefusal.opensMenu` says the same, and a test holds the two together.
+    public static func menuOpeningRefusal(role: String) -> String {
+        "That \(role) opens a menu a click here cannot follow, so it was not pressed. "
+            + "Use select with this control and the item, or context_menu."
+    }
+
     /// True for Command with Delete, whatever else is held: it moves to the Trash, deletes a message
     /// or empties the Trash in the applications that bind it.
     public static func isDestructive(_ chord: KeyChord) -> Bool {
@@ -61,14 +71,21 @@ public struct ActionPermissions: Sendable, Equatable, Codable {
     /// the name typed into its middle, while a triple click selected all of it.
     public var selectsFieldsByTripleClick: Bool
 
+    /// A click on a popup or a menu button is refused and nothing presses it. Set while the seat
+    /// holds a file panel the system draws out of process: pressed, it opens a menu window the panel
+    /// service owns, outside the scene, which stays open (05/10/2026); `select` chooses in it.
+    public var refusesMenuOpeningClicks: Bool
+
     public init(
         allowsDestructive           : Bool = false,
         contextMenusOnTextFieldsOnly: Bool = false,
-        selectsFieldsByTripleClick  : Bool = false
+        selectsFieldsByTripleClick  : Bool = false,
+        refusesMenuOpeningClicks    : Bool = false
     ) {
         self.allowsDestructive            = allowsDestructive
         self.contextMenusOnTextFieldsOnly = contextMenusOnTextFieldsOnly
         self.selectsFieldsByTripleClick   = selectsFieldsByTripleClick
+        self.refusesMenuOpeningClicks     = refusesMenuOpeningClicks
     }
 
     public init(from decoder: any Decoder) throws {
@@ -77,6 +94,8 @@ public struct ActionPermissions: Sendable, Equatable, Codable {
         contextMenusOnTextFieldsOnly = try container.decodeIfPresent(Bool.self, forKey: .contextMenusOnTextFieldsOnly)
             ?? false
         selectsFieldsByTripleClick   = try container.decodeIfPresent(Bool.self, forKey: .selectsFieldsByTripleClick)
+            ?? false
+        refusesMenuOpeningClicks     = try container.decodeIfPresent(Bool.self, forKey: .refusesMenuOpeningClicks)
             ?? false
     }
 }

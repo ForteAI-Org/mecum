@@ -228,6 +228,23 @@ public final class AgentSeat {
     /// counting it. The assignment ending is what clears it.
     var keyboardRecipients: [Int: Int32] = [:]
 
+    /// The text field the last accessibility click on remote panel content left
+    /// a caret or a selection in, with the content window, the surface and the
+    /// selection generation that click was proved under. Text reaches it through
+    /// accessibility while all of them still hold and it answers; any other
+    /// Command forgets it (ADR 0031).
+    var remoteTextField: (
+        field     : RemoteContentActuation.TextField,
+        recipient : WindowReference,
+        surface   : WindowIdentity,
+        generation: UInt64
+    )?
+
+    /// Why the seat stopped for good: the Issues of its transition to `failed`, with the causes the
+    /// host found for them, such as a screen connected. Empty while it has not failed.
+    public private(set) var failureIssues: [SeatIssue] = []
+    public private(set) var failureCauses: [SeatIssueCause] = []
+
     /// The finite positive budgets this seat observes and admits under.
     public let observationProfile: ObservationProfile
 
@@ -2175,10 +2192,20 @@ public final class AgentSeat {
         }
         let admitted = try admitOrdinary(observation)
         await realignReportedPosition(of: observation)
+        // Text keeps the field the last accessibility click remembered, which
+        // is its recipient; any other Command forgets it (ADR 0031).
+        let textField = Self.text(of: command) == nil ? nil : rememberedRemoteTextField(for: observation)
+        if textField == nil { remoteTextField = nil }
+        // While a menu of an ordinary window's process is open, its tracking takes every key, so no
+        // focused control is asked for and nothing prepares the window, which would close the menu.
+        let menuTakesKeys = command.firstMouseScreenPoint == nil && attestedModalSurface(for: observation) == nil
+            && !sensing.menuWindows(ownedBy: admitted.reference.processID).isEmpty
         // The picture may be the host's while the Command is over a modal drawn
         // inside it: a gesture goes to the window under the point of the down,
         // and a key to the window the observed internal focus is in.
-        let resolvedGesture = try inputEndpoint(for: command, observation: observation)
+        let resolvedGesture = textField == nil && !menuTakesKeys
+            ? try inputEndpoint(for: command, observation: observation)
+            : nil
         let endpoint        = resolvedGesture?.endpoint
         if let endpoint, endpoint.kind == .keyboardContext {
             keyboardRecipients[endpoint.logicalSurface.windowNumber] = endpoint.identity.processID
@@ -2187,7 +2214,7 @@ public final class AgentSeat {
         let routed          = endpoint.map { command.rebased(onto: $0.geometry) } ?? command
         // The current reference of the endpoint's own reading, never the record
         // the adoption wrote with the frame the surface used to be at.
-        let recipient       = endpoint?.geometry.window ?? window.reference
+        let recipient       = textField?.recipient ?? endpoint?.geometry.window ?? window.reference
 
         if Self.nativeTextInputID != nil || nativeTextInputContext != nil {
             guard let context = nativeTextInputContext else {
@@ -2221,7 +2248,7 @@ public final class AgentSeat {
 
         // The recipe comes from what the seat established about the surface and
         // from what this Command needs. One that qualifies none refuses.
-        let classification = SurfaceInputClassification.of(
+        let classification = textField != nil ? .remotePanelContent : SurfaceInputClassification.of(
             observation,
             endpoint: endpoint,
             remoteAppKitPanelServiceQualified: endpoint.map {
@@ -2232,7 +2259,15 @@ public final class AgentSeat {
         if nativeTextInputContext != nil, isModalSurface {
             throw InputFailure.nativeTextInputRefused(.unsupported)
         }
-        guard let resolved = platform ?? classification.platform(
+        // An ordinary window of an application that takes its clicks through accessibility, Finder's,
+        // acts on its own content the way a remote panel's is acted on (ADR 0031).
+        let ownContent = ownContentEndpoint(
+            for        : routed,
+            endpoint   : endpoint,
+            window     : window,
+            observation: observation
+        )
+        guard let resolved = platform ?? (menuTakesKeys ? AppKitPlatform() : nil) ?? classification.platform(
             for                : routed,
             ofDrivenApplication: record.platform,
             host               : window.reference,
@@ -2323,7 +2358,19 @@ public final class AgentSeat {
                 throw retired
             }
             traceContext.beginQueue(at: DispatchTime.now().uptimeNanoseconds)
-            let receipt = try await sender.send(
+            // A click posted into a remote panel's content activates its host, so
+            // it and a remembered field's text go through accessibility instead.
+            let byAccessibility = textField != nil || ownContent != nil
+                || classification == .remotePanelContent && routed.hasMouseLocation
+            let receipt = try await byAccessibility ? actuateRemoteContent(
+                routed,
+                textField   : textField?.field,
+                endpoint    : ownContent ?? endpoint,
+                observation : observation,
+                turn        : turn,
+                recipient   : recipient,
+                traceContext: traceContext
+            ) : sender.send(
                 routed,
                 to           : recipient,
                 correlationID: turn.correlationID,
@@ -2375,11 +2422,143 @@ public final class AgentSeat {
             restoreActionState(previous, reason: .cancelled)
             throw failure
         } catch {
-            // Every refusal of the driver happens before the first
-            // `postToPid`: the posting loop itself cannot fail. So a thrown
-            // send posted nothing and leaves no unconfirmed Command behind.
+            // A driver refusal comes before the first `postToPid` and leaves no unconfirmed
+            // Command; a remote panel's `actionRefused` may still have acted (ADR 0031).
             restoreActionState(previous, reason: .cancelled)
             throw error
+        }
+    }
+
+    /// Actuates one Command on a qualified remote panel's content through
+    /// accessibility, where the driver would have posted it, and posts no event
+    /// (ADR 0031). A click acts on the element under its point; text replaces
+    /// the selection of the field a click remembered.
+    ///
+    /// It awaits the gate's preparation as the driver does, and checks the
+    /// reference and the endpoint again after it, so the boundary is the one
+    /// `send` describes. The Receipt counts no event and names
+    /// `PostRoute.accessibilityAction`. A drag or a scroll refuses. A refusal
+    /// changes nothing, except `actionRefused`, which may follow an effect and
+    /// is never repeated.
+    private func actuateRemoteContent(
+        _ command    : InputCommand,
+        textField    : RemoteContentActuation.TextField?,
+        endpoint     : ResolvedInputEndpoint?,
+        observation  : SeatObservationReference,
+        turn         : Turn,
+        recipient    : WindowReference,
+        traceContext : InputTraceContext
+    ) async throws -> InputReceipt {
+
+        var trace = traceContext
+        trace.beginExecution(at: DispatchTime.now().uptimeNanoseconds)
+        let isClick = if case .click = command { true } else { false }
+        let started: UInt64
+        let done   : String
+        do {
+            guard textField != nil || isClick else { throw RemoteContentActuationRefusal.gestureUnmeasured }
+            try await commandGate?.prepare(correlationID: turn.correlationID)
+            if let refusal = admissionRefusal(for: observation, expecting: .ordinaryTarget) { throw refusal }
+            if let endpoint, let retired = endpointInvalidation(of: endpoint) { throw retired }
+            try commandGate?.check()
+
+            started = DispatchTime.now().uptimeNanoseconds
+            if let textField, let text = Self.text(of: command) {
+                let shows = try textField.replaceSelection(text).get()?.contains(text) == true
+                done = "AXSelectedText, the value read back \(shows ? "holds" : "does not show") it"
+            } else {
+                guard let endpoint, let instance = assignmentKit.lifecycle.current?.instance else {
+                    throw RemoteContentActuationRefusal.unreadable
+                }
+                let actuation = try endpoints.remoteActuation(instance.processID, command, endpoint).get()
+                remoteTextField = actuation.textField.map {
+                    ($0, recipient, endpoint.logicalSurface, endpoint.selectionGeneration)
+                }
+                done = "\(actuation.action) on \(actuation.role)"
+            }
+            trace.recordSendSystemCall(from: started, through: DispatchTime.now().uptimeNanoseconds)
+        } catch {
+            sender.recordCompletedTrace(trace.completed(at: DispatchTime.now().uptimeNanoseconds))
+            throw error
+        }
+        Self.log.notice("""
+            \(isClick ? "pointer" : "text", privacy: .public) on window \
+            \(observation.surface.windowNumber, privacy: .public) acted on window \
+            \(recipient.windowNumber, privacy: .public) of pid \(recipient.processID, privacy: .public) \
+            by accessibility: \(done, privacy: .public)
+            """)
+        let completedAt = DispatchTime.now().uptimeNanoseconds
+        let completed   = trace.completed(at: completedAt)
+        sender.recordCompletedTrace(completed)
+        return InputReceipt(
+            eventCount      : 0,
+            route           : InputRoute(
+                poster           : .accessibilityAction,
+                routedEventCount : 0,
+                windowNumber     : recipient.windowNumber,
+                ownerConnectionID: recipient.identity?.ownerConnectionID ?? 0
+            ),
+            timing          : InputTiming(postingNanoseconds: completedAt - started),
+            trace           : completed,
+            unvalidatedBuild: sender.unvalidatedBuild,
+            textMeasure     : command.textMeasure
+        )
+    }
+
+    /// The endpoint a click on an ordinary window of `EndpointDiscovery.accessibilityClickedApplications`
+    /// is actuated through: the one discovery answered for the window itself, or the window read now.
+    /// Nil for any other Command, window or application, and for a modal or remote recipient. A
+    /// scroll or a drag keeps its route: no activation is known for them, and a drag moves files.
+    private func ownContentEndpoint(
+        for command : InputCommand,
+        endpoint    : ResolvedInputEndpoint?,
+        window      : AdoptedWindow,
+        observation : SeatObservationReference
+    ) -> ResolvedInputEndpoint? {
+        guard case .click = command, attestedModalSurface(for: observation) == nil,
+              let surface = window.reference.identity, endpoints.clicksThroughAccessibility(surface)
+        else { return nil }
+        if let endpoint {
+            return endpoint.relation == .logicalSurface && endpoint.identity == surface ? endpoint : nil
+        }
+        guard let geometry = sensing.windowGeometryObservation(of: window.reference) else { return nil }
+        let now = DispatchTime.now().uptimeNanoseconds
+        return ResolvedInputEndpoint(
+            kind                  : .pointer,
+            geometry              : geometry,
+            evidence              : .attestedSurfaceItself,
+            relation              : .logicalSurface,
+            logicalSurface        : surface,
+            accessibilityProcessID: surface.processID,
+            selectionGeneration   : observation.selectionGeneration,
+            resolvedAtNanoseconds : now,
+            expiresAtNanoseconds  : now &+ DialogEndpointResolver<AXUIElement>.lifetimeNanoseconds
+        )
+    }
+
+    /// The field the last accessibility click remembered, when `observation`
+    /// is still on its surface under its selection generation, its content
+    /// window is still the same one and the field still answers. A remembered
+    /// field was qualified panel content when its click proved it.
+    private func rememberedRemoteTextField(
+        for observation: SeatObservationReference
+    ) -> (field: RemoteContentActuation.TextField, recipient: WindowReference,
+          surface: WindowIdentity, generation: UInt64)? {
+        guard let remembered = remoteTextField,
+              (attestedModalSurface(for: observation) ?? observation.surface) == remembered.surface,
+              observation.selectionGeneration == remembered.generation,
+              let content = remembered.recipient.identity,
+              endpoints.identity(content.windowNumber) == content,
+              remembered.field.isAnswering()
+        else { return nil }
+        return remembered
+    }
+
+    /// The text a `.text` or `.insertText` Command carries, nil for any other.
+    private static func text(of command: InputCommand) -> String? {
+        switch command {
+            case .text(let text), .insertText(let text): text
+            case .key, .click, .drag, .scroll: nil
         }
     }
 
@@ -2432,6 +2611,8 @@ public final class AgentSeat {
         keyInterval: Duration,
         choosing choose: @MainActor @Sendable (ContextMenu) async throws -> [CGKeyCode]?
     ) async throws -> PopupMenuReceipt {
+        // Its opener is a routed click, which activates a remote panel's host (ADR 0031).
+        guard remoteFilePanelContent.isEmpty else { throw RemoteContentActuationRefusal.pixelDropdown }
         var opening: InputReceipt?
         var choosing: [InputReceipt] = []
         let result = try await usePopupMenu(of: window, turn: turn, within: deadline, opening: { target, platform in
@@ -2478,7 +2659,10 @@ public final class AgentSeat {
         )
         let record = try preflight(window, turn: turn, traceContext: &trace)
         let target = record.window.reference
-        guard sensing.menuWindows(ownedBy: target.processID).isEmpty else {
+        // A popup of a remote file panel opens a menu its panel service owns (ADR 0031).
+        let owners = [target.processID] + remoteFilePanelContent.map(\.processID).filter { $0 != target.processID }
+        let menuWindows = { owners.flatMap { self.sensing.menuWindows(ownedBy: $0) } }
+        guard menuWindows().isEmpty else {
             throw SessionFailure.contextMenuAlreadyOpen(processID: target.processID)
         }
         let previous = state
@@ -2497,9 +2681,9 @@ public final class AgentSeat {
             try Task.checkCancellation()
             try await opening(target, record.platform)
             _ = await EventLoopWait.until({
-                !self.sensing.menuWindows(ownedBy: target.processID).isEmpty
+                !menuWindows().isEmpty
             }, timeout: deadline, interval: .milliseconds(30))
-            let appeared = sensing.menuWindows(ownedBy: target.processID)
+            let appeared = menuWindows()
             guard let first = appeared.first else {
                 throw SessionFailure.contextMenuNeverOpened(windowNumber: target.windowNumber, within: deadline)
             }
@@ -2514,7 +2698,7 @@ public final class AgentSeat {
         } catch { failure = error }
 
         // Even a native request that timed out may have opened a menu. Never abandon it.
-        if menu == nil, let late = sensing.menuWindows(ownedBy: target.processID).first {
+        if menu == nil, let late = menuWindows().first {
             menu = ContextMenu(window: late, appearedAfter: started.duration(to: .now))
         }
         guard let menu else {
@@ -2528,10 +2712,10 @@ public final class AgentSeat {
                     throw error
                 }
                 _ = await EventLoopWait.until(
-                    { self.sensing.menuWindows(ownedBy: target.processID).isEmpty },
+                    { menuWindows().isEmpty },
                     timeout: .milliseconds(500), interval: .milliseconds(30)
                 )
-                if let late = sensing.menuWindows(ownedBy: target.processID).first {
+                if let late = menuWindows().first {
                     report([.contextMenuLeftOpen])
                     throw SessionFailure.contextMenuNotClosed(menuWindowNumber: late.windowNumber, processID: target.processID)
                 }
@@ -3031,7 +3215,10 @@ public final class AgentSeat {
         // would read "closed" with a submenu still on the screen. Nothing else
         // of the target's can be here: the action refused to start if one was.
         func isOpen() -> Bool {
-            !sensing.menuWindows(ownedBy: target.processID).isEmpty
+            // A remote file panel's menu belongs to its panel service (ADR 0031).
+            Set([target.processID, menu.window.processID]).contains {
+                !sensing.menuWindows(ownedBy: $0).isEmpty
+            }
         }
 
         func remaining(upTo wanted: Duration) -> Duration? {
@@ -4246,10 +4433,15 @@ public final class AgentSeat {
     /// Command and Up went to the enclosing folder and left the selection as it
     /// was, Command, Shift and Down and Command and A did nothing, and a triple
     /// click selected the whole name with no key.
-    public var holdsRemoteFilePanel: Bool {
-        guard let instance = assignmentKit.lifecycle.current?.instance else { return false }
-        return openDialogs.contains { dialog in
-            guard let frame = sensing.windowGeometry(of: dialog.windowNumber)?.frame else { return false }
+    public var holdsRemoteFilePanel: Bool { !remoteFilePanelContent.isEmpty }
+
+    /// The content windows of the dialogs open in the seat that the qualified
+    /// panel service draws. Their owner also owns the menu a popup of that
+    /// content opens (ADR 0031).
+    var remoteFilePanelContent: [WindowIdentity] {
+        guard let instance = assignmentKit.lifecycle.current?.instance else { return [] }
+        return openDialogs.compactMap { dialog in
+            guard let frame = sensing.windowGeometry(of: dialog.windowNumber)?.frame else { return nil }
             let chain = DialogEndpointResolver<AXUIElement>.SurfaceChain(
                 host        : selectionKit.attachedHost(of: dialog)
                     ?? selectionKit.namedModalHost(of: dialog)
@@ -4258,9 +4450,14 @@ public final class AgentSeat {
                 surfaceFrame: frame
             )
             guard let content = endpoints.foreignContentWindow(instance.processID, chain),
-                  let owner = endpoints.identity(content)
-            else { return false }
-            return endpoints.qualifiedAppKitPanelService(owner)
+                  let owner = endpoints.identity(content),
+                  SurfaceInputClassification.isRemotePanelContent(
+                      owner,
+                      of       : dialog,
+                      qualified: endpoints.qualifiedAppKitPanelService(owner)
+                  )
+            else { return nil }
+            return owner
         }
     }
 

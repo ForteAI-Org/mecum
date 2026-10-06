@@ -468,9 +468,11 @@ public final class AgentSession {
             lastObservation = nil
             lastDelivery = nil
             lastScene = nil
+            // A remote panel's refused accessibility action may still have acted (ADR 0031).
+            let mayHaveActed = (error as? RemoteContentActuationRefusal)?.mayHaveTakenEffect == true
             // Nothing went out, so this is the seat's refusal and not an
             // action: it never becomes a report of something executed.
-            guard !receipts.isEmpty else {
+            guard !receipts.isEmpty || mayHaveActed else {
                 try? driver.endTurn(turn, receipts: [], confirmation: .absent)
                 throw error
             }

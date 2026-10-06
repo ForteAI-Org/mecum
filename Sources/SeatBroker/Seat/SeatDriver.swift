@@ -751,6 +751,8 @@ final class SeatDriver {
     private func mapped<T>(_ body: () async throws -> T) async throws -> T {
         do { return try await body() }
         catch let error as SeatBrokerError { throw error }
+        // Kept whole, so the action is reported as one whose effect is unknown (ADR 0031).
+        catch let refusal as RemoteContentActuationRefusal where refusal.mayHaveTakenEffect { throw refusal }
         catch { throw driverError(error) }
     }
 

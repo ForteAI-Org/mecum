@@ -86,8 +86,11 @@ nonisolated enum SurfaceInputClassification: Sendable, Equatable {
             // same-process child is governed by the application's profile; only
             // a separately attested process can use the remote recipe.
             case .remoteContent
-                where endpoint.identity.process != endpoint.logicalSurface.process
-                    && remoteAppKitPanelServiceQualified:
+                where isRemotePanelContent(
+                    endpoint.identity,
+                    of       : endpoint.logicalSurface,
+                    qualified: remoteAppKitPanelServiceQualified
+                ):
                 return .remotePanelContent
             case .logicalSurface where endpoint.evidence == .leafSurface:
                 return .leafSurfaceOfDrivenApplication
@@ -100,6 +103,17 @@ nonisolated enum SurfaceInputClassification: Sendable, Equatable {
                 return .drivenApplication
             case .remoteContent: return .unknown
         }
+    }
+
+    /// Whether a window drawn inside `surface` is the qualified panel service's
+    /// content: another process, which identifies as that service. It is the
+    /// one rule for a Command's endpoint and for `AgentSeat.holdsRemoteFilePanel`.
+    static func isRemotePanelContent(
+        _ content: WindowIdentity,
+        of surface: WindowIdentity,
+        qualified: Bool
+    ) -> Bool {
+        content.process != surface.process && qualified
     }
 
     /// The recipe this Command may be posted with, `nil` when this
