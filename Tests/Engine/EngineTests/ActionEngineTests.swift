@@ -70,6 +70,11 @@ struct ActionEngineTests {
         }
         func toggleState(at point: CGPoint, in processID: pid_t) async -> ControlState? { toggle }
         func focusedFieldValue(in processID: pid_t) async -> String? { focused }
+        var menuItemPresses = false
+        var pressedMenuItems: [(title: String, frame: CGRect)] = []
+        func pressMenuItem(titled title: String, within menuFrame: CGRect, in processID: pid_t) async -> Bool {
+            pressedMenuItems.append((title, menuFrame)); return menuItemPresses
+        }
     }
 
     final class FakeActivation: ApplicationActivating, @unchecked Sendable {
@@ -415,6 +420,28 @@ struct ActionEngineTests {
         #expect(outcome.kind == .foundActed, Comment(rawValue: outcome.message))
         #expect(outcome.message.contains("keyboard 1↓ + Return"))
         #expect(actuator.gestures == [.key(code: Key.downArrow), .key(code: Key.return)])
+    }
+
+    @Test("an item of an open native menu is pressed by its title, with no key, and the menu's closing verifies it")
+    func popupNativeItemIsPressed() async {
+        let actuator = RecordingActuator()
+        let controls = FakeControls(); controls.menuItemPresses = true
+        let windows = ScriptedWindows([[popupWindow, mainWindow], [mainWindow]])
+        let outcome = await engine(scenes: ScriptedScenes([listScene, scene([export])]), actuator: actuator,
+                                   windows: windows, controls: controls)
+            .act(request("96000"))
+        #expect(outcome.kind == .foundActed, Comment(rawValue: outcome.message))
+        #expect(controls.pressedMenuItems.map(\.title) == ["96000"])
+        #expect(controls.pressedMenuItems.first?.frame == popupWindow.frame)
+        #expect(actuator.gestures.isEmpty, "no key reaches a window whose focus nobody can read")
+
+        // Still open after the press: the effect is unknown, and nothing is pressed or typed again.
+        let again = RecordingActuator()
+        let stays = await engine(scenes: ScriptedScenes([listScene, scene([export])]), actuator: again,
+                                 windows: ScriptedWindows([[popupWindow, mainWindow]]), controls: controls)
+            .act(request("96000"))
+        #expect(stays.kind == .actedUnverified)
+        #expect(again.gestures.isEmpty)
     }
 
     @Test("without a readable control the pick falls back to type-ahead and commits only while open")

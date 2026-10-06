@@ -371,6 +371,19 @@ public struct ActionEngine: Sendable {
         perceived  : PerceivedWindow
     ) async -> ActOutcome {
         let pid = request.processID
+        // A native menu names its items: the one of that title is pressed, and keys pick only otherwise.
+        if !request.isDryRun, let controls = dependencies.controls,
+           await controls.pressMenuItem(titled: element.label, within: popupFrame, in: pid) {
+            await pause(timing.popupCommit)
+            let stillOpen = await surfaces(pid).hasOpenPopup
+            let after = await perceive(pid)?.scene
+            if stillOpen {
+                return ActOutcome(.actedUnverified, "pressed '\(element.label)' in the open menu, but the "
+                    + "menu is still open: observe before choosing again.", scene: after)
+            }
+            return ActOutcome(.foundActed, "chose '\(element.label)' in the open menu through its accessibility "
+                + "item; the menu closed. Check the command's own effect before going on.", scene: after)
+        }
         let rows = PopupRowPick.rows(in: perceived.scene, windowFrame: perceived.frame, popupFrame: popupFrame)
         let labels = Set(rows.flatMap { $0.map { LabelText.normalize($0.label) } }.filter { !$0.isEmpty })
         let current = await dependencies.controls?.controlValue(matchingAny: labels, in: pid)

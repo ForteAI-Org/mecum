@@ -25,6 +25,11 @@ public struct SeatControls: ControlPressing {
         await accessibility.pressControl(labelled: label, in: processID)
     }
 
+    /// A menu is a window opened where it stands, so its items' frames are read against its own.
+    public func pressMenuItem(titled title: String, within menuFrame: CGRect, in processID: pid_t) async -> Bool {
+        await accessibility.pressMenuItem(titled: title, within: menuFrame, in: processID)
+    }
+
     public func controlValue(matchingAny labels: Set<String>, in processID: pid_t) async -> String? {
         await accessibility.controlValue(matchingAny: labels, in: processID)
     }

@@ -42,6 +42,19 @@ public struct AccessibilityController: ControlPressing {
         }
     }
 
+    public func pressMenuItem(titled title: String, within menuFrame: CGRect, in processID: pid_t) async -> Bool {
+        await MainActor.run {
+            do {
+                try DropdownOpening.select(item: title, in: menuFrame, processID: processID)
+                return true
+            } catch DropdownOpening.Failure.actionRefused {
+                return true
+            } catch {
+                return false
+            }
+        }
+    }
+
     public func controlValue(matchingAny labels: Set<String>, in processID: pid_t) async -> String? {
         guard !labels.isEmpty else { return nil }
         return await MainActor.run {

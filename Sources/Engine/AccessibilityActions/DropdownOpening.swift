@@ -33,38 +33,45 @@ public enum DropdownOpening {
     public static func select(item: String, in menuFrame: CGRect, processID: pid_t) throws {
         let root = AXUIElementCreateApplication(processID)
         AXUIElementSetMessagingTimeout(root, 0.2)
-        func value(_ node: AXUIElement, _ attribute: String) -> CFTypeRef? {
-            var result: CFTypeRef?
-            AXUIElementCopyAttributeValue(node, attribute as CFString, &result)
-            return result
+        let selected = nativeMenuItem(named: item, in: menuFrame, under: root,
+                                      reader: LiveAccessibilityReader())
+        guard let selected else {
+            throw Failure.controlNotUnique
         }
-        var matches: [AXUIElement] = []
-        func visit(_ node: AXUIElement, _ depth: Int) {
-            guard depth < 12 else { return }
-            let role = value(node, kAXRoleAttribute) as? String ?? ""
-            let title = value(node, kAXTitleAttribute) as? String ?? ""
-            if role == kAXMenuItemRole, title.caseInsensitiveCompare(item) == .orderedSame {
-                var position = CGPoint.zero
-                var size = CGSize.zero
-                if let origin = value(node, kAXPositionAttribute), CFGetTypeID(origin) == AXValueGetTypeID(),
-                   let dimensions = value(node, kAXSizeAttribute), CFGetTypeID(dimensions) == AXValueGetTypeID(),
-                   AXValueGetValue(origin as! AXValue, .cgPoint, &position),
-                   AXValueGetValue(dimensions as! AXValue, .cgSize, &size),
-                   size.width > 0, size.height > 0,
-                   menuFrame.contains(CGPoint(x: position.x + size.width / 2, y: position.y + size.height / 2)) {
-                    matches.append(node)
-                }
-            }
-            for child in value(node, kAXChildrenAttribute) as? [AXUIElement] ?? [] { visit(child, depth + 1) }
-        }
-        visit(root, 0)
-        guard matches.count == 1 else { throw Failure.controlNotUnique }
         var actions: CFArray?
-        AXUIElementCopyActionNames(matches[0], &actions)
+        AXUIElementCopyActionNames(selected, &actions)
         guard (actions as? [String] ?? []).contains(kAXPressAction) else { throw Failure.pressUnsupported }
         try Task.checkCancellation()
-        let result = AXUIElementPerformAction(matches[0], kAXPressAction as CFString)
+        let result = AXUIElementPerformAction(selected, kAXPressAction as CFString)
         guard result == .success || result == .cannotComplete else { throw Failure.actionRefused(result.rawValue) }
+    }
+
+    /// Resolves one painted native menu item. Chromium can expose the same option under
+    /// its web area and in an AppKit popup; only the latter is a native action recipient.
+    /// Two native matches remain ambiguous, and lookup never dispatches an action. Titles compare
+    /// by `LabelText.menuTitleKey`: case, bidi controls, typographic quotes and an ellipsis aside.
+    static func nativeMenuItem<Reader: AccessibilityTreeReading>(
+        named item: String, in menuFrame: CGRect, under root: Reader.Node, reader: Reader
+    ) -> Reader.Node? {
+        var painted: [(node: Reader.Node, title: String)] = []
+        func visit(_ node: Reader.Node, _ depth: Int) {
+            // CEF's native popup rows sit at depth twelve under its AppKit wrappers.
+            // Match the bounded control search without traversing web option mirrors.
+            guard depth < 16 else { return }
+            let role = reader.role(node) ?? ""
+            guard role != "AXWebArea" else { return }
+            if role == kAXMenuItemRole,
+               let frame = reader.frame(node), frame.width > 0, frame.height > 0,
+               menuFrame.contains(CGPoint(x: frame.midX, y: frame.midY)) {
+                painted.append((node, reader.title(node) ?? ""))
+            }
+            for child in reader.children(node) { visit(child, depth + 1) }
+        }
+        visit(root, 0)
+        guard let index = LabelText.menuItemMatch(item, in: painted.map(\.title)),
+              reader.isEnabled(painted[index].node) == true
+        else { return nil }
+        return painted[index].node
     }
 
     public enum Failure: Error, CustomStringConvertible {

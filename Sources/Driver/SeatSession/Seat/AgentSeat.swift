@@ -2904,9 +2904,20 @@ public final class AgentSeat {
             requestWindowFollow()
         }
 
-        guard sensing.menuWindows(ownedBy: target.processID).isEmpty else {
-            restoreActionState(previous, reason: .cancelled)
-            throw SessionFailure.contextMenuAlreadyOpen(processID: target.processID)
+        // A menu left open by an earlier right click cannot be told whose it is, so it is closed
+        // with the same levers as this action's own and the action goes on; one that stays refuses.
+        if let stale = sensing.menuWindows(ownedBy: target.processID).first {
+            let closed = await close(
+                ContextMenu(window: stale, appearedAfter: .zero),
+                of                : target,
+                turn              : turn,
+                itemWasChosen     : false,
+                withinNanoseconds : observationProfile.menuCleanupNanoseconds
+            )
+            guard closed != nil, sensing.menuWindows(ownedBy: target.processID).isEmpty else {
+                restoreActionState(previous, reason: .cancelled)
+                throw SessionFailure.contextMenuAlreadyOpen(processID: target.processID)
+            }
         }
 
         let interactionStarted  = DispatchTime.now().uptimeNanoseconds

@@ -104,8 +104,19 @@ public struct SeatContextMenuSelector {
                     case .failure(let reason): throw reason
                 }
                 let menu = try await perceive(delivery, identity: identity, title: "Contextual menu")
-                guard case .found(let row) = menu.scene.resolve(target: item), row.isEnabled != false else {
-                    missing = "no unique enabled '\(item)' in the observed menu"
+                // The scene's own resolution first, then the menu title rule that names
+                // `Compress “file”` by "Compress"; a miss names what the menu holds.
+                let enabled = menu.scene.elements.filter { !$0.isUnlabeled && $0.isEnabled != false }
+                var chosen: SceneElement?
+                if case .found(let found) = menu.scene.resolve(target: item) {
+                    chosen = found.isEnabled != false ? found : nil
+                } else {
+                    chosen = LabelText.menuItemMatch(item, in: enabled.map(\.label)).map { enabled[$0] }
+                }
+                guard let row = chosen else {
+                    let titles = enabled.map(\.label).filter { LabelText.isNameworthy($0) }
+                    missing = "no unique enabled '\(item)' in the observed menu. It holds: "
+                        + (titles.isEmpty ? "nothing readable" : titles.joined(separator: ", "))
                     return
                 }
                 guard let choice = InputLocation(screenPoint: menu.globalPoint(of: row), observedIn: delivery.geometry) else {

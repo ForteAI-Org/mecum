@@ -100,6 +100,21 @@ struct SeatContextMenuSelectorTests {
         try c.seat.release(next)
     }
 
+    @Test("an item named by the start of its title is chosen, and a miss names what the menu holds")
+    func itemByItsStartAndMissListing() async throws {
+        let chosen = try await ContextMenuTests.ready()
+        try chosen.seat.release(chosen.turn)
+        let outcome = try await selector(seat: chosen.seat).select(item: "Select", on: "field", identity: identity)
+        #expect(outcome.message.contains("requested 'Select All'"), Comment(rawValue: outcome.message))
+        #expect(chosen.sender.sent.count == 2)
+
+        let missed = try await ContextMenuTests.ready()
+        try missed.seat.release(missed.turn)
+        let miss = try await selector(seat: missed.seat).select(item: "Compress", on: "field", identity: identity)
+        #expect(miss.kind == .honestMiss)
+        #expect(miss.message.contains("It holds: Select All"), Comment(rawValue: miss.message))
+    }
+
     @Test("destructive menu choices refuse before opening")
     func destructiveChoiceRefuses() async throws {
         let c = try await ContextMenuTests.ready()

@@ -183,10 +183,10 @@ struct ContextMenuTests {
         #expect(context.seat.state == .degraded)
     }
 
-    @Test("a menu already open refuses before the click, because the click would go to it")
+    @Test("a menu already open that no lever closes refuses before the click, because the click would go to it")
     func alreadyOpenRefuses() async throws {
 
-        let context = try await Self.ready()
+        let context = try await Self.ready(closedBy: [])
         let observation = try await observedReference(context.seat)
         context.sensing.menus = [FakeGeometry.menuWindow]
 
@@ -199,7 +199,63 @@ struct ContextMenuTests {
                 turn       : context.turn
             )
         }
-        #expect(context.sender.sent.isEmpty, "nothing was posted at all")
+        #expect(!context.sender.sent.contains { if case .click = $0.command { true } else { false } },
+                "no click was posted at all")
+        #expect(context.sender.preparationCycles == [FakeGeometry.windowNumber], "the closing levers were pulled")
+    }
+
+    @Test("a menu left open by an earlier right click is closed first, and the action opens its own")
+    func aStaleMenuIsClosedFirst() async throws {
+
+        let context = try await Self.ready()
+        let observation = try await observedReference(context.seat)
+        context.sensing.menus = [FakeGeometry.menuWindow]
+
+        let outcome = try await context.seat.withContextMenu(
+            openedAt   : Self.openAt,
+            observation: observation,
+            turn       : context.turn
+        )
+
+        #expect(context.sender.preparationCycles == [FakeGeometry.windowNumber, FakeGeometry.windowNumber],
+                "one cycle closed the stale menu before the right click, one closed the action's own")
+        #expect(context.sender.sent.first?.command == .click(Self.openAt, button: .right))
+        #expect(outcome.menu.window.windowNumber == FakeGeometry.menuWindowNumber)
+        #expect(context.seat.state == .ready)
+    }
+
+    @Test("a key while a menu of the window's process is open goes to the menu, unprepared, with no focus asked")
+    func aKeyGoesToTheOpenMenu() async throws {
+
+        let sensing   = FakeSensing()
+        let sender    = FakeSender()
+        let discovery = GestureEndpointRoutingTests.Discovery()
+        // Finder's list answers no Window ID for its focus, so the window's keyboard discovery refuses.
+        discovery.keyboardAnswer = .failure(.subtreeUnreadable(surface: FakeGeometry.identity()))
+        let seat = makeSeat(
+            sensing  : sensing,
+            sender   : sender,
+            marker   : 3_301,
+            reader   : ControlledSurfaceReader(sensing: sensing),
+            source   : ControlledObservationSource(sensing: sensing),
+            clock    : ControlledContentClock(),
+            endpoints: discovery.discovery
+        )
+        _ = try await seat.adopt(FakeGeometry.userSeatWindow, platform: ChromiumPlatform())
+        let turn = try await seat.acquire()
+
+        await #expect(throws: InputEndpointRefusal.self, "without a menu the keys need a focus to go to") {
+            try await seat.send(.text("Compress"), observation: try await observedReference(seat), turn: turn)
+        }
+        sensing.menus = [FakeGeometry.menuWindow]
+        let resolutions = discovery.keyboardResolutions
+        let receipt = try await seat.send(.text("Compress"), observation: try await observedReference(seat), turn: turn)
+
+        #expect(sender.sent.map(\.command) == [.text("Compress")])
+        #expect(sender.addressed.last?.platform is AppKitPlatform, "a prepared recipe would close the menu")
+        #expect(discovery.keyboardResolutions == resolutions)
+        try seat.confirm(receipt, .unknown)
+        try seat.release(turn)
     }
 
     // MARK: Choosing
