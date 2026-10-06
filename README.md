@@ -48,6 +48,8 @@ To build from source with **Swift 6.4**, follow the [developer Quickstart](QUICK
 <details>
 <summary>Connect Claude Code, Codex or another local MCP client</summary>
 
+<br>
+
 Mecum and your client must run on the same Mac. The app includes the STDIO bridge; no Node.js or Python installation is needed.
 
 1. Keep Mecum open. In **MCP → MCP Connections…**, name your client, choose its capabilities and click **Add Client**.
@@ -113,18 +115,18 @@ Mecum's full-scene responses used **85–97% fewer estimated tokens** than Cua's
 
 <table border="1" cellspacing="0" cellpadding="8">
   <thead>
-    <tr><th scope="col">Application / framework</th><th scope="col">Mecum support</th><th scope="col">Cua support</th><th scope="col">Mecum step (ms)</th><th scope="col">Cua step (ms)</th></tr>
+    <tr><th scope="col" align="left">Application / framework</th><th scope="col">Mecum support</th><th scope="col">Cua support</th><th scope="col">Mecum step (ms)</th><th scope="col">Cua step (ms)</th></tr>
   </thead>
   <tbody>
-    <tr><th scope="row">TextEdit (AppKit)</th><td>Partial</td><td>Supported</td><td>1,069</td><td>1,489</td></tr>
-    <tr><th scope="row">Chrome (Chromium)</th><td>Partial</td><td>Supported</td><td>1,227</td><td>1,590</td></tr>
-    <tr><th scope="row">Obsidian (Electron)</th><td>Supported</td><td>Supported</td><td><img src="readme-assets/benchmark-values/value-1316.svg" alt="1,316" width="42" height="20" /></td><td>1,513</td></tr>
-    <tr><th scope="row">Stocks (Mac Catalyst)</th><td>Unavailable</td><td>Supported</td><td>—</td><td>2,061</td></tr>
-    <tr><th scope="row">kitty (OpenGL/GLFW)</th><td>Partial</td><td>Partial</td><td><img src="readme-assets/benchmark-values/value-1155.svg" alt="1,155" width="42" height="20" /></td><td>1,602</td></tr>
-    <tr><th scope="row">DaVinci Resolve (Qt + GPU UI)</th><td>Supported</td><td>Not supported</td><td><img src="readme-assets/benchmark-values/value-1269.svg" alt="1,269" width="42" height="20" /></td><td>—</td></tr>
-    <tr><th scope="row">Prism Launcher (Qt 6)</th><td>Supported</td><td>Not supported</td><td><img src="readme-assets/benchmark-values/value-1127.svg" alt="1,127" width="42" height="20" /></td><td>—</td></tr>
-    <tr><th scope="row">Calculator (SwiftUI)</th><td>Supported</td><td>Supported</td><td><img src="readme-assets/benchmark-values/value-1047.svg" alt="1,047" width="42" height="20" /></td><td>1,355</td></tr>
-    <tr><th scope="row">Safari (WebKit)</th><td>Partial</td><td>Partial</td><td><img src="readme-assets/benchmark-values/value-1246.svg" alt="1,246" width="42" height="20" /></td><td>1,385</td></tr>
+    <tr><th scope="row" align="left">TextEdit (AppKit)</th><td>Partial</td><td>Supported</td><td>1,069</td><td>1,489</td></tr>
+    <tr><th scope="row" align="left">Chrome (Chromium)</th><td>Partial</td><td>Supported</td><td>1,227</td><td>1,590</td></tr>
+    <tr><th scope="row" align="left">Obsidian (Electron)</th><td>Supported</td><td>Supported</td><td><img src="readme-assets/benchmark-values/value-1316.svg" alt="1,316" width="42" height="20" /></td><td>1,513</td></tr>
+    <tr><th scope="row" align="left">Stocks (Mac Catalyst)</th><td>Unavailable</td><td>Supported</td><td>—</td><td>2,061</td></tr>
+    <tr><th scope="row" align="left">kitty (OpenGL/GLFW)</th><td>Partial</td><td>Partial</td><td><img src="readme-assets/benchmark-values/value-1155.svg" alt="1,155" width="42" height="20" /></td><td>1,602</td></tr>
+    <tr><th scope="row" align="left">DaVinci Resolve (Qt + GPU UI)</th><td>Supported</td><td>Not supported</td><td><img src="readme-assets/benchmark-values/value-1269.svg" alt="1,269" width="42" height="20" /></td><td>—</td></tr>
+    <tr><th scope="row" align="left">Prism Launcher (Qt 6)</th><td>Supported</td><td>Not supported</td><td><img src="readme-assets/benchmark-values/value-1127.svg" alt="1,127" width="42" height="20" /></td><td>—</td></tr>
+    <tr><th scope="row" align="left">Calculator (SwiftUI)</th><td>Supported</td><td>Supported</td><td><img src="readme-assets/benchmark-values/value-1047.svg" alt="1,047" width="42" height="20" /></td><td>1,355</td></tr>
+    <tr><th scope="row" align="left">Safari (WebKit)</th><td>Partial</td><td>Partial</td><td><img src="readme-assets/benchmark-values/value-1246.svg" alt="1,246" width="42" height="20" /></td><td>1,385</td></tr>
   </tbody>
 </table>
 
@@ -136,17 +138,17 @@ Estimated tokens in the tool response, rather than total tokens for a task with 
 
 <table border="1" cellspacing="0" cellpadding="8">
   <thead>
-    <tr><th scope="col">Application / framework</th><th scope="col">Mecum full read</th><th scope="col">Mecum unchanged</th><th scope="col">Cua full read</th></tr>
+    <tr><th scope="col" align="left">Application / framework</th><th scope="col">Mecum full read</th><th scope="col">Mecum unchanged</th><th scope="col">Cua full read</th></tr>
   </thead>
   <tbody>
-    <tr><th scope="row">TextEdit (AppKit)</th><td><img src="readme-assets/benchmark-values/value-385.svg" alt="385" width="26" height="20" /></td><td><img src="readme-assets/benchmark-values/value-100.svg" alt="100" width="26" height="20" /></td><td>6,185</td></tr>
-    <tr><th scope="row">Chrome (Chromium)</th><td><img src="readme-assets/benchmark-values/value-978.svg" alt="978" width="26" height="20" /></td><td><img src="readme-assets/benchmark-values/value-38.svg" alt="38" width="18" height="20" /></td><td>13,986</td></tr>
-    <tr><th scope="row">Obsidian (Electron)</th><td><img src="readme-assets/benchmark-values/value-738.svg" alt="738" width="26" height="20" /></td><td><img src="readme-assets/benchmark-values/value-97.svg" alt="97" width="18" height="20" /></td><td>7,307</td></tr>
-    <tr><th scope="row">kitty (OpenGL/GLFW)</th><td><img src="readme-assets/benchmark-values/value-142.svg" alt="142" width="26" height="20" /></td><td><img src="readme-assets/benchmark-values/value-39.svg" alt="39" width="18" height="20" /></td><td>4,566</td></tr>
-    <tr><th scope="row">DaVinci Resolve (Qt + GPU UI)</th><td><img src="readme-assets/benchmark-values/value-764.svg" alt="764" width="26" height="20" /></td><td><img src="readme-assets/benchmark-values/value-38.svg" alt="38" width="18" height="20" /></td><td>17,924</td></tr>
-    <tr><th scope="row">Prism Launcher (Qt 6)</th><td><img src="readme-assets/benchmark-values/value-622.svg" alt="622" width="26" height="20" /></td><td><img src="readme-assets/benchmark-values/value-39.svg" alt="39" width="18" height="20" /></td><td>4,157</td></tr>
-    <tr><th scope="row">Calculator (SwiftUI)</th><td><img src="readme-assets/benchmark-values/value-476.svg" alt="476" width="26" height="20" /></td><td><img src="readme-assets/benchmark-values/value-38.svg" alt="38" width="18" height="20" /></td><td>3,801</td></tr>
-    <tr><th scope="row">Safari (WebKit)</th><td><img src="readme-assets/benchmark-values/value-977.svg" alt="977" width="26" height="20" /></td><td><img src="readme-assets/benchmark-values/value-38.svg" alt="38" width="18" height="20" /></td><td>34,002</td></tr>
+    <tr><th scope="row" align="left">TextEdit (AppKit)</th><td><img src="readme-assets/benchmark-values/value-385.svg" alt="385" width="26" height="20" /></td><td><img src="readme-assets/benchmark-values/value-100.svg" alt="100" width="26" height="20" /></td><td>6,185</td></tr>
+    <tr><th scope="row" align="left">Chrome (Chromium)</th><td><img src="readme-assets/benchmark-values/value-978.svg" alt="978" width="26" height="20" /></td><td><img src="readme-assets/benchmark-values/value-38.svg" alt="38" width="18" height="20" /></td><td>13,986</td></tr>
+    <tr><th scope="row" align="left">Obsidian (Electron)</th><td><img src="readme-assets/benchmark-values/value-738.svg" alt="738" width="26" height="20" /></td><td><img src="readme-assets/benchmark-values/value-97.svg" alt="97" width="18" height="20" /></td><td>7,307</td></tr>
+    <tr><th scope="row" align="left">kitty (OpenGL/GLFW)</th><td><img src="readme-assets/benchmark-values/value-142.svg" alt="142" width="26" height="20" /></td><td><img src="readme-assets/benchmark-values/value-39.svg" alt="39" width="18" height="20" /></td><td>4,566</td></tr>
+    <tr><th scope="row" align="left">DaVinci Resolve (Qt + GPU UI)</th><td><img src="readme-assets/benchmark-values/value-764.svg" alt="764" width="26" height="20" /></td><td><img src="readme-assets/benchmark-values/value-38.svg" alt="38" width="18" height="20" /></td><td>17,924</td></tr>
+    <tr><th scope="row" align="left">Prism Launcher (Qt 6)</th><td><img src="readme-assets/benchmark-values/value-622.svg" alt="622" width="26" height="20" /></td><td><img src="readme-assets/benchmark-values/value-39.svg" alt="39" width="18" height="20" /></td><td>4,157</td></tr>
+    <tr><th scope="row" align="left">Calculator (SwiftUI)</th><td><img src="readme-assets/benchmark-values/value-476.svg" alt="476" width="26" height="20" /></td><td><img src="readme-assets/benchmark-values/value-38.svg" alt="38" width="18" height="20" /></td><td>3,801</td></tr>
+    <tr><th scope="row" align="left">Safari (WebKit)</th><td><img src="readme-assets/benchmark-values/value-977.svg" alt="977" width="26" height="20" /></td><td><img src="readme-assets/benchmark-values/value-38.svg" alt="38" width="18" height="20" /></td><td>34,002</td></tr>
   </tbody>
 </table>
 
