@@ -128,4 +128,46 @@ struct SceneSnapshotTests {
         #expect(SceneIdentity.key(kind: .control, label: "Audio 7", bounds: rect(0.9, 0.9, 0.1, 0.1), isUnlabeled: false) == "control|audio7")
         #expect(SceneIdentity.key(kind: .icon, label: "", bounds: rect(0.31, 0.44, 0.02, 0.02), isUnlabeled: true) == "?|@3,4")
     }
+
+    @Test("one screen renders one text: panels and their elements in reading order, an open menu as listed")
+    func textIsInReadingOrder() {
+        let sections = [
+            SceneSection(name: "content", bounds: rect(0.3, 0.1, 0.7, 0.9)),
+            SceneSection(name: "top bar", bounds: rect(0, 0, 1, 0.1)),
+            SceneSection(name: "sidebar", bounds: rect(0, 0.1, 0.3, 0.9)),
+            SceneSection(name: "open menu", bounds: rect(0.5, 0.5, 0.2, 0.3)),
+        ]
+        func text(_ label: String, _ x: Double, _ y: Double, in section: String?) -> SceneElement {
+            SceneElement(id: "text|\(label)", kind: .text, label: label, bounds: rect(x, y, 0.1, 0.02),
+                         section: section)
+        }
+        // A label's box sits a few pixels below the icon beside it, and still shares its row.
+        let elements = [
+            text("Beta", 0.40, 0.204, in: "content"),
+            SceneElement(id: "icon|alpha", kind: .icon, label: "Alpha", bounds: rect(0.32, 0.200, 0.02, 0.03),
+                         section: "content"),
+            text("Gamma", 0.32, 0.300, in: "content"),
+            text("Title", 0.40, 0.020, in: "top bar"),
+            text("Inbox", 0.02, 0.200, in: "sidebar"),
+            text("Zoom", 0.52, 0.600, in: "open menu"),
+            text("Yank", 0.52, 0.550, in: "open menu"),
+            text("Loose", 0.90, 0.950, in: nil),
+        ]
+        let scene = SceneSnapshot(bundleID: "com.x", appName: "X", windowTitle: "W",
+                                  viewportPixelSize: ViewportPixelSize(width: 1000, height: 1000),
+                                  elements: elements, sections: sections)
+        // Everything but the menu's rows arrives in the opposite order.
+        let menu = elements.filter { $0.section == "open menu" }
+        let shuffled = SceneSnapshot(bundleID: "com.x", appName: "X", windowTitle: "W",
+                                     viewportPixelSize: ViewportPixelSize(width: 1000, height: 1000),
+                                     elements: elements.filter { $0.section != "open menu" }.reversed() + menu,
+                                     sections: sections.reversed())
+        let order = scene.text().split(separator: "\n").compactMap { line -> String? in
+            if line.hasPrefix("Section: ") { return String(line.dropFirst(9).prefix { $0 != "," }) }
+            return line.hasPrefix("    [") ? String(line.split(separator: " ")[1]) : nil
+        }
+        #expect(order == ["top bar", "Title", "sidebar", "Inbox", "content", "Alpha", "Beta", "Gamma",
+                          "open menu", "Zoom", "Yank", "Loose"])
+        #expect(shuffled.text() == scene.text())
+    }
 }

@@ -31,7 +31,7 @@ extension SceneSnapshot {
             // Nameless clutter is filtered before truncating, so the budget is spent on real rows.
             let showable = ranked.filter { !$0.isUnlabeled || $0.state != nil }
             let budget = showable.count <= 10 ? showable.count
-                : (section.name == "open menu" ? min(60, showable.count) : notable)
+                : (section.name == Self.openMenu ? min(60, showable.count) : notable)
             let shown = showable.prefix(budget)
             for element in shown {
                 let state = element.state.map { " [\($0.rawValue)]" } ?? ""
@@ -53,36 +53,97 @@ extension SceneSnapshot {
     }
 
     /// Renders the full scene: one line per element, nested under its panel when sections exist.
+    ///
+    /// Panels, and the elements inside each, come in reading order rather than in the order
+    /// composition gathered them, so one screen renders one text. An open menu keeps its own order.
     public func text() -> String {
         var out = header()
         out += "viewport: \(viewportPixelSize.width)x\(viewportPixelSize.height)\n"
         if sections.isEmpty {
             out += "elements (\(elements.count)):\n"
-            for element in elements { out += Self.elementLine(element, indent: "  ") }
+            out += lines(of: elements, indent: "  ").joined()
         } else {
             out += "elements (\(elements.count)) in \(sections.count) sections:\n"
-            for section in sections {
+            for section in sectionsInReadingOrder {
                 let members = elements.filter { $0.section == section.name }
                 out += sectionLine(section, count: members.count)
-                for element in members { out += Self.elementLine(element, indent: "    ") }
+                if section.name == Self.openMenu {
+                    for element in members { out += Self.elementLine(element, indent: "    ") }
+                } else {
+                    out += lines(of: members, indent: "    ").joined()
+                }
             }
             let loose = elements.filter { $0.section == nil }
             if !loose.isEmpty {
                 out += "Unsectioned: \(loose.count) elements\n"
-                for element in loose { out += Self.elementLine(element, indent: "    ") }
+                out += lines(of: loose, indent: "    ").joined()
             }
         }
-        if !commands.isEmpty {
-            out += "commands (\(commands.count)): " + commands.prefix(40).joined(separator: " · ") + "\n"
-        }
+        if !commands.isEmpty { out += commandsLine() }
         return out
     }
 
-    private func header() -> String {
+    /// The section name of an open pop-up menu: its rows are its surface, kept in the menu's order.
+    static let openMenu = "open menu"
+
+    /// How far apart two vertical centers may be and still share a row: eight captured pixels, meant
+    /// to keep a label on the row of the icon beside it and two lines of UI text on rows of their own.
+    var rowTolerance: Double { 8 / Double(max(viewportPixelSize.height, 1)) }
+
+    /// The sections in reading order, the same rule as elements.
+    var sectionsInReadingOrder: [SceneSection] {
+        Self.readingOrder(sections, rowTolerance: rowTolerance, bounds: \.bounds, tieBreak: \.name)
+    }
+
+    /// The element lines of `members` in reading order.
+    func lines(of members: [SceneElement], indent: String) -> [String] {
+        let lines = members.map { Self.elementLine($0, indent: indent) }
+        return Self.readingOrder(
+            Array(zip(members, lines)),
+            rowTolerance: rowTolerance,
+            bounds      : \.0.bounds,
+            tieBreak    : \.1
+        ).map(\.1)
+    }
+
+    /// `items` in reading order: rows top to bottom, then left to right within a row. A row holds
+    /// every item whose vertical center lies within `rowTolerance` of its first item's. `tieBreak`
+    /// orders items at one place, so equal sets of items come out equal whatever order they came in.
+    static func readingOrder<Item>(
+        _ items     : [Item],
+        rowTolerance: Double,
+        bounds      : (Item) -> NormalizedRect,
+        tieBreak    : (Item) -> String
+    ) -> [Item] {
+        let byCenter = items.sorted {
+            (bounds($0).midY, bounds($0).x, tieBreak($0)) < (bounds($1).midY, bounds($1).x, tieBreak($1))
+        }
+        var rows: [[Item]] = []
+        var rowCenter = -Double.infinity
+        for item in byCenter {
+            if bounds(item).midY - rowCenter > rowTolerance {
+                rows.append([item])
+                rowCenter = bounds(item).midY
+            } else {
+                rows[rows.count - 1].append(item)
+            }
+        }
+        return rows.flatMap { row in
+            row.sorted {
+                (bounds($0).x, bounds($0).midY, tieBreak($0)) < (bounds($1).x, bounds($1).midY, tieBreak($1))
+            }
+        }
+    }
+
+    func header() -> String {
         "app: \(appName) (\(bundleID))\(windowTitle.isEmpty ? "" : ": \"\(windowTitle)\"")\n"
     }
 
-    private func sectionLine(_ section: SceneSection, count: Int) -> String {
+    func commandsLine() -> String {
+        "commands (\(commands.count)): " + commands.prefix(40).joined(separator: " · ") + "\n"
+    }
+
+    func sectionLine(_ section: SceneSection, count: Int) -> String {
         let b = section.bounds
         let position = String(format: "%.2f,%.2f %.2f×%.2f", b.x, b.y, b.width, b.height)
         let vertical   = section.verticalScrollNote.map { " · \($0)" } ?? ""
@@ -90,7 +151,7 @@ extension SceneSnapshot {
         return "Section: \(section.name), position: \(position), \(count) elements\(vertical)\(horizontal)\n"
     }
 
-    private static func elementLine(_ element: SceneElement, indent: String) -> String {
+    static func elementLine(_ element: SceneElement, indent: String) -> String {
         let position = String(format: "%.2f,%.2f", element.bounds.x, element.bounds.y)
         let state    = element.state.map { " [\($0.rawValue)]" } ?? ""
         let field    = AccessibilityAugmentation.textEntryRoles.contains(element.role ?? "")
