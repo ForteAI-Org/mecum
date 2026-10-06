@@ -423,7 +423,7 @@ nonisolated package enum CrossCheckedSurfaceReader {
                 claims.roles.append(
                     SurfaceRoleClaim(
                         surface   : identity,
-                        role      : role,
+                        role      : Self.role(of: record, readAs: role, frame: surface.reference.frame),
                         provenance: .qualifiedRoleAttestation
                     )
                 )
@@ -1445,6 +1445,29 @@ nonisolated package enum CrossCheckedSurfaceReader {
                 }
             }
         return try? number.get()
+    }
+
+    /// The role a record is claimed with: the one it read, except for the 66 by
+    /// 20 point overlay `role(named:subrole:...)` describes, which is claimed a
+    /// decoration.
+    ///
+    /// Measured again on 05 and 06/10/2026 in DaVinci Resolve and in TextEdit,
+    /// level 0, subrole `AXDialog`, not modal, a new Window ID each time, seen
+    /// after a text field took focus. Read as a dialog it became a candidate
+    /// beside the document and the selection asked for an explicit choice at
+    /// every observation. Nothing else this reader takes separates it from a
+    /// dialog, so the size decides; a modal answers for itself whatever its size.
+    package static func role(
+        of record   : AccessibilitySurfaceRecord,
+        readAs role : SurfaceRole,
+        frame       : CGRect
+    ) -> SurfaceRole {
+        // ponytail: a size class from the measured 66x20 point surface; replace it with a
+        // native trait of that window (title, identifier) once one is read and measured.
+        guard role == .dialog, record.isModal != true,
+              frame.width <= 80, frame.height <= 24
+        else { return role }
+        return .decoration
     }
 
     private static func visibility(
