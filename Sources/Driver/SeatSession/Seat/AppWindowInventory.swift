@@ -318,13 +318,17 @@ nonisolated struct AppWindowInventory {
         attempts[windowNumber] = nil
     }
 
-    /// A surface worth moving: visible, with an area, and not a contextual
-    /// menu. A menu is a temporary surface running a modal tracking loop inside
+    /// A surface worth moving: visible, with an area, and drawn below the menu
+    /// level. A menu is a temporary surface running a modal tracking loop inside
     /// somebody else's process and `useContextMenu` owns it whole; a second
     /// owner deciding to move one is how the tracking loop loses the window it
     /// was drawn for.
+    ///
+    /// What is drawn above menus is as transient: help tags, drag images and
+    /// screen-saver level surfaces. Qt draws its drag image at level 1000 at the
+    /// real cursor, on the person's screen, and moving it failed a seat.
     private func isTransferable(_ surface: WindowSurface, menuLevel: Int) -> Bool {
-        surface.isVisible && surface.level != menuLevel
+        surface.isVisible && surface.level < menuLevel
             && surface.reference.frame.width > 0 && surface.reference.frame.height > 0
     }
 }

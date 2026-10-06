@@ -268,12 +268,13 @@ struct WindowAdoptionTests {
         try seat.release(turn)
     }
 
-    @Test("a window that only stops reading during its adoption still fails the seat, as a refused rollback")
+    @Test("a detected window that only stops reading during its adoption fails nothing, and stays owed")
     func withdrawnDuringAdoption() async throws {
-        let (seat, _, _, _) = try await Self.adoptionOfAClosedWindow(takenInPlace: false, destroyed: false)
+        let (seat, _, _, before) = try await Self.adoptionOfAClosedWindow(takenInPlace: false, destroyed: false)
         #expect(seat.lastAdoptionFailure?.restoration == .refused)
-        #expect(seat.state == .failed)
-        #expect(seat.hasPendingWindowRestorations)
+        #expect(seat.state == before, "a window the seat found by itself fails nothing (ADR 0032)")
+        #expect(!seat.hasPendingWindowRestorations, "and does not hold up the next detection")
+        #expect(seat.hasOutstandingWindowReturns, "what it is owed stays in the ledger")
     }
 
     @Test("teardown waits for an in-flight adoption rollback and prevents late success")

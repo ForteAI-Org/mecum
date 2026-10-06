@@ -1177,7 +1177,10 @@ public final class AgentSeat {
                 ?? (outcome: .refused, error: nil)
             let restoration = rollback.outcome
             adoptionRestorations[window.windowNumber] = restoration
-            if restoration == .returned || restoration == .vanished {
+            // A window the seat found by itself is left where it is and fails nothing; the ledger keeps
+            // what it is owed, and the follower is not held up by it (a Qt drag image, 06/10/2026).
+            let failsTheSeat = restoration == .refused && reason != .detected
+            if restoration == .returned || restoration == .vanished || reason == .detected {
                 pendingAdoptions[window.windowNumber] = nil
             }
             lastAdoptionFailure = WindowAdoptionFailure(
@@ -1190,7 +1193,7 @@ public final class AgentSeat {
                 restorationError: rollback.error
             )
             if state != .failed, !isTearingDown {
-                transition(to: restoration == .refused ? .failed : previous, reason: .cancelled)
+                transition(to: failsTheSeat ? .failed : previous, reason: .cancelled)
                 if state == .failed { turns.failAll(with: SessionFailure.seatNotReady(.failed)) }
             }
             throw error
