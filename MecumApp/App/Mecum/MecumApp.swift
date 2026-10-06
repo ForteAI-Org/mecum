@@ -62,7 +62,10 @@ struct MecumApp: App {
             )
             // The delegate is made by AppKit and the model by SwiftUI, so
             // this window, the one that always exists, is where they meet.
-            .task { delegate.model = model }
+            .task {
+                delegate.model = model
+                if !Self.isCheckRun { await model.mcp.prepare() }
+            }
         }
         // A snapshot run draws offscreen and quits; it opens no window and no workspace.
         .defaultLaunchBehavior(Self.isCheckRun ? .suppressed : .automatic)
@@ -75,7 +78,18 @@ struct MecumApp: App {
             #endif
             TeamMenuCommands()
             SettingsCommands()
+            MCPConnectionsCommands()
         }
+
+        Window("MCP Connections", id: MCPConnectionsView.windowID) {
+            MCPConnectionsView(model: model.mcp)
+                .task {
+                    delegate.model = model
+                    if !Self.isCheckRun { await model.mcp.prepare() }
+                }
+        }
+        .defaultLaunchBehavior(.suppressed)
+        .restorationBehavior(.disabled)
 
         // A window of its own rather than the Settings scene, for the full title bar and toolbar.
         Window(

@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import LocalMCP
 import ModelTransports
 import SeatBroker
 
@@ -22,6 +23,31 @@ final class AppModel {
     let broker = SeatBroker(configuration: .init(allowUnvalidatedBuild: true))
 
     let settings = ModelSettingsStore()
+
+    /// External clients share the app's Seat broker and each have private engine state.
+    lazy var mcp = MCPConnectionsModel(
+        directory: WorkspaceLaunch.directory.appendingPathComponent("MCP", isDirectory: true),
+        executable: Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/mecum-bridge")
+    ) { [broker] profile, activity in
+        let desktop = BrokeredAutomationSession(
+            broker: broker,
+            workerID: UUID(),
+            knowledgeDirectory: WorkspaceLaunch.directory.appendingPathComponent(
+                "MCP/Knowledge/" + profile.id.uuidString, isDirectory: true
+            )
+        )
+        let session = ExternalMCPSession(
+            profile: profile,
+            session: desktop,
+            perform: { body in
+                var result = JSONValue.null
+                try await desktop.turn { result = try await body() }
+                return result
+            },
+            activity: activity
+        )
+        return MCPHostSession(router: session.router) { await session.close() }
+    }
 
     init() {
         broker.display = Self.storedDisplay

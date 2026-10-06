@@ -390,3 +390,6 @@ pending singletons, replaced by the store actor's own state.
 
 The independent [interaction listener](../Interactions.md) exposes `mecum watch` for inspecting
 manual input, window attribution and production perception. It does not feed the Brain or memory.
+
+For external Claude and Codex clients using the running macOS app, see
+[Local MCP connections](LocalMCP.md).
