@@ -8,7 +8,7 @@
 
 <p align="center"><strong>Let agents work in your apps while you keep using your Mac.</strong></p>
 
-<p align="center">Mecum gives agents a desktop workspace on your Mac. Give a worker a task in the Mecum app, or connect Claude Code or Codex through MCP to work in desktop apps, including apps that expose neither an API nor an AX tree.</p>
+<p align="center">Mecum gives agents a desktop workspace on your Mac. Give a worker a task in the Mecum app, or connect Claude Code or Codex through MCP to work in desktop apps, even when they expose neither an API nor an AX tree.</p>
 
 <p align="center">
   <img src="readme-assets/badge-download.svg" alt="Download for macOS" width="213" height="30" />
