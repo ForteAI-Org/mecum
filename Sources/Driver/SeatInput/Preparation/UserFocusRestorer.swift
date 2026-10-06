@@ -98,7 +98,8 @@ package final class UserFocusRestorer {
     /// Errors and effects of the request itself are unchanged by this timing.
     /// `primesKeyWindow` selects destination-bound key preparation for brief
     /// activation and its handback. An own-process destination instead requests
-    /// its exact local key window through AppKit; ordinary recovery keeps its policy.
+    /// its exact local key window through AppKit. Brief handback also requests
+    /// the attested process explicitly; ordinary recovery keeps its policy.
     package func restore(
         _ window       : WindowReference,
         primesKeyWindow: Bool = false
@@ -121,6 +122,7 @@ package final class UserFocusRestorer {
             processID: participant.processID,
             windowNumber: Int(windowNumber),
             consumerProcessID: consumerProcessID,
+            activatesLocalProcess: primesKeyWindow,
             requestLocal: Self.requestOwnWindow,
             requestRemote: {
                 withUnsafeMutablePointer(to: &participant.serialNumber) {
@@ -129,8 +131,8 @@ package final class UserFocusRestorer {
             }
         )
         timing.activationNanoseconds = DispatchTime.now().uptimeNanoseconds &- start
-        // AppKit owns the consumer's restoration in both modes. External
-        // destinations retain their configured key-record policy.
+        // AppKit selects the consumer's key window. External destinations
+        // retain their configured key-record policy.
         if code == 0, !requestsLocal, usesKeyRecords || primesKeyWindow {
             var checkpoint = DispatchTime.now().uptimeNanoseconds
             try preparation.makeKey(participant) { step in
@@ -145,11 +147,14 @@ package final class UserFocusRestorer {
 
     /// Selects one request after participant attestation. A missing local
     /// destination refuses without retrying a private request for that process.
+    /// Brief handback supplements AppKit's cooperative activation request with
+    /// the same attested process request used for external destinations.
     /// A zero request code still requires the session's independent verification.
     package static func requestFront(
         processID           : Int32,
         windowNumber        : Int,
         consumerProcessID   : Int32,
+        activatesLocalProcess: Bool = false,
         requestLocal        : (Int) -> Bool,
         requestRemote       : () throws -> Int32
     ) throws -> Int32 {
@@ -159,7 +164,7 @@ package final class UserFocusRestorer {
         guard requestLocal(windowNumber) else {
             throw InputFailure.inputPaused([.destinationNotPrepared])
         }
-        return 0
+        return activatesLocalProcess ? try requestRemote() : 0
     }
 
     private static func requestOwnWindow(_ number: Int) -> Bool {

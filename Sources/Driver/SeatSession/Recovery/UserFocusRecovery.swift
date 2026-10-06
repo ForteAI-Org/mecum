@@ -159,8 +159,9 @@ final class UserFocusRecovery {
 
     /// Bounds verification after a brief activation's native handback. The
     /// consumer's activation can settle past ordinary recovery's 250 ms window;
-    /// two timely identity matches remain required. See ADR 0023.
-    static let briefHandbackLimitNanoseconds: UInt64 = 1_000_000_000
+    /// an app repetition needed 1010.4 ms for its second reading. Two timely
+    /// identity matches remain required. See ADR 0023.
+    static let briefHandbackLimitNanoseconds: UInt64 = 2_000_000_000
 
     /// Whether a request was already made for the activation being answered
     /// now. A verification that did not agree is not a reason to ask again, so
@@ -668,10 +669,12 @@ final class UserFocusRecovery {
             guard now() < deadline, !Task.isCancelled else { break }
             let readingStart = now()
             lastWindow = sensing.focusedUserWindow
+            let destinationIsValid = lastWindow.map(validDestination) ?? false
+            // Geometry and visibility can take time to read. Check foreground
+            // after them, so a choice made during that work cannot confirm the
+            // previous window on the second agreeing sample.
             lastFront = sensing.frontmostProcessID
-            lastWindowWasEligible = lastWindow.map {
-                lastFront == $0.processID && validDestination($0)
-            } ?? false
+            lastWindowWasEligible = destinationIsValid && lastFront == lastWindow?.processID
             lastMatches = lastWindowWasEligible && lastWindow?.hasSameIdentity(as: person) == true
             readings += 1
             let readingEnd = now()

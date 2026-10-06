@@ -71,4 +71,35 @@ struct UserFocusRestorerTests {
         #expect(code == -50)
         #expect(calls == ["remote"])
     }
+
+    @Test("Brief handback activates the attested process after selecting its local window")
+    func briefLocalHandback() throws {
+        var calls: [String] = []
+        let code = try UserFocusRestorer.requestFront(
+            processID: 101,
+            windowNumber: 801,
+            consumerProcessID: 101,
+            activatesLocalProcess: true,
+            requestLocal: { calls.append("local \($0)"); return true },
+            requestRemote: { calls.append("front"); return -50 }
+        )
+        #expect(code == -50)
+        #expect(calls == ["local 801", "front"])
+    }
+
+    @Test("Brief handback refuses activation if its local window has disappeared")
+    func absentBriefLocalWindow() {
+        var calls: [String] = []
+        #expect(throws: InputFailure.inputPaused([.destinationNotPrepared])) {
+            _ = try UserFocusRestorer.requestFront(
+                processID: 101,
+                windowNumber: 801,
+                consumerProcessID: 101,
+                activatesLocalProcess: true,
+                requestLocal: { calls.append("local \($0)"); return false },
+                requestRemote: { calls.append("front"); return 0 }
+            )
+        }
+        #expect(calls == ["local 801"])
+    }
 }

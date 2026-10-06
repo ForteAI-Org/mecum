@@ -28,7 +28,7 @@ nonisolated public enum BriefActivationOutcome: Sendable, Equatable {
     case refused(Refusal)
 
     /// The handback to the person's attested window was not verified within
-    /// one second. If the target still holds foreground, ordinary focus recovery
+    /// two seconds. If the target still holds foreground, ordinary focus recovery
     /// owns the episode. A different foreground is left with the person's choice.
     case handbackNotVerified
 
