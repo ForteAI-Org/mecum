@@ -191,6 +191,77 @@ struct TargetResolutionTests {
         #expect(scene([row, field, other]).resolve(target: row.id, preferTextEntry: true) == .ambiguous(2))
     }
 
+    /// The Save sheet's Where popup as a scene printed it on 05/10/2026: its value in bidi isolates,
+    /// beside a caption of the same label.
+    private func wherePair() -> (popup: SceneElement, caption: SceneElement) {
+        let popup = SceneElement(id: "control|where", kind: .control, label: "Where:",
+                                 bounds: rect(0.30, 0.40, 0.4, 0.05), role: "AXPopUpButton",
+                                 value: "\u{2068}TextEdit\u{2069} \u{2014} iCloud")
+        let caption = SceneElement(id: "text|where", kind: .text, label: "Where:",
+                                   bounds: rect(0.18, 0.40, 0.1, 0.05), role: "AXStaticText")
+        return (popup, caption)
+    }
+
+    @Test("the rendered label = value names the control it was printed for, isolates or not", arguments: [
+        "Where: = \u{2068}TextEdit\u{2069} \u{2014} iCloud", "Where: = TextEdit \u{2014} iCloud",
+        "where: = textedit \u{2014} icloud",
+    ])
+    func renderedLabelAndValue(target: String) {
+        let (popup, caption) = wherePair()
+        #expect(scene([caption, popup]).resolve(target: target, preferNativeControls: true) == .found(popup))
+        #expect(scene([caption, popup]).resolve(target: target) == .found(popup))
+    }
+
+    @Test("a rendered value that is not the control's own names nothing")
+    func renderedValueMustMatch() {
+        let (popup, caption) = wherePair()
+        #expect(scene([caption, popup]).resolve(target: "Where: = Downloads") == .none)
+    }
+
+    @Test("a label in bidi isolates matches its plain spelling")
+    func isolatedLabelMatchesPlainSpelling() {
+        let folder = SceneElement(id: "row|desktop", kind: .control, label: "\u{2068}Desktop\u{2069}",
+                                  bounds: rect(0.02, 0.39, 0.1, 0.03))
+        #expect(scene([folder]).resolve(target: "Desktop") == .found(folder))
+        #expect(scene([folder]).resolve(target: "\u{200E}desktop") == .found(folder))
+    }
+
+    @Test("select's control Where: is the popup, not its caption of the same label")
+    func whereIsThePopup() {
+        let (popup, caption) = wherePair()
+        #expect(scene([caption, popup]).resolve(target: "Where:", preferNativeControls: true) == .found(popup))
+    }
+
+    /// Finder's Downloads list as a scene printed it on 06/10/2026: a recognizer's bullet before the
+    /// name, the row's context after it, and the row's other columns naming it as their context.
+    private func finderRows() -> (name: SceneElement, kind: SceneElement, other: SceneElement) {
+        let name = SceneElement(id: "text|carla", kind: .text, label: "\u{2022} carla_video_bn",
+                                bounds: rect(0.20, 0.25, 0.2, 0.02), container: "list view")
+        let kind = SceneElement(id: "text|qt", kind: .text, label: "QT movie",
+                                bounds: rect(0.67, 0.25, 0.1, 0.02), container: "list view / carla_video_bn")
+        let other = SceneElement(id: "text|sidebar", kind: .text, label: "carla_video_bn",
+                                 bounds: rect(0.02, 0.60, 0.1, 0.02), container: "sidebar")
+        return (name, kind, other)
+    }
+
+    @Test("a target copied with its bullet and its {context} names the row", arguments: [
+        "\u{2022} carla_video_bn {list view}", "carla_video_bn {list view}", "\u{2022} carla_video_bn",
+    ])
+    func copiedRowResolves(target: String) {
+        let (name, kind, _) = finderRows()
+        #expect(scene([name, kind]).resolve(target: target) == .found(name))
+        #expect(scene([name, kind]).resolve(target: target, preferNativeControls: true) == .found(name),
+                "the contextual menu's lookup resolves it the same way")
+    }
+
+    @Test("a copied {context} picks the same-named element of that context")
+    func copiedContextDisambiguates() {
+        let (name, _, other) = finderRows()
+        #expect(scene([name, other]).resolve(target: "carla_video_bn {list view}") == .found(name))
+        #expect(scene([name, other]).resolve(target: "carla_video_bn {sidebar}") == .found(other))
+        #expect(scene([name, other]).resolve(target: "carla_video_bn") == .ambiguous(2))
+    }
+
     @Test("two native buttons remain ambiguous even with a same-name caption")
     func duplicateNativeControls() {
         let caption = SceneElement(id: "caption", kind: .text, label: "Create", bounds: rect(0.04, 0.30, 0.1, 0.05))

@@ -17,6 +17,54 @@ public enum LabelText {
         String(string.lowercased().unicodeScalars.filter { CharacterSet.alphanumerics.contains($0) })
     }
 
+    /// The text without the bidi isolates and marks an application wraps names in, U+2066 to
+    /// U+2069, U+200E and U+200F, and without outer whitespace: a file panel reads its folders as
+    /// isolated names, and a model copies them back with or without them.
+    public static func withoutBidiControls(_ string: String) -> String {
+        let controls: Set<UInt32> = [0x2066, 0x2067, 0x2068, 0x2069, 0x200E, 0x200F]
+        let kept = string.unicodeScalars.filter { !controls.contains($0.value) }
+        return String(String.UnicodeScalarView(kept)).trimmingCharacters(in: .whitespaces)
+    }
+
+    /// A menu item's title as compared: without bidi controls, typographic quotes read as straight
+    /// ones, no trailing ellipsis or three dots, lowercased. Finder titles an item
+    /// `Compress “carla_video_bn”`, and a model or a recognizer gives it straight quotes.
+    public static func menuTitleKey(_ title: String) -> String {
+        var text = withoutBidiControls(title)
+        for (typographic, straight) in [("\u{201C}", "\""), ("\u{201D}", "\""), ("\u{2018}", "'"), ("\u{2019}", "'")] {
+            text = text.replacingOccurrences(of: typographic, with: straight)
+        }
+        if text.hasSuffix("\u{2026}") { text.removeLast() } else if text.hasSuffix("...") { text.removeLast(3) }
+        return text.trimmingCharacters(in: .whitespaces).lowercased()
+    }
+
+    /// Which of `titles` a menu item named `wanted` is: the one whose `menuTitleKey` equals it, else
+    /// the one whose key begins with it and a space or a quote, as "Compress" names Finder's
+    /// `Compress “carla_video_bianco_nero.mov”`. Nil for none or several: an exact title wins over a
+    /// longer one ("Open" over "Open With"), and two longer ones stay ambiguous.
+    public static func menuItemMatch(_ wanted: String, in titles: [String]) -> Int? {
+        let key = menuTitleKey(wanted)
+        guard !key.isEmpty else { return nil }
+        let keys  = titles.map(menuTitleKey)
+        let exact = keys.indices.filter { keys[$0] == key }
+        if !exact.isEmpty { return exact.count == 1 ? exact[0] : nil }
+        let longer = keys.indices.filter { index in
+            [" ", "\"", "'"].contains { keys[index].hasPrefix(key + $0) }
+        }
+        return longer.count == 1 ? longer[0] : nil
+    }
+
+    /// The `{context}` a rendered map appends to a label, nil when the string carries none.
+    public static func displayContext(_ string: String) -> String? {
+        var text = string.trimmingCharacters(in: .whitespaces)
+        while let last = text.last, let opener = [Character("]"): " [", ")": " (", "}": " {"][last],
+              let range = text.range(of: opener, options: .backwards) {
+            if last == "}" { return String(text[range.upperBound..<text.index(before: text.endIndex)]) }
+            text = String(text[..<range.lowerBound]).trimmingCharacters(in: .whitespaces)
+        }
+        return nil
+    }
+
     /// Lowercase runs of letters and digits, punctuation dropped.
     public static func tokens(_ string: String) -> [String] {
         string.lowercased()
@@ -70,12 +118,12 @@ public enum LabelText {
         return true
     }
 
-    /// Strips the display annotations a rendered map appends, " [state]" and " (ordinal)", so a
-    /// target copied from the map still matches the bare label. Peels repeatedly.
+    /// Strips the display annotations a rendered map appends, " [state]", " (ordinal)" and
+    /// " {context}", so a target copied from the map still matches the bare label. Peels repeatedly.
     public static func strippingDisplayAnnotations(_ string: String) -> String {
         var text = string.trimmingCharacters(in: .whitespaces)
-        while text.hasSuffix("]") || text.hasSuffix(")") {
-            let opener = text.hasSuffix("]") ? " [" : " ("
+        while text.hasSuffix("]") || text.hasSuffix(")") || text.hasSuffix("}") {
+            let opener = text.hasSuffix("]") ? " [" : text.hasSuffix(")") ? " (" : " {"
             guard let range = text.range(of: opener, options: .backwards) else { break }
             text = String(text[..<range.lowerBound]).trimmingCharacters(in: .whitespaces)
         }

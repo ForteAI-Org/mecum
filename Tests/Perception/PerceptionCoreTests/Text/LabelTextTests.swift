@@ -11,6 +11,18 @@ import Testing
 @Suite("Label text")
 struct LabelTextTests {
 
+    @Test("a menu item is named by its title, or by the start of a longer one when that one is unique")
+    func menuItemMatch() {
+        let finder = ["Open", "Open With", "Move to Trash", "Compress \u{201C}carla_video_bianco_nero.mov\u{201D}"]
+        #expect(LabelText.menuItemMatch("Compress", in: finder) == 3)
+        #expect(LabelText.menuItemMatch("compress \"carla_video_bianco_nero.mov\"", in: finder) == 3)
+        #expect(LabelText.menuItemMatch("Open", in: finder) == 0, "the exact title wins over a longer one")
+        #expect(LabelText.menuItemMatch("Open", in: ["Open With", "Open in New Tab"]) == nil, "two longer ones")
+        #expect(LabelText.menuItemMatch("Comp", in: finder) == nil, "a word cut short names nothing")
+        #expect(LabelText.menuItemMatch("Move", in: finder) == 2)
+        #expect(LabelText.menuItemMatch("", in: finder) == nil)
+    }
+
     @Test("normalize keeps alphanumerics only")
     func normalize() {
         #expect(LabelText.normalize("✓ 48000") == "48000")

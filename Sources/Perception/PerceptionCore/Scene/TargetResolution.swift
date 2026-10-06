@@ -53,11 +53,25 @@ extension SceneSnapshot {
         if let match = byID.first { return .found(match) }
 
         let cleaned = LabelText.strippingDisplayAnnotations(target)
-        var byLabel = elements.filter { inSection($0) && $0.label.caseInsensitiveCompare(target) == .orderedSame }
+        let bare = Self.plain(target)
+        var byLabel = elements.filter {
+            inSection($0) && Self.plain($0.label).caseInsensitiveCompare(bare) == .orderedSame
+        }
         if byLabel.isEmpty, cleaned != target {
             byLabel = elements.filter {
                 inSection($0)
-                    && LabelText.strippingDisplayAnnotations($0.label).caseInsensitiveCompare(cleaned) == .orderedSame
+                    && Self.plain(LabelText.strippingDisplayAnnotations($0.label))
+                        .caseInsensitiveCompare(Self.plain(cleaned)) == .orderedSame
+            }
+        }
+        // The scene prints a control as "label = value": that copy names the element with both.
+        if byLabel.isEmpty, let separator = cleaned.range(of: " = ") {
+            let label = LabelText.withoutBidiControls(String(cleaned[..<separator.lowerBound]))
+            let value = LabelText.withoutBidiControls(String(cleaned[separator.upperBound...]))
+            byLabel = elements.filter {
+                inSection($0)
+                    && LabelText.withoutBidiControls($0.label).caseInsensitiveCompare(label) == .orderedSame
+                    && $0.value.map(LabelText.withoutBidiControls)?.caseInsensitiveCompare(value) == .orderedSame
             }
         }
         if byLabel.isEmpty {
@@ -88,9 +102,22 @@ extension SceneSnapshot {
             }
             if !controls.isEmpty, onlyControlsAndCaptions { byLabel = controls }
         }
+        // A copied "{context}" names the element's own context among same-named ones.
+        if byLabel.count > 1, let context = LabelText.displayContext(target) {
+            let inContext = byLabel.filter { $0.container?.caseInsensitiveCompare(context) == .orderedSame }
+            if !inContext.isEmpty { byLabel = inContext }
+        }
         byLabel = Self.collapseSameRow(byLabel)
         if byLabel.count == 1 { return .found(byLabel[0]) }
         return byLabel.isEmpty ? .none : .ambiguous(byLabel.count)
+    }
+
+    /// A label as compared: without bidi controls, and without the leading bullet a recognizer
+    /// reads into a list row ("• carla_video_bn").
+    private static func plain(_ label: String) -> String {
+        let text = LabelText.withoutBidiControls(label)
+        guard text.hasPrefix("\u{2022}") else { return text }
+        return String(text.dropFirst()).trimmingCharacters(in: .whitespaces)
     }
 
     /// Resolves a section name exactly, or a decorative bar by role when exactly one bar matches.
