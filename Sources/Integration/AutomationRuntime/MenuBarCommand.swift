@@ -95,7 +95,18 @@ public enum MenuBarCommand {
         var chosen: Item<Element>?
         for (index, wanted) in steps.enumerated() {
             let shown = level.map(\.title).filter { !$0.isEmpty }
-            guard let position = level.firstIndex(where: { normalized($0.title) == normalized(wanted) }) else {
+            let exact = level.firstIndex(where: { normalized($0.title) == normalized(wanted) })
+            let verb = normalized(wanted)
+            // AppKit validates Redo into Redo Typing on activation. Only these
+            // two bare editing verbs admit one terminal word-boundary suffix;
+            // the exact title, including its disabled state, always wins.
+            let dynamic = index > 0 && index == steps.count - 1 && ["undo", "redo"].contains(verb)
+                ? level.indices.filter { normalized(level[$0].title).hasPrefix(verb + " ") } : []
+            if exact == nil, dynamic.count > 1 {
+                return .outcome(ActOutcome(.ambiguous, "More than one current '\(wanted)' command: "
+                    + dynamic.map { level[$0].title }.joined(separator: ", ") + ". Name its exact title."))
+            }
+            guard let position = exact ?? (dynamic.count == 1 ? dynamic.first : nil) else {
                 let place = trail.isEmpty ? "the menu bar" : trail.joined(separator: " > ")
                 return .outcome(ActOutcome(.honestMiss, "No item '\(wanted)' in \(place). It holds: "
                     + shown.prefix(40).joined(separator: ", ") + "."))

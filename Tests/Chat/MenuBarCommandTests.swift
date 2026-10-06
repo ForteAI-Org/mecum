@@ -252,6 +252,70 @@ struct MenuBarCommandTests {
         #expect(result.outcome.kind == .refused)
     }
 
+    @Test("Redo's cold title may expand when activation validates its current command")
+    func aRedoTitleCanExpandDuringActivation() async {
+        let cold = Node("Redo", enabled: false)
+        let current = Node("Redo Typing")
+        var inFront = false
+        var presses = 0
+        func menu() -> Node {
+            Node("", [Node("Apple"), Node("TextEdit"), Node("Edit", [inFront ? current : cold])])
+        }
+        func items(_ node: Node) -> [MenuBarCommand.Item<Node>] {
+            node.children.map { MenuBarCommand.Item(title: $0.title, isEnabled: $0.enabled, element: $0) }
+        }
+        let result = await MenuBarCommand.runInFront(
+            read: {
+                MenuBarCommand.resolve(["Edit", "Redo"], from: menu(), allowsDestructive: false, items: items)
+            },
+            press: { item in
+                #expect(inFront && item === current)
+                presses += 1
+                return .success
+            },
+            withFront: { command in
+                inFront = true
+                #expect(MenuBarCommand.isEnabled(["Edit", "Redo"], from: menu(), items: items))
+                command()
+                inFront = false
+                return nil
+            }
+        )
+        #expect(presses == 1)
+        #expect(result.pressed == "Edit > Redo Typing")
+    }
+
+    @Test("dynamic Undo and Redo require one candidate and never broaden other command paths")
+    func aDynamicEditingTitleMustBeUnique() {
+        func resolve(_ wanted: String, titles: [String], disabled: Set<String> = []) -> MenuBarCommand.Resolution<Node> {
+            let menu = Node("", [Node("Apple"), Node("TextEdit"),
+                                 Node("Edit", titles.map { Node($0, enabled: !disabled.contains($0)) })])
+            return MenuBarCommand.resolve(["Edit", wanted], from: menu, allowsDestructive: false) {
+                $0.children.map { MenuBarCommand.Item(title: $0.title, isEnabled: $0.enabled, element: $0) }
+            }
+        }
+        for verb in ["Undo", "Redo"] {
+            guard case .press(_, "Edit > \(verb) Typing") = resolve(verb, titles: ["\(verb) Typing"]) else {
+                Issue.record("The current editing command was not resolved"); continue
+            }
+            if case .press = resolve(verb, titles: ["\(verb) Typing", "\(verb) Selection"]) {
+                Issue.record("An ambiguous editing command must not dispatch")
+            }
+            guard case .press(_, "Edit > \(verb)") = resolve(verb, titles: [verb, "\(verb) Typing"]) else {
+                Issue.record("The exact current title must win"); continue
+            }
+            guard case .disabled = resolve(verb, titles: [verb, "\(verb) Typing"], disabled: [verb]) else {
+                Issue.record("A disabled exact command must not admit another command"); continue
+            }
+        }
+        if case .press = resolve("Paste", titles: ["Paste and Match Style"]) {
+            Issue.record("Other paths must retain exact matching")
+        }
+        if case .press = resolve("Redo", titles: ["Redoable"]) {
+            Issue.record("A prefix without a word boundary is another command")
+        }
+    }
+
     /// A browser's menu bar around the File menu given, the Apple and application menus first.
     static func browser(file: [Node], applicationMenu: [Node] = [], appleMenu: [Node] = []) -> Node {
         Node("", [Node("Apple", appleMenu), Node("Browser", applicationMenu), Node("File", file),

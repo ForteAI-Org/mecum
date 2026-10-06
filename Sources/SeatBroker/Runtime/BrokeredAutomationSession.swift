@@ -373,11 +373,15 @@ public final class BrokeredAutomationSession: AutomationSessionOperating {
             throw AutomationFailure(sentence)
         }
         let processID = application.processIdentifier
-        let isAdobe = TargetPlatform.chosen(
+        let platform = TargetPlatform.chosen(
             bundleURL       : application.bundleURL,
             bundleIdentifier: application.bundleIdentifier
-        ) == .adobeUXP
-        if isAdobe {
+        )
+        // TextEdit leaves its editing menu disabled while its text view accepts
+        // background input. Read and dispatch its menu during verified activation,
+        // just as for Adobe; other native hosts remain separately qualified.
+        let preparesMenu = platform == .adobeUXP || application.bundleIdentifier == "com.apple.TextEdit"
+        if preparesMenu {
             return try await MenuBarCommand.performInFront(
                 path,
                 processID: processID,
