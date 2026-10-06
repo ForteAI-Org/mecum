@@ -77,6 +77,8 @@ nonisolated struct SlashCommandContext: Equatable {
         case showUsage
 
         case showContext
+
+        case observe
     }
 
     /// The levels the worker's model offers, as the model popup's slider shows them:
@@ -116,6 +118,7 @@ nonisolated struct SlashCommandContext: Equatable {
         case .stop   : return isAnswering ? .available : .unlisted
         case .release: return holdsComputer ? .available : .unlisted
         case .screen : return hasScreen ? .available : .unlisted
+        case .observe: return hasScreen ? (isAnswering ? busy : .available) : .unlisted
         case .usage  : return showsCounter ? .available : .unlisted
         case .context: return showsRing ? .available : .unlisted
         }
@@ -138,6 +141,7 @@ nonisolated struct SlashCommandContext: Equatable {
         case .release: return .release
         case .usage  : return .showUsage
         case .context: return .showContext
+        case .observe: return .observe
 
         case .model:
             guard !argument.isEmpty else { return .chooseModel }
@@ -438,7 +442,7 @@ nonisolated private extension SlashCommandContext {
         switch command {
         case .stop   : return "Available while \(worker) is responding."
         case .release: return "Available while \(worker) holds the computer."
-        case .screen : return "Available once \(worker) has a screen."
+        case .screen, .observe: return "Available once \(worker) has a screen."
         case .usage  : return "Available once \(worker) has used tokens."
         case .context: return Self.sizeUnknown
         default      : return nil

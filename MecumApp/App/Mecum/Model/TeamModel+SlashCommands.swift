@@ -75,6 +75,9 @@ extension TeamModel {
 
         case .showContext:
             showsContext = true
+
+        case .observe:
+            await observeScreen(of: id)
         }
         await flushDraft()
     }

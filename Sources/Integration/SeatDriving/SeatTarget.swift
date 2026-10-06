@@ -42,6 +42,8 @@ public final class SeatTarget {
     public private(set) var lastWindowGeometry: WindowGeometryObservation?
     /// The window whose pixels were last observed, resolved from the delivery's own recipient.
     public private(set) var lastCapturedWindow: AdoptedWindow?
+    /// The pixels the last scene was read from, so a person can see what the agent saw.
+    public internal(set) var lastSceneImage: CGImage?
 
     public init(configuration: SeatHostConfiguration = SeatHostConfiguration(restoresUserFocus: true)) {
         host = SeatHost(configuration: configuration)

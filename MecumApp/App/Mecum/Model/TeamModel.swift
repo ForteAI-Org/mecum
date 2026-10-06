@@ -11,6 +11,7 @@ import ChatCore
 import Foundation
 import ModelTransports
 import Observation
+import PerceptionCore
 import os
 import SeatBroker
 
@@ -95,6 +96,11 @@ final class TeamModel {
     /// another conversation opens.
     var showsUsage   = false
     var showsContext = false
+
+    /// The worker's window as `/observe` read it, the scene and its pixels,
+    /// shown in the composer's popover until it closes; nil while none is
+    /// shown. It closes when another conversation opens.
+    var observation: (scene: SceneSnapshot, image: CGImage)?
 
     /// Moves each time `/model` asks the composer to open its model popup.
     var modelPopupRequest = 0
@@ -303,6 +309,7 @@ final class TeamModel {
         savedDraftQuote = nil
         showsUsage      = false
         showsContext    = false
+        observation     = nil
 
         guard let id = selection else { return }
 
@@ -1222,6 +1229,25 @@ final class TeamModel {
     /// as they are; the next tool call that needs the computer waits in the queue for it again.
     func releaseComputer(_ workerID: UUID) async {
         await desktops[workerID]?.close()
+    }
+
+    /// Reads the worker's window as the agent's `observe` reads it, for `/observe`. It
+    /// does not take the seat: with no session open there is nothing to read.
+    func observeScreen(of workerID: UUID) async {
+        guard let desktop = desktops[workerID] else { return }
+
+        do {
+            let observed = try await desktop.observeWithImage()
+            guard let image = observed.image else { throw AutomationFailure("The scene came without its frame.") }
+
+            observation = (observed.scene, image)
+        } catch {
+            problem = issue(
+                title  : "Couldn’t Read the Screen",
+                message: "Mecum couldn’t read the window the worker is using.",
+                error  : error
+            )
+        }
     }
 
     /// The worker's current or last turn, with the settings it ran with. Nil before its first.

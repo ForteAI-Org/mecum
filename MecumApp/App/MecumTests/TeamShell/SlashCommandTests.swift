@@ -184,6 +184,21 @@ struct SlashCommandTests {
         #expect(watched.action(for: SlashCommandInvocation(.screen)) == .showScreen(inConversation: false))
     }
 
+    @Test("/observe reads the screen while the worker is free, and waits while it answers")
+    func observe() {
+        var watched = context()
+        watched.hasScreen = true
+        #expect(watched.action(for: SlashCommandInvocation(.observe)) == .observe)
+        #expect(watched.action(for: SlashCommandInvocation(
+            .observe,
+            argument: "now"
+        )) == nil)
+
+        var answering = context(answering: true)
+        answering.hasScreen = true
+        #expect(answering.availability(of: .observe) == .unavailable(reason: "Available when Atlas finishes responding."))
+    }
+
     // MARK: Availability
 
     @Test("While the worker answers, what acts on its context or model waits, with the context popover's reason")
@@ -200,7 +215,7 @@ struct SlashCommandTests {
         #expect(compacting.availability(of: .new) == .unavailable(reason: "Available when compacting finishes."))
     }
 
-    @Test("/stop, /release, /screen, /usage and /context are listed only when they apply")
+    @Test("/stop, /release, /screen, /observe, /usage and /context are listed only when they apply")
     func listedOnlyWhenTheyApply() {
         let free = context()
         #expect(titles("/") == ["/compact", "/new", "/model", "/effort"])
@@ -368,6 +383,7 @@ struct SlashCommandTests {
             ("/stop", "Available while Atlas is responding."),
             ("/release", "Available while Atlas holds the computer."),
             ("/screen", "Available once Atlas has a screen."),
+            ("/observe", "Available once Atlas has a screen."),
             ("/usage", "Available once Atlas has used tokens."),
             ("/context", "Available once the context’s size is known."),
         ]

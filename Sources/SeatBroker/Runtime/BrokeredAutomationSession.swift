@@ -323,6 +323,12 @@ public final class BrokeredAutomationSession: AutomationSessionOperating {
         }
     }
 
+    /// A fresh scene with the pixels it was read from, for a person who asks to see what the agent sees.
+    public func observeWithImage() async throws -> (scene: SceneSnapshot, image: CGImage?) {
+        let scene = try await observe()
+        return (scene, target?.lastSceneImage)
+    }
+
     public func act(target: String, verb: ActionVerb, section: String?, desiredState: ControlState?) async throws
         -> ActOutcome {
         let (application, runtime, seat) = try current()

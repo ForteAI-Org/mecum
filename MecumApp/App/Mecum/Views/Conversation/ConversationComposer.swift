@@ -171,6 +171,21 @@ struct ConversationComposer: View {
                 }
             )
         }
+        // What `/observe` read of the worker's window, with the elements the agent sees.
+        .popover(
+            isPresented: Binding(
+                get: { team.observation != nil },
+                set: { if !$0 { team.observation = nil } }
+            ),
+            arrowEdge  : .top
+        ) {
+            if let observation = team.observation {
+                ConversationObservedScreen(
+                    scene: observation.scene,
+                    image: observation.image
+                )
+            }
+        }
         .animation(reducesMotion ? nil : .spring(duration: 0.35, bounce: 0.15), value: context == nil)
         .animation(
             ComposerBar.stripAnimation,

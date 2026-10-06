@@ -13,7 +13,7 @@ import Foundation
 /// the order the composer's popup lists them in.
 nonisolated enum SlashCommand: String, CaseIterable, Identifiable {
 
-    case compact, new, model, effort, stop, release, screen, usage, context
+    case compact, new, model, effort, stop, release, screen, observe, usage, context
 
     var id: String { rawValue }
 
@@ -44,6 +44,7 @@ nonisolated enum SlashCommand: String, CaseIterable, Identifiable {
         case .stop   : "stop.circle"
         case .release: "rectangle.portrait.and.arrow.right"
         case .screen : "display"
+        case .observe: "eye"
         case .usage  : "circle.hexagongrid"
         case .context: "chart.pie"
         }
@@ -59,6 +60,7 @@ nonisolated enum SlashCommand: String, CaseIterable, Identifiable {
         case .stop   : "Stop the response"
         case .release: "Release the computer"
         case .screen : "Move the screen"
+        case .observe: "Read the screen"
         case .usage  : "Show the tokens used"
         case .context: "Show the context"
         }

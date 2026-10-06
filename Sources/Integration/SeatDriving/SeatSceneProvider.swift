@@ -93,6 +93,7 @@ public struct SeatSceneProvider: SceneProviding {
             windowNumber: observedWindow.id
         )
         let scene = try await pipeline.perceive(image, of: window)
+        await MainActor.run { target.lastSceneImage = image }
         return PerceivedWindow(scene: scene, frame: frame)
     }
 }
