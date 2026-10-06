@@ -506,7 +506,7 @@ executable's SHA-256 is
 
 ## Round 4 candidate: enabled Adobe menu preparation
 
-The candidate in [ADR 0020](adr/Adr0020PrepareEnabledAdobeMenuCommands.md)
+The candidate in [ADR 0020](../adr/Adr0020PrepareEnabledAdobeMenuCommands.md)
 prepares an admitted enabled Adobe command before its first and only dispatch.
 It resolves the item again after verified readiness and handback; a refusal or
 a newly disabled item posts nothing. Menu listings and refused paths do not
@@ -606,7 +606,7 @@ observation retains the parent, the same four owned documents remain, and
 close leaves null status. This qualifies the removal of the false ready
 outcome, not successful menu operation.
 
-The next candidate in [ADR 0021](adr/Adr0021ReadConsumerFocusLocally.md)
+The next candidate in [ADR 0021](../adr/Adr0021ReadConsumerFocusLocally.md)
 reads an own-process foreground window from AppKit's local
 key window, avoiding an AX request back to the consumer's UI thread. An absent
 local key window refuses without AX fallback; external applications retain the
@@ -661,7 +661,7 @@ File > New... refuses before dispatch; the four documents remain unchanged
 and final status is null. A later independent reading finds Mecum active and
 Photoshop inactive. This is not a completed workflow.
 
-[ADR 0022](adr/Adr0022RequestConsumerHandbackLocally.md) selects AppKit for a
+[ADR 0022](../adr/Adr0022RequestConsumerHandbackLocally.md) selects AppKit for a
 brief handback to the exact attested window in the consumer's own process.
 An absent local window refuses without a remote retry. External requests and
 ordinary recovery retain their policies; the verification deadline and all
@@ -702,7 +702,7 @@ profile captures native AppKit/ViewBridge work during a 342.9 ms failed
 verification. The earlier profile starts after the operation and cannot explain
 it. Native failures are retained, and no unit pass qualifies their workflows.
 
-[ADR 0023](adr/Adr0023BriefHandbackVerificationLimit.md) separates a one-second
+[ADR 0023](../adr/Adr0023BriefHandbackVerificationLimit.md) separates a one-second
 brief-handback limit from ordinary recovery's unchanged 250 ms policy. A
 compiled controlled regression fails under the old limit at a 300 ms first
 identity reading. Two agreeing identity/foreground/visibility readings remain
@@ -740,7 +740,7 @@ The requested New Layer/name steps are unrun in those cycles, not passes.
 An independent direct New Layer attempt on the owned current document also
 leaves fresh scene and discovery unchanged. All four owned documents remain
 and each session closes with null status. The separate candidate in
-[ADR 0024](adr/Adr0024DispatchAdmittedAdobeMenuBeforeHandback.md) moves a single
+[ADR 0024](../adr/Adr0024DispatchAdmittedAdobeMenuBeforeHandback.md) moves a single
 admitted Adobe AX menu command before handback, with explicit partial-effect
 handling and unchanged refusal boundaries. Its native qualification is pending.
 
@@ -908,7 +908,7 @@ The condition is narrowed to positively observed thumbnail/staging cases.
 The first parallel focused run also fails four capture-deadline checks under
 MainActor contention; the prescribed serial 99-test run passes. The expanded
 serial regression set and a fresh full baseline validate the final scope.
-See [the placement decision](adr/Adr0025ConfirmStashedPlacementPosition.md).
+See [the placement decision](../adr/Adr0025ConfirmStashedPlacementPosition.md).
 
 
 The final expanded serial command
@@ -1018,7 +1018,7 @@ existing geometry matching. No absent or stale recipient falls back to
 geometry or focus. An old adapter without identity support supplies no facts
 for an identified capture. The captured host's geometry provides the ID for
 a hosted sheet, rather than inventing a separate sheet picture. See
-[ADR 0026](adr/Adr0026BindNativeFactsToCapturedWindow.md).
+[ADR 0026](../adr/Adr0026BindNativeFactsToCapturedWindow.md).
 
 Two compiled regressions fail before the correction with seven assertion
 issues. The final focused command
@@ -1133,10 +1133,10 @@ qualified. The worker's inference that HTML exposes no popup is unsupported:
 the inspected dropdown opener refuses on an AX/title mismatch before it can
 try to open one. WindowServer and AX titles are independently recorded.
 
-[ADR 0027](adr/Adr0027BindDropdownLookupToCapture.md) binds native dropdown
+[ADR 0027](../adr/Adr0027BindDropdownLookupToCapture.md) binds native dropdown
 queries and full-window before/after scenes to the actual capture. Native
 values now drive row routing and effect verification; stale identities and
-geometry still refuse. [ADR 0028](adr/Adr0028RestoreConsumerThroughAppKit.md)
+geometry still refuse. [ADR 0028](../adr/Adr0028RestoreConsumerThroughAppKit.md)
 uses the exact local AppKit window for ordinary consumer handback as well
 as primed handback. External restoration remains unchanged. The latter is
 a candidate correction for the continuation failure, whose native cause

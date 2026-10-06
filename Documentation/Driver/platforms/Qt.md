@@ -264,7 +264,7 @@ close the native context; on this source Qt commits an isolated accent. They do
 not undo edits or promise discarded marked text. Scope errors retain cleanup
 separately from their cause, and failed restoration degrades the Seat.
 
-[ADR 0018](adr/Adr0018BoundNativeTextInputPreparation.md) records the contract.
+[ADR 0018](../adr/Adr0018BoundNativeTextInputPreparation.md) records the contract.
 This qualifies the measured dead-key source on the owned Qt Quick surface.
 Candidate windows, CJK IMEs, other source layouts and additional application
 surfaces are still pending. Chrome has a separate qualification of the same
@@ -343,7 +343,7 @@ Initial ordinary typing of `Mecum Qt é 🧪` failed the exact-value oracle: AX 
 text containing supplementary Unicode as one intact insertion. A repeat through
 the rebuilt app reads the exact value, then clears Search and restores the list.
 This verifies the application path separately from the Qt 6 fixture and
-native-composition rows. See [application flow checks](ApplicationFlowChecks.md).
+native-composition rows. See [application flow checks](../reports/ApplicationFlowChecks.md).
 The Cancel action completed but its learned effect prediction disagreed;
 fresh observation confirmed panel withdrawal and return to the Project Manager.
 Resolve exceeded the one-second quit confirmation and was reported still

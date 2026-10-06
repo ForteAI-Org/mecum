@@ -50,7 +50,7 @@ rows verify actual preedit and exact `é` commit, deadline closure with a refuse
 late key, and cancellation while marked text exists. Each observes Qt's final
 inactive state, returns its owned window, and verifies zero physical input and
 preserved User Seat. Exact commands and remaining IME limits are in
-[Qt.md](../Qt.md). Candidate-window IMEs and other application families require
+[Qt.md](../platforms/Qt.md). Candidate-window IMEs and other application families require
 separate qualification before this scope is offered to them.
 
 Chrome 154.0.8037.58 reproduced an ordinary dead key without native preedit.
@@ -64,7 +64,7 @@ identifier. Reusing that platform for Electron or CEF does not enable the scope.
 The admission regressions exercise both positive consumers and refuse ordinary
 Chromium policy without qualification. Native Chrome deadline and cancellation
 rows preserve the same cleanup and late-command contracts, including the
-isolated-accent effect of closing marked text. See [Chromium.md](../Chromium.md).
+isolated-accent effect of closing marked text. See [Chromium.md](../platforms/Chromium.md).
 
 The Seat also binds its callback to a task-local scope identity. Detached work
 has no admission, and an inherited child that outlives the callback retains a

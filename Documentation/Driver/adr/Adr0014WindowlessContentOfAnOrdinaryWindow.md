@@ -77,7 +77,7 @@ in this one nonmodal keyboard case. It adds no backend qualification for the
 widget service. The proof is repeated at the posting boundary as before. Tests
 cover the positive route, missing proof, a directly named foreign focus, modal
 surfaces and proof loss before posting. App repeat results are tracked in
-[stabilization rounds](../StabilizationRounds.md).
+[stabilization rounds](../reports/StabilizationRounds.md).
 
 ## Why remote panel content stays refused
 

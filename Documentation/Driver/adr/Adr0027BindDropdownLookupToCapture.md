@@ -52,7 +52,7 @@ errors are retained as setup/build failures, not failing behaviour tests.
 `dropdown-native-value-red-final.log` is the compiled behavioural failure;
 `dropdown-capture-identity-green-final.log` passes 55 tests in six suites.
 Required baseline and signed-app outcomes follow in
-[StabilizationRounds.md](../StabilizationRounds.md).
+[StabilizationRounds.md](../reports/StabilizationRounds.md).
 
 
 ## Composition follow-up

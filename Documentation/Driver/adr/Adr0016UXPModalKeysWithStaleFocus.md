@@ -54,7 +54,7 @@ Three-cycle native effects in UXP.md qualify only the named selection, pixel
 and layer commands. No mouse-down offset or failing drag calibration is shipped.
 
 Unit tests cover incomplete facts, eligibility changes and overrides. Native
-rows in [UXP.md](../UXP.md) separately require effects and User Seat preservation.
+rows in [UXP.md](../platforms/UXP.md) separately require effects and User Seat preservation.
 Character shortcuts use the installed layout with no Unicode payload. Key 13
 was comma on this Mac; negative hardcoded Cmd+W trials were harness errors.
 This decision does not qualify other hosts, localizations, operating systems or

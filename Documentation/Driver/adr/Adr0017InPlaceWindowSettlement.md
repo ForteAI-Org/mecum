@@ -34,7 +34,7 @@ Pure regressions reproduce the old adoption and release failures, verify no
 move or resize for a naturally settled modal, and distinguish a thumbnail
 with a disagreeing AX body. The 55 follow/adoption/rollback checks passed on
 2026-10-03. Live Photoshop results and remaining limits are recorded separately
-in [UXP.md](../UXP.md). This is a shared placement rule; it does not qualify any
+in [UXP.md](../platforms/UXP.md). This is a shared placement rule; it does not qualify any
 other application's input behavior.
 
 ## A held sheet that grows in place (2026-10-05)

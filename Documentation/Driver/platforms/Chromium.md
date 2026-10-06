@@ -6,7 +6,7 @@ The current local qualification uses Google Chrome 154.0.8037.58 on macOS
 ordinary `ChromiumPlatform` policy. Their separate application checks below
 provide partial effects on named targets, rather than full family qualification.
 
-The [application flow checks](ApplicationFlowChecks.md) separately exercise
+The [application flow checks](../reports/ApplicationFlowChecks.md) separately exercise
 Chrome, a GitHub Desktop Electron dialog and the official CEF client through Mecum. Successful checkbox,
 drag and picker effects coexist with dropdown failures and unreadable context-menu
 recipients. Initial short-text Unicode loss is fixed in the Engine; exact-value
@@ -105,7 +105,7 @@ required; qualified windowless page content can name that same recipient.
 Remote endpoints, modals, held keys, pointer Commands, Command/Control
 shortcuts and bulk text remain outside the scope. Task ownership, per-command
 admission and the five-second ceiling are shared with the Qt implementation.
-See [ADR 0018](adr/Adr0018BoundNativeTextInputPreparation.md).
+See [ADR 0018](../adr/Adr0018BoundNativeTextInputPreparation.md).
 
 ## Remaining qualification
 

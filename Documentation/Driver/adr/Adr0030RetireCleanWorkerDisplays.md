@@ -1,7 +1,7 @@
 # Retire a clean worker lease's display
 
 Status: candidate, 2026-10-05. Application qualification is recorded in
-[the stabilization rounds](../StabilizationRounds.md).
+[the stabilization rounds](../reports/StabilizationRounds.md).
 
 ## Evidence
 

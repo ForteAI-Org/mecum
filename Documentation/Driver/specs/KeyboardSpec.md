@@ -19,7 +19,7 @@ its done criteria are the agreed criteria, not values derived from an earlier do
 | 9. Measure and bound bulk text without promising semantic delivery | B1, B4 |
 
 References that constrain the design: `Context.md` for vocabulary,
-sections 5 and 6 of `Spec.md` for the driver and primitives, `SpiLedger.md`
+sections 5 and 6 of `HandoffSpec.md` for the driver and primitives, `SpiLedger.md`
 for existing measurement evidence, `adr/Adr0001FailClosedPrivatePrimitives.md`, and
 `adr/Adr0011ModifierPolicyLeavesNoState.md`.
 

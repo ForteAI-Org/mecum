@@ -4,7 +4,7 @@ Photoshop's document, native filter dialogs, displacement-map chooser and UXP
 New Document modal have different recipients. Classify the fresh observation
 before input. The ordinary UXP family prepares nothing. A separately attested
 recipient can require only its make-key pair and a 300 ms settle, with no
-application activation record. See [ADR 0016](adr/Adr0016UXPModalKeysWithStaleFocus.md).
+application activation record. See [ADR 0016](../adr/Adr0016UXPModalKeysWithStaleFocus.md).
 
 ## Mecum app integration
 
@@ -95,7 +95,7 @@ allows five seconds of fresh observation while rendering settles. Waiting never
 replays input.
 
 AX menu presses are setup, not background-shortcut evidence. A positively
-disabled menu can use [ADR 0013](adr/Adr0013BriefActivationForStaleMenus.md)'s
+disabled menu can use [ADR 0013](../adr/Adr0013BriefActivationForStaleMenus.md)'s
 `bringTargetBrieflyInFront` with verified handback before input. An open modal,
 unreadable readiness or failed handback refuses. After Return, Photoshop may
 retain a retired New Document WindowServer proxy. The consumer explicitly
@@ -171,7 +171,7 @@ requires thumbnail staging. Its operational size, staged classification and
 return destination use the same confirmed body; a physical window retains its
 original return obligation. The pure regressions first reproduced adoption and
 release failures, then all 55 follow/adoption/rollback checks passed. See
-[ADR 0017](adr/Adr0017InPlaceWindowSettlement.md).
+[ADR 0017](../adr/Adr0017InPlaceWindowSettlement.md).
 
 ## Recipient proof
 
@@ -426,7 +426,7 @@ The 4 October follow-up fixes a pixel-grouping defect in New Document: Close's
 label had named the neighboring Create border. Three signed Mecum UI repeats
 on candidate `6443dc84` cancel without creating a document; independent native
 Window menu inspection confirms the same four owned documents before and after.
-See [stabilization rounds](StabilizationRounds.md#round-4-neighboring-photoshop-button-labels).
+See [stabilization rounds](../reports/StabilizationRounds.md#round-4-neighboring-photoshop-button-labels).
 
 The shared chat/app tools also expose `insert_text` for a current focus and
 selection, using one existing Driver insertion payload. It preserves an opaque
@@ -447,7 +447,7 @@ independent WindowServer title and Window menu inspection confirm an additional
 `Untitled-1` alongside the owned seed. Scene metadata now reads the current
 title of the exact captured window instead of its adoption title; that corrects
 the stale document evidence, not the modal action itself. The
-[application flow checks](ApplicationFlowChecks.md) retain these failures.
+[application flow checks](../reports/ApplicationFlowChecks.md) retain these failures.
 They do not extend the direct Driver rows or qualify the complete workflow.
 
 A later offscreen repeat found two discovery defects: the broker admitted only
@@ -468,5 +468,5 @@ because their PID matches Photoshop.
 
 Missing ledger qualification does not block runtime-checked, permission-granted
 operation. Readiness and Receipts retain `unvalidatedBuild`; debug and release
-use the same policy. See [ADR 0015](adr/Adr0015UnqualifiedBuildsRemainUsable.md).
+use the same policy. See [ADR 0015](../adr/Adr0015UnqualifiedBuildsRemainUsable.md).
 Local results do not promote the ledger or qualify a different environment.

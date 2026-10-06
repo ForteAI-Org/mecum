@@ -58,7 +58,7 @@ zoom-field click does not release the failure. This candidate therefore has
 passing controlled checks but no native command-effect qualification. It must
 not be used as evidence that Adobe is stable or that foreground dispatch fixes
 the observed failure. See the dated results in
-[stabilization rounds](../StabilizationRounds.md#scoped-adobe-command-candidate-native-result).
+[stabilization rounds](../reports/StabilizationRounds.md#scoped-adobe-command-candidate-native-result).
 
 ## Post-dispatch reporting follow-up, 2026-10-05
 
@@ -76,7 +76,7 @@ This does not refresh history, activate for a listing or bypass a disabled item.
 
 The two new controlled regressions first fail and then pass within all 19 menu
 tests; the counted package baseline also passes. Live replay of the new build
-remains required. The [demo's error-to-fix table](../PhotoshopDemo20261005.md#error-to-fix-follow-up)
+remains required. The [demo's error-to-fix table](../reports/PhotoshopDemo20261005.md#error-to-fix-follow-up)
 records separate pending field, endpoint, handback and final-save cases.
 
 ## Consumer activation candidate, 2026-10-05
@@ -93,5 +93,5 @@ new Photoshop panel retakes foreground before verification completes. The
 candidate therefore does not close that handback defect. Subsequent Rasterize,
 Invert and Save As requests verify return to the destination; panel-session
 recovery and a separately prompted continuation produce a verified inverted
-PSD. The [video checkpoint](../PhotoshopDemo20261005.md#video-checkpoint-2026-10-05-1524-europerome)
+PSD. The [video checkpoint](../reports/PhotoshopDemo20261005.md#video-checkpoint-2026-10-05-1524-europerome)
 preserves this partial result and the remaining fresh-prompt qualification.

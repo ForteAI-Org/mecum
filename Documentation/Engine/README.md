@@ -117,7 +117,7 @@ payload, even below the 128-character typing threshold. App-flow checks found
 per-character input dropping emoji in Qt, Chrome and Electron, while insertion
 preserved it. Field selection and exact readback still decide the result; no
 unconfirmed edit is automatically replayed. See the
-[application flow checks](../Driver/ApplicationFlowChecks.md).
+[application flow checks](../Driver/reports/ApplicationFlowChecks.md).
 
 `insert_text` exposes the same single payload through the CLI chat and Mecum
 app tools, at a focus and selection the caller has already established. It

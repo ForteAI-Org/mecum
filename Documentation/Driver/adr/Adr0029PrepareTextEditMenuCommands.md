@@ -1,7 +1,7 @@
 # Prepare TextEdit menu commands
 
 Status: candidate, 2026-10-04. Qualification is recorded in
-[the stabilization rounds](../StabilizationRounds.md).
+[the stabilization rounds](../reports/StabilizationRounds.md).
 
 ## Evidence
 

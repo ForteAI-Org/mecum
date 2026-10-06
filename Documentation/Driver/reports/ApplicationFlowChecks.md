@@ -101,7 +101,7 @@ the table come from separate live conversations and inspected outputs; unit
 tests are not their substitute. The local conversation and diagnostics retain
 the detailed action outcomes, synthetic values and unverified effects.
 
-The [UXP guide](UXP.md), [Qt guide](Qt.md) and [Chromium guide](Chromium.md)
+The [UXP guide](../platforms/UXP.md), [Qt guide](../platforms/Qt.md) and [Chromium guide](../platforms/Chromium.md)
 record the independent Driver tiers. Their passed rows do not erase failures
 observed through the app's complete path.
 

@@ -47,7 +47,7 @@ import SeatInput
 /// 2. the bundle ships Qt's core library, as the framework `macdeployqt`
 ///    bundles or as the dylib Qt 5 and 6 builds also ship, which DaVinci
 ///    Resolve does: it is driven with `QtPlatform`, the recipe measured on
-///    DaVinci and an owned Qt 6 fixture (Documentation/Driver/Qt.md), whose
+///    DaVinci and an owned Qt 6 fixture (Documentation/Driver/platforms/Qt.md), whose
 ///    clicks are unprepared, since a prepared one activated a followed dialog,
 ///    whose bulk insertion stays unprepared to preserve Qt Quick focus, and
 ///    which keeps the window follower awake a second after a click for the

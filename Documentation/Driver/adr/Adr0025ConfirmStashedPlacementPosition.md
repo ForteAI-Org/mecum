@@ -38,4 +38,4 @@ position before allowing the requested position, and hold a staged window
 at the wrong position until rollback. Existing panel, borrowed-identity and
 handback regressions guard the scope. Full commands, unsuccessful attempts
 and native repeats are recorded in
-[stabilization rounds](../StabilizationRounds.md).
+[stabilization rounds](../reports/StabilizationRounds.md).

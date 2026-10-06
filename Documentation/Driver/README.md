@@ -25,15 +25,15 @@ against it declines to act rather than guessing.
 | `SeatSession` | `SeatHost` and `AgentSeat`: lifecycle, turns, watchdog, recovery |
 | `TargetReader` | reads another application's accessibility tree and returns value types; it never acts, no facility depends on it, and what a reading means is the caller's |
 
-The [Chromium qualification guide](Chromium.md) records the app's renderer
+The [Chromium qualification guide](platforms/Chromium.md) records the app's renderer
 readiness, bounded native composition and eight owned-browser rows in
 `make chromium-live-tests`, including known menu-equivalent effect failures.
 
-The [Qt driver guide](Qt.md) records the command policy and the live
+The [Qt driver guide](platforms/Qt.md) records the command policy and the live
 qualification of DaVinci Resolve's Project Manager, including the commands
 whose target-side effect still needs a witness.
 
-The [Mecum application flow checks](ApplicationFlowChecks.md) record effects,
+The [Mecum application flow checks](reports/ApplicationFlowChecks.md) record effects,
 failures and corrections from the full app path across AppKit, UXP, Qt,
 Chromium, Electron and an unqualified hybrid CEF candidate.
 
@@ -149,7 +149,7 @@ block use after runtime self checks and permission preflights pass. Receipts kee
 `unvalidatedBuild: true`; a successful run does not promote a Ledger entry.
 Debug and release apply the same checks. Legacy `allowUnvalidatedBuild` options
 remain accepted. See [ADR 0015](adr/Adr0015UnqualifiedBuildsRemainUsable.md) and
-the [Adobe UXP qualification guide](UXP.md) for exact coverage and limitations.
+the [Adobe UXP qualification guide](platforms/UXP.md) for exact coverage and limitations.
 
 A selected UXP dialog with stale global focus, or a selected document behind a
 positively empty focus proxy, can qualify its own complete subtree as a
@@ -186,7 +186,7 @@ physical input, foreground, cursor and complete Host teardown gate the run.
 `AGENTSEAT_UXP_CYCLES=1..20` controls repetitions;
 `AGENTSEAT_UXP_ARTIFACTS=/existing/temporary/directory` retains PNGs for inspection;
 `AGENTSEAT_UXP_SETTLE_MS=0..1000` calibrates the default 300 ms modal priming wait.
-The [UXP guide](UXP.md) records each operation and environment actually verified,
+The [UXP guide](platforms/UXP.md) records each operation and environment actually verified,
 including control and drag limits. Timing includes setup and polling, not a
 subtracted microbenchmark.
 
@@ -242,7 +242,7 @@ selected standalone window if it is still the selection. This keeps the native
 application-wide AX hit test from naming a sibling above the captured window.
 It does not reselect an old window after the selection changes. A staging
 failure refuses the observation; all existing endpoint identity and modal
-checks still apply. See [stabilization evidence](StabilizationRounds.md).
+checks still apply. See [stabilization evidence](reports/StabilizationRounds.md).
 
 The consumer's clean worker lease completion retires its display while keeping
 the queue's AgentSession reusable. A finish warning or outstanding restitution
@@ -259,7 +259,7 @@ make test           unit tier: pure, serialized, no permission needed
 make host-tests     host tier: TCC and a real display, two commands, counts asserted
 make live-tests     live tier: real windows and a real browser
 make bench          the measurements of spec section 8, each one a gate
-make compat-report  runs the tiers and writes docs/compatibility/Build<build>.{md,json}
+make compat-report  runs the tiers and writes compatibility/Build<build>.{md,json}
 make promote-build BUILD=26A5425a
 ```
 
@@ -315,8 +315,8 @@ AGENTSEAT_FIXTURE_APP=/path/to/target make live-tests
 
 ## Validating a macOS build
 
-`make compat-report` runs the tiers and assembles `docs/compatibility/Build<build>.md`
-for a person to read, plus `docs/compatibility/Build<build>.json`, a draft ledger
+`make compat-report` runs the tiers and assembles `compatibility/Build<build>.md`
+for a person to read, plus `compatibility/Build<build>.json`, a draft ledger
 entry. It writes nothing into the ledger.
 
 `make promote-build BUILD=<build>` is the only thing in the repository that
@@ -338,19 +338,24 @@ a run that happens to be fast never saves its own numbers over one.
 
 macOS 15 or later to build, the lowest version the package compiles for, though
 every private primitive is validated per build, so the seat runs only on a build
-the ledger lists: see `docs/SpiLedger.md` for what is used and what was discarded, and
-`docs/compatibility/` for the report of each validated build. Accessibility is
+the ledger lists: see [SpiLedger.md](SpiLedger.md) for what is used and what was discarded, and
+[compatibility/](compatibility/) for the report of each validated build. Accessibility is
 required for input and the fence, Screen Recording for capture. The kit relies on
 undocumented system interfaces, so it is not a basis for the Mac App Store.
 
 ## Documents
 
-`docs/Spec.md` (the hand-off specification), `docs/adr/` (why the load-bearing
-decisions are what they are), `docs/SpiLedger.md` (every private primitive that
-is used, that was verified and left out, or that was discarded, with the reason
-and the build), `docs/compatibility/Build<build>.md` (the report of one validated
-build), `Context.md` (the domain vocabulary, binding), `CodeStyle.md`,
-`CLAUDE.md`.
+| Path | What it holds |
+|---|---|
+| [CONTEXT.md](CONTEXT.md) | the domain vocabulary, binding |
+| [CodeStyle.md](CodeStyle.md) | the Driver's local conventions |
+| [SpiLedger.md](SpiLedger.md) | every private primitive that is used, that was verified and left out, or that was discarded, with the reason and the build |
+| [adr/](adr/) | why the load-bearing decisions are what they are |
+| [specs/](specs/) | the [hand-off specification](specs/HandoffSpec.md), the [keyboard](specs/KeyboardSpec.md) and [launch focus](specs/LaunchFocusSpec.md) designs |
+| [platforms/](platforms/) | per-family policy and qualification: [Chromium](platforms/Chromium.md), [Qt](platforms/Qt.md), [Adobe UXP](platforms/UXP.md) |
+| [reports/](reports/) | dated campaigns through the Mecum app: application flows, stabilization rounds, release readiness, Photoshop runs, the TryCUA comparison and the Cua Driver benchmark |
+| [compatibility/](compatibility/) | `Build<build>.{md,json}`, the report of one validated build, and named campaigns |
+| [measurements/](measurements/) | raw rows behind the live campaigns and benchmarks |
 
 The comments are the fourth document. A comment here says what a thing does and
 why it is that shape, with the number that decided it, and never where the

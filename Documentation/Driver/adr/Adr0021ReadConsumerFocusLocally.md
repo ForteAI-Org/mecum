@@ -42,4 +42,4 @@ retained separately from the compiled behavior failure.
 The signed-app repeat must verify both the intended window and the command's
 effect. This change cannot qualify a menu invocation, a modal return, another
 OS build or an Adobe host by itself. The native failed diagnostic remains in
-[the stabilization record](../StabilizationRounds.md).
+[the stabilization record](../reports/StabilizationRounds.md).

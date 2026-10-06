@@ -42,7 +42,7 @@ refusal without a remote fallback and unchanged external routing.
 `ordinary-own-focus-red.log` retains the failure. The combined focused run
 in `dropdown-own-focus-green.log` passes 127 tests in nine suites.
 Required baseline, host and native results follow in
-[StabilizationRounds.md](../StabilizationRounds.md).
+[StabilizationRounds.md](../reports/StabilizationRounds.md).
 
 
 Release `4c59af9c` completes three file-picker open/Cancel/parent/close cycles
