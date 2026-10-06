@@ -153,6 +153,8 @@ enum ChatCommand {
                 }
                 if message.hasPrefix("/") { print("Unknown command. Use /help."); continue }
                 try transcript.append(.user, message)
+                // A resumed provider context may have been compacted, so each turn's first scene goes whole.
+                tools.forgetScene()
                 let turn = ProviderTurn(
                     provider: selected.provider, model: transcript.conversation.model,
                     sessionID: transcript.conversation.providerSessionID, prompt: message,

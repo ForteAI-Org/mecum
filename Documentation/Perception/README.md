@@ -61,6 +61,22 @@ scene.resolve(target: "Export")               // .found, .ambiguous(n) or .none
   it stored still decode. Pinned by `SceneSnapshotTests.legacyWireFormat`.
 - `SceneDifference` counts only stable labels; a live measurement is not UI. `SceneEffect.encoded` is
   the sorted, count-free evidence string memory accumulates under, and it round-trips.
+- `text()` prints sections, and the elements in each, in reading order: rows by vertical center within
+  eight captured pixels, then left to right, an exact tie broken by the line itself. One screen renders
+  one text whatever order composition and augmentation gathered it in. An open menu keeps its own
+  order, and the map tier keeps its ranking.
+- `SceneChanges` is the reader's update between two scenes of one window, in `text()`'s own lines:
+  added elements whole, removed ones short, changed ones with their earlier values, under the section
+  each is in now, plus a changed title, viewport, section list or commands. Elements match by id
+  (kind and normalized label), duplicates by role and then distance, a caption regrouped into a
+  control in place by label, and an unlabeled element, whose id is a grid cell, by kind within 0.02
+  of the window. A new order, smaller moves, group tags and sections redrawn around an unchanged
+  element are not changes: two readings of one screen differ in exactly those. Pixel seams move with
+  the text that protects them, a header read differently renames a panel and renumbers every
+  `region N`, and a group tag is memory's ordinal among every member it has learned. A changed id
+  the model can target with is reported, and so is an element now in another section while its old
+  section still stands, since a `section:` argument names it. Panel bounds within 0.02 are the same
+  layout. Whether to send the update, and against which scene, is the caller's (`AutomationMCP`).
 - `WindowSurfaceClassifier` answers "is a pop-up open" and "which window do we drive" in one pass;
   a menu-layer window one row tall is a pop-up; every verdict carries the clause that decided it.
 - Empty multiline editors are harvested as `AXTextArea`. Their AX identifier can supply a handle
@@ -152,7 +168,7 @@ so many scattered rects cost more than a full read while covering almost none of
 
 ## Evidence
 
-Unit: 131 tests in 12 suites for `PerceptionCore` alone, pure, parallel, no permission needed.
+Unit: 180 tests in 14 suites for `PerceptionCore` alone, pure, parallel, no permission needed.
 `ScenePipelineTests` drives the roles with doubles that honor their ordering and failure semantics,
 the substitutability evidence for the roles. `IncrementalTextTests` adds 15: the plan's thresholds
 with their measured reasons, the tile grid, and a recording recognizer that proves an unchanged

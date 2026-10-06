@@ -134,9 +134,9 @@ struct AutomationToolsTests {
             })
         ]))
         #expect(session.calls == ["First", "Second"])
-        #expect(result["structuredContent"]["status"].string == "stopped")
-        #expect(result["structuredContent"]["steps"].array?.count == 2)
-        #expect(result["structuredContent"]["verifiedSteps"] == .number(1))
+        #expect(result.payload["status"].string == "stopped")
+        #expect(result.payload["steps"].array?.count == 2)
+        #expect(result.payload["verifiedSteps"] == .number(1))
     }
 
     @Test
@@ -151,8 +151,8 @@ struct AutomationToolsTests {
             })
         ]))
         #expect(session.calls == ["First", "Second"])
-        #expect(result["structuredContent"]["verifiedSteps"] == .number(1))
-        #expect(result["structuredContent"]["steps"].array?.last?["status"].string == "error")
+        #expect(result.payload["verifiedSteps"] == .number(1))
+        #expect(result.payload["steps"].array?.last?["status"].string == "error")
     }
 
     @Test("A terminal batch failure keeps prior effects and never advises observing its ended ID")
@@ -169,8 +169,8 @@ struct AutomationToolsTests {
         ]))
         #expect(session.calls == ["First", "Second"])
         #expect(session.id == nil)
-        #expect(result["structuredContent"]["verifiedSteps"] == .number(1))
-        let guidance = try #require(result["structuredContent"]["steps"].array?.last?["guidance"].string)
+        #expect(result.payload["verifiedSteps"] == .number(1))
+        let guidance = try #require(result.payload["steps"].array?.last?["guidance"].string)
         #expect(guidance.contains("Earlier effects remain"))
         #expect(guidance.contains("Use status"))
         #expect(!guidance.contains("Observe before"))
@@ -201,8 +201,8 @@ struct AutomationToolsTests {
         let result = try await tools.call("close_session", .object(["session": .string(id.uuidString)]))
 
         #expect(session.id == nil)
-        #expect(result["structuredContent"]["status"].string == "closed")
-        #expect(result["structuredContent"]["warning"].string == warning)
+        #expect(result.payload["status"].string == "closed")
+        #expect(result.payload["warning"].string == warning)
     }
 
     @Test
@@ -216,7 +216,7 @@ struct AutomationToolsTests {
         ]))
         #expect(session.discoveryReads == [finder.processIdentifier])
         #expect(session.calls.isEmpty)
-        #expect(result["structuredContent"]["applications"].array?.first?["windows"] == .array([
+        #expect(result.payload["applications"].array?.first?["windows"] == .array([
             .object(["id": .number(987_654), "title": .string("Owned offscreen fixture")])
         ]))
     }
@@ -260,7 +260,7 @@ struct AutomationToolsTests {
         let result = try await tools.call("insert_text", .object([
             "session": .string(id), "text": .string("Mecum-à-中-🙂")
         ]))
-        #expect(result["structuredContent"]["status"].string == "found_acted")
+        #expect(result.payload["status"].string == "found_acted")
         #expect(session.inputs.count == 1)
         #expect(session.inputs == [.insertText("Mecum-à-中-🙂")])
         #expect(session.sections == [nil])
@@ -280,7 +280,7 @@ struct AutomationToolsTests {
             try await tools.call(name, .object(arguments.merging(["session": .string(id)], uniquingKeysWith: { $1 })))
         }
         let typed = try await call("type_text", ["target": .string("Project Name"), "text": .string("My Project")])
-        #expect(typed["structuredContent"]["status"].string == "found_acted")
+        #expect(typed.payload["status"].string == "found_acted")
         _ = try await call("type_text", ["target": .string("Notes"), "text": .string(" more"), "replace": .bool(false),
                                          "section": .string("Inspector")])
         _ = try await call("press_key", ["key": .string("n"), "modifiers": .array([.string("cmd"), .string("shift")]),
@@ -345,9 +345,9 @@ struct AutomationToolsTests {
             ])
         ]))
         #expect(session.inputs == [.insertText("Mecum")])
-        #expect(result["structuredContent"]["status"].string == "stopped")
-        #expect(result["structuredContent"]["attemptedSteps"] == .number(1))
-        #expect(result["structuredContent"]["verifiedSteps"] == .number(0))
+        #expect(result.payload["status"].string == "stopped")
+        #expect(result.payload["attemptedSteps"] == .number(1))
+        #expect(result.payload["verifiedSteps"] == .number(0))
     }
 
     @Test
@@ -365,8 +365,8 @@ struct AutomationToolsTests {
         ]))
         #expect(session.inputs == [.typeText("Demo", into: "Name", replacing: true),
                                    .pressKey(KeyChord(.return), times: 1)])
-        #expect(result["structuredContent"]["status"].string == "stopped")
-        #expect(result["structuredContent"]["verifiedSteps"] == .number(1))
+        #expect(result.payload["status"].string == "stopped")
+        #expect(result.payload["verifiedSteps"] == .number(1))
     }
 }
 
@@ -389,7 +389,7 @@ extension AutomationToolsTests {
             ApplicationCandidate(name: "Other Browser", bundleID: "com.example.Other", version: nil, isRunning: true)
         ])
         let result = try await AutomationTools(session: session).call("apps", .null)
-        #expect(result["structuredContent"] == .object(["applications": .array([
+        #expect(result.payload == .object(["applications": .array([
             .object(["name": .string("Browser"), "bundleID": .string("com.example.Browser"),
                      "version": .string("1.0"), "running": .bool(true), "defaultBrowser": .bool(true)]),
             .object(["name": .string("Other Browser"), "bundleID": .string("com.example.Other"),
@@ -410,7 +410,7 @@ extension AutomationToolsTests {
         tools.record = { records.append($0) }
         let result = try await tools.call("apps", .object(["query": .string("pro tools")]))
         #expect(session.queries == ["pro tools"])
-        #expect(result["structuredContent"] == .object(["applications": .array([
+        #expect(result.payload == .object(["applications": .array([
             .object(["name": .string("Pro Tools"), "bundleID": .string("com.avid.ProTools"),
                      "version": .string("26.4.1.179"), "running": .bool(false)]),
             .object(["name": .string("Pro Tools"), "bundleID": .string("com.example.ProTools"),
@@ -428,8 +428,8 @@ extension AutomationToolsTests {
         let many = (1...61).map { ApplicationCandidate(name: "App \($0)", bundleID: "com.example.\($0)", version: nil,
                                                        isRunning: false) }
         let result = try await AutomationTools(session: CatalogueSession(candidates: many)).call("apps", .null)
-        #expect(result["structuredContent"]["applications"].array?.count == 60)
-        #expect(result["structuredContent"]["more"] == .string("1 more not listed; pass a query to find them."))
+        #expect(result.payload["applications"].array?.count == 60)
+        #expect(result.payload["more"] == .string("1 more not listed; pass a query to find them."))
     }
 
     @Test
@@ -471,24 +471,139 @@ extension AutomationToolsTests {
         let tools = AutomationTools(session: session)
         let id = JSONValue.string(try #require(session.id).uuidString)
         session.scene = Self.scene(Self.rows)
-        let observed = try await tools.call("observe", .object(["session": id]))["structuredContent"]
+        let observed = try await tools.call("observe", .object(["session": id])).payload
         #expect(observed["scene"].string == session.scene.text())
         #expect(observed["changes"] == .null)
 
         session.scene = Self.scene(Self.rows.map { $0 == "Track 7 volume" ? "Track 7 muted" : $0 })
         let acted = try await tools.call("act", .object(["session": id, "target": .string("Track 7")]))
-        let observation = acted["structuredContent"]["observation"]
+        let observation = acted.payload["observation"]
         let changes = try #require(observation["changes"].string)
         #expect(observation["scene"] == .null)
         #expect(observation["since"] == observed["revision"])
-        #expect(changes.contains("\nSection: Tracks"))
-        #expect(changes.contains("\n-     [control] Track 7 volume"))
-        #expect(changes.contains("\n+     [control] Track 7 muted"))
+        #expect(changes.hasPrefix("Changes since revision 1:"))
+        #expect(changes.contains("\nSection: Tracks, position: 0.00,0.00 1.00×1.00, 20 elements\n"))
+        #expect(changes.contains("\n  ~ [control] Track 7 muted  @ 0.10,0.24  (was label \"Track 7 volume\")"))
         #expect(!changes.contains("Track 8"))
 
         #expect(observation["revision"] == .number(2))
         let again = try await tools.call("act", .object(["session": id, "target": .string("Track 7")]))
-        #expect(again["structuredContent"]["observation"]["changes"] == .string("Unchanged since revision 2."))
+        #expect(again.payload["observation"]["changes"] == .string("Unchanged since revision 2."))
+    }
+
+    @Test("observe answers the changes since the model's scene of the window, or the whole scene when asked")
+    func observeSendsChangesUnlessAskedForTheWholeScene() async throws {
+        let session = SyntheticSession()
+        let tools = AutomationTools(session: session)
+        let id = JSONValue.string(try #require(session.id).uuidString)
+        session.scene = Self.scene(Self.rows)
+        let first = try await tools.call("observe", .object(["session": id])).payload
+        #expect(first["scene"].string == session.scene.text())
+
+        let polled = try await tools.call("observe", .object(["session": id])).payload
+        #expect(polled["changes"] == .string("Unchanged since revision 1."))
+        #expect(polled["since"] == .number(1))
+        #expect(polled["scene"] == .null)
+
+        session.scene.elements[0].state = .on
+        let changed = try await tools.call("observe", .object(["session": id])).payload
+        let stated = "~ [control] Track 1 volume [on]  @ 0.10,0.00  (was no state)"
+        #expect(changed["changes"].string?.contains(stated) == true)
+        #expect(changed["since"] == .number(2))
+
+        let whole = try await tools.call("observe", .object(["session": id, "full": .bool(true)])).payload
+        #expect(whole["scene"].string == session.scene.text())
+        #expect(whole["changes"] == .null)
+        let again = try await tools.call("observe", .object(["session": id, "full": .bool(false)])).payload
+        #expect(again["changes"] == .string("Unchanged since revision 4."))
+
+        let calls = session.calls
+        await #expect(throws: AutomationFailure.self) {
+            try await tools.call("observe", .object(["session": id, "full": .string("yes")]))
+        }
+        #expect(session.calls == calls)
+        let definition = try #require(AutomationTools.definitions.first { $0["name"].string == "observe" })
+        #expect(definition["inputSchema"]["properties"]["full"]["type"] == .string("boolean"))
+        #expect(definition["inputSchema"]["required"] == .array([.string("session")]))
+    }
+
+    @Test("open_session sends its scene whole even when the model read that window before")
+    func openingSendsTheWholeScene() async throws {
+        let session = SyntheticSession()
+        let tools = AutomationTools(session: session)
+        session.scene = Self.scene(Self.rows)
+        _ = try await tools.call("observe", .object(["session": .string(try #require(session.id).uuidString)]))
+        let opened = try await tools.call("open_session", .object(["app": .string("Synthetic Mixer")])).payload
+        #expect(opened["scene"].string == session.scene.text())
+        #expect(opened["changes"] == .null)
+    }
+
+    @Test("returning from a dialog sends the changes since the model's last scene of the window under it",
+          arguments: [Optional(31), nil])
+    func eachWindowKeepsItsOwnBaseline(_ mainNumber: Int?) async throws {
+        let session = SyntheticSession()
+        let tools = AutomationTools(session: session)
+        let id = JSONValue.string(try #require(session.id).uuidString)
+        let main = Self.scene(Self.rows)
+        session.scene = main
+        session.observedWindowNumber = mainNumber
+        _ = try await tools.call("observe", .object(["session": id]))
+
+        let dialog = Self.scene((1...12).map { "Option \($0)" }, title: "Rename Track")
+        session.scene = dialog
+        session.observedWindowNumber = mainNumber.map { $0 + 1 }
+        let opened = try await tools.call("act", .object(["session": id, "target": .string("Rename")])).payload
+        #expect(opened["observation"]["scene"].string == dialog.text())
+
+        // The dialog loses its title between two readings, as one did on Resolve; it is the same window.
+        session.scene.windowTitle = ""
+        let typed = try await tools.call("act", .object(["session": id, "target": .string("Name")])).payload
+        #expect(typed["observation"]["since"] == .number(2))
+        #expect(typed["observation"]["changes"].string?.hasPrefix("Changes since revision 2:") == true)
+
+        session.scene = Self.scene(Self.rows.map { $0 == "Track 7 volume" ? "Track 7 renamed" : $0 })
+        session.observedWindowNumber = mainNumber
+        let closed = try await tools.call("act", .object(["session": id, "target": .string("OK")])).payload
+        let changes = try #require(closed["observation"]["changes"].string)
+        #expect(closed["observation"]["since"] == .number(1))
+        #expect(changes.contains("~ [control] Track 7 renamed"))
+        #expect(!changes.contains("Track 8"))
+    }
+
+    @Test("the number of windows remembered is bounded, the least recently read forgotten first")
+    func baselinesAreBounded() async throws {
+        let session = SyntheticSession()
+        let tools = AutomationTools(session: session)
+        let id = JSONValue.string(try #require(session.id).uuidString)
+        for index in 0...8 {
+            session.scene = Self.scene(Self.rows, title: "Window \(index)")
+            _ = try await tools.call("observe", .object(["session": id]))
+        }
+        session.scene = Self.scene(Self.rows, title: "Window 8")
+        #expect(try await tools.call("observe", .object(["session": id])).payload["changes"]
+            == .string("Unchanged since revision 9."))
+        session.scene = Self.scene(Self.rows, title: "Window 0")
+        #expect(try await tools.call("observe", .object(["session": id])).payload["scene"].string
+            == session.scene.text())
+    }
+
+    @Test("a call whose answer never reached the model leaves the baseline the model read")
+    func aFailedCallKeepsTheBaseline() async throws {
+        let session = SyntheticSession()
+        let tools = AutomationTools(session: session)
+        let id = JSONValue.string(try #require(session.id).uuidString)
+        session.scene = Self.scene(Self.rows)
+        _ = try await tools.call("observe", .object(["session": id]))
+
+        session.scene.elements[0].state = .on
+        tools.record = { if $0.hasPrefix("← observe") { throw AutomationFailure("transcript unavailable") } }
+        await #expect(throws: AutomationFailure.self) {
+            try await tools.call("observe", .object(["session": id]))
+        }
+        tools.record = nil
+        let next = try await tools.call("observe", .object(["session": id])).payload
+        #expect(next["since"] == .number(1))
+        #expect(next["changes"].string?.contains("(was no state)") == true)
     }
 
     @Test("an action's scene of another window, or one that changed in most of its lines, is sent whole",
@@ -503,8 +618,8 @@ extension AutomationToolsTests {
             : Self.scene(Self.rows.map { $0 + " (soloed)" })
         session.scene = after
         let acted = try await tools.call("act", .object(["session": id, "target": .string("Track 1")]))
-        #expect(acted["structuredContent"]["observation"]["scene"].string == after.text())
-        #expect(acted["structuredContent"]["observation"]["changes"] == .null)
+        #expect(acted.payload["observation"]["scene"].string == after.text())
+        #expect(acted.payload["observation"]["changes"] == .null)
     }
 
     @Test
@@ -517,8 +632,8 @@ extension AutomationToolsTests {
 
         tools.forgetScene()
         let acted = try await tools.call("act", .object(["session": id, "target": .string("Track 1")]))
-        #expect(acted["structuredContent"]["observation"]["scene"].string == session.scene.text())
-        #expect(acted["structuredContent"]["observation"]["changes"] == .null)
+        #expect(acted.payload["observation"]["scene"].string == session.scene.text())
+        #expect(acted.payload["observation"]["changes"] == .null)
     }
 
     @Test
@@ -534,8 +649,8 @@ extension AutomationToolsTests {
         let acted = try await tools.call("act", .object([
             "session": .string(id.uuidString), "target": .string("Track 1")
         ]))
-        #expect(acted["structuredContent"]["observation"]["scene"].string == session.scene.text())
-        #expect(acted["structuredContent"]["observation"]["changes"] == .null)
+        #expect(acted.payload["observation"]["scene"].string == session.scene.text())
+        #expect(acted.payload["observation"]["changes"] == .null)
     }
 }
 
@@ -571,6 +686,7 @@ private final class SyntheticSession: AutomationSessionOperating {
     var id: UUID? = UUID()
     var closeWarning: String?
     var seatNotice: String?
+    var observedWindowNumber: Int?
     var calls: [String] = []
     var openedWindowTitles: [String?] = []
     var results: [ActOutcomeKind] = []

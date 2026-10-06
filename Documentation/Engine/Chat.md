@@ -86,9 +86,37 @@ A provider process disconnect between turns does not release the Seat.
 share these definitions and their validation.
 
 Action tools require the ephemeral session ID returned by open_session.
-Observations carry a revision, capture report time, and the current text scene.
+Observations carry a revision, capture report time, and the current text scene,
+or its `changes` since an earlier revision (`since`) of the same window.
 The existing engine observes afresh before acting; saved observations are not
 coordinates or authority for later input.
+
+A result carries its value once, as the JSON text of one content item. No tool
+declares an output schema, so there is no `structuredContent` copy, which a
+client that shows both made the model read twice. AutomationMCP keeps the last
+scene the model read of up to eight windows, by the seat's window number or else
+by bundle ID and title; an untitled window of the same size is taken for the
+titled one it was. An action's or `observe`'s scene of such a window is sent as
+`SceneChanges` when they are under half the scene's size. `open_session` and
+`observe` with `full: true` send the whole scene. The baselines are forgotten at
+each turn, when the session ends, and left as they were by a call whose answer
+never reached the model.
+
+`SceneChanges` matches elements by identity and writes them in the lines of
+`text()`, which prints sections and their elements in reading order so one screen
+renders one text. Two readings of one screen still differ in their sections (pixel
+seams move with the text that protects them, and a header read differently renames
+a panel and renumbers each `region N`) and in learned group tags, so the update
+ignores those, element order, and moves of elements and panel edges under 2% of
+the window. An element now in another section is reported while its old section
+name still exists, since `section:` targets by it; a section name that is gone is
+reported once, in the new section lines.
+
+Replayed over one recorded Codex session on Resolve and Slack (89 Mecum tool
+results, 72 of them scenes, with no window numbers), the results come to 279
+thousand characters against the 820 thousand that session printed; dropping the
+duplicate alone gives 412 thousand. Half the scene stays the cut: two thirds turned
+three more scenes into changes and saved 5% of the scene characters.
 
 Batch validates all steps before starting, executes at most 20 act/select/input steps,
 and stops on the first failed/ambiguous/unverified result. Earlier effects remain.

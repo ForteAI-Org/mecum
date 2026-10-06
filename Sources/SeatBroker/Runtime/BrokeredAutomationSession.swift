@@ -637,6 +637,9 @@ public final class BrokeredAutomationSession: AutomationSessionOperating {
         return (application, runtime, target)
     }
 
+    /// The window the seat's latest observation captured: the latest scene's, or the one under its pop-up.
+    public var observedWindowNumber: Int? { target?.lastCapturedWindow?.id }
+
     /// The windows of the application the latest scene saw on the person's screen, outside the seat,
     /// each named by its window server title and the kind the seat read, in the worker's sentence.
     public var seatNotice: String? {

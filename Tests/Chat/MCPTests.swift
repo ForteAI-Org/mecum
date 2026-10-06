@@ -71,3 +71,15 @@ struct MCPTests {
         #expect(calls == 2)
     }
 }
+
+extension JSONValue {
+
+    /// A tool result's value as the model reads it: the JSON text of its one content item, or null
+    /// when that text is missing or is not JSON.
+    var payload: JSONValue {
+        guard let text = self["content"].array?.first?["text"].string,
+              let value = try? JSONDecoder().decode(JSONValue.self, from: Data(text.utf8))
+        else { return .null }
+        return value
+    }
+}

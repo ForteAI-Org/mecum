@@ -25,6 +25,9 @@ public final class AutomationSession: AutomationSessionOperating {
     private var closing: Task<Void, Never>?
     public private(set) var id: UUID?
 
+    /// The window the seat's latest observation captured: the latest scene's, or the one under its pop-up.
+    public var observedWindowNumber: Int? { target?.lastCapturedWindow?.id }
+
     public init(knowledgeDirectory: URL, allowsDestructive: Bool = false) {
         self.knowledgeDirectory = knowledgeDirectory
         self.allowsDestructive = allowsDestructive

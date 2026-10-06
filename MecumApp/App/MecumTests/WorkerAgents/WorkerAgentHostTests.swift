@@ -39,8 +39,9 @@ struct WorkerAgentHostTests {
     An action result's observation is the scene taken just after the action settled: read it, do not observe again.
     Observe only when a result has none, when a dialog or window may still be opening, or before repeating an
     acted_unverified action whose observation shows no effect, since that scene is taken moments after acting.
-    An action result's observation may carry only the changes since an earlier revision of the scene;
-    observe gives the full scene, for example after the conversation was compacted.
+    An observation, from an action or from observe, may carry only the changes since an earlier revision of
+    that window's scene, or say it is unchanged. When you no longer have that revision, for example after
+    the conversation was compacted, observe with full true. open_session always gives the full scene.
     select needs the CURRENT dropdown label/value.
     Prefer set_toggle with explicit on/off over blindly clicking checkboxes.
     On ambiguous, inspect the candidates and disambiguate. On a transport failure, observe;

@@ -13,18 +13,18 @@ public final class AutomationTools {
     public let session: any AutomationSessionOperating
     public var record: ((String) throws -> Void)?
     private var revision = 0
-    /// The lines of the last scene sent to the model, with its session and revision: what an action's
-    /// changes are taken against.
-    private var seen: (session: UUID, revision: Int, lines: [String])?
+    /// The last scene sent to the model of each window it read, most recent last: what the next scene
+    /// of that window is sent as changes against.
+    private var seen: [Baseline] = []
 
     public init(session: any AutomationSessionOperating) {
         self.session = session
     }
 
-    /// Forgets the scene the model last read, so the next action's scene is sent whole: for a new
-    /// turn or a compacted context, which may no longer hold that scene.
+    /// Forgets every scene the model read, so the next scene of any window is sent whole: for a new
+    /// turn or a compacted context, which may no longer hold those scenes.
     public func forgetScene() {
-        seen = nil
+        seen = []
     }
 
     /// The base instructions every provider turn over these tools runs with, in the CLI and the app alike.
@@ -47,8 +47,9 @@ public final class AutomationTools {
     An action result's observation is the scene taken just after the action settled: read it, do not observe again.
     Observe only when a result has none, when a dialog or window may still be opening, or before repeating an
     acted_unverified action whose observation shows no effect, since that scene is taken moments after acting.
-    An action result's observation may carry only the changes since an earlier revision of the scene;
-    observe gives the full scene, for example after the conversation was compacted.
+    An observation, from an action or from observe, may carry only the changes since an earlier revision of
+    that window's scene, or say it is unchanged. When you no longer have that revision, for example after
+    the conversation was compacted, observe with full true. open_session always gives the full scene.
     select needs the CURRENT dropdown label/value.
     Prefer set_toggle with explicit on/off over blindly clicking checkboxes.
     On ambiguous, inspect the candidates and disambiguate. On a transport failure, observe;
@@ -158,8 +159,11 @@ public final class AutomationTools {
                  ["app": text, "window": .object(["type": .string("string")])], ["app"]),
             tool("observe", "Read a fresh scene in this session, including its current dialog. Required after "
                  + "resuming chat. Not after an action whose result carries observation: that is already the "
-                 + "scene after it.",
-                 session, ["session"], readOnly: true),
+                 + "scene after it. A window already read answers its changes since that revision, or that it "
+                 + "is unchanged; full true answers the whole scene, for when that revision is no longer in "
+                 + "the conversation.",
+                 session.merging(["full": .object(["type": .string("boolean")])], uniquingKeysWith: { $1 }),
+                 ["session"], readOnly: true),
             tool("act", "Resolve a current label or element ID, act, and verify; observation is the scene after "
                  + "acting. set_toggle requires value on/off. Never automatically repeat acted_unverified. "
                  + "Typing, keys, scrolling, drags and contextual menus have their own tools.",
@@ -220,7 +224,7 @@ public final class AutomationTools {
     public func call(_ name: String, _ arguments: JSONValue) async throws -> JSONValue {
         let before = seen
         // A session that ended leaves no scene to compare the next one against.
-        defer { if session.id == nil { seen = nil } }
+        defer { if session.id == nil { seen = [] } }
         do {
             return try await dispatch(name, arguments)
         } catch {
@@ -282,7 +286,12 @@ public final class AutomationTools {
             let scene = try await session.open(application: string(arguments, "app"),
                                                 window: Self.windowTitle(arguments))
             value = observation(scene)
-        case "observe": value = observation(try await session.observe())
+        case "observe":
+            if values["full"] != nil, arguments["full"].bool == nil {
+                throw AutomationFailure("full must be true or false.")
+            }
+            let scene = try await session.observe()
+            value = observation(scene, changesOnly: arguments["full"].bool != true)
         case "menu":
             value = outcome(try await session.menu(path: string(arguments, "path")))
         case "press":
@@ -344,7 +353,7 @@ public final class AutomationTools {
         _ notice: String?
     ) -> JSONValue {
         guard let notice, case .object(var object) = value,
-              object["scene"] != nil || object["observation"] != nil
+              object["scene"] != nil || object["changes"] != nil || object["observation"] != nil
         else { return value }
         object["notice"] = .string(notice)
         return .object(object)
@@ -361,72 +370,65 @@ public final class AutomationTools {
         }
     }
 
-    /// The scene as the model reads it, which becomes the baseline. An action's scene of the same
-    /// window as the baseline is sent as its `changes` since that revision when they are under half its size.
+    /// The scene as the model reads it, which becomes its window's baseline. With `changesOnly`, a scene
+    /// of a window the model already read is sent as its `changes` since that revision, when they are
+    /// under half the scene's size: a diff any larger saves little and reads worse than the scene.
     private func observation(_ scene: SceneSnapshot, changesOnly: Bool = false) -> JSONValue {
         revision += 1
-        let text  = scene.text()
-        let lines = text.split(separator: "\n").map(String.init)
+        let text   = scene.text()
+        let number = session.observedWindowNumber
         var values: [String: JSONValue] = [
             "session": session.id.map { .string($0.uuidString) } ?? .null,
             "revision": .number(Double(revision)), "observedAt": .string(Date().ISO8601Format())
         ]
-        if changesOnly, let seen, seen.session == session.id, seen.lines.first == lines.first {
-            let changes = Self.changes(from: seen.lines, to: lines, since: seen.revision)
-            // ponytail: a fixed cut at half the scene, unmeasured; a diff just under it still costs half.
-            // Tune it from measured runs.
+        let known = session.id.flatMap { id in
+            seen.lastIndex { $0.shows(scene, number: number, in: id) }
+                ?? seen.lastIndex { $0.mayShow(scene, number: number, in: id) }
+        }
+        if changesOnly, let known {
+            let changes = SceneChanges.text(from: seen[known].scene, to: scene, since: seen[known].revision)
             if changes.count * 2 < text.count {
                 values["changes"] = .string(changes)
-                values["since"] = .number(Double(seen.revision))
+                values["since"] = .number(Double(seen[known].revision))
             }
         }
         if values["changes"] == nil { values["scene"] = .string(text) }
-        seen = session.id.map { (session: $0, revision: revision, lines: lines) }
+        if let known { seen.remove(at: known) }
+        if let id = session.id {
+            seen.append(Baseline(session: id, windowNumber: number, revision: revision, scene: scene))
+            if seen.count > Self.baselineLimit { seen.removeFirst() }
+        }
         return .object(values)
     }
 
-    /// The lines `new` removes from `old` (`- `) and adds (`+ `), in scene order, each element line
-    /// after the unindented line it belongs to, such as its `Section:` line; one line when none changed.
-    private static func changes(from old: [String], to new: [String], since base: Int) -> String {
-        let difference = new.difference(from: old)
-        guard !difference.isEmpty else { return "Unchanged since revision \(base)." }
-        var removed  = Set<Int>()
-        var inserted = Set<Int>()
-        for change in difference {
-            switch change {
-            case .remove(let offset, _, _): removed.insert(offset)
-            case .insert(let offset, _, _): inserted.insert(offset)
-            }
+    /// The most windows whose last scene is kept, the least recently read forgotten first: a turn
+    /// moves between a window and its dialogs, rarely across more.
+    private static let baselineLimit = 8
+
+    /// One scene the model read, of one window, and the revision it was sent as.
+    private struct Baseline {
+        let session: UUID
+        /// The window server's number for the window, when the session knew it.
+        let windowNumber: Int?
+        let revision: Int
+        let scene: SceneSnapshot
+
+        /// True when `scene`, read in `session` from window `number`, shows this baseline's window:
+        /// the same window number when both are known, else the same application and title.
+        func shows(_ scene: SceneSnapshot, number: Int?, in session: UUID) -> Bool {
+            guard session == self.session, scene.bundleID == self.scene.bundleID else { return false }
+            if let number, let windowNumber { return number == windowNumber }
+            return scene.windowTitle == self.scene.windowTitle
         }
-        var out = ["Changes since revision \(base); an element line belongs to the section line above it."]
-        var section: String?
-        var shown: String?
-        var (i, j) = (0, 0)
-        while i < old.count || j < new.count {
-            let (mark, line): (String, String)
-            if removed.contains(i) {
-                (mark, line) = ("- ", old[i])
-                i += 1
-            } else if inserted.contains(j) {
-                (mark, line) = ("+ ", new[j])
-                j += 1
-            } else {
-                guard i < old.count, j < new.count else { break }
-                if old[i].first?.isWhitespace == false { section = old[i] }
-                i += 1
-                j += 1
-                continue
-            }
-            if line.first?.isWhitespace == false {
-                section = line
-                shown = line
-            } else if let section, section != shown {
-                out.append(section)
-                shown = section
-            }
-            out.append(mark + line)
+
+        /// True when `scene` may be this baseline's window having lost or gained its title, which
+        /// keeps its size: asked only when no baseline `shows` the scene, and never across two numbers.
+        func mayShow(_ scene: SceneSnapshot, number: Int?, in session: UUID) -> Bool {
+            guard session == self.session, scene.bundleID == self.scene.bundleID,
+                  number == nil || windowNumber == nil else { return false }
+            return (scene.windowTitle.isEmpty || self.scene.windowTitle.isEmpty)
+                && scene.viewportPixelSize == self.scene.viewportPixelSize
         }
-        return out.joined(separator: "\n")
     }
 
     private func outcome(_ outcome: ActOutcome) -> JSONValue {

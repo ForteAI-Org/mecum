@@ -25,6 +25,9 @@ public protocol AutomationSessionOperating: AnyObject {
     /// What the latest scene went ahead without: other windows of the application it does not
     /// show, such as one left on the person's screen, in one sentence; nil when there are none.
     var seatNotice: String? { get }
+    /// The window server's number for the window the latest scene was read from; nil when the session
+    /// does not know it. It tells apart two windows of one application whose titles do not.
+    var observedWindowNumber: Int? { get }
     /// The applications `open` can open that `query` names, best first, or all of them when it is nil.
     /// Read-only: it needs no open session and opens nothing.
     func applications(matching query: String?) async throws -> [ApplicationCandidate]
@@ -37,6 +40,8 @@ public extension AutomationSessionOperating {
     var closeWarning: String? { nil }
 
     var seatNotice: String? { nil }
+
+    var observedWindowNumber: Int? { nil }
 
     func windowCandidates(ownedBy processID: pid_t) throws -> [WindowRow] {
         try WindowServerWindowListing().windows(ownedBy: processID)
