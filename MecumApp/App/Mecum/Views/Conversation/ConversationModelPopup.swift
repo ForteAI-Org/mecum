@@ -141,7 +141,7 @@ struct ConversationModelPopup: View {
     }
 
     private func title(in catalogue: [ModelInfo]) -> String {
-        catalogue.first { $0.id == selection.model }?.title ?? selection.model
+        catalogue.first { $0.id == selection.model }?.title ?? ModelInfo.displayName(for: selection.model)
     }
 
     // MARK: Models

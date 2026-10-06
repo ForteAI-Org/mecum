@@ -89,7 +89,7 @@ struct TokenCounterPopover: View {
                     id: \.model
                 ) { entry in
                     row(
-                        entry.model,
+                        ModelInfo.displayName(for: entry.model),
                         count: entry.count
                     )
                 }

@@ -378,7 +378,7 @@ nonisolated struct SlashCommandSuggestions: Equatable {
         ]
     }
 
-    /// The candidates any of whose keys `query` matches, those a key starts with first.
+    /// The candidates any of whose keys `query` matches: a key equal to it first, then those a key starts with.
     static func matching<Candidate>(
         _ candidates: [Candidate],
         query       : some StringProtocol,
@@ -387,24 +387,25 @@ nonisolated struct SlashCommandSuggestions: Equatable {
         let ranked = candidates.map { candidate in
             (candidate, keys(candidate).compactMap { rank(query, in: $0) }.min())
         }
-        return [0, 1].flatMap { level in ranked.filter { $0.1 == level }.map(\.0) }
+        return [0, 1, 2].flatMap { level in ranked.filter { $0.1 == level }.map(\.0) }
     }
 
-    /// 0 when `key` starts with `query`, 1 when it holds its letters in order, nil otherwise; case is ignored.
+    /// 0 when `key` is `query`, 1 when it starts with it, 2 when it holds its letters in order, nil otherwise; case is ignored.
     static func rank(
         _ query: some StringProtocol,
         in key : String
     ) -> Int? {
         let query = query.lowercased()
         let key   = key.lowercased()
-        if key.hasPrefix(query) { return 0 }
+        if key == query { return 0 }
+        if key.hasPrefix(query) { return 1 }
 
         var rest = Substring(key)
         for letter in query {
             guard let found = rest.firstIndex(of: letter) else { return nil }
             rest = rest[rest.index(after: found)...]
         }
-        return 1
+        return 2
     }
 }
 

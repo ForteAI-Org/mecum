@@ -10,6 +10,13 @@ import ModelTransports
 import Testing
 @testable import Mecum
 
+/// Claude Code's catalogue as the command line lists it, by id.
+private let claudeModels = [
+    "claude-fable-5-1", "claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-4-5",
+    "claude-fable-5", "claude-opus-5", "claude-sonnet-5", "claude-opus-4-8", "claude-opus-4-7", "claude-opus-4-6", "claude-opus-4-5",
+    "claude-sonnet-4-6", "claude-sonnet-4-5",
+]
+
 /// Atlas on Claude's Sonnet, free, with nothing shown but the composer.
 private func context(
     answering : Bool = false,
@@ -24,7 +31,7 @@ private func context(
             model   : "claude-sonnet-5",
             effort  : .low
         ),
-        catalogue   : ModelProvider.claudeCode.knownModels.map {
+        catalogue   : claudeModels.map {
             ModelInfo(
                 id     : $0,
                 title  : $0.replacingOccurrences(
@@ -260,8 +267,8 @@ struct SlashCommandTests {
 
     @Test("After /model, /effort and /screen with a space, the rows are the models, the levels and the places")
     func argumentRows() throws {
-        #expect(titles("/model ").count == ModelProvider.claudeCode.knownModels.count)
-        #expect(titles("/model sonnet") == ["Claude Sonnet 5", "Claude Sonnet 4 6", "Claude Sonnet 4 5"])
+        #expect(titles("/model ").count == claudeModels.count)
+        #expect(titles("/model sonnet") == ["Claude Sonnet 5 5", "Claude Sonnet 5", "Claude Sonnet 4 6", "Claude Sonnet 4 5"])
         #expect(titles("/model hk") == ["Claude Haiku 4 5"], "letters in order match too")
 
         let sonnet = try #require(SlashCommandSuggestions(

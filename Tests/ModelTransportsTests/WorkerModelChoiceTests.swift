@@ -12,9 +12,9 @@ import Testing
 @Suite("Choosing a worker's model and effort")
 struct WorkerModelChoiceTests {
 
-    /// Every provider with every model it names, and a local one for Ollama.
+    /// Every provider with every model it starts from, and a local one for Ollama.
     private static let pairs: [(ModelProvider, String)] =
-        ModelProvider.allCases.flatMap { provider in provider.knownModels.map { (provider, $0) } }
+        ModelProvider.allCases.flatMap { provider in provider.defaultModels.map { (provider, $0) } }
             + [(.ollama, "qwen3:8b")]
 
     @Test("the rail's positions are the supported efforts, exactly", arguments: pairs)

@@ -57,7 +57,7 @@ struct TeamOutlineTests {
         #expect(row.subtitle == TeamRow.toConfigure)
         #expect(row.accessibilityLabel.contains(TeamRow.toConfigure))
         #expect(!row.accessibilityLabel.contains(TemporaryStore.secondSelection.model))
-        #expect(after.first { $0.id == head.id }?.subtitle == "claude-opus-5, High Effort")
+        #expect(after.first { $0.id == head.id }?.subtitle == "Opus 5, High Effort")
     }
 
     @Test("Changing a worker's state does not move it in the list")
@@ -97,10 +97,10 @@ struct TeamOutlineTests {
 
         // The role stays in the label and the inspector; the second line is the model, and only that.
         let attached = TeamOutline.rows(of: try await store.workers())
-        #expect(attached.first { $0.id == roled.id }?.subtitle == "claude-opus-5, High Effort")
+        #expect(attached.first { $0.id == roled.id }?.subtitle == "Opus 5, High Effort")
         #expect(attached.first { $0.id == roleless.id }?.subtitle == "qwen3:8b, No thinking")
         #expect(attached.first { $0.id == roled.id }?.accessibilityLabel
-            == "Aaa, Research lead, claude-opus-5, High Effort")
+            == "Aaa, Research lead, Opus 5, High Effort")
     }
 
     @Test("The accessible label keeps the whole name and the role behind a truncation")
@@ -146,7 +146,7 @@ struct TeamOutlineTests {
 
         #expect(after.map(\.id) == before.map(\.id))
         #expect(after.map(\.subtitle) == ["Using Calculator", "Waiting for the computer (1 ahead)", TeamRow.toConfigure])
-        let model = "claude-opus-5, High Effort"
+        let model = "Opus 5, High Effort"
         #expect(before.map(\.subtitle) == [model, model, TeamRow.toConfigure])
         let scoutRow = try #require(after.first { $0.id == scout.id })
         #expect(scoutRow.accessibilityLabel

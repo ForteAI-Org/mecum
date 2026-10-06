@@ -66,7 +66,7 @@ struct ConversationModelButton: View {
     }
 
     private var title: String {
-        catalogue?.first { $0.id == selection.model }?.title ?? selection.model
+        catalogue?.first { $0.id == selection.model }?.title ?? ModelInfo.displayName(for: selection.model)
     }
 
     private var scale: EffortScale {

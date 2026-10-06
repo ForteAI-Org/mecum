@@ -51,7 +51,7 @@ struct TurnSummaryTests {
         let turn = try #require(try await TurnSummary.latest(of: worker.id, in: store, isRunning: false))
         #expect(turn.executionID == execution.id)
         #expect(turn.selection == Self.first)
-        #expect(turn.modelLine == "claude-opus-5, High Effort")
+        #expect(turn.modelLine == "Opus 5, High Effort")
         #expect(turn.state == .completed)
         #expect(try await store.worker(worker.id)?.configuration == Self.second)
     }
@@ -72,7 +72,7 @@ struct TurnSummaryTests {
         let running = try #require(try await TurnSummary.latest(of: worker.id, in: store, isRunning: true))
         #expect(running.executionID == newer.id)
         #expect(running.state == .running)
-        #expect(running.modelLine == "gpt-5.4-mini, Low Effort")
+        #expect(running.modelLine == "GPT-5.4-Mini, Low Effort")
 
         let orphan = try #require(try await TurnSummary.latest(of: worker.id, in: store, isRunning: false))
         #expect(orphan.state == .unfinished)
@@ -99,7 +99,7 @@ struct TurnSummaryTests {
         try await store.configure(worker: worker.id, selection: ModelSelection(
             provider: .anthropic, model: "claude-haiku-4-5", effort: .medium))
         let haiku = try await store.startExecution(worker: worker.id)
-        #expect(TurnSummary(execution: haiku, events: [], isRunning: true).modelLine == "claude-haiku-4-5")
+        #expect(TurnSummary(execution: haiku, events: [], isRunning: true).modelLine == "Haiku 4.5")
 
         try await store.configure(worker: worker.id, selection: ModelSelection(
             provider: .ollama, model: "qwen3:8b", effort: .high))

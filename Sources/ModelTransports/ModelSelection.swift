@@ -25,23 +25,6 @@ public enum ModelProvider: String, Sendable, CaseIterable, Codable, Identifiable
         }
     }
 
-    /// Every model id the provider serves today, for the + menu when the
-    /// provider has no listing endpoint. Claude ids from the official models
-    /// overview (platform.claude.com, September 2026): current line first,
-    /// then the legacy models still available.
-    public var knownModels: [String] {
-        switch self {
-        case .codex: ["gpt-5.6-luna", "gpt-5.4-mini"]
-        case .claudeCode, .anthropic: [
-            "claude-fable-5-1", "claude-opus-5", "claude-sonnet-5", "claude-haiku-4-5",
-            "claude-fable-5", "claude-opus-4-8", "claude-opus-4-7", "claude-opus-4-6", "claude-opus-4-5",
-            "claude-sonnet-4-6", "claude-sonnet-4-5",
-        ]
-        case .gemini: ["gemini-3-pro-preview", "gemini-3-flash-preview", "gemini-2.5-pro", "gemini-2.5-flash"]
-        case .ollama: []
-        }
-    }
-
     /// Where the person gets access, shown next to the key field.
     public var accessHint: String {
         switch self {
@@ -92,9 +75,10 @@ public struct ModelSelection: Sendable, Hashable, Codable {
     }
 
     /// Efforts a provider/model pair accepts, in order. Empty when the model
-    /// has no effort parameter at all, so no level is offered for it. Codex's
-    /// own catalogue (`ProviderCatalog.catalogue`) narrows its levels per model;
-    /// without it every level passes and the command line has the last word.
+    /// has no effort parameter at all, so no level is offered for it. The
+    /// catalogues of Codex and Claude Code (`ProviderCatalog.catalogue`) narrow
+    /// the levels per model; without them every level passes and the command
+    /// line has the last word.
     public static func supportedEfforts(provider: ModelProvider, model: String) -> [ReasoningEffort] {
         switch provider {
         case .codex: ReasoningEffort.allCases

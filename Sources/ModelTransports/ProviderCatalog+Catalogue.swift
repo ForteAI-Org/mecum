@@ -14,9 +14,11 @@ extension ProviderCatalog {
     /// Every model the provider offers this account or server, with the efforts each accepts.
     ///
     /// Codex answers from `codex debug models`, its own catalogue, which also
-    /// names each model's levels; a hidden model is left out. The API providers
-    /// are read page by page to the end. Claude Code has no listing, so its
-    /// models are `knownModels`. Ollama lists what the local server has pulled.
+    /// names each model's levels; a hidden model is left out. Claude Code
+    /// answers the `initialize` request of its stream-json mode with the models
+    /// the installed version and the account take, before any turn starts. The
+    /// API providers are read page by page to the end. Ollama lists what the
+    /// local server has pulled.
     public static func catalogue(
         _ provider: ModelProvider,
         settings  : ProviderSettings
@@ -33,7 +35,18 @@ extension ProviderCatalog {
             guard result.status == 0 else { throw CodexClientError.failed("codex debug models exited \(result.status)") }
             return try codexCatalogue(from: result.output)
         case .claudeCode:
-            return provider.knownModels.map { .known($0, provider: provider) }
+            let request = #"{"type":"control_request","request_id":"models","request":{"subtype":"initialize"}}"#
+            let result  = try await CodexCLIClient.run(
+                executable: ClaudeCLIClient.executableURL(),
+                arguments : [
+                    "-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose",
+                    "--setting-sources", "", "--strict-mcp-config", "--no-session-persistence",
+                ],
+                input     : Data((request + "\n").utf8),
+                schema    : nil,
+                timeout   : 20
+            )
+            return try claudeCatalogue(from: result.output)
         case .anthropic:
             return try await anthropicCatalogue(apiKey: settings.anthropicAPIKey)
         case .gemini:
@@ -65,11 +78,45 @@ extension ProviderCatalog {
             }
     }
 
-    /// Every page of `/v1/models`, newest first as the API returns them.
+    /// A Claude model id without the snapshot date some listings append, "claude-haiku-4-5-20251001"
+    /// read as "claude-haiku-4-5": the alias the command line and the API both take, and the id a
+    /// worker keeps, so one model is never listed twice or missed under its other name.
+    static func claudeID(_ id: String) -> String {
+        id.replacing(/-\d{8}$/, with: "")
+    }
+
+    /// The models of Claude Code's answer to `initialize`, in its own order, each once by the id it
+    /// resolves to. The `default` row only repeats one of the others under another name.
+    static func claudeCatalogue(from data: Data) throws -> [ModelInfo] {
+        let lines  = String(decoding: data, as: UTF8.self).split(separator: "\n")
+        let answer = lines.lazy
+            .compactMap { try? JSONSerialization.jsonObject(with: Data($0.utf8)) as? [String: Any] }
+            .first { $0["type"] as? String == "control_response" }
+        guard let response = answer?["response"] as? [String: Any],
+              let models   = (response["response"] as? [String: Any])?["models"] as? [[String: Any]]
+        else { throw ClaudeClientError.failed("claude listed no models") }
+
+        var seen = Set<String>()
+        return models.compactMap { model -> ModelInfo? in
+            guard model["value"] as? String != "default",
+                  let id = (model["resolvedModel"] as? String ?? model["value"] as? String).map(claudeID),
+                  seen.insert(id).inserted
+            else { return nil }
+            let levels = model["supportedEffortLevels"] as? [String] ?? []
+            return ModelInfo(
+                id     : id,
+                title  : model["displayName"] as? String,
+                efforts: levels.compactMap(ReasoningEffort.init(rawValue:))
+            )
+        }
+    }
+
+    /// Every page of `/v1/models`, newest first as the API returns them, each model once by `claudeID`.
     private static func anthropicCatalogue(apiKey: String) async throws -> [ModelInfo] {
         guard !apiKey.isEmpty else { throw ProviderError.missingAPIKey(.anthropic) }
 
         var models: [ModelInfo] = []
+        var seen  = Set<String>()
         var after : String?
         repeat {
             var components = URLComponents(string: "https://api.anthropic.com/v1/models")!
@@ -80,15 +127,14 @@ extension ProviderCatalog {
             request.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
             let json = try await HTTPTransport.getJSON(request)
             let page = json["data"] as? [[String: Any]] ?? []
-            models += page.compactMap { entry in
-                (entry["id"] as? String).map {
-                    .known(
-                        $0,
-                        provider     : .anthropic,
-                        title        : entry["display_name"] as? String,
-                        contextWindow: entry["max_input_tokens"] as? Int
-                    )
-                }
+            models += page.compactMap { entry -> ModelInfo? in
+                guard let id = (entry["id"] as? String).map(claudeID), seen.insert(id).inserted else { return nil }
+                return .known(
+                    id,
+                    provider     : .anthropic,
+                    title        : entry["display_name"] as? String,
+                    contextWindow: entry["max_input_tokens"] as? Int
+                )
             }
             after = json["has_more"] as? Bool == true ? json["last_id"] as? String : nil
         } while after != nil
