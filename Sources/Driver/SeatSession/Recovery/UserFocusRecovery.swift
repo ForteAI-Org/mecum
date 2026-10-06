@@ -959,7 +959,7 @@ final class UserFocusRecovery {
     private func note(_ outcome: String) {
         guard outcome != lastPreparationOutcome else { return }
         lastPreparationOutcome = outcome
-        Self.log.info("\(outcome, privacy: .public)")
+        Self.log.notice("\(outcome, privacy: .public)")
     }
 
     private static func milliseconds(_ nanoseconds: UInt64) -> String {

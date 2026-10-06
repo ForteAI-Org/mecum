@@ -66,13 +66,13 @@ final class LaunchFocusComeback: FrontRestoring {
         restores += 1
         do {
             let code = try restorer.restore(window)
-            Self.log.info("""
+            Self.log.notice("""
                 \(self.taker, privacy: .public) \(pid, privacy: .public) took the front: sent it back to \
                 window \(self.window.windowNumber, privacy: .public), request code \(code, privacy: .public)
                 """)
             try restorer.prepare(window, targets: [])
         } catch {
-            Self.log.info("""
+            Self.log.notice("""
                 \(self.taker, privacy: .public) \(pid, privacy: .public) took the front and it could not be \
                 given back: \(String(describing: error), privacy: .public)
                 """)

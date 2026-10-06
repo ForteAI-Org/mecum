@@ -2136,7 +2136,7 @@ public final class AgentSeat {
               let reported = (try? placing.frame(of: record.window.reference)) ?? nil
         else { return }
         // Temporary live diagnosis: both readings, whether they agree or not.
-        Self.log.info("""
+        Self.log.notice("""
             modal window \(outer.windowNumber, privacy: .public) reads \
             \(String(describing: reported), privacy: .public) to accessibility and \
             \(String(describing: server.frame), privacy: .public) to the window server
@@ -2147,7 +2147,7 @@ public final class AgentSeat {
               ),
               (try? placing.move(record.window.reference, to: server.frame.origin)) != nil
         else { return }
-        Self.log.info("""
+        Self.log.notice("""
             window \(outer.windowNumber, privacy: .public) was reported at \
             \(Int(reported.minX), privacy: .public),\(Int(reported.minY), privacy: .public) and shown at \
             \(Int(server.frame.minX), privacy: .public),\(Int(server.frame.minY), privacy: .public): \
@@ -2269,7 +2269,7 @@ public final class AgentSeat {
         }
         // Where a Command went, never what it carried: a first key to a panel
         // that did nothing could not be told from one that went elsewhere.
-        Self.log.info("""
+        Self.log.notice("""
             \(routed.hasMouseLocation ? "pointer" : "keys", privacy: .public) on window \
             \(observation.surface.windowNumber, privacy: .public) go to window \
             \(recipient.windowNumber, privacy: .public) of pid \(recipient.processID, privacy: .public), \
@@ -3409,7 +3409,7 @@ public final class AgentSeat {
             if held != lastWindowFollowStandDown {
                 lastWindowFollowStandDown = held
                 let did = scope.isStandDown ? "stood down" : "reconciles only"
-                Self.log.info("""
+                Self.log.notice("""
                     the window follow pass \(did, privacy: .public): \(held, privacy: .public)
                     """)
             }
@@ -3601,7 +3601,7 @@ public final class AgentSeat {
                   session[number] == nil
             else { continue }
 
-            Self.log.info("""
+            Self.log.notice("""
                 window \(number, privacy: .public) was already open outside the seat when the \
                 application was handed over and its direct move was refused: taking it in
                 """)
@@ -3636,7 +3636,7 @@ public final class AgentSeat {
                   state.acceptsCommands || containmentOnlyFollowWait,
                   session[reference.windowNumber] == nil
             else { return nil }
-            Self.log.info("""
+            Self.log.notice("""
                 window \(reference.windowNumber, privacy: .public) was already on the virtual \
                 display when the application was handed over, owned by no seat: taking it in place
                 """)
@@ -3755,7 +3755,7 @@ public final class AgentSeat {
             // The numbers first: this is the one refusal a consumer answers by
             // choosing a different display, and how much larger the window is
             // is the whole of what it needs to know.
-            Self.log.info("""
+            Self.log.notice("""
                 window \(fresh.windowNumber, privacy: .public) is \
                 \(Int(body.width), privacy: .public)x\(Int(body.height), privacy: .public) \
                 and the virtual display is \
@@ -3877,7 +3877,7 @@ public final class AgentSeat {
         } else {
             verdict = window.identity == nil ? "an unattested identity" : "no assignment yet"
         }
-        Self.log.info("""
+        Self.log.notice("""
             window \(window.windowNumber, privacy: .public) was detected at \
             \(Int(window.frame.width), privacy: .public) by \
             \(Int(window.frame.height), privacy: .public) pt, level \
@@ -3966,7 +3966,7 @@ public final class AgentSeat {
         )
         do { try placing.resize(window, to: size) }
         catch {
-            Self.log.info("""
+            Self.log.notice("""
                 window \(window.windowNumber, privacy: .public) would not be resized: \
                 \(String(describing: error), privacy: .public)
                 """)
@@ -3980,7 +3980,7 @@ public final class AgentSeat {
     }
 
     private func refuseTransfer(_ window: WindowReference, _ reason: WindowTransferRefusal) {
-        Self.log.info("""
+        Self.log.notice("""
             window \(window.windowNumber, privacy: .public) was not brought in: \
             \(String(describing: reason), privacy: .public)
             """)
@@ -4204,7 +4204,7 @@ public final class AgentSeat {
         if case .refused(let refusal) = run.outcome, refusal != .frontRequestRefused {
             return refuseBriefActivation(refusal, run.summary)
         }
-        Self.log.info("""
+        Self.log.notice("""
             brought pid \(target.processID, privacy: .public) window \(target.windowNumber, privacy: .public) \
             briefly in front: \(run.summary, privacy: .public)
             """)
@@ -4268,7 +4268,7 @@ public final class AgentSeat {
         _ refusal: BriefActivationOutcome.Refusal,
         _ reason : String
     ) -> BriefActivationOutcome {
-        Self.log.info("""
+        Self.log.notice("""
             a brief activation was refused, \(refusal.rawValue, privacy: .public): \(reason, privacy: .public)
             """)
         return .refused(refusal)
@@ -4379,7 +4379,7 @@ public final class AgentSeat {
         // difference between "the seat gave your focus back" and "the seat sat
         // there". It is one line and it belongs in the same log as the
         // transitions it explains.
-        Self.log.info("""
+        Self.log.notice("""
             user focus recovery: \(String(describing: report.outcome), privacy: .public), \
             destination \(report.destination.map { "window \($0.windowNumber)" } ?? "none", privacy: .public), \
             activated by process \(report.activatingProcessID, privacy: .public), \
@@ -4644,7 +4644,7 @@ public final class AgentSeat {
                     catch { writeError = error }
                 }
             } else if sensing.windowIsDestroyed(window.reference) {
-                Self.log.info("""
+                Self.log.notice("""
                     the window server confirmed window \(window.id, privacy: .public) was destroyed \
                     before its adoption was rolled back: it is owed no return
                     """)
@@ -4954,7 +4954,7 @@ public final class AgentSeat {
         // own says what happened and never why, and the two readings a consumer
         // has to tell apart — an issue and a request — look identical without
         // it. Issue cases carry no text of the person's.
-        Self.log.info("""
+        Self.log.notice("""
             seat \(previous.rawValue, privacy: .public) -> \
             \(next.rawValue, privacy: .public), \
             \(String(describing: reason), privacy: .public)
@@ -5086,7 +5086,7 @@ public final class AgentSeat {
            case .hostMoved(let before, let after)? =
                closureGeometryEffect(of: seatGuard.target) {
             confirmation = .observed
-            Self.log.info("""
+            Self.log.notice("""
                 window \(seatGuard.target.windowNumber, privacy: .public) moved from \
                 \(Int(before.minX), privacy: .public),\(Int(before.minY), privacy: .public) to \
                 \(Int(after.minX), privacy: .public),\(Int(after.minY), privacy: .public) pt \
@@ -5180,7 +5180,7 @@ public final class AgentSeat {
                     // the readings that follow say whether the write took.
                     do { try placing.resize(record.window.reference, to: size) }
                     catch {
-                        Self.log.info("""
+                        Self.log.notice("""
                             window \(record.window.id, privacy: .public) would not be adapted to \
                             \(Int(size.width), privacy: .public) by \
                             \(Int(size.height), privacy: .public) pt: \
@@ -5240,7 +5240,7 @@ public final class AgentSeat {
         observationIssuer.invalidate(.geometryChanged)
         outstandingGeometry = nil
 
-        Self.log.info("""
+        Self.log.notice("""
             window \(resized.windowNumber, privacy: .public) settled at \
             \(Int(resized.frame.width), privacy: .public) by \
             \(Int(resized.frame.height), privacy: .public) pt: it is the operating geometry now, \

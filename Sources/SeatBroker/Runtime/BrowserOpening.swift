@@ -168,7 +168,7 @@ enum BrowserOpening {
         }
         let waited = started.duration(to: .now).components
         let milliseconds = waited.seconds * 1000 + waited.attoseconds / 1_000_000_000_000_000
-        log.info("""
+        log.notice("""
             \(app.name, privacy: .public) was running: pressed \(pressed, privacy: .public) and adopting \
             its new window \(opened.window.windowNumber, privacy: .public), listed after \
             \(milliseconds, privacy: .public) ms, accessibility element found: \

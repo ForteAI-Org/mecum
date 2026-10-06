@@ -62,7 +62,7 @@ public final class HiddenWindowReturns {
 
     func owe(_ window: AdoptedWindow) {
         owed[window.id] = Owed(window: window)
-        Self.log.info("""
+        Self.log.notice("""
             window \(window.id, privacy: .public) is hidden by its application: \
             it goes back when it is shown again
             """)
@@ -93,12 +93,12 @@ public final class HiddenWindowReturns {
             let home = (entry.window.originalServerFrame ?? entry.window.originalFrame).origin
             let tolerance = VirtualWindowPlacementCheck.crossSourceTolerance
             if abs(server.frame.minX - home.x) <= tolerance, abs(server.frame.minY - home.y) <= tolerance {
-                Self.log.info("window \(number, privacy: .public) was shown again and is back where it was")
+                Self.log.notice("window \(number, privacy: .public) was shown again and is back where it was")
                 owed[number] = nil
                 continue
             }
             guard entry.moves < Self.moveLimit else {
-                Self.log.info("""
+                Self.log.notice("""
                     window \(number, privacy: .public) was shown again and would not go back \
                     after \(Self.moveLimit, privacy: .public) moves: left where its application put it
                     """)
@@ -108,7 +108,7 @@ public final class HiddenWindowReturns {
             owed[number]?.moves += 1
             do { try placing.move(server, to: entry.window.originalFrame.origin) }
             catch {
-                Self.log.info("""
+                Self.log.notice("""
                     window \(number, privacy: .public) was shown again and could not be moved \
                     back yet: \(String(describing: error), privacy: .public)
                     """)

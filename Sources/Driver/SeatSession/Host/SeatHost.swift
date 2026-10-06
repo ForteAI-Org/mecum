@@ -652,7 +652,7 @@ public final class SeatHost {
         state = next
         eventChannel.yield(.hostStateChanged(from: previous, to: next, reason: reason))
 
-        Self.log.info("""
+        Self.log.notice("""
             host \(previous.rawValue, privacy: .public) -> \
             \(next.rawValue, privacy: .public)
             """)

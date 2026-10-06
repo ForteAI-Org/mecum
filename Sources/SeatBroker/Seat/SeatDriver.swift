@@ -350,7 +350,7 @@ final class SeatDriver {
                 bundleURL       : running?.bundleURL,
                 bundleIdentifier: running?.bundleIdentifier
             )
-            Self.log.info("""
+            Self.log.notice("""
                 \(running?.localizedName ?? "pid \(target.pid)", privacy: .public) \
                 (\(running?.bundleIdentifier ?? "no bundle identifier", privacy: .public)) \
                 is driven with \(choice.platformName, privacy: .public): \
@@ -668,7 +668,7 @@ final class SeatDriver {
             try await seat.withContextMenu(openedAt: location, observation: observation, turn: turn) { interaction in
                 note = await Self.choose(item, in: interaction, openedFrom: parent)
                 // The note quotes the menu's own titles, which are the app's content (§15.5).
-                Self.log.info("contextual menu, chose: \(note, privacy: .private)")
+                Self.log.notice("contextual menu, chose: \(note, privacy: .private)")
             }
         }
         return MenuChoice(
@@ -1030,7 +1030,7 @@ final class SeatDriver {
         await preview.tearDown()
         seat = nil
         let report = await host.stop()
-        Self.log.info("""
+        Self.log.notice("""
             teardown: display removed \(report.displayRemoved, privacy: .public), \
             fence released \(report.fenceReleased, privacy: .public), \
             main display restored \(report.mainDisplayRestored, privacy: .public), \
@@ -1069,7 +1069,7 @@ final class SeatDriver {
     private func liveSeat() async throws -> AgentSeat {
         if let seat {
             guard seat.state == .failed else { return seat }
-            Self.log.info("the seat failed: taking the host down to make a new seat")
+            Self.log.notice("the seat failed: taking the host down to make a new seat")
             if let sentence = await stop() { keep(sentence) }
             // The failed seat's releases are named in the notes already, and
             // they are no window of the adoption that is about to start.
@@ -1108,7 +1108,7 @@ final class SeatDriver {
     private func watch(_ events: AsyncStream<SeatEvent>) -> Task<Void, Never> {
         Task { @MainActor [weak self] in
             for await event in events {
-                Self.log.info("seat event: \(SeatErrorMapper.line(for: event), privacy: .public)")
+                Self.log.notice("seat event: \(SeatErrorMapper.line(for: event), privacy: .public)")
                 guard let self else { return }
                 if let note = SeatErrorMapper.note(for: event) { self.keep(note) }
             }

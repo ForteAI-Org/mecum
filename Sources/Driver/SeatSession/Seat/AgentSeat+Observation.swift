@@ -357,7 +357,7 @@ extension AgentSeat {
         // Proof another reader took is drained here too, because this is the
         // only reading that ends a containment wait.
         for identity in pendingDestruction.sorted(by: { $0.windowNumber < $1.windowNumber }) {
-            AgentSeat.observationLog.info("""
+            AgentSeat.observationLog.notice("""
                 the window server confirmed window \(identity.windowNumber, privacy: .public) \
                 was destroyed: ending its containment wait
                 """)
@@ -387,7 +387,7 @@ extension AgentSeat {
         // stays absent-uncertain forever, containment never verifies again, and
         // the seat is suspended on a window nobody can bring back.
         for identity in snapshot.withdrawnByApplication {
-            AgentSeat.observationLog.info("""
+            AgentSeat.observationLog.notice("""
                 the application withdrew window \(identity.windowNumber, privacy: .public),                 which the window server still shows: confirming its closure
                 """)
             noteSurfaceGone(identity.windowNumber, evidence: .applicationWithdrewTheWindow)
@@ -752,7 +752,7 @@ extension AgentSeat {
                 let why = remote.evidence == .focusedSurfaceDescendant
                     ? "has a focused descendant in its remote content window"
                     : "answers no readable focus and names one remote content window"
-                AgentSeat.observationLog.info("""
+                AgentSeat.observationLog.notice("""
                     modal window \(sheet.windowNumber, privacy: .public) \(why, privacy: .public), \
                     \(remote.identity.windowNumber, privacy: .public), so its keys go there: the \
                     discovery had answered \(String(describing: outcome), privacy: .public)
@@ -808,7 +808,7 @@ extension AgentSeat {
                chain,
                observation.selectionGeneration
            ) {
-            AgentSeat.observationLog.info("""
+            AgentSeat.observationLog.notice("""
                 the \(content.kind == .pointer ? "node under the point" : "focused control", privacy: .public) \
                 on window \(sheet.windowNumber, privacy: .public) names no Window ID and is drawn inside \
                 it, so its events go to it: the discovery had answered \
@@ -830,14 +830,14 @@ extension AgentSeat {
                 if hasAttestedModalRelation {
                     switch endpoints.leafSurface(instance.processID, kind, chain, observation.selectionGeneration) {
                         case .success(let endpoint):
-                            AgentSeat.observationLog.info("""
+                            AgentSeat.observationLog.notice("""
                                 modal window \(sheet.windowNumber, privacy: .public) is a single \
                                 accessibility leaf, so its events go to it: the discovery had refused \
                                 with \(String(describing: refusal), privacy: .public)
                                 """)
                             return (endpoint, record.window)
                         case .failure(let leaf):
-                            AgentSeat.observationLog.info("""
+                            AgentSeat.observationLog.notice("""
                                 modal window \(sheet.windowNumber, privacy: .public) is no single \
                                 accessibility leaf either: \(String(describing: leaf), privacy: .public)
                                 """)
@@ -860,14 +860,14 @@ extension AgentSeat {
                    case .success(let modal) = endpoints.modalSurfaceKeyboardContext(
                        instance.processID, chain, observation.selectionGeneration
                    ) {
-                    AgentSeat.observationLog.info("""
+                    AgentSeat.observationLog.notice("""
                         UXP dialog window \(sheet.windowNumber, privacy: .public) has a complete \
                         own-window subtree despite absent or blocked AX focus; \
                         make only the modal key for input
                         """)
                     return (modal, record.window)
                 }
-                AgentSeat.observationLog.info("""
+                AgentSeat.observationLog.notice("""
                     the input endpoint discovery refused: \
                     \(String(describing: refusal), privacy: .public)
                     """)
@@ -1195,7 +1195,7 @@ extension AgentSeat {
         guard let identity = window.identity else { return }
         foldCurrentReading()
         if case .failure(let refusal) = selectionKit.selectExplicitly(identity) {
-            AgentSeat.observationLog.info("""
+            AgentSeat.observationLog.notice("""
                 the explicit selection was refused: \(String(describing: refusal), privacy: .public)
                 """)
         }
@@ -1422,7 +1422,7 @@ extension AgentSeat {
             chosen  = settled
             picture = observationPicture(for: chosen.surface)
             if let host = unresolvedModalHost(of: picture.surface) {
-                AgentSeat.observationLog.info("""
+                AgentSeat.observationLog.notice("""
                     window \(picture.surface.windowNumber, privacy: .public) is drawn inside \
                     window \(host.windowNumber, privacy: .public), which is not a window this \
                     seat can capture: refusing rather than publishing the modal's own picture

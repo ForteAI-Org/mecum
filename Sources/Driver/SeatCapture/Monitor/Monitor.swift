@@ -265,7 +265,7 @@ public final class Monitor {
         }
 
         policy = candidate
-        Self.log.info("""
+        Self.log.notice("""
             monitor quality \(change.from.frameRate.rawValue, privacy: .public) fps \
             x\(change.from.resolutionScale, privacy: .public) -> \
             \(change.to.frameRate.rawValue, privacy: .public) fps \
@@ -330,7 +330,7 @@ public final class Monitor {
         // the shape this followed belongs to the run that has already ended.
         guard requestedConfiguration == asked else { return }
         requestedConfiguration = followed
-        Self.log.info("""
+        Self.log.notice("""
             monitor follows target shape to \
             \(Int(contentPixelSize.width), privacy: .public)x\
             \(Int(contentPixelSize.height), privacy: .public) at \

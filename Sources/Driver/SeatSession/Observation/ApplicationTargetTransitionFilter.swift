@@ -119,7 +119,7 @@ nonisolated package final class ApplicationTargetTransitionFilter: @unchecked Se
             let retainedNumbers = String(describing: retained.keys.map(\.windowNumber).sorted())
             let admittedNumbers = String(describing: admitted.map(\.windowNumber).sorted())
             let omittedNumbers  = String(describing: omitted.map(\.windowNumber).sorted())
-            Self.observationLog.info(
+            Self.observationLog.notice(
                 "[known-missing] filter qualified=\(snapshot.inventory.completeness.isQualified, privacy: .public) rows=\(rowNumbers, privacy: .public) retained=\(retainedNumbers, privacy: .public) admitted=\(admittedNumbers, privacy: .public) omitted=\(omittedNumbers, privacy: .public)"
             )
         }

@@ -875,7 +875,7 @@ public final class SeatCaptureStream {
         self.configuration = configuration
         transition(to: .running(generation: generation))
         presentPendingStartupFrame(generation: generation)
-        Self.log.info("""
+        Self.log.notice("""
             capture started, \(String(describing: self.target), privacy: .public) \
             \(Int(configuration.pixelSize.width), privacy: .public)x\
             \(Int(configuration.pixelSize.height), privacy: .public) at \

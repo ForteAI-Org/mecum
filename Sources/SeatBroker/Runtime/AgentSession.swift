@@ -369,7 +369,7 @@ public final class AgentSession {
         // dentro il rettangolo dichiarato pieno, non e' il ritaglio a doverlo
         // togliere. Via appena la banda nera ha un nome.
         let geometry = delivery.frame.geometry
-        Self.diagnosticLog.info("""
+        Self.diagnosticLog.notice("""
             observed frame: pixel \(Int(geometry.pixelSize.width), privacy: .public)x\
             \(Int(geometry.pixelSize.height), privacy: .public) scale \(geometry.scaleFactor, privacy: .public), \
             content \(String(describing: geometry.contentRectInSurface), privacy: .public), \

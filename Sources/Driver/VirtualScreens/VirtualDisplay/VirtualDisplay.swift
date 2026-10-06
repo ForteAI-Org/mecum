@@ -228,7 +228,7 @@ public final class VirtualDisplay {
         )
         let origin = try baseline.cornerAttachedOrigin()
 
-        log.info("""
+        log.notice("""
             virtual display \(surface.displayID, privacy: .public) created, \
             \(configuration.pixelWidth, privacy: .public)x\
             \(configuration.pixelHeight, privacy: .public) at \
@@ -411,7 +411,7 @@ public final class VirtualDisplay {
             throw DisplayFailure.displayStillOnline(displayID)
         }
         let outcome = try topology.restore()
-        Self.log.info("topology restore: \(String(describing: outcome), privacy: .public)")
+        Self.log.notice("topology restore: \(String(describing: outcome), privacy: .public)")
         return outcome
     }
 

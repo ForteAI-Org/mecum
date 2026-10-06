@@ -88,7 +88,7 @@ nonisolated package struct SensingSurfaceReader: AssignedSurfaceReading {
         let retained = targetTransitions.retainedIdentities(ownedBy: processIDs)
         if !retained.isEmpty {
             let requested = String(describing: retained.map(\.windowNumber).sorted())
-            Self.observationLog.info(
+            Self.observationLog.notice(
                 "[known-missing] requesting named WindowServer rows=\(requested, privacy: .public)"
             )
         }
@@ -98,7 +98,7 @@ nonisolated package struct SensingSurfaceReader: AssignedSurfaceReading {
                     let rows = String(describing: native.inventory.rows.map(\.surface.reference.windowNumber).sorted())
                     let destroyed = String(describing: native.destroyedByWindowServer.map(\.windowNumber).sorted())
                     let withdrawn = String(describing: native.withdrawnByApplication.map(\.windowNumber).sorted())
-                    Self.observationLog.info(
+                    Self.observationLog.notice(
                         "[known-missing] named reply qualified=\(native.inventory.completeness.isQualified, privacy: .public) rows=\(rows, privacy: .public) destroyed=\(destroyed, privacy: .public) withdrawn=\(withdrawn, privacy: .public)"
                     )
                 }
