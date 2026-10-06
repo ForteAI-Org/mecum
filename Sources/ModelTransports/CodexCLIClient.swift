@@ -72,6 +72,7 @@ public actor CodexCLIClient: ModelTransport {
     /// `PATH`, which is minimal for an app launched from the Finder.
     public static func executableURL() throws -> URL {
         let paths = [
+            "/Applications/ChatGPT.app/Contents/Resources/codex-cli/bin/codex",
             "/Applications/ChatGPT.app/Contents/Resources/codex",
             "/Applications/Codex.app/Contents/Resources/codex",
             "/opt/homebrew/bin/codex", "/usr/local/bin/codex",
