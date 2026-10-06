@@ -66,6 +66,8 @@ public enum AccessibilityAugmentation {
     /// fill OCR gaps as text, after controls have taken their share of the element budget.
     /// Duplicate labels within the same container take ordinals; labels in different containers
     /// remain independently addressable.
+    /// Web ranges require native field focus: an inactive browser field can report
+    /// 0..0 while retaining another DOM selection. Native fields outside web content are unchanged.
     public static func elements<Reader: AccessibilityTreeReading>(
         under window: Reader.Node,
         windowFrame : CGRect,
@@ -79,6 +81,7 @@ public enum AccessibilityAugmentation {
 
         func emit(_ frame: CGRect, role: String, label: String, state: ControlState?, clip: CGRect,
                   container: String?, value: String? = nil, isEnabled: Bool? = nil,
+                  selectedRange: NSRange? = nil,
                   kind: ElementKind = .control) {
             // Chrome reports offscreen controls as one-point edge frames.
             // Such slivers cannot supply a usable position or an observed value.
@@ -95,6 +98,7 @@ public enum AccessibilityAugmentation {
                 role  : role,
                 state : state,
                 value : value,
+                selectedRange: selectedRange,
                 isEnabled: isEnabled,
                 container: container
             )
@@ -102,10 +106,12 @@ public enum AccessibilityAugmentation {
         }
 
         func walk(_ node: Reader.Node, _ depth: Int, _ clip: CGRect, _ container: String?,
-                  column: String? = nil, rowName: String? = nil, insideControl: Bool = false) {
+                  column: String? = nil, rowName: String? = nil, insideControl: Bool = false,
+                  insideWebContent: Bool = false) {
             guard depth < limits.maxDepth, out.count < limits.maxElements,
                   !limits.isPastDeadline() else { return }
             let role = reader.role(node) ?? ""
+            let webContent = insideWebContent || role == "AXWebArea"
             var childContainer = container
             if role == "AXGroup" || tableRoles.contains(role),
                let name = firstText([reader.title(node), reader.descriptionText(node)]),
@@ -150,7 +156,7 @@ public enum AccessibilityAugmentation {
                     let aligned = cells.count == columns.count && cells.allSatisfy { reader.role($0) == "AXCell" }
                     for (index, cell) in cells.enumerated() {
                         walk(cell, depth + 2, childClip, owner, column: aligned ? columns[index] : nil,
-                             rowName: label, insideControl: insideControl)
+                             rowName: label, insideControl: insideControl, insideWebContent: webContent)
                     }
                 }
                 return
@@ -164,19 +170,25 @@ public enum AccessibilityAugmentation {
                 }
             }
             if role == "AXTextField" || role == "AXTextArea" || role == "AXPopUpButton", let frame = reader.frame(node) {
+                let rawValue = reader.value(node)
+                // An unnamed empty native editor still has a measured role and frame.
+                let anonymousHandle = role == "AXTextArea" ? "Text area" : "Text field"
                 let handle = column ?? firstText([
                     reader.descriptionText(node), reader.title(node),
-                    role == "AXTextArea" ? reader.identifier(node) : nil, reader.value(node)
-                ])
+                    role == "AXTextArea" ? reader.identifier(node) : nil, rawValue
+                ]) ?? (textEntryRoles.contains(role) ? anonymousHandle : nil)
                 if let handle, handle.count <= 48, column != nil || rowName != cleanLabel(handle) {
                     emit(frame, role: role, label: handle, state: nil, clip: clip, container: container,
-                         value: firstText([reader.value(node), role == "AXPopUpButton" ? reader.title(node) : nil]),
-                         isEnabled: reader.isEnabled(node))
+                         value: role == "AXPopUpButton" ? firstText([rawValue, reader.title(node)]) : rawValue,
+                         isEnabled: reader.isEnabled(node),
+                         selectedRange: textEntryRoles.contains(role)
+                            && (!webContent || reader.isFocused(node) == true) ? reader.selectedRange(node) : nil)
                 }
             }
             if statefulRoles.contains(role), let frame = reader.frame(node) {
                 let title = column ?? firstText([reader.title(node), reader.descriptionText(node)])
-                let value = firstText([reader.value(node)])
+                let rawValue = reader.value(node)
+                let value = firstText([rawValue])
                 var state: ControlState?
                 if role == "AXCheckBox" || role == "AXRadioButton" {
                     switch reader.numericValue(node) {
@@ -188,13 +200,16 @@ public enum AccessibilityAugmentation {
                 }
                 if let label = title ?? value, label.count <= 48, column != nil || rowName != cleanLabel(label) {
                     emit(frame, role: role, label: label, state: state, clip: clip, container: container,
-                         value: role == "AXComboBox" || role == "AXMenuButton" ? value : nil,
-                         isEnabled: reader.isEnabled(node))
+                         value: role == "AXComboBox" ? rawValue : (role == "AXMenuButton" ? value : nil),
+                         isEnabled: reader.isEnabled(node),
+                         selectedRange: role == "AXComboBox"
+                            && (!webContent || reader.isFocused(node) == true) ? reader.selectedRange(node) : nil)
                 }
             }
             for child in reader.children(node) {
                 walk(child, depth + 1, childClip, childContainer, column: column, rowName: rowName,
-                     insideControl: insideControl || interactiveRoles.contains(role) || role == "AXTextArea")
+                     insideControl: insideControl || interactiveRoles.contains(role) || role == "AXTextArea",
+                     insideWebContent: webContent)
             }
         }
         walk(window, 0, windowFrame, nil)
@@ -262,6 +277,7 @@ public enum AccessibilityAugmentation {
                 result[index].role = element.role
                 result[index].state = element.state
                 result[index].value = element.value
+                result[index].selectedRange = element.selectedRange
                 result[index].isEnabled = element.isEnabled
                 result[index].container = element.container
                 result[index].label = element.label

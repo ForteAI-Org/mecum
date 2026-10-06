@@ -5,7 +5,9 @@
 //  Created by Ronaldo Zefi on 15/09/2026.
 //
 
-/// SceneToken is a deterministic, process-stable hash of a scene's content and control states.
+import Foundation
+
+/// SceneToken is a deterministic, process-stable hash of content, control states and text selection.
 ///
 /// A model echoes it back when it acts, and the actuator compares it against the live scene: the
 /// same screen yields the same token, any element or state change yields a different one. It is
@@ -23,7 +25,11 @@ public struct SceneToken: Sendable, Equatable, Hashable, Codable, CustomStringCo
     public init(bundleID: String, windowTitle: String, elements: [SceneElement]) {
         let body = elements
             .map {
-                "\($0.id)|\($0.state?.rawValue ?? "")|\($0.value ?? "")|\($0.isEnabled.map(String.init) ?? "")|\($0.container ?? "")"
+                let body = "\($0.id)|\($0.state?.rawValue ?? "")|\($0.value ?? "")|\($0.isEnabled.map(String.init) ?? "")|\($0.container ?? "")"
+                guard let range = SceneElement.validRange($0.selectedRange, value: $0.value) else {
+                    return body
+                }
+                return body + "|selection:\(range.location),\(range.length)"
             }
             .sorted()
             .joined(separator: ";")

@@ -6,6 +6,7 @@
 //
 
 import CoreGraphics
+import Foundation
 
 /// AccessibilityTreeReading reads the facts of one accessibility tree, node by node, so the walk that
 /// turns the tree into scene elements is generic: the live conformer wraps the system's element
@@ -25,10 +26,20 @@ public protocol AccessibilityTreeReading: Sendable {
     func identifier(_ node: Node) -> String?
     /// The value as text, for fields, static text and combo boxes.
     func value(_ node: Node) -> String?
+    /// The node's own selection in UTF-16 units; nil when the provider cannot read it.
+    func selectedRange(_ node: Node) -> NSRange?
+    /// Whether the node owns keyboard focus within its application; nil when unreadable.
+    /// This does not establish that its application is in the foreground.
+    func isFocused(_ node: Node) -> Bool?
     /// The value as a number, for checkboxes and radios: 0 off, 1 on, 2 mixed.
     func numericValue(_ node: Node) -> Int?
     func isEnabled(_ node: Node) -> Bool?
     func actions(_ node: Node) -> [String]
     func frame(_ node: Node) -> CGRect?
     func children(_ node: Node) -> [Node]
+}
+
+extension AccessibilityTreeReading {
+    public func selectedRange(_ node: Node) -> NSRange? { nil }
+    public func isFocused(_ node: Node) -> Bool? { nil }
 }

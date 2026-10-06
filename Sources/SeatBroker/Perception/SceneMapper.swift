@@ -34,6 +34,7 @@ enum SceneMapper {
                 role    : element.role,
                 state   : element.state?.rawValue,
                 value   : element.value,
+                selectedRange: element.selectedRange,
                 bounds  : element.bounds.cgRect
             )
         }
@@ -84,6 +85,10 @@ enum SceneMapper {
         if let role = element.role { line += "/\(role)" }
         line += " · \(element.label)"
         if let state = element.state { line += " [\(state)]" }
+        if let value = element.value { line += " = \(String(reflecting: value))" }
+        if let range = element.selectedRange, let value = element.value {
+            line += " [selection UTF-16: \(range.location)..\(range.location + range.length) of \(value.utf16.count)]"
+        }
         return line + String(format: "  @ %.2f,%.2f %.2f×%.2f", element.bounds.minX, element.bounds.minY,
                              element.bounds.width, element.bounds.height)
     }

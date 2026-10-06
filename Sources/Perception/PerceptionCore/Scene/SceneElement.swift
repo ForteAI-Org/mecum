@@ -28,6 +28,8 @@ public struct SceneElement: Sendable, Equatable, Hashable {
     public var state: ControlState?
     /// The live field or dropdown value, distinct from the control's name.
     public var value: String?
+    /// Native selection in UTF-16 units, when it fits the exact observed field value.
+    public var selectedRange: NSRange?
     /// The application's enabled flag; nil means it did not expose availability.
     public var isEnabled: Bool?
     /// A named accessibility container path, independent of geometric panels and learned groups.
@@ -51,6 +53,7 @@ public struct SceneElement: Sendable, Equatable, Hashable {
         role       : String? = nil,
         state      : ControlState? = nil,
         value      : String? = nil,
+        selectedRange: NSRange? = nil,
         isEnabled  : Bool? = nil,
         container  : String? = nil,
         isUnlabeled: Bool = false,
@@ -66,6 +69,7 @@ public struct SceneElement: Sendable, Equatable, Hashable {
         self.role        = role
         self.state       = state
         self.value       = value
+        self.selectedRange = Self.validRange(selectedRange, value: value)
         self.isEnabled   = isEnabled
         self.container   = container
         self.isUnlabeled = isUnlabeled
@@ -74,13 +78,21 @@ public struct SceneElement: Sendable, Equatable, Hashable {
         self.does        = does
         self.section     = section
     }
+
+    /// Rejects missing values, negative ranges, overflow and ranges outside this reading.
+    static func validRange(_ range: NSRange?, value: String?) -> NSRange? {
+        guard let range, let value, range.location >= 0, range.length >= 0 else { return nil }
+        let count = value.utf16.count
+        guard range.location <= count, range.length <= count - range.location else { return nil }
+        return range
+    }
 }
 
 extension SceneElement: Codable {
 
     /// The wire keys are the ones scenes have always used, so a stored scene still decodes.
     private enum CodingKeys: String, CodingKey {
-        case id, kind, label, role, state, value, isEnabled, container, group, does, section
+        case id, kind, label, role, state, value, selectedRange, isEnabled, container, group, does, section
         case bounds      = "pos"
         case isUnlabeled = "unlabeled"
         case isRecalled  = "recalled"
@@ -96,6 +108,7 @@ extension SceneElement: Codable {
             role       : try c.decodeIfPresent(String.self, forKey: .role),
             state      : try c.decodeIfPresent(ControlState.self, forKey: .state),
             value      : try c.decodeIfPresent(String.self, forKey: .value),
+            selectedRange: try c.decodeIfPresent(NSRange.self, forKey: .selectedRange),
             isEnabled  : try c.decodeIfPresent(Bool.self, forKey: .isEnabled),
             container  : try c.decodeIfPresent(String.self, forKey: .container),
             isUnlabeled: try c.decodeIfPresent(Bool.self, forKey: .isUnlabeled) ?? false,
@@ -115,6 +128,7 @@ extension SceneElement: Codable {
         try c.encodeIfPresent(role, forKey: .role)
         try c.encodeIfPresent(state, forKey: .state)
         try c.encodeIfPresent(value, forKey: .value)
+        try c.encodeIfPresent(Self.validRange(selectedRange, value: value), forKey: .selectedRange)
         try c.encodeIfPresent(isEnabled, forKey: .isEnabled)
         try c.encodeIfPresent(container, forKey: .container)
         if isUnlabeled { try c.encode(true, forKey: .isUnlabeled) }

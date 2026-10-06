@@ -10,8 +10,9 @@ import PerceptionCore
 /// ActVerification decides whether a gesture landed, from the scenes before and after it.
 ///
 /// Success requires a structural effect: an element appeared, vanished, flipped, or the title
-/// changed. Identical tokens mean the window did not change at all. A token that differs with no
-/// attributable effect leaves the result unverified: content may have changed, or a repaint may
+/// changed, or a known native text selection changed. Identical tokens mean the window did not
+/// change at all. A token that differs with no attributable effect leaves the result unverified:
+/// content may have changed, or a repaint may
 /// have occurred. That uncertainty proves neither successful delivery nor absence of an effect.
 public enum ActVerification {
 

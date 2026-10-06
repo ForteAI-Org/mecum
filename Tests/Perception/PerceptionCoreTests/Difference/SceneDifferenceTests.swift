@@ -5,6 +5,7 @@
 //  Created by Ronaldo Zefi on 15/09/2026.
 //
 
+import Foundation
 @testable import PerceptionCore
 import Testing
 
@@ -124,6 +125,38 @@ struct SceneDifferenceTests {
         #expect(SceneDifference.effect(before: before, after: before, targetID: "a") == nil)
     }
 
+    @Test("native selection identifies the field even beside a checkbox with the same ID",
+          arguments: ["AXTextField", "AXTextArea", "AXComboBox"])
+    func nativeSelectionBesideASharedID(_ role: String) {
+        var field = element("search", "Search #2")
+        field.role = role
+        field.value = "Aé🧪"
+        field.selectedRange = NSRange(location: 0, length: 0)
+        var selected = field
+        selected.selectedRange = NSRange(location: 0, length: 4)
+        var checkbox = element("search", "Search", state: .on)
+        checkbox.role = "AXCheckBox"
+        #expect(SceneDifference.effect(
+            before: scene([checkbox, field]), after: scene([checkbox, selected]), targetID: nil
+        ) == .textSelectionChanged)
+    }
+
+    @Test("a selection cannot be attributed across a different application or document")
+    func nativeSelectionNeedsTheSameWindow() {
+        var field = element("name", "Name")
+        field.role = "AXTextField"
+        field.value = "Aé🧪"
+        field.selectedRange = NSRange(location: 0, length: 0)
+        var selected = field
+        selected.selectedRange = NSRange(location: 0, length: 4)
+        let before = scene([field], title: "Untitled-1")
+        var otherDocument = scene([selected], title: "Untitled-2")
+        #expect(SceneDifference.effect(before: before, after: otherDocument, targetID: nil) == nil)
+        otherDocument.bundleID = "com.other"
+        otherDocument.windowTitle = before.windowTitle
+        #expect(SceneDifference.effect(before: before, after: otherDocument, targetID: nil) == nil)
+    }
+
     @Test("family, summary and round trip through the encoded string")
     func familySummaryAndRoundTrip() {
         let flip = SceneEffect.stateFlip(from: .off, to: .on)
@@ -133,9 +166,10 @@ struct SceneDifferenceTests {
         #expect(SceneEffect.windowTitleChanged(title: "Render Queue").summary == "navigates to Render Queue")
         #expect(SceneEffect.stateFlip(from: .on, to: .off).family == flip.family)
         for effect in [flip, SceneEffect.menuOpened(labels: ["A", "B"]), .elementsAppeared(labels: ["X"]),
-                       .elementsDisappeared(labels: []), .windowTitleChanged(title: "Q")] {
+                       .elementsDisappeared(labels: []), .windowTitleChanged(title: "Q"), .textSelectionChanged] {
             #expect(SceneEffect(encoded: effect.encoded) == effect)
         }
         #expect(SceneEffect(encoded: "nonsense:x") == nil)
+        #expect(SceneEffect(encoded: "textSelectionChanged:unknown") == nil)
     }
 }

@@ -82,11 +82,14 @@ public struct SceneElement: Sendable, Hashable, Identifiable {
     public let state: String?
     /// Accessibility value, separate from the human-facing control label.
     public let value: String?
+    /// Selection in UTF-16 units of the observed value; nil when unavailable.
+    public let selectedRange: NSRange?
     /// Normalized to the observation image, origin top-left.
     public let bounds: CGRect
 
     public init(index: Int, identity: String, kind: String, label: String,
-                role: String?, state: String?, value: String? = nil, bounds: CGRect) {
+                role: String?, state: String?, value: String? = nil,
+                selectedRange: NSRange? = nil, bounds: CGRect) {
         self.index = index
         self.identity = identity
         self.kind = kind
@@ -94,6 +97,13 @@ public struct SceneElement: Sendable, Hashable, Identifiable {
         self.role = role
         self.state = state
         self.value = value
+        if let value, let selectedRange, selectedRange.location >= 0, selectedRange.length >= 0,
+           selectedRange.location <= value.utf16.count,
+           selectedRange.length <= value.utf16.count - selectedRange.location {
+            self.selectedRange = selectedRange
+        } else {
+            self.selectedRange = nil
+        }
         self.bounds = bounds
     }
 

@@ -6,6 +6,7 @@
 //
 
 import CoreGraphics
+import Foundation
 import PerceptionCore
 
 /// FakeNode is an in-memory accessibility node, so the augmentation walk is decided by tests with no
@@ -17,6 +18,8 @@ final class FakeNode: @unchecked Sendable {
     var descriptionText: String?
     var identifier: String?
     var value: String?
+    var selectedRange: NSRange?
+    var isFocused: Bool?
     var numericValue: Int?
     var isEnabled: Bool?
     var frame: CGRect?
@@ -57,6 +60,8 @@ struct FakeReader: AccessibilityTreeReading {
     func descriptionText(_ node: FakeNode) -> String? { node.descriptionText }
     func identifier(_ node: FakeNode) -> String? { node.identifier }
     func value(_ node: FakeNode) -> String? { node.value }
+    func selectedRange(_ node: FakeNode) -> NSRange? { node.selectedRange }
+    func isFocused(_ node: FakeNode) -> Bool? { node.isFocused }
     func numericValue(_ node: FakeNode) -> Int? { node.numericValue }
     func isEnabled(_ node: FakeNode) -> Bool? { node.isEnabled }
     func actions(_ node: FakeNode) -> [String] { [] }

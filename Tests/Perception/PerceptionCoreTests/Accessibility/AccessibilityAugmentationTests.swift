@@ -6,6 +6,7 @@
 //
 
 import CoreGraphics
+import Foundation
 @testable import PerceptionCore
 import Testing
 
@@ -36,6 +37,96 @@ struct AccessibilityAugmentationTests {
     }
 
     // MARK: Harvest
+
+    @Test("editable native values preserve empty text, spaces and terminal line endings",
+          arguments: ["AXTextField", "AXTextArea", "AXComboBox"])
+    func nativeTextIsVerbatim(role: String) throws {
+        for raw in ["", "   ", "  Aé🧪\r\n\n"] {
+            let field = FakeNode(role, descriptionText: "Editor", value: raw,
+                                 frame: box(300, 300, 200, 80))
+            let root = FakeNode("AXWindow", frame: window).adding(field)
+            let out = AccessibilityAugmentation.elements(under: root, windowFrame: window, reader: reader)
+            #expect(try #require(out.first).value == raw)
+        }
+        let unavailable = FakeNode(role, descriptionText: "Editor", frame: box(300, 300, 200, 80))
+        let root = FakeNode("AXWindow", frame: window).adding(unavailable)
+        #expect(try #require(AccessibilityAugmentation.elements(
+            under: root, windowFrame: window, reader: reader
+        ).first).value == nil)
+    }
+
+    @Test("a native UTF-16 selection survives pixel merging and reaches the readable scene",
+          arguments: ["AXTextField", "AXTextArea", "AXComboBox"])
+    func nativeSelectionIsVisible(role: String) throws {
+        let raw = "Aé🧪"
+        let field = FakeNode(role, descriptionText: "Editor", value: raw,
+                             frame: box(300, 300, 200, 80))
+        field.selectedRange = NSRange(location: 0, length: raw.utf16.count)
+        let root = FakeNode("AXWindow", frame: window).adding(field)
+        let native = AccessibilityAugmentation.elements(under: root, windowFrame: window, reader: reader)
+        let merged = AccessibilityAugmentation.merge(pixels: [SceneElement(
+            id: "ocr-editor", kind: .text, label: "Editor",
+            bounds: try #require(native.first).bounds
+        )], accessibility: native)
+        let scene = SceneSnapshot(
+            bundleID: "fixture", appName: "Fixture", windowTitle: "Editor",
+            viewportPixelSize: .init(width: 1000, height: 800), elements: merged
+        )
+        #expect(scene.text().contains("[selection UTF-16: 0..4 of 4]"))
+        #expect(scene.mapText().contains("[selection UTF-16: 0..4 of 4]"))
+    }
+
+    @Test("web fields expose selection only with positive native focus",
+          arguments: ["AXTextField", "AXTextArea", "AXComboBox"])
+    func webSelectionRequiresFocus(role: String) throws {
+        for focused: Bool? in [true, false, nil] {
+            let field = FakeNode(role, descriptionText: "Editor", value: "ABCé🧪",
+                                 frame: box(300, 300, 200, 80))
+            field.selectedRange = NSRange(location: 0, length: focused == true ? 6 : 0)
+            field.isFocused = focused
+            let root = FakeNode("AXWindow", frame: window).adding(
+                FakeNode("AXWebArea", frame: window).adding(
+                    FakeNode("AXGroup", frame: window).adding(field)
+                )
+            )
+            let element = try #require(AccessibilityAugmentation.elements(
+                under: root, windowFrame: window, reader: reader
+            ).first)
+            #expect(element.value == "ABCé🧪")
+            #expect(element.selectedRange == (focused == true ? field.selectedRange : nil))
+        }
+    }
+
+    @Test("native fields outside web content retain their own readable selection")
+    func nativeSelectionDoesNotRequireWebFocus() throws {
+        let field = FakeNode("AXTextArea", descriptionText: "Editor", value: "ABCé🧪",
+                             frame: box(300, 300, 200, 80))
+        field.selectedRange = NSRange(location: 0, length: 6)
+        field.isFocused = false
+        let web = FakeNode("AXWebArea", frame: window)
+        let root = FakeNode("AXWindow", frame: window).adding(web, field)
+        let element = try #require(AccessibilityAugmentation.elements(
+            under: root, windowFrame: window, reader: reader
+        ).first)
+        #expect(element.selectedRange == field.selectedRange)
+    }
+
+    @Test("known empty and whitespace-bearing native values are visible without scene line breaks")
+    func nativeWhitespaceIsVisible() throws {
+        for raw in ["", "   ", "  Aé🧪\r\n\n"] {
+            let field = FakeNode("AXTextArea", descriptionText: "Editor", value: raw,
+                                 frame: box(300, 300, 200, 80))
+            let root = FakeNode("AXWindow", frame: window).adding(field)
+            let native = AccessibilityAugmentation.elements(under: root, windowFrame: window, reader: reader)
+            let scene = SceneSnapshot(
+                bundleID: "fixture", appName: "Fixture", windowTitle: "Editor",
+                viewportPixelSize: .init(width: 1000, height: 800), elements: native
+            )
+            #expect(scene.text().contains(" = " + String(reflecting: raw)))
+            #expect(!scene.text().contains("\r"))
+            #expect(scene.text().split(separator: "\n").count == 4)
+        }
+    }
 
     @Test("table rows are named by their deepest name, cleaned, and normalized")
     func tableRows() {
@@ -105,6 +196,25 @@ struct AccessibilityAugmentationTests {
         let root = FakeNode("AXWindow", frame: window).adding(a, b)
         let out = AccessibilityAugmentation.elements(under: root, windowFrame: window, reader: reader)
         #expect(out.map(\.label) == ["Track Name", "Track Name #2"])
+    }
+
+    @Test("unnamed native text entries remain addressable without inventing a value",
+          arguments: ["AXTextField", "AXTextArea"], [String?.some(""), .none, .some("  ")])
+    func unnamedTextEntry(role: String, value: String?) throws {
+        let field = FakeNode(role, value: value, frame: box(120, 200, 600, 40))
+        let range = NSRange(location: 0, length: value?.utf16.count ?? 0)
+        field.selectedRange = range
+        let root = FakeNode("AXWindow", frame: window).adding(field)
+        let elements = AccessibilityAugmentation.elements(
+            under: root, windowFrame: window, reader: reader
+        )
+        let entry = try #require(elements.first)
+        #expect(elements.count == 1)
+        #expect(entry.role == role)
+        #expect(entry.label == (role == "AXTextArea" ? "Text area" : "Text field"))
+        #expect(entry.value == value)
+        #expect(entry.selectedRange == (value == nil ? nil : range))
+        #expect(entry.bounds == NormalizedRect(x: 0.02, y: 0.125, width: 0.6, height: 0.05))
     }
 
     @Test("an empty multiline editor is addressable by description or identifier", arguments: [true, false])

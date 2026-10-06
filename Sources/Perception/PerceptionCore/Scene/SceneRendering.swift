@@ -103,10 +103,25 @@ extension SceneSnapshot {
     }
 
     private static func liveDetails(_ element: SceneElement) -> String {
-        let value = element.value.flatMap { $0 == element.label ? nil : " = \($0)" } ?? ""
+        let value = element.value.flatMap { $0 == element.label ? nil : " = \(visibleValue($0))" } ?? ""
+        let selection: String
+        if let text = element.value, let range = SceneElement.validRange(element.selectedRange, value: text) {
+            selection = " [selection UTF-16: \(range.location)..\(range.location + range.length) of \(text.utf16.count)]"
+        } else {
+            selection = ""
+        }
         let availability = element.isEnabled == false ? " [disabled]" : ""
         let owner = element.container.map { " {\($0)}" } ?? ""
-        return value + availability + owner
+        return value + selection + availability + owner
+    }
+
+    /// Escapes whitespace without turning one native value into additional scene rows.
+    private static func visibleValue(_ value: String) -> String {
+        if value.isEmpty || value != value.trimmingCharacters(in: .whitespacesAndNewlines)
+            || value.contains("\n") || value.contains("\r") || value.contains("\t") {
+            return String(reflecting: value)
+        }
+        return value
     }
 
     /// Map order: stateful first, learned affordance second, any labeled control or icon third.

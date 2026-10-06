@@ -30,6 +30,18 @@ public struct LiveAccessibilityReader: AccessibilityTreeReading {
     public nonisolated func identifier(_ node: AXUIElement) -> String? { string(node, kAXIdentifierAttribute) }
     public nonisolated func value(_ node: AXUIElement) -> String? { string(node, kAXValueAttribute) }
 
+    public nonisolated func selectedRange(_ node: AXUIElement) -> NSRange? {
+        guard let value = axValue(attribute(node, kAXSelectedTextRangeAttribute)),
+              AXValueGetType(value) == .cfRange else { return nil }
+        var range = CFRange()
+        guard AXValueGetValue(value, .cfRange, &range), range.location >= 0, range.length >= 0 else { return nil }
+        return NSRange(location: range.location, length: range.length)
+    }
+
+    public nonisolated func isFocused(_ node: AXUIElement) -> Bool? {
+        attribute(node, kAXFocusedAttribute) as? Bool
+    }
+
     public nonisolated func numericValue(_ node: AXUIElement) -> Int? {
         (attribute(node, kAXValueAttribute) as? NSNumber)?.intValue
     }

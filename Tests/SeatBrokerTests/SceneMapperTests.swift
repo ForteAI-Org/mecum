@@ -6,7 +6,9 @@
 //
 
 import CoreGraphics
+import Foundation
 import PerceptionCore
+import struct SeatBroker.SceneElement
 import Testing
 @testable import SeatBroker
 
@@ -95,4 +97,45 @@ private func blankImage() -> CGImage {
 
     #expect(Set(elements.map(\.id)).count == elements.count)
     #expect(elements.map(\.identity) == ["?|@2,0", "?|@2,0"])
+}
+
+@Test func mapsExactNativeTextAndSelection() throws {
+    let value = "  Aé🧪\r\n"
+    let selection = NSRange(location: 2, length: 4)
+    let snapshot = SceneSnapshot(
+        bundleID         : "fixture",
+        appName          : "Fixture",
+        windowTitle      : "Editor",
+        viewportPixelSize: ViewportPixelSize(width: 100, height: 50),
+        elements         : [PerceptionCore.SceneElement(
+            id           : "control|editor",
+            kind         : .control,
+            label        : "Editor",
+            bounds       : NormalizedRect(x: 0.1, y: 0.1, width: 0.5, height: 0.1),
+            role         : "AXTextArea",
+            value        : value,
+            selectedRange: selection
+        )]
+    )
+    let observation = SceneMapper.observation(from: snapshot, image: blankImage())
+    let field = try #require(observation.elements.first)
+    #expect(field.value == value)
+    #expect(field.selectedRange == selection)
+    #expect(observation.text.contains(String(reflecting: value)))
+    #expect(observation.text.contains("[selection UTF-16: 2..6 of 8]"))
+}
+
+@Test func rejectsBrokerSelectionOutsideTheObservedText() {
+    let field = SceneElement(
+        index        : 1,
+        identity     : "control|editor",
+        kind         : "control",
+        label        : "Editor",
+        role         : "AXTextArea",
+        state        : nil,
+        value        : "A",
+        selectedRange: NSRange(location: 0, length: Int.max),
+        bounds       : CGRect(x: 0.1, y: 0.1, width: 0.5, height: 0.1)
+    )
+    #expect(field.selectedRange == nil)
 }

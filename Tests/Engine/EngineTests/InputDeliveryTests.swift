@@ -362,6 +362,51 @@ struct InputDeliveryTests {
         #expect(actuator.gestures == [.key(code: Key.delete, modifiers: .command)])
     }
 
+    @Test("a key's changed native selection is verified without a text or pixel change")
+    func keyChangesNativeSelection() async {
+        var before = field(value: "Aé🧪")
+        before.selectedRange = NSRange(location: 0, length: 0)
+        var after = before
+        after.selectedRange = NSRange(location: 0, length: 1)
+        let actuator = RecordingActuator()
+        let outcome = await engine(
+            scenes: ScriptedScenes([scene([before]), scene([after])]), actuator: actuator
+        ).deliver(request(.pressKey(KeyChord(.right, modifiers: .shift), times: 1)))
+        #expect(outcome.kind == .foundActed, Comment(rawValue: outcome.message))
+        #expect(outcome.message.contains("text selection"))
+        #expect(actuator.confirmations == [.observed])
+        #expect(actuator.gestures == [.key(code: Key.rightArrow, modifiers: .shift)])
+    }
+
+    @Test("unknown, invalid or ambiguous selection cannot verify a key", arguments: [
+        "unknown before", "unknown after", "different value", "different identity",
+        "different role", "duplicate ID", "invalid range"
+    ])
+    func uncertainSelectionCannotVerifyAKey(_ issue: String) async {
+        var before = field(value: "Aé🧪")
+        before.selectedRange = NSRange(location: 4, length: 0)
+        var after = before
+        after.selectedRange = NSRange(location: 0, length: 1)
+        switch issue {
+            case "unknown before"   : before.selectedRange = nil
+            case "unknown after"    : after.selectedRange = nil
+            case "different value"  : after.value = "Bé🧪"
+            case "different identity": after.id = "another-field"
+            case "different role"   : after.role = "AXStaticText"
+            case "invalid range"    : after.selectedRange = NSRange(location: Int.max, length: 1)
+            default                  : break
+        }
+        let beforeElements = issue == "duplicate ID" ? [before, before] : [before]
+        let afterElements = issue == "duplicate ID" ? [after, after] : [after]
+        let actuator = RecordingActuator()
+        let outcome = await engine(
+            scenes: ScriptedScenes([scene(beforeElements), scene(afterElements)]), actuator: actuator
+        ).deliver(request(.pressKey(KeyChord(.right, modifiers: .shift), times: 1)))
+        #expect(outcome.kind == .actedUnverified)
+        #expect(actuator.confirmations == [.unknown])
+        #expect(actuator.gestures.count == 1)
+    }
+
     @Test("a key is found_acted only when the scene changed, and repeats go out as separate presses")
     func keyIsJudgedByTheScene() async {
         let actuator = RecordingActuator()

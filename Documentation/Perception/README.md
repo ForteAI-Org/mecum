@@ -65,6 +65,23 @@ scene.resolve(target: "Export")               // .found, .ambiguous(n) or .none
   a menu-layer window one row tall is a pop-up; every verdict carries the clause that decided it.
 - Empty multiline editors are harvested as `AXTextArea`. Their AX identifier can supply a handle
   when title and description are absent, as in TextEdit's `First Text View`; frame trust still applies.
+  A text field or text area with no readable handle remains addressable by its measured role,
+  using `Text field` or `Text area`. These are role handles, not inferred application labels.
+  Missing values stay unavailable; a genuinely empty value stays empty. Popup buttons do not
+  acquire this text-entry fallback. Existing clipping and duplicate-label rules still apply.
+- Native editable values retain exact whitespace and line endings. An empty string is a known
+  empty value; nil means unavailable. Native selection ranges use UTF-16 units and are exposed
+  only when they fit the exact value, including a caret in empty text. Both scene tiers and broker
+  observations carry this evidence. Whitespace-bearing values are escaped onto one text row.
+  Within an `AXWebArea`, a range also requires positive native focus on that field. Browser AX
+  can report 0..0 after blur while the DOM retains a different selection. An unfocused or
+  unreadable focus therefore leaves the range unavailable, while preserving the exact value.
+  Native fields outside web content retain their independently readable selection.
+  Older serialized scenes omit selection and still decode. A valid selection change changes the
+  scene token, so an action based on a different observed selection cannot reuse the old token.
+  Two valid ranges on one uniquely identified editable field, with the same exact text, app and
+  window title, yield a `textSelectionChanged` effect. Missing, invalid or duplicate facts do not
+  establish that effect; its stable encoding carries no transient offsets into learned evidence.
 - Native text-entry controls appear as `[field]` with their current element ID in both text tiers.
   This distinguishes an editable value from a same-name visual caption or version row. Typing
   prefers native text-entry matches for a shared label, while two fields remain ambiguous;

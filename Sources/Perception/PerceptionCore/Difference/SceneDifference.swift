@@ -62,7 +62,29 @@ public enum SceneDifference {
             return !normalized.isEmpty && !afterLabels.contains(normalized)
         }
         if gone.count >= 3 { return .elementsDisappeared(labels: canonicalLabels(gone)) }
+        if textSelectionChanged(before: before, after: after) { return .textSelectionChanged }
         return nil
+    }
+
+    /// Both readings must belong to one field with the same exact text. Missing,
+    /// invalid or duplicate native facts do not establish a selection change.
+    private static func textSelectionChanged(before: SceneSnapshot, after: SceneSnapshot) -> Bool {
+        guard before.bundleID == after.bundleID, before.windowTitle == after.windowTitle else { return false }
+        let roles: Set<String> = ["AXTextField", "AXTextArea", "AXComboBox"]
+        for field in before.elements where field.kind == .control && roles.contains(field.role ?? "") {
+            let matches: (SceneElement) -> Bool = {
+                $0.id == field.id && $0.kind == field.kind && $0.role == field.role
+            }
+            guard before.elements.filter(matches).count == 1 else { continue }
+            let current = after.elements.filter(matches)
+            guard current.count == 1, let counterpart = current.first,
+                  field.value == counterpart.value,
+                  let previousRange = SceneElement.validRange(field.selectedRange, value: field.value),
+                  let currentRange = SceneElement.validRange(counterpart.selectedRange, value: counterpart.value)
+            else { continue }
+            if previousRange != currentRange { return true }
+        }
+        return false
     }
 
     /// Sorted, deduplicated, capped names: the canonical identity of an appearance. Prose next to a

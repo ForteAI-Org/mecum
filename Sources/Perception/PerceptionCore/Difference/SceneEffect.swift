@@ -23,9 +23,11 @@ public enum SceneEffect: Sendable, Equatable, Hashable {
     case elementsAppeared(labels: [String])
     /// A cluster of stable labels vanished.
     case elementsDisappeared(labels: [String])
+    /// A uniquely identified native text field changed its observed UTF-16 selection.
+    case textSelectionChanged
 
     /// The effect family: `stateFlip`, `menuOpened`, `elementsAppeared`, `elementsDisappeared`,
-    /// `windowTitleChanged`.
+    /// `windowTitleChanged`, `textSelectionChanged`.
     public var family: String {
         switch self {
             case .windowTitleChanged : "windowTitleChanged"
@@ -33,6 +35,7 @@ public enum SceneEffect: Sendable, Equatable, Hashable {
             case .menuOpened         : "menuOpened"
             case .elementsAppeared   : "elementsAppeared"
             case .elementsDisappeared: "elementsDisappeared"
+            case .textSelectionChanged: "textSelectionChanged"
         }
     }
 
@@ -44,6 +47,7 @@ public enum SceneEffect: Sendable, Equatable, Hashable {
             case .menuOpened(let labels)             : "menuOpened:\(labels.joined(separator: "|"))"
             case .elementsAppeared(let labels)       : "elementsAppeared:\(labels.joined(separator: "|"))"
             case .elementsDisappeared(let labels)    : "elementsDisappeared:\(labels.joined(separator: "|"))"
+            case .textSelectionChanged               : "textSelectionChanged:"
         }
     }
 
@@ -60,6 +64,8 @@ public enum SceneEffect: Sendable, Equatable, Hashable {
                 return "closes elements"
             case .windowTitleChanged(let title):
                 return "navigates to \(title)"
+            case .textSelectionChanged:
+                return "changes text selection"
         }
     }
 
@@ -80,6 +86,9 @@ public enum SceneEffect: Sendable, Equatable, Hashable {
             case "menuOpened"         : self = .menuOpened(labels: labels)
             case "elementsAppeared"   : self = .elementsAppeared(labels: labels)
             case "elementsDisappeared": self = .elementsDisappeared(labels: labels)
+            case "textSelectionChanged":
+                guard payload.isEmpty else { return nil }
+                self = .textSelectionChanged
             default                   : return nil
         }
     }
