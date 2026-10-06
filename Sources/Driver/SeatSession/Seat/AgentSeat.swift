@@ -4767,11 +4767,9 @@ public final class AgentSeat {
         let bounds = sensing.virtualDisplayBounds
 
         var previousMatched = false
-        // Stage Manager can keep publishing a full-size transition surface
-        // after AX has already put a stashed window's body home. Give that
-        // transition time to become the physical thumbnail, without writing
-        // AXPosition again and restarting the animation on every reading.
-        let attempts = window.originalServerFrame == nil ? 8 : 3
+        // Stage Manager can stash even a window whose original server frame was
+        // known. Poll the same bound without restarting a matched AX body.
+        let attempts = 8
         for _ in 0..<attempts {
             guard Self.mayContinue(until: limit) else { return .refused }
             guard sensing.physicalTopologyIsUnchanged else { return .refused }
