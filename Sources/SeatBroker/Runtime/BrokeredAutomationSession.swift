@@ -88,6 +88,9 @@ public final class BrokeredAutomationSession: AutomationSessionOperating {
     @ObservationIgnored private let idleWindow: Duration
     @ObservationIgnored private let waitIdle: IdleWaiting
 
+    /// Whether the seat a held target borrows stopped for good, which ends this session.
+    @ObservationIgnored private let stoppedForGood: @MainActor (SeatTarget) -> Bool
+
     @ObservationIgnored private var lease: SeatLease?
     @ObservationIgnored private var target: SeatTarget?
     @ObservationIgnored private var runtime: EngineRuntime?
@@ -147,7 +150,10 @@ public final class BrokeredAutomationSession: AutomationSessionOperating {
         seating           : @escaping Seating,
         perceiving        : @escaping Perceiving,
         idleWindow        : Duration = idleWindow,
-        waitIdle          : @escaping IdleWaiting = { try await Task.sleep(for: $0) }
+        waitIdle          : @escaping IdleWaiting = { try await Task.sleep(for: $0) },
+        stoppedForGood    : @escaping @MainActor (SeatTarget) -> Bool = {
+            SeatAdmission.stoppedForGood(try? $0.agentSeat())
+        }
     ) {
         self.broker             = broker
         self.label              = workerID.uuidString
@@ -159,6 +165,7 @@ public final class BrokeredAutomationSession: AutomationSessionOperating {
         self.perceiving         = perceiving
         self.idleWindow         = idleWindow
         self.waitIdle           = waitIdle
+        self.stoppedForGood     = stoppedForGood
     }
 
     /// What the worker's row says about the computer, and nil while this session neither waits
@@ -228,6 +235,8 @@ public final class BrokeredAutomationSession: AutomationSessionOperating {
     public func open(application word: String, window title: String?) async throws -> SceneSnapshot {
         // A release between turns may still be finishing; this open comes after it.
         await closing?.value
+        // A seat that stopped for good ends its session: this open replaces it, as close_session would.
+        if case .holding = phase, let target, stoppedForGood(target) { await close() }
         guard phase == .idle, closing == nil else {
             throw AutomationFailure("A Seat is already open. Observe it or close_session before opening another app.")
         }

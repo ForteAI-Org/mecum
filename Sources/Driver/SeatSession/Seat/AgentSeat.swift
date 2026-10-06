@@ -3404,8 +3404,9 @@ public final class AgentSeat {
     /// Fails the seat because the host it lives on failed. The Issues are the
     /// host's, and the caller is the host: a seat cannot decide this for
     /// itself, because the display and the fence are not its own.
-    func failFromHost(_ issues: [SeatIssue]) {
+    func failFromHost(_ issues: [SeatIssue], causes: [SeatIssueCause] = []) {
 
+        if state != .failed { failureCauses = causes }
         reportStrandedKeys()
         stopFocusRecovery()
         stopWindowFollowing()
@@ -5184,6 +5185,7 @@ public final class AgentSeat {
         if next == .failed {
             stopFocusRecovery()
             stopWindowFollowing()
+            if case .issues(let issues) = reason { failureIssues = issues }
         }
 
         let previous = state

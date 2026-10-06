@@ -1,4 +1,5 @@
 import ApplicationServices
+import AutomationRuntime
 import CoreGraphics
 import CursorGuard
 import Foundation
@@ -604,34 +605,14 @@ enum SeatErrorMapper {
             + numbers.map(String.init).joined(separator: ", ")
     }
 
-    /// The Issue's sentence, unless the cause says more than the Issue can. A
-    /// screen connected is `displayChanged` like any other, but the generic
-    /// sentence reads as a fault, and this one is the person's own plug.
+    /// The Issue's sentence, unless the cause says more than the Issue can. The
+    /// sentences are `SeatAdmission`'s, which a stopped seat's refusal also says.
     private static func sentence(_ issue: SeatIssue, cause: SeatIssueCause?) -> String {
-        guard cause == .watchdog(.physicalDisplayAdded) else { return sentence(issue) }
-        return "a screen was connected while the seat was running, so the seat stopped and "
-            + "will start again, including the new screen, the next time an application is opened"
+        SeatAdmission.sentence(for: issue, cause: cause)
     }
 
     private static func sentence(_ issue: SeatIssue) -> String {
-        switch issue {
-        case .keysNotReleased:         "held keys could not be released safely"
-        case .displayChanged:          "the background display or the physical arrangement is no longer trustworthy"
-        case .fenceUnavailable:        "the cursor fence is not active"
-        case .processUnavailable:      "the target application is gone"
-        case .identityChanged:         "the target's PID or window id changed"
-        case .targetActivated:         "the target application became active in your seat"
-        case .windowUnavailable:       "the target window is momentarily unreadable"
-        case .geometryChanged:         "the target window moved or was resized"
-        case .snapshotChanged:         "the accessibility and window server geometry have to be reconfirmed"
-        case .cursorInterference:      "the cursor moved for a reason physical input does not explain"
-        case .ambiguousEffect:         "the effect of the last input is unknown, and repeating it could duplicate an action"
-        case .recoveryExhausted:       "the recovery did not succeed within its budget"
-        case .monitorUnavailable:      "the preview of the background display is unavailable"
-        case .windowStashed:           "the window stayed stashed: Stage Manager did not put it back on stage"
-        case .preparationNotRestored:  "the target's internal AppKit state did not go back, and the events are already out"
-        case .contextMenuLeftOpen:     "a contextual menu the seat opened stayed on the screen"
-        }
+        SeatAdmission.sentence(for: issue, cause: nil)
     }
 
     // MARK: Input

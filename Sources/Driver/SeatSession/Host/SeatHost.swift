@@ -387,7 +387,7 @@ public final class SeatHost {
             eventChannel.yield(.issueDetected(violation.issue, cause: .watchdog(violation)))
         }
 
-        failClosed(violations.map(\.issue))
+        failClosed(violations.map(\.issue), causes: violations.map { .watchdog($0) })
     }
 
     /// The Monitor's quality pass, fed with the share of CPU the host can
@@ -509,7 +509,7 @@ public final class SeatHost {
     /// **before** destroying the display, because the
     /// work holds coordinates that only mean anything while the display is
     /// there.
-    private func failClosed(_ issues: [SeatIssue]) {
+    private func failClosed(_ issues: [SeatIssue], causes: [SeatIssueCause] = []) {
 
         guard !isFailingClosed, state == .ready || state == .degraded else { return }
         isFailingClosed = true
@@ -518,7 +518,7 @@ public final class SeatHost {
         // The display, the fence or the capture the observation needs is gone, so
         // this is the shared fault and not the isolated one.
         seat?.reportMonitorHealth(.sharedFault)
-        seat?.failFromHost(issues)
+        seat?.failFromHost(issues, causes: causes)
 
         Task { @MainActor [weak self] in
             guard let self else { return }

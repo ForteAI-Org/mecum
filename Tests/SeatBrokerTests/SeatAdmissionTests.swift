@@ -6,6 +6,7 @@
 //
 
 import AutomationRuntime
+import SeatCore
 import SeatSession
 import Testing
 
@@ -90,6 +91,32 @@ struct SeatAdmissionTests {
         for state in SeatState.allCases where !state.acceptsCommands {
             #expect(!SeatAdmission.refusal(for: state, application: "MarkEdit").contains("reopen"))
         }
+    }
+
+    @Test func aStoppedSeatSaysWhyAndThatOpenSessionReplacesIt() {
+        let screen = SeatAdmission.stopReason(issues: [.displayChanged], causes: [.watchdog(.physicalDisplayAdded)])
+        let sentence = SeatAdmission.refusal(for: .failed, application: "DaVinci Resolve", stoppedBecause: screen)
+        #expect(sentence.hasPrefix("The seat stopped for good: a screen was connected while the seat was running"))
+        #expect(sentence.contains("including the new screen"))
+        #expect(sentence.contains("Open DaVinci Resolve again with open_session"))
+        #expect(!sentence.contains("Close the session"))
+        #expect(SeatAdmission.reading(state: .failed, recovery: nil, application: "DaVinci Resolve",
+                                      stoppedBecause: screen) == .refuse(sentence))
+
+        // A window neither taken in nor put back is named, with the same open_session advice.
+        let untaken = SeatAdmission.refusal(
+            for           : .failed,
+            application   : "DaVinci Resolve",
+            stoppedBecause: SeatAdmission.untakenWindow(13_252)
+        )
+        #expect(untaken.hasPrefix("The seat stopped for good: a window the application opened could not be "
+            + "handled: window 13252 could not be taken into the seat or put back where it was."))
+        #expect(untaken.contains("Open DaVinci Resolve again with open_session"))
+
+        // Without a cause the Issue's own words, one per Issue.
+        let generic = SeatAdmission.stopReason(issues: [.displayChanged, .fenceUnavailable], causes: [])
+        #expect(generic == "the background display or the physical arrangement is no longer trustworthy; "
+            + "the cursor fence is not active")
     }
 
     @Test func aFailedSeatIsAnsweredAtOnceEvenWithARecoveryInFlight() {

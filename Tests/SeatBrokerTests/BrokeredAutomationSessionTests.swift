@@ -230,6 +230,47 @@ struct BrokeredAutomationSessionTests {
         #expect(broker.queue.entries.isEmpty)
     }
 
+    @Test("an open over a seat that stopped for good ends that session and opens the requested one")
+    func anOpenReplacesAStoppedSeat() async throws {
+        let broker = SeatBroker()
+        let dock = try #require(NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.dock")
+            .first?.processIdentifier)
+        let scene = SceneSnapshot(bundleID: "test.process", appName: "Test", windowTitle: "Test",
+                                  viewportPixelSize: ViewportPixelSize(width: 10, height: 10), elements: [])
+        var seatings = 0
+        var stopped  = false
+        let desktop = BrokeredAutomationSession(
+            broker            : broker,
+            workerID          : UUID(),
+            knowledgeDirectory: FileManager.default.temporaryDirectory
+                .appendingPathComponent("mecum-brokered-\(UUID().uuidString)", isDirectory: true),
+            allowsDestructive : false,
+            missingGrant      : { nil },
+            requestGrants     : {},
+            seating           : { _, _, _ in
+                seatings += 1
+                return (TargetApp(pid: dock, bundleID: "test.process", name: "Test", bundleURL: nil, windows: []),
+                        SeatTarget())
+            },
+            perceiving        : { _, _ in scene },
+            stoppedForGood    : { _ in stopped }
+        )
+        _ = try await desktop.open(application: "Test", window: nil)
+        let first = try #require(desktop.id)
+
+        // A live seat still refuses a second open.
+        await #expect(throws: AutomationFailure.self) { try await desktop.open(application: "Test", window: nil) }
+        #expect(desktop.id == first)
+
+        stopped = true
+        _ = try await desktop.open(application: "Test", window: nil)
+        #expect(seatings == 2, "the dead session was closed and the requested one opened")
+        #expect(desktop.id != nil && desktop.id != first)
+        stopped = false
+        await desktop.close()
+        #expect(broker.queue.entries.isEmpty)
+    }
+
     @Test("a recoverable observation refusal preserves the current worker session", arguments: [
         ObservationUnavailable.noSelectedTarget,
         .suspended([.noEligibleTarget]),

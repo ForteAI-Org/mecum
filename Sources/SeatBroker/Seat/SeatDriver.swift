@@ -1,4 +1,5 @@
 import AppKit
+import AutomationRuntime
 import CoreGraphics
 import Foundation
 import OSLog
@@ -774,6 +775,10 @@ final class SeatDriver {
         // that end by themselves are worth waiting out.
         if !reasons.isEmpty, let report = seat?.lastFocusRecovery {
             sentence += " " + SeatErrorMapper.detail(of: report)
+        }
+        // A seat that stopped for good says why, a screen connected for one.
+        if let seat, let stop = SeatAdmission.stopReason(of: seat) {
+            sentence += " The seat stopped for good: \(stop)."
         }
         return SeatErrorMapper.mayDecideAgain(reasons)
             ? .inputPaused(sentence)

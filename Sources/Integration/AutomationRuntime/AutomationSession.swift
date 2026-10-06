@@ -31,6 +31,8 @@ public final class AutomationSession: AutomationSessionOperating {
     }
 
     public func open(application word: String, window title: String?) async throws -> SceneSnapshot {
+        // A seat that stopped for good ends its session: this open replaces it, as close_session would.
+        if let target, closing == nil, SeatAdmission.stoppedForGood(try? target.agentSeat()) { await close() }
         guard target == nil, closing == nil else {
             throw AutomationFailure("A Seat is already open. Observe it or close_session before opening another app.")
         }

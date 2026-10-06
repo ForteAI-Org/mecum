@@ -566,6 +566,19 @@ struct AgentSeatTests {
         await #expect(throws: SessionFailure.seatNotReady(.failed)) { _ = try await seat.acquire() }
     }
 
+    @Test("a seat that stops for good keeps why: its Issues and the causes the host found")
+    func aFailedSeatKeepsWhy() async throws {
+
+        let (seat, _) = try await Self.adopted()
+        #expect(seat.failureIssues.isEmpty && seat.failureCauses.isEmpty)
+        seat.failFromHost([.displayChanged], causes: [.watchdog(.physicalDisplayAdded)])
+
+        #expect(seat.failureIssues == [.displayChanged])
+        #expect(seat.failureCauses == [.watchdog(.physicalDisplayAdded)])
+        seat.failFromHost([.fenceUnavailable])
+        #expect(seat.failureCauses == [.watchdog(.physicalDisplayAdded)], "a second report does not rewrite why")
+    }
+
     @Test("a window issue leaves the seat usable: the stage failed, not the seat")
     func windowIssueLeavesTheSeatUsable() async throws {
 
