@@ -36,3 +36,21 @@ with a disagreeing AX body. The 55 follow/adoption/rollback checks passed on
 2026-10-03. Live Photoshop results and remaining limits are recorded separately
 in [UXP.md](../UXP.md). This is a shared placement rule; it does not qualify any
 other application's input behavior.
+
+## A held sheet that grows in place (2026-10-05)
+
+TextEdit's Save sheet, held beside its document window, widened from 390 to
+about 891 points when its disclosure was pressed. The guard stays on the host
+for a surface that owes no return, so every Command on the sheet read
+`geometryChanged` from the sheet's record, sent a recovery episode after a host
+that had not moved, finished, and left the record at its adoption size: the
+next Command looped the same way.
+
+Before input, a surface that owes no return and whose only Issue is
+`geometryChanged` takes its current window server frame as its operational
+geometry when that frame keeps its identity, lies inside the Virtual Display
+and the host the guard watches reads no Issue. The Command that found it is
+refused without a recovery episode, because its observation predates the
+accepted frame; the next observation is admitted. A host that moved, a sheet
+outside the display or any other Issue keeps the existing report and recovery.
+`SheetGeometryTests` reproduces the loop offline; no live run was made.

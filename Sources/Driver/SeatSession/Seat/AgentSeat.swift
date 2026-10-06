@@ -4245,12 +4245,41 @@ public final class AgentSeat {
             through: DispatchTime.now().uptimeNanoseconds
         )
         guard issues.isEmpty else {
-            report(issues)
+            // Refused either way; a sheet that settled in place takes the reading instead of
+            // sending a recovery after a host that did not move.
+            if !acceptSettledAttachedSurface(record, issues: issues) { report(issues) }
             throw SeatInterruption(issues: issues)
         }
 
         beginObservationIfNeeded(for: record, turn: turn)
         return record
+    }
+
+    /// Accepts the reading of a surface that owes no return and settled at a
+    /// new frame inside the seat, while the host the guard watches is intact.
+    ///
+    /// A Save sheet grows in place when its disclosure is pressed. The guard
+    /// stays on the host for a surface that owes no return, so the recovery
+    /// episode read a host that had not moved, finished, and left the sheet's
+    /// record at its adoption size: every later Command on the sheet found the
+    /// same Issue and looped. The Command that found it is still refused,
+    /// because the observation it was decided on predates the accepted frame.
+    private func acceptSettledAttachedSurface(
+        _ record: WindowRecord,
+        issues  : [SeatIssue]
+    ) -> Bool {
+
+        guard record.window.owesNoReturn,
+              issues == [.geometryChanged],
+              let reading = sensing.windowGeometry(of: record.window.id),
+              reading.hasSameIdentity(as: record.window.reference),
+              sensing.virtualDisplayBounds.contains(reading.frame),
+              let host = seatGuard.flatMap({ session[$0.target.windowNumber] }),
+              host.window.id != record.window.id,
+              currentIssues(for: host).isEmpty
+        else { return false }
+        acceptOperationalGeometry(reading)
+        return true
     }
 
     /// The Issues the current readings show, using the guard of Core: one
