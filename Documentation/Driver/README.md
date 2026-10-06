@@ -98,6 +98,14 @@ Seat so the consumer can tell a person's own activity from an anomaly; the kit
 reports, it does not attribute. That diagnostic is not the Observation Reference
 and the two are never interchanged.
 
+Assignment release accepts a hidden window's `returnsWhenShown` outcome only
+after `HiddenWindowReturns` takes its original destination and identity. That
+shared ledger outlives the assignment and restores the window when it is shown;
+the release does not claim a physical return or a destroyed window. Without a
+deferred-return ledger, the window return is refused. Ordered-out held members leave the
+assignment inventory with explicit WindowServer ordering-out evidence, while
+their deferred restoration remains owed by the shared ledger.
+
 ### What the code cutover is, and what it is not
 
 The public contract above is implemented and the internal callers are migrated.

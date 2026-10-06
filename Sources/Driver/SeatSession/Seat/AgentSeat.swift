@@ -1575,7 +1575,8 @@ public final class AgentSeat {
                     break
                 }
                 windows[window.id] = outcome
-                if outcome != .returned, outcome != .vanished {
+                // The shared hidden-window ledger owns an accepted deferred return.
+                if outcome != .returned, outcome != .vanished, outcome != .returnsWhenShown {
                     note(window.reference, window.originalFrame, .returnRefused)
                 }
             }
@@ -1596,7 +1597,7 @@ public final class AgentSeat {
                     break
                 }
                 windows[member.windowNumber] = outcome
-                if outcome != .returned, outcome != .vanished {
+                if outcome != .returned, outcome != .vanished, outcome != .returnsWhenShown {
                     note(member.reference, member.originalFrame, .returnRefused)
                 }
             }
@@ -1763,6 +1764,9 @@ public final class AgentSeat {
         releaseLedger[window.id] = outcome
         eventChannel.yield(.windowReleased(windowNumber: window.id, outcome: outcome))
         if outcome == .returned || outcome == .vanished { noteSurfaceGone(window.id) }
+        else if outcome == .returnsWhenShown {
+            noteSurfaceGone(window.id, evidence: .windowServerConfirmedOrderingOut)
+        }
         return outcome
     }
 
@@ -4738,7 +4742,8 @@ public final class AgentSeat {
         // A window its application ordered out answers no element, so there is
         // nothing to write until the application shows it again.
         if sensing.windowIsOrderedOut(window.reference) {
-            hiddenReturns?.owe(window)
+            guard let hiddenReturns else { return .refused }
+            hiddenReturns.owe(window)
             return .returnsWhenShown
         }
 

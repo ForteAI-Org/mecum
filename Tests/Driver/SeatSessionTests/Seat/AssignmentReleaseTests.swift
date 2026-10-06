@@ -229,6 +229,63 @@ struct AssignmentReleaseTests {
         #expect(fixture.seat.coherentState.lastInvalidation == .lifecycleChanged)
     }
 
+    @Test("a hidden window keeps its deferred return without a refused-assignment obligation", arguments: [false, true])
+    func hiddenWindowsKeepTheirDeferredReturn(withHelper: Bool) async throws {
+
+        let fixture = try await Self.fixture(marker: withHelper ? 2_122 : 2_121, withHelper: withHelper)
+        if withHelper { Self.containHelper(fixture) }
+        let numbers = [fixture.host.id] + (withHelper ? [Self.helperWindowNumber] : [])
+        fixture.sensing.orderedOut = Set(numbers)
+        let ledger = HiddenWindowReturns(
+            placing: fixture.placing,
+            geometry: { number in
+                fixture.sensing.orderedOut.contains(number)
+                    ? nil : fixture.sensing.windowGeometry(of: number)
+            },
+            identity: { fixture.sensing.windowGeometry(of: $0)?.identity },
+            cadence: .seconds(3_600)
+        )
+        fixture.seat.hiddenReturns = ledger
+
+        let writesBefore = fixture.placing.moves.count
+        let report = await fixture.seat.releaseAssignment()
+
+        #expect(report.outcome == .released)
+        #expect(report.isComplete)
+        #expect(report.obligations.isEmpty)
+        for number in numbers { #expect(report.windows[number] == .returnsWhenShown) }
+        #expect(ledger.owedWindowNumbers == numbers.sorted())
+        #expect(!fixture.seat.hasOutstandingWindowReturns,
+                "the independent ledger owns the hidden returns after this host retires")
+        #expect(fixture.placing.moves.count == writesBefore,
+                "a hidden window is not moved or falsely claimed physically returned")
+        #expect(fixture.seat.coherentState.instance == nil)
+
+        fixture.sensing.orderedOut = []
+        ledger.check()
+        #expect(fixture.sensing.geometry?.frame == FakeGeometry.userSeatWindow.frame)
+        if withHelper {
+            #expect(fixture.sensing.additionalWindows[Self.helperWindowNumber]?.frame == Self.helperHome)
+        }
+        ledger.check()
+        #expect(ledger.owedWindowNumbers.isEmpty,
+                "the independent deferred ledger still puts every shown window home")
+    }
+
+    @Test("a hidden window without a deferred-return ledger keeps its refusal")
+    func hiddenWindowWithoutLedgerIsStillOwed() async throws {
+
+        let fixture = try await Self.fixture(marker: 2_123)
+        fixture.sensing.orderedOut = [fixture.host.id]
+        fixture.seat.hiddenReturns = nil
+        let report = await fixture.seat.releaseAssignment()
+
+        #expect(report.windows[fixture.host.id] == .refused)
+        #expect(!report.isComplete)
+        #expect(report.obligations.map(\.windowNumber) == [fixture.host.id])
+        #expect(report.obligations.first?.reason == .returnRefused)
+    }
+
     @Test("after the release the same seat takes a second application")
     func theSeatTakesASecondApplication() async throws {
 

@@ -45,6 +45,11 @@ nonisolated public enum ClosureEvidence: String, Sendable, Equatable {
     /// The window server confirmed the window was destroyed.
     case windowServerConfirmedDestruction
 
+    /// The window server retains this identity but has ordered out its geometry.
+    /// The shared hidden-window ledger has accepted its later return, so it no
+    /// longer belongs to this assignment's inventory. The window is still alive.
+    case windowServerConfirmedOrderingOut
+
     /// It was missing from a reading, which proves nothing.
     case absentFromReading
 
