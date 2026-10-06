@@ -100,6 +100,70 @@ struct FailedSeatRestartTests {
         #expect(closing == nil, "the session closed with something left behind")
     }
 
+    @Test("clean worker leases reuse the queue session with a new ready seat each time")
+    func cleanLeasesRetireTheirSeat() async throws {
+        let appName = ProcessInfo.processInfo.environment["MECUM_RESTART_APP"] ?? "TextEdit"
+        let scratch = FileManager.default.temporaryDirectory
+            .appendingPathComponent("mecum-clean-lease-\(UUID().uuidString)", isDirectory: true)
+        NSApplication.shared.setActivationPolicy(.accessory)
+        NSApplication.shared.finishLaunching()
+
+        let broker = SeatBroker(configuration: SeatBrokerConfiguration(
+            allowUnvalidatedBuild: true,
+            recordingDirectory   : scratch.appendingPathComponent("Runs", isDirectory: true)
+        ))
+        let isRunning = broker.runningTargets().contains {
+            $0.pid != nil && $0.name.caseInsensitiveCompare(appName) == .orderedSame
+        }
+        try #require(!isRunning, "\(appName) is already running: the test must open its own process")
+
+        var reusedSession: AgentSession?
+        var previousSeat: AgentSeat?
+        var failure: (any Error)?
+        do {
+            for cycle in 1...3 {
+                let lease = try await broker.queue.acquire("clean lease \(cycle)")
+                let session = lease.session
+                if let reusedSession {
+                    #expect(session === reusedSession, "the queue replaced its reusable session")
+                } else {
+                    reusedSession = session
+                }
+                var launchedPID: pid_t?
+                do {
+                    launchedPID = try await session.open(applicationNamed: appName).pid
+                    let current = try session.borrowedSeatTarget().agentSeat()
+                    #expect(current.state == .ready, "the new lease is not ready")
+                    if let previousSeat {
+                        #expect(current !== previousSeat, "a clean lease reused the previous seat")
+                    }
+                    previousSeat = current
+                } catch {
+                    failure = error
+                }
+
+                let finish = await session.finishUsingApp()
+                #expect(finish == nil, "a clean lease left a restitution or teardown warning: \(finish ?? "")")
+                #expect(session.isOpen, "finishing the application closed the reusable queue session")
+                lease.giveBack()
+                if let launchedPID {
+                    await Self.waitForExit(of: launchedPID, within: .seconds(5))
+                    let exited = kill(launchedPID, 0) != 0
+                    #expect(exited, "the application opened by the lease did not exit")
+                    if !exited { break }
+                }
+                if failure != nil || finish != nil { break }
+            }
+        } catch {
+            failure = error
+        }
+        await broker.queue.shutdown()
+
+        let cleanup = Result { try Self.remove(scratch) }
+        if let failure { throw failure }
+        try cleanup.get()
+    }
+
     private static func waitForExit(of pid: pid_t, within limit: Duration) async {
         let deadline = ContinuousClock.now.advanced(by: limit)
         while kill(pid, 0) == 0, ContinuousClock.now < deadline {

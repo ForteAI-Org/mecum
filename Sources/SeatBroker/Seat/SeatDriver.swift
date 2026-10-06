@@ -166,6 +166,12 @@ final class SeatDriver {
         return Self.leavesWindowUnrestored(lastReleases)
     }
 
+    /// Whether this host can retire after the current application is returned.
+    /// Earlier assignments' refused returns must keep their display alive.
+    var canRetireHost: Bool {
+        !hasUnrestoredWindow && seat?.hasOutstandingWindowReturns != true
+    }
+
     /// Whether a handback left any window the seat took still out there. Every
     /// window is asked and one that did not come home decides for the set:
     /// terminating the owner then strands an obligation nothing can settle,

@@ -239,6 +239,8 @@ struct AssignmentReleaseTests {
         let report = await fixture.seat.releaseAssignment()
         #expect(report.outcome == .released)
 
+        #expect(!fixture.seat.hasOutstandingWindowReturns)
+
         let otherPID  = FakeGeometry.distinctProcessID()
         let reference = Self.otherInstanceWindow(processID: otherPID)
         fixture.sensing.additionalWindows[Self.secondWindowNumber] = reference
@@ -258,6 +260,45 @@ struct AssignmentReleaseTests {
         // The host was never taken down and put back up: the same seat, the
         // same display bounds, and no second seat was made.
         #expect(fixture.seat.seatGuard?.displayBounds == FakeGeometry.virtual)
+    }
+
+    @Test("a clean second application does not erase the first application's refused return")
+    func anEarlierRefusalKeepsTheHostRequired() async throws {
+        let fixture = try await Self.fixture(marker: 2_116)
+        fixture.placing.moveError = DisplayFailure.attributeNotSettable("AXPosition")
+        fixture.placing.onMove = { _ in }
+        let first = await fixture.seat.releaseAssignment()
+        #expect(first.windows[fixture.host.id] == .refused)
+        #expect(fixture.sensing.geometry?.frame != FakeGeometry.userSeatWindow.frame)
+
+        fixture.placing.moveError = nil
+        fixture.router.install(on: fixture.placing)
+        let otherPID = FakeGeometry.distinctProcessID()
+        let reference = Self.otherInstanceWindow(processID: otherPID)
+        let otherWindow = MoveRouter.Window(
+            number   : Self.secondWindowNumber,
+            size     : reference.frame.size,
+            processID: otherPID
+        )
+        fixture.sensing.additionalWindows[Self.secondWindowNumber] = reference
+        fixture.router.homes[reference.frame.origin] = otherWindow
+        fixture.router.adopting = otherWindow
+        _ = try await fixture.seat.adopt(reference, platform: AppKitPlatform())
+        fixture.router.adopting = nil
+
+        let second = await fixture.seat.releaseAssignment()
+        #expect(second.windows[Self.secondWindowNumber] == .returned)
+        #expect(second.isComplete)
+        #expect(second.obligations.isEmpty,
+                "current-assignment provenance cannot reveal the earlier refused return")
+        #expect(fixture.sensing.additionalWindows[Self.secondWindowNumber]?.frame == reference.frame)
+        #expect(fixture.seat.adoptedWindows.isEmpty)
+        #expect(!fixture.seat.hasPendingWindowRestorations)
+        #expect(fixture.seat.hasOutstandingWindowReturns,
+                "the first window still requires the host after the second assignment ended")
+        let teardown = await fixture.seat.releaseAllWindows(.returnToUserSeat)
+        #expect(teardown[fixture.host.id] == .refused)
+        #expect(teardown[Self.secondWindowNumber] == .returned)
     }
 
     @Test("a release never touches a window of another assignment")

@@ -228,6 +228,12 @@ It does not reselect an old window after the selection changes. A staging
 failure refuses the observation; all existing endpoint identity and modal
 checks still apply. See [stabilization evidence](StabilizationRounds.md).
 
+The consumer's clean worker lease completion retires its display while keeping
+the queue's AgentSession reusable. A finish warning or outstanding restitution
+retains the host, including refused returns from earlier assignments on that
+host. Handover within a lease keeps its existing lifecycle.
+See [ADR0030](adr/Adr0030RetireCleanWorkerDisplays.md) for the cost and limits.
+
 ## Testing it
 
 Everything goes through the `Makefile`; `make help` lists it.

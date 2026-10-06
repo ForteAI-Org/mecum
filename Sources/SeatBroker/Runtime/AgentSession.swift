@@ -222,12 +222,15 @@ public final class AgentSession {
         held = HeldApp(pid: pid, name: name, provenance: ledger.provenance(of: pid))
     }
 
-    /// Finishes with the held application as its provenance says and keeps
-    /// the seat and its display, so a session given back to the queue is
-    /// parked warm for the next entry. The sentence is `finishWithHeldApp`'s.
+    /// Finishes with the held application and keeps the queue's session reusable.
+    /// A clean lease retires its display rather than parking it between workers.
+    /// This adds display removal and startup at the lease boundary. A warning
+    /// or outstanding restitution keeps its host alive.
     func finishUsingApp() async -> String? {
         guard isOpen else { return nil }
-        return await finishWithHeldApp()
+        let finish = await finishWithHeldApp()
+        guard finish == nil, driver.canRetireHost else { return finish }
+        return await driver.stop()
     }
 
     /// Gives the held window back and, when the agent opened the application

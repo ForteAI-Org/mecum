@@ -290,6 +290,22 @@ public final class AgentSeat {
     /// A failed move still owned by the host until teardown can restore it.
     public var hasPendingWindowRestorations: Bool { !pendingAdoptions.isEmpty }
 
+    /// Whether this seat still owes a window return, including earlier assignments.
+    /// A consumer must retain the host while this is true. A deferred return
+    /// accepted by the shared hidden-window ledger does not require this host.
+    public var hasOutstandingWindowReturns: Bool {
+        if hasPendingWindowRestorations { return true }
+        return releaseLedger.values.contains(where: Self.returnRequiresHost)
+            || adoptionRestorations.values.contains(where: Self.returnRequiresHost)
+    }
+
+    private static func returnRequiresHost(_ outcome: WindowReleaseOutcome) -> Bool {
+        switch outcome {
+        case .refused, .leftOnVirtualDisplay: true
+        case .returned, .vanished, .returnsWhenShown: false
+        }
+    }
+
     /// Every successfully adopted window, in Window ID order.
     public var adoptedWindows: [AdoptedWindow] { session.adoptedWindows }
 
