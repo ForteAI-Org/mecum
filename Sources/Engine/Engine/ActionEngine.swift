@@ -267,7 +267,7 @@ public struct ActionEngine: Sendable {
             return ActOutcome(
                 .actedUnverified,
                 "\(request.verb.performed) '\(element.label)': no scene could be read "
-                + "afterwards; describe_scene when the window is back")
+                + "afterwards; observe the window once it is available")
         }
         let surfacesAfter = await surfaces(pid)
         let effect = Self.gatedEffect(
@@ -522,8 +522,9 @@ public struct ActionEngine: Sendable {
     static let endOfField: Gesture = .key(code: Key.downArrow, modifiers: .command)
 
     /// Said after a Command chord whose effect was not seen on a background window.
-    static let menuShortcutNote = " A shortcut a menu resolves (Command-C, Command-V, Command-A, Command-Z…) "
-        + "does nothing on this background window: use a visible control or the target's contextual menu."
+    static let menuShortcutNote = " Background support for a menu shortcut depends on the target. "
+        + "Verify the intended effect; prefer the menu tool or the target's contextual menu for an unsupported "
+        + "shortcut. Do not repeat an unconfirmed command."
 
     /// Preserves a caller-established focus and selection. Pixel text alone cannot verify the
     /// resulting value, and an uncertain insertion must never be replayed automatically.
@@ -652,7 +653,7 @@ public struct ActionEngine: Sendable {
         if let error = await send(Array(repeating: chord.gesture, count: times), to: pid) {
             return ActOutcome(.actedUnverified, "\(pressed): delivery failed: \(error)")
         }
-        // Only the seat has no activation role, and only there does a menu miss a chord.
+        // A background chord's unchanged scene does not qualify the target's menu support.
         let note = dependencies.activation == nil && chord.modifiers.contains(.command) ? Self.menuShortcutNote : ""
         return await judged(
             pressed, in: request, before: perceived.scene, targetID: nil,

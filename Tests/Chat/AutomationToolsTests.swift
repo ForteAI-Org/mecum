@@ -9,6 +9,50 @@ import Testing
 
 @Suite("Automation MCP application boundary")
 struct AutomationToolsTests {
+    @Test("shortcut guidance preserves target-specific support and observed file-panel state")
+    func shortcutGuidanceMatchesQualifiedTargets() {
+        let instructions = AutomationTools.instructions
+        #expect(!instructions.contains("Command-C, Command-V, Command-A, Command-Z) do nothing"))
+        #expect(instructions.contains("Shortcut support depends on the target and its current context"))
+        #expect(instructions.contains("never automatically replay an action that may already have happened"))
+        #expect(instructions.contains("observe its initial value"))
+        #expect(!instructions.contains("Go to Folder opens with / in its field"))
+    }
+
+    @Test("exact native window titles distinguish an omitted selector from an untitled window")
+    func nativeWindowTitleIsPreserved() async throws {
+        let definition = try #require(AutomationTools.definitions.first { $0["name"].string == "open_session" })
+        let titleSchema = definition["inputSchema"]["properties"]["window"]
+        #expect(titleSchema["type"].string == "string")
+        #expect(titleSchema["minLength"] == .null || titleSchema["minLength"] == .number(0))
+        for title: String? in [nil, "", "  ", "Probe.png @ 100%"] {
+            let session = SyntheticSession()
+            session.id = nil
+            let tools = AutomationTools(session: session)
+            var arguments: [String: JSONValue] = ["app": .string("Synthetic Mixer")]
+            if let title { arguments["window"] = .string(title) }
+            _ = try await tools.call("open_session", .object(arguments))
+            #expect(session.openedWindowTitles == [title])
+            #expect(session.calls == ["open"])
+        }
+    }
+
+    @Test("non-string window selectors refuse before opening a session")
+    func malformedWindowTitleCannotOpen() async throws {
+        for title: JSONValue in [.null, .bool(true), .number(109442), .array([]), .object([:])] {
+            let session = SyntheticSession()
+            session.id = nil
+            let tools = AutomationTools(session: session)
+            await #expect(throws: AutomationFailure.self) {
+                try await tools.call("open_session", .object([
+                    "app": .string("Synthetic Mixer"), "window": title
+                ]))
+            }
+            #expect(session.calls.isEmpty)
+            #expect(session.id == nil)
+        }
+    }
+
     @Test("Observation guidance follows the remaining session, without replaying a terminal failure", arguments: [true, false])
     func observationGuidanceMatchesSessionLifetime(_ ends: Bool) async throws {
         let session = SyntheticSession()
@@ -185,7 +229,7 @@ struct AutomationToolsTests {
         #expect(steps.compactMap { $0["properties"]["operation"]["const"].string }
             == ["act", "select", "type_text", "insert_text", "press_key", "scroll", "drag", "context_menu"])
         #expect(!AutomationTools.instructions.contains("Typing, scrolling, keyboard shortcuts"))
-        #expect(AutomationTools.instructions.contains("A file panel that just opened has no field focused yet"))
+        #expect(AutomationTools.instructions.contains("may need explicit focus before accepting keys"))
         #expect(AutomationTools.instructions.contains("use the browser apps marks as the default"))
         #expect(AutomationTools.instructions.contains("its other visible windows move to the seat's display too"))
     }
@@ -509,6 +553,7 @@ private final class SyntheticSession: AutomationSessionOperating {
     var id: UUID? = UUID()
     var closeWarning: String?
     var calls: [String] = []
+    var openedWindowTitles: [String?] = []
     var results: [ActOutcomeKind] = []
     var throwOnTarget: String?
     var observationFailure: AutomationFailure?
@@ -524,6 +569,7 @@ private final class SyntheticSession: AutomationSessionOperating {
 
     func open(application: String, window: String?) async throws -> SceneSnapshot {
         calls.append("open")
+        openedWindowTitles.append(window)
         id = UUID()
         return scene
     }

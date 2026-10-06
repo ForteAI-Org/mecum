@@ -437,7 +437,7 @@ struct InputDeliveryTests {
         #expect(KeyChord(slash, modifiers: .command).gesture == .character("/", modifiers: .command))
     }
 
-    @Test("a letter's chord goes by character, and an unseen Command chord says a menu does not answer here")
+    @Test("an unseen Command chord preserves delivery uncertainty and target-dependent guidance")
     func menuShortcutNote() async {
         let actuator = RecordingActuator()
         let copy = KeyChord(.character("c"), modifiers: .command)
@@ -445,11 +445,13 @@ struct InputDeliveryTests {
             .deliver(request(.pressKey(copy, times: 1)))
         #expect(actuator.gestures == [.character("c", modifiers: .command)])
         #expect(background.kind == .actedUnverified)
-        #expect(background.message.contains("does nothing on this background window"))
+        #expect(!background.message.contains("does nothing on this background window"))
+        #expect(background.message.contains("depends on the target"))
+        #expect(background.message.contains("Do not repeat an unconfirmed command"))
         let foreground = await engine(scenes: ScriptedScenes([scene([export])]),
                                       activation: FakeActivation(frontmost: pid))
             .deliver(request(.pressKey(copy, times: 1)))
-        #expect(!foreground.message.contains("background window"))
+        #expect(!foreground.message.contains("depends on the target"))
     }
 
     @Test("a key dry run presses nothing")
