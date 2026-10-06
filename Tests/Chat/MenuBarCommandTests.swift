@@ -225,6 +225,60 @@ struct MenuBarCommandTests {
         #expect(!dispatches || result.outcome.message.contains("Do not repeat"))
     }
 
+    @Test("Observation failure after dispatch retains delivery and any handback failure",
+          arguments: [false, true])
+    func aFailedObservationRetainsTheScopedCommand(_ handbackFails: Bool) async {
+        var presses = 0
+        var observations = 0
+        let dispatched = await MenuBarCommand.runInFront(
+            read     : { .press(Node("New..."), path: "File > New...") },
+            press    : { _ in presses += 1; return .success },
+            withFront: { command in
+                command()
+                return handbackFails ? "The person's focus handback was not verified." : nil
+            }
+        )
+        do {
+            let result = try await MenuBarCommand.observedOutcome(
+                dispatched.pressed,
+                outcome  : dispatched.outcome,
+                processID: -1,
+                before   : [],
+                observe  : {
+                    observations += 1
+                    throw AutomationFailure("The application's Seat is suspended.")
+                }
+            )
+            #expect(result.kind == .actedUnverified)
+            #expect(!result.isSuccess)
+            #expect(result.scene == nil)
+            #expect(result.message.contains("pressed File > New..."))
+            #expect(result.message.contains("Seat is suspended"))
+            #expect(result.message.contains("Do not repeat"))
+            #expect(result.message.contains("Observe"))
+            #expect(!handbackFails || result.message.contains("handback was not verified"))
+        } catch {
+            Issue.record("Observation erased an acknowledged dispatch: \(error)")
+        }
+        #expect(presses == 1)
+        #expect(observations == 1)
+    }
+
+    @Test("An unprepared listing warns that disabled flags and history may be stale without requesting input")
+    func aBackgroundListingDoesNotEstablishCommandAvailability() async {
+        let result = await MenuBarCommand.runInFront(
+            read     : { self.resolve("File") },
+            press    : { _ in Issue.record("A listing must not press"); return .success },
+            withFront: { _ in Issue.record("A listing must not activate"); return nil }
+        )
+        #expect(result.pressed == nil)
+        #expect(result.outcome.kind == .actedNoop)
+        #expect(result.outcome.message.contains("Save (disabled)"))
+        #expect(result.outcome.message.contains("without activating"))
+        #expect(result.outcome.message.contains("may be stale"))
+        #expect(result.outcome.message.contains("full command path"))
+    }
+
     @Test("A listing, missing path and destructive refusal never enter an input scope",
           arguments: ["File", "File > Missing", "Layer > Delete > Layer"])
     func aNonCommandNeverEntersTheScope(_ path: String) async {

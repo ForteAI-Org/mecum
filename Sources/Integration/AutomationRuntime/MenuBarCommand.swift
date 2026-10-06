@@ -333,7 +333,8 @@ public enum MenuBarCommand {
     }
 
     /// Resolves an admitted command again inside its bounded foreground scope.
-    /// Listings, misses and policy refusals never enter the scope. `withFront`
+    /// Listings warn that their unprepared metadata may be stale. Listings,
+    /// misses and policy refusals never enter the scope. `withFront`
     /// invokes its callback at most once and returns any readiness or handback
     /// failure. A dispatched command retains that failure as a possible partial
     /// effect; it is never pressed again after the scope ends.
@@ -345,7 +346,14 @@ public enum MenuBarCommand {
         let initial = read()
         switch initial {
             case .press, .disabled: break
-            case .list, .outcome: return run(initial, press: press)
+            case .list:
+                let result = run(initial, press: press)
+                return (nil, ActOutcome(result.outcome.kind, result.outcome.message
+                    + " This listing was read without activating the application; enabled flags and editing history "
+                    + "may be stale. Use the full command path for the intended operation; menu preparation reads "
+                    + "its current item again."), result.disabled)
+            case .outcome:
+                return run(initial, press: press)
         }
         var result: (pressed: String?, outcome: ActOutcome, disabled: String?)?
         let issue = await withFront {
@@ -363,7 +371,7 @@ public enum MenuBarCommand {
         ), result.disabled)
     }
 
-    /// Performs an admitted Adobe command once during the consumer-supplied
+    /// Performs an admitted menu command once during the consumer-supplied
     /// foreground scope, then observes its effect after handback. Input is
     /// separate from readiness, and cleanup failure stays in the outcome.
     public static func performInFront(
@@ -410,7 +418,8 @@ public enum MenuBarCommand {
         return try await observedOutcome(pressed, outcome: outcome, processID: processID, before: before, observe: observe)
     }
 
-    private static func observedOutcome(
+    /// Retains an acknowledged dispatch even when its later observation fails.
+    static func observedOutcome(
         _ pressed: String?,
         outcome  : ActOutcome,
         processID: pid_t,
@@ -419,7 +428,15 @@ public enum MenuBarCommand {
     ) async throws -> ActOutcome {
         guard let pressed else { return outcome }
         try? await Task.sleep(for: .milliseconds(400))
-        let scene   = try await observe()
+        let scene: SceneSnapshot
+        do {
+            scene = try await observe()
+        } catch {
+            return ActOutcome(.actedUnverified, outcome.message
+                + " Observation after dispatch failed: \(error). Do not repeat this command. "
+                + "Observe the session before further input; if observation remains unavailable, "
+                + "stop and report this error.")
+        }
         if outcome.kind == .actedUnverified {
             return ActOutcome(.actedUnverified, outcome.message, scene: scene)
         }
