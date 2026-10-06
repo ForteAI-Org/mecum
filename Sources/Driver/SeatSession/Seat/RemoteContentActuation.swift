@@ -5,6 +5,7 @@
 //  Created by Eliomar Alejandro Rodriguez Ferrer on 05/10/2026.
 //
 
+import ApplicationServices
 import Foundation
 
 /// Why a Command addressed to an out of process panel's content was not
@@ -12,9 +13,9 @@ import Foundation
 /// events instead: a routed pointer event into that content activates the
 /// host application (ADR 0031).
 ///
-/// Every case but `actionRefused` is decided before any action or write. Each
-/// case carries the one sentence a worker acts on, as `description`, because
-/// the consumers print a thrown error as it comes.
+/// Every case but `actionRefused` and `selectedNotOpened` is decided before any
+/// action or write. Each case carries the one sentence a worker acts on, as
+/// `description`, because the consumers print a thrown error as it comes.
 nonisolated public enum RemoteContentActuationRefusal: Error, Sendable, Equatable {
 
     /// A drag or a scroll. No accessibility counterpart was measured, and
@@ -46,7 +47,8 @@ nonisolated public enum RemoteContentActuationRefusal: Error, Sendable, Equatabl
     case opensMenu(String)
 
     /// The application answered the action or write with this AXError. The
-    /// action may still have taken effect, so it is never repeated.
+    /// action may still have taken effect, so it is never repeated, except
+    /// after -25206, which says the element does not support the action.
     case actionRefused(action: String, code: Int32)
 
     /// An item of a grid that no write to its list's selected children was read
@@ -56,10 +58,20 @@ nonisolated public enum RemoteContentActuationRefusal: Error, Sendable, Equatabl
     /// The point is in a column view, whose selection was never measured.
     case columnView
 
-    /// True for the one refusal that follows the action itself: the effect is
-    /// unknown, and the caller reports it as an action, not as a refusal.
+    /// A double click selected its row, and then nothing opened it: no element offered AXOpen
+    /// (nil), or AXOpen answered this AXError. The selection took effect.
+    case selectedNotOpened(code: Int32?)
+
+    /// True for a refusal that follows an effect or may: the effect is unknown,
+    /// and the caller reports it as an action, not as a refusal. Finder answered
+    /// AXOpen with -25205 on 06/10/2026 and its window then showed the folder,
+    /// so only the unsupported answer, -25206, is read as nothing done.
     public var mayHaveTakenEffect: Bool {
-        if case .actionRefused = self { true } else { false }
+        switch self {
+            case .actionRefused(_, let code): code != AXError.actionUnsupported.rawValue
+            case .selectedNotOpened         : true
+            default                         : false
+        }
     }
 }
 
@@ -89,6 +101,10 @@ nonisolated extension RemoteContentActuationRefusal: CustomStringConvertible, Lo
             case .opensMenu(let role):
                 "That \(role) opens a menu a click here cannot follow, so it was not pressed. "
                     + "Use select with this control and the item, or context_menu."
+            case .selectionNotVerified(let role) where role == kAXRowRole:
+                "The row at that point could not be selected: neither its list's selected rows nor its "
+                    + "own selection read back. Observe again before retrying; to reach a folder, use "
+                    + "Go to Folder."
             case .selectionNotVerified(let role):
                 "The item at that point (\(role)) could not be selected: no selection of its list "
                     + "read back. Switch the view to list view (select on its view button, \"List\"), "
@@ -96,6 +112,18 @@ nonisolated extension RemoteContentActuationRefusal: CustomStringConvertible, Lo
             case .columnView:
                 "That point is in a column view, where a click cannot select yet, so nothing was sent. "
                     + "Switch the view to list view (select on its view button, \"List\"), then click the row."
+            case .selectedNotOpened(let code?) where code != AXError.actionUnsupported.rawValue:
+                "The row was selected, and the application answered AXOpen with error \(code), so it may "
+                    + "or may not have opened. Observe before retrying; do not repeat it blindly."
+            case .selectedNotOpened(let code):
+                "The row was selected, but "
+                    + (code == nil ? "nothing in it offers to open it" : "opening it is not supported there "
+                        + "(AXOpen answered error \(AXError.actionUnsupported.rawValue))")
+                    + ", so it was not opened. A sidebar row opens its folder when selected: observe before "
+                    + "acting again."
+            case .actionRefused(let action, let code) where code == AXError.actionUnsupported.rawValue:
+                "\(action) is not supported there (error \(code)), so it did nothing. Observe again and "
+                    + "name another control, a row or a field."
             case .actionRefused(let action, let code):
                 "The application answered \(action) with error \(code), and the action may have taken "
                     + "effect. Observe before retrying; do not repeat it blindly."

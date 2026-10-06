@@ -138,7 +138,7 @@ public struct ActionEngine: Sendable {
             element = try resolved(
                 request.target, section: request.section, in: scene, appName: request.appName,
                 preferStateful: request.verb == .setToggle,
-                preferNativeControls: [.click, .doubleClick, .tripleClick].contains(request.verb),
+                preferNativeControls: [.click, .doubleClick, .tripleClick, .rightClick].contains(request.verb),
                 preferTextEntry: request.verb == .tripleClick
             )
         } catch {
@@ -457,13 +457,16 @@ public struct ActionEngine: Sendable {
         }
         let after = await perceive(pid)?.scene
         let stillOpen = (await surfaces(pid)).hasOpenPopup
-        await dependencies.actuator.confirm(stillOpen ? .unknown : .observed, in: pid)
+        // A menu closing after typed keys proves the closing, not the item: Finder's Compress did nothing.
+        await dependencies.actuator.confirm(.unknown, in: pid)
         if stillOpen {
             return ActOutcome(.actedUnverified, "typed '\(typed)' but a pop-up is still open: that prefix may not "
                 + "match a row; "
                 + "describe_scene to read the exact item labels, then act the precise one.", scene: after)
         }
-        return ActOutcome(.foundActed, "selected '\(element.label)' in the pop-up (keyboard type-ahead)", scene: after)
+        return ActOutcome(.actedUnverified, "typed '\(typed)' to choose '\(element.label)' in the pop-up (keyboard "
+            + "type-ahead): the menu closed but the effect is not confirmed; observe before acting again.",
+            scene: after)
     }
 
     // MARK: The inputs

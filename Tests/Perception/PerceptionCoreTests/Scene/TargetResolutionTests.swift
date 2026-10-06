@@ -262,6 +262,22 @@ struct TargetResolutionTests {
         #expect(scene([name, other]).resolve(target: "carla_video_bn") == .ambiguous(2))
     }
 
+    /// Finder on 06/10/2026: a share popover's title text and the file's list row, both `carla_video_bw`.
+    @Test("a native row is preferred over a title text of the same label, and two rows stay ambiguous")
+    func nativeRowOverTitleText() {
+        let title = SceneElement(id: "text|carlavideobw", kind: .text, label: "carla_video_bw",
+                                 bounds: rect(0.30, 0.06, 0.1, 0.02))
+        let row = SceneElement(id: "control|carlavideobw", kind: .control, label: "carla_video_bw",
+                               bounds: rect(0.22, 0.24, 0.2, 0.02), role: "AXRow", container: "list view")
+        #expect(scene([title, row]).resolve(target: "carla_video_bw") == .ambiguous(2))
+        #expect(scene([title, row]).resolve(target: "carla_video_bw", preferNativeControls: true) == .found(row))
+        var other = row
+        other.id = "control|other"
+        other.bounds.y = 0.60
+        #expect(scene([title, row, other]).resolve(target: "carla_video_bw", preferNativeControls: true)
+            == .ambiguous(2))
+    }
+
     @Test("two native buttons remain ambiguous even with a same-name caption")
     func duplicateNativeControls() {
         let caption = SceneElement(id: "caption", kind: .text, label: "Create", bounds: rect(0.04, 0.30, 0.1, 0.05))

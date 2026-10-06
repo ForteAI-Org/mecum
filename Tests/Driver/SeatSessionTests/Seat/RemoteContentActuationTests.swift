@@ -40,7 +40,12 @@ struct RemoteContentActuationTests {
         var answers  = true
         var performed: [String] = []
         var writes   : [RemoteContentActuator<Element>.Write] = []
+        var children : [Element] = []
         private var selection = NSRange(location: 0, length: 0)
+
+        /// What an action answers, and whether an `AXSelected` write is read back as taken.
+        var performAnswer        = AXError.success
+        var ignoresSelectedWrite = false
 
         // A list of items: whether its selected children can be written, what they are, every
         // write, and what a write really does in the application.
@@ -50,6 +55,13 @@ struct RemoteContentActuationTests {
         var onSelectChildren : (([Element]) -> Void)?
         var selectedFlag     : Bool?
         var defaultButton    : Element?
+
+        // An outline or a table: whether its selected rows can be written, what they are, every
+        // write, and what a write really does in the application.
+        var rowsSettable = false
+        var selectedRows : [Element]?
+        var rowWrites    : [[Element]] = []
+        var onSelectRows : (([Element]) -> Void)?
 
         init(
             _ role   : String,
@@ -65,12 +77,14 @@ struct RemoteContentActuationTests {
             self.parent    = parent
             self.actions   = actions
             self.value     = value
+            parent?.children.append(self)
         }
 
         func apply(_ write: RemoteContentActuator<Element>.Write) {
             writes.append(write)
             switch write {
-                case .selected, .focused: break
+                case .selected: if !ignoresSelectedWrite { selectedFlag = true }
+                case .focused: break
                 case .selectedTextRange(let location, let length):
                     selection = NSRange(location: location, length: length)
                 case .selectedText(let text):
@@ -112,17 +126,27 @@ struct RemoteContentActuationTests {
             role   : { $0.answers ? $0.role : nil },
             actions: { $0.actions },
             value  : { $0.value },
-            perform: { element, action in element.performed.append(action); return .success },
+            perform: { element, action in element.performed.append(action); return element.performAnswer },
             write  : { element, write in element.apply(write); return .success },
-            selectionIsSettable: { $0.selectionSettable },
-            selectedChildren   : { $0.selectedChildren },
-            selectChildren     : { list, children in
-                list.selectionWrites.append(children)
-                list.onSelectChildren?(children)
+            selectionIsSettable: { node, attribute in
+                attribute == kAXSelectedRowsAttribute ? node.rowsSettable : node.selectionSettable
+            },
+            selection          : { node, attribute in
+                attribute == kAXSelectedRowsAttribute ? node.selectedRows : node.selectedChildren
+            },
+            writeSelection     : { container, attribute, nodes in
+                if attribute == kAXSelectedRowsAttribute {
+                    container.rowWrites.append(nodes)
+                    container.onSelectRows?(nodes)
+                } else {
+                    container.selectionWrites.append(nodes)
+                    container.onSelectChildren?(nodes)
+                }
                 return .success
             },
             isSelected         : { $0.selectedFlag },
             parent             : { $0.parent },
+            children           : { $0.children },
             defaultButton      : { $0.defaultButton }
         )
     }
@@ -698,14 +722,21 @@ struct RemoteContentActuationTests {
     /// A seat holding one ordinary window, of an application that takes its clicks through
     /// accessibility or not, with Finder's sidebar as accessibility shows it: the window, its
     /// sidebar outline, the Downloads row, its cell and its text.
+    ///
+    /// Measured on 06/10/2026 on a Finder window in the background: the row offers only
+    /// AXShowDefaultUI and AXShowAlternateUI, and its `AXSelected` written answers 0 and selects
+    /// without navigating, while `[row]` written to the outline's `AXSelectedRows` navigates. The
+    /// window element's value stands for the folder the window shows.
     struct Finder {
         let seat     : AgentSeat
         let sender   : FakeSender
         let discovery: GestureEndpointRoutingTests.Discovery
         let window   : AdoptedWindow
+        let element  : Element
         let outline  : Element
         let row      : Element
         let text     : Element
+        let hit      : Hit
     }
 
     static func finder(clicksThroughAccessibility: Bool, marker: Int64) async throws -> Finder {
@@ -727,19 +758,37 @@ struct RemoteContentActuationTests {
         discovery.identities[identity.windowNumber] = identity
 
         let own      = DialogEndpointResolver<Element>.WindowReading.window(identity.windowNumber)
-        let windowEl = Element(kAXWindowRole, window: own, processID: identity.processID)
+        let windowEl = Element(kAXWindowRole, window: own, processID: identity.processID, value: "Recents")
         let outline  = Element(kAXOutlineRole, window: own, processID: identity.processID, parent: windowEl)
         let row      = Element(kAXRowRole, window: own, processID: identity.processID, parent: outline,
-                               actions: [kAXShowMenuAction])
+                               actions: ["AXShowDefaultUI", "AXShowAlternateUI"])
         let cell     = Element(kAXCellRole, window: .windowless, processID: identity.processID, parent: row)
         let text     = Element(kAXStaticTextRole, window: .windowless, processID: identity.processID, parent: cell,
                                value: "Downloads")
+        outline.rowsSettable = true
+        outline.selectedRows = []
+        outline.onSelectRows = { [unowned outline] rows in
+            outline.selectedRows = rows
+            if rows == [row] { windowEl.value = "Downloads" }
+        }
         let hit      = Hit()
         hit.element  = text
         let actuator = Self.actuator(hitting: { hit.element }, window: windowEl)
         discovery.actuation = { actuator.actuate($0, endpoint: $1) }
-        return Finder(seat: seat, sender: sender, discovery: discovery, window: window,
-                      outline: outline, row: row, text: text)
+        return Finder(seat: seat, sender: sender, discovery: discovery, window: window, element: windowEl,
+                      outline: outline, row: row, text: text, hit: hit)
+    }
+
+    static func send(
+        _ count : Int,
+        to finder: Finder,
+        turn    : Turn
+    ) async throws -> InputReceipt {
+        try await finder.seat.send(
+            .click(Self.point(in: finder.window), count: count),
+            observation: try await observedReference(finder.seat),
+            turn       : turn
+        )
     }
 
     static func point(in window: AdoptedWindow) -> InputLocation {
@@ -750,14 +799,16 @@ struct RemoteContentActuationTests {
         )
     }
 
-    @Test("a click on a Finder sidebar row selects it through accessibility and posts nothing")
+    @Test("a click on a Finder sidebar row selects it through its outline's selected rows and posts nothing")
     func aFinderSidebarRowIsSelected() async throws {
         let finder = try await Self.finder(clicksThroughAccessibility: true, marker: 3_401)
         let turn   = try await finder.seat.acquire()
         let receipt = try await finder.seat.send(
             .click(Self.point(in: finder.window)), observation: try await observedReference(finder.seat), turn: turn
         )
-        #expect(finder.row.writes == [.selected])
+        #expect(finder.outline.rowWrites == [[finder.row]], "the outline's selected rows, which navigate")
+        #expect(finder.row.writes.isEmpty, "no AXSelected on the row, measured to select without navigating")
+        #expect(finder.element.value == "Downloads")
         #expect(finder.outline.writes == [.focused], "the list takes the focus a click gives, for a key such as /")
         #expect(finder.sender.sent.isEmpty, "the first click on an inactive window is not posted to be eaten")
         #expect(receipt.route.poster == .accessibilityAction)
@@ -780,6 +831,99 @@ struct RemoteContentActuationTests {
         #expect(empty.sender.sent.isEmpty)
         try empty.seat.release(emptyTurn)
         try finder.seat.release(turn)
+    }
+
+    @Test("a row whose list's selected rows cannot be written or do not read back is selected by its own AXSelected",
+          arguments: [false, true])
+    func aRowFallsBackToItsOwnSelection(listIsSettable: Bool) async throws {
+        let finder = try await Self.finder(clicksThroughAccessibility: true, marker: listIsSettable ? 3_406 : 3_407)
+        finder.outline.rowsSettable = listIsSettable
+        // The write answers 0 and changes nothing.
+        finder.outline.onSelectRows = { _ in }
+        let turn    = try await finder.seat.acquire()
+        let receipt = try await Self.send(1, to: finder, turn: turn)
+        #expect(finder.outline.rowWrites == (listIsSettable ? [[finder.row]] : []))
+        #expect(finder.row.writes == [.selected], "the row's own selection, read back")
+        #expect(finder.element.value == "Recents", "selected, not navigated: the scene says which")
+        #expect(finder.sender.sent.isEmpty)
+        try finder.seat.confirm(receipt, .unknown)
+
+        // Neither selection reads back: the click refuses, and nothing is posted.
+        finder.row.ignoresSelectedWrite = true
+        finder.row.selectedFlag         = nil
+        await #expect(throws: RemoteContentActuationRefusal.selectionNotVerified(kAXRowRole)) {
+            try await Self.send(1, to: finder, turn: turn)
+        }
+        #expect(!RemoteContentActuationRefusal.selectionNotVerified(kAXRowRole).description.contains("list view"),
+                "a row is already in a list: its sentence does not send the worker to list view")
+        #expect(finder.sender.sent.isEmpty)
+        try finder.seat.release(turn)
+    }
+
+    @Test("a double click on a Finder sidebar row selects it, and says when it was not opened")
+    func aSidebarRowDoubleClickSaysItWasNotOpened() async throws {
+        let finder = try await Self.finder(clicksThroughAccessibility: true, marker: 3_408)
+        let turn   = try await finder.seat.acquire()
+        // Nothing offers AXOpen: the row's actions are AXShowDefaultUI and AXShowAlternateUI.
+        await #expect(throws: RemoteContentActuationRefusal.selectedNotOpened(code: nil)) {
+            try await Self.send(2, to: finder, turn: turn)
+        }
+        #expect(finder.element.value == "Downloads", "the sidebar navigates on its selection")
+        #expect(RemoteContentActuationRefusal.selectedNotOpened(code: nil).mayHaveTakenEffect)
+
+        // An element offering AXOpen that answers it unsupported.
+        finder.text.actions       = [RemoteContentActuator<Element>.openAction]
+        finder.text.performAnswer = .actionUnsupported
+        let unsupported = RemoteContentActuationRefusal.selectedNotOpened(code: AXError.actionUnsupported.rawValue)
+        await #expect(throws: unsupported) { try await Self.send(2, to: finder, turn: turn) }
+        #expect(finder.text.performed == [RemoteContentActuator<Element>.openAction])
+        #expect(unsupported.description.contains("not supported"))
+        #expect(finder.sender.sent.isEmpty)
+        try finder.seat.release(turn)
+    }
+
+    @Test("a double click on a file's kind in a Finder list selects its row and opens it through its name field")
+    func aFileRowOpensThroughItsName() async throws {
+        let finder = try await Self.finder(clicksThroughAccessibility: true, marker: 3_409)
+        let pid    = finder.element.processID
+        let list   = Element(kAXOutlineRole, window: finder.element.window, processID: pid, parent: finder.element)
+        list.rowsSettable = true
+        list.selectedRows = []
+        list.onSelectRows = { [unowned list] rows in list.selectedRows = rows }
+        let row      = Element(kAXRowRole, window: .windowless, processID: pid, parent: list,
+                               actions: ["AXShowDefaultUI", "AXShowAlternateUI"])
+        let nameCell = Element(kAXCellRole, window: .windowless, processID: pid, parent: row)
+        let name     = Element(kAXTextFieldRole, window: .windowless, processID: pid, parent: nameCell,
+                               actions: [RemoteContentActuator<Element>.openAction, kAXShowMenuAction],
+                               value: "carla_video_bw")
+        let kindCell = Element(kAXCellRole, window: .windowless, processID: pid, parent: row)
+        let kind     = Element(kAXStaticTextRole, window: .windowless, processID: pid, parent: kindCell,
+                               value: "QT movie")
+        finder.hit.element = kind
+
+        let turn    = try await finder.seat.acquire()
+        let receipt = try await Self.send(2, to: finder, turn: turn)
+        #expect(list.rowWrites == [[row]])
+        #expect(name.performed == [RemoteContentActuator<Element>.openAction], "the row's name field opens it")
+        #expect(row.performed.isEmpty && kind.performed.isEmpty)
+        #expect(finder.sender.sent.isEmpty)
+        try finder.seat.confirm(receipt, .unknown)
+        try finder.seat.release(turn)
+    }
+
+    @Test("an action answered unsupported did nothing, and any other answer may have acted")
+    func refusalCodesArePrecise() {
+        let unsupported = RemoteContentActuationRefusal.actionRefused(
+            action: "AXOpen", code: AXError.actionUnsupported.rawValue
+        )
+        #expect(!unsupported.mayHaveTakenEffect)
+        #expect(unsupported.description.contains("not supported"))
+        // Finder answered AXOpen with -25205 on 06/10/2026, and its window then showed Downloads.
+        let answered = RemoteContentActuationRefusal.actionRefused(
+            action: "AXOpen", code: AXError.attributeUnsupported.rawValue
+        )
+        #expect(answered.mayHaveTakenEffect)
+        #expect(answered.description.contains("may have taken effect"))
     }
 
     @Test("in Finder a scroll and a drag keep their posted route", arguments: [false, true])
@@ -889,7 +1033,8 @@ struct RemoteContentActuationTests {
         target = cell
         #expect(try actuator.actuate(click(1), endpoint: endpoint).get().action == kAXSelectedAttribute)
         #expect(row.writes == [.selected])
-        #expect(try actuator.actuate(click(2), endpoint: endpoint).get().action == "AXOpen")
+        #expect(try actuator.actuate(click(2), endpoint: endpoint).get().action == "AXSelected, then AXOpen")
+        #expect(row.writes == [.selected, .selected], "a double click selects the row first")
         #expect(cell.performed == ["AXOpen"], "the row's own entry under the point opens")
         #expect(throws: RemoteContentActuationRefusal.unsupportedRole(kAXRowRole)) {
             try actuator.actuate(click(3), endpoint: endpoint).get()
@@ -903,7 +1048,7 @@ struct RemoteContentActuationTests {
         target = triangle
         #expect(try actuator.actuate(click(1), endpoint: endpoint).get().action == kAXPressAction)
         #expect(triangle.performed == [kAXPressAction])
-        #expect(row.writes == [.selected], "the row was not selected again")
+        #expect(row.writes == [.selected, .selected], "the triangle's press selects nothing")
 
         target = field
         #expect(throws: RemoteContentActuationRefusal.unsupportedRole(kAXTextFieldRole)) {

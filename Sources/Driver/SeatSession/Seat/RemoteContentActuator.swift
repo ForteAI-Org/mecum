@@ -37,7 +37,8 @@ nonisolated package struct RemoteContentActuator<Node: Equatable> {
         case selectedText(String)
     }
 
-    /// The views a row of an ordinary window belongs to, which a pointer click gives the focus.
+    /// The views a row belongs to: their selected rows select it, and in an ordinary window a
+    /// pointer click gives them the focus.
     package static var rowContainerRoles: Set<String> {
         [kAXOutlineRole, kAXTableRole, kAXBrowserRole]
     }
@@ -74,16 +75,19 @@ nonisolated package struct RemoteContentActuator<Node: Equatable> {
     let perform: (Node, String) -> AXError
     let write  : (Node, Write) -> AXError
 
-    /// The selection of a list of items: whether it can be written, what it holds, and the write.
-    let selectionIsSettable: (Node) -> Bool
-    let selectedChildren   : (Node) -> [Node]?
-    let selectChildren     : (Node, [Node]) -> AXError
+    /// The selection a container holds under one attribute, `AXSelectedChildren` of a list of items
+    /// or `AXSelectedRows` of an outline or a table: whether it can be written, what it holds, and
+    /// the write.
+    let selectionIsSettable: (Node, String) -> Bool
+    let selection          : (Node, String) -> [Node]?
+    let writeSelection     : (Node, String, [Node]) -> AXError
 
     /// An element's own `AXSelected`, nil when it does not answer.
     let isSelected: (Node) -> Bool?
 
-    /// The element above, and the default button a window or a panel names.
+    /// The element above, the elements below, and the default button a window or a panel names.
     let parent       : (Node) -> Node?
+    let children     : (Node) -> [Node]
     let defaultButton: (Node) -> Node?
 
     package init(
@@ -93,11 +97,12 @@ nonisolated package struct RemoteContentActuator<Node: Equatable> {
         value  : @escaping (Node) -> String?,
         perform: @escaping (Node, String) -> AXError,
         write  : @escaping (Node, Write) -> AXError,
-        selectionIsSettable: @escaping (Node) -> Bool = { _ in false },
-        selectedChildren   : @escaping (Node) -> [Node]? = { _ in nil },
-        selectChildren     : @escaping (Node, [Node]) -> AXError = { _, _ in .attributeUnsupported },
+        selectionIsSettable: @escaping (Node, String) -> Bool = { _, _ in false },
+        selection          : @escaping (Node, String) -> [Node]? = { _, _ in nil },
+        writeSelection     : @escaping (Node, String, [Node]) -> AXError = { _, _, _ in .attributeUnsupported },
         isSelected         : @escaping (Node) -> Bool? = { _ in nil },
         parent             : @escaping (Node) -> Node? = { _ in nil },
+        children           : @escaping (Node) -> [Node] = { _ in [] },
         defaultButton      : @escaping (Node) -> Node? = { _ in nil }
     ) {
         self.path    = path
@@ -107,10 +112,11 @@ nonisolated package struct RemoteContentActuator<Node: Equatable> {
         self.perform = perform
         self.write   = write
         self.selectionIsSettable = selectionIsSettable
-        self.selectedChildren    = selectedChildren
-        self.selectChildren      = selectChildren
+        self.selection           = selection
+        self.writeSelection      = writeSelection
         self.isSelected          = isSelected
         self.parent              = parent
+        self.children            = children
         self.defaultButton       = defaultButton
     }
 
@@ -118,8 +124,8 @@ nonisolated package struct RemoteContentActuator<Node: Equatable> {
     /// it refuses.
     ///
     /// Inside a row, measured as a file list's name field, its text and its
-    /// icon, a left click selects the row and two open the innermost element
-    /// offering AXOpen, the row last; only a control drawn in the row is pressed.
+    /// icon, a left click selects the row and two select it and open it through
+    /// the element offering AXOpen; only a control drawn in the row is pressed.
     /// Outside one, a click presses a control or leaves a caret at the end of a
     /// field, and three select the field's whole value. A popup or a menu button
     /// refuses. A right click shows the nearest element's menu.
@@ -156,38 +162,28 @@ nonisolated package struct RemoteContentActuator<Node: Equatable> {
             return .failure(.opensMenu(roles[control]))
         }
         if let row {
-            switch count {
-                case 1:
-                    if let control { return press(nodes[control], kAXPressAction) }
-                    let code = write(nodes[row], .selected)
-                    guard code == .success else {
-                        return .failure(.actionRefused(action: kAXSelectedAttribute, code: code.rawValue))
-                    }
-                    // In an ordinary window a click also focuses the row's list, which a key such as
-                    // Finder's / then reaches; its answer is reported, never retried.
-                    let list = endpoint.relation == .logicalSurface
-                        ? nodes[(row + 1)...].first { Self.rowContainerRoles.contains(role($0) ?? "") }
-                        : nil
-                    let focus = list.map {
-                        write($0, .focused) == .success ? ", its list focused" : ", its list not focused"
-                    }
-                    return .success(RemoteContentActuation(
-                        action   : kAXSelectedAttribute + (focus ?? ""),
-                        role     : kAXRowRole,
-                        textField: nil
-                    ))
-                case 2:
-                    guard let opener = nodes[...row].first(where: { actions($0).contains(Self.openAction) })
-                    else { return .failure(.unsupportedRole(kAXRowRole)) }
-                    return press(opener, Self.openAction)
-                default:
-                    return .failure(.unsupportedRole(kAXRowRole))
+            if count == 1, let control { return press(nodes[control], kAXPressAction) }
+            guard count <= 2 else { return .failure(.unsupportedRole(kAXRowRole)) }
+            var selected: String
+            switch selectRow(at: row, of: nodes) {
+                case .success(let attribute): selected = attribute
+                case .failure(let refusal): return .failure(refusal)
             }
+            // In an ordinary window a click also focuses the row's list, which a key such as
+            // Finder's / then reaches; its answer is reported, never retried.
+            if endpoint.relation == .logicalSurface,
+               let list = nodes[(row + 1)...].first(where: { Self.rowContainerRoles.contains(role($0) ?? "") }) {
+                selected += write(list, .focused) == .success ? ", its list focused" : ", its list not focused"
+            }
+            guard count == 2 else {
+                return .success(RemoteContentActuation(action: selected, role: kAXRowRole, textField: nil))
+            }
+            return open(row: nodes[row], under: nodes[...row], selected: selected)
         }
         let mapped = Self.pressedRoles.union(Self.textRoles)
         // An item of a grid, outside any row or control, is selected through its list.
         if control == nil, let list = nodes.indices.first(where: {
-            Self.itemListRoles.contains(roles[$0]) && selectionIsSettable(nodes[$0])
+            Self.itemListRoles.contains(roles[$0]) && selectionIsSettable(nodes[$0], kAXSelectedChildrenAttribute)
         }), !roles[..<list].contains(where: mapped.contains) {
             return item(in: nodes, list: list, roles: roles, count: count)
         }
@@ -226,8 +222,9 @@ nonisolated package struct RemoteContentActuator<Node: Equatable> {
         // A hit already selected proves nothing: only a change read back does.
         let wasSelected = isSelected(nodes[0]) == true
         guard let chosen = candidates.first(where: { index in
-            selectChildren(nodes[list], [nodes[index]]) == .success
-                && (selectedChildren(nodes[list]) == [nodes[index]] || !wasSelected && isSelected(nodes[0]) == true)
+            writeSelection(nodes[list], kAXSelectedChildrenAttribute, [nodes[index]]) == .success
+                && (selection(nodes[list], kAXSelectedChildrenAttribute) == [nodes[index]]
+                    || !wasSelected && isSelected(nodes[0]) == true)
         }) else { return .failure(.selectionNotVerified(roles[0])) }
         let selected = RemoteContentActuation(
             action   : kAXSelectedChildrenAttribute,
@@ -245,6 +242,63 @@ nonisolated package struct RemoteContentActuator<Node: Equatable> {
             return .failure(.unsupportedRole(roles[0]))
         }
         return press(opener, Self.openAction)
+    }
+
+    /// Selects the row at `row` of the path and answers the attribute that did it, only once a
+    /// selection is read back.
+    ///
+    /// Measured on 06/10/2026 on Finder's sidebar, Finder in the background: `AXSelected` on the row
+    /// answered 0 and selected it without navigating, while `[row]` written to the sidebar outline's
+    /// `AXSelectedRows` navigated, two of two. So the nearest outline or table above the row whose
+    /// selected rows are settable is written first, and the row's own `AXSelected`, which navigated
+    /// in a file panel's sidebar three of three, is the fallback, read back on the row or the list.
+    private func selectRow(
+        at row  : Int,
+        of nodes: [Node]
+    ) -> Result<String, RemoteContentActuationRefusal> {
+        let target = nodes[row]
+        let list   = nodes[(row + 1)...].first {
+            Self.rowContainerRoles.contains(role($0) ?? "") && selectionIsSettable($0, kAXSelectedRowsAttribute)
+        }
+        func listHoldsRow() -> Bool { list.map { selection($0, kAXSelectedRowsAttribute) == [target] } ?? false }
+        if let list, writeSelection(list, kAXSelectedRowsAttribute, [target]) == .success, listHoldsRow() {
+            return .success(kAXSelectedRowsAttribute)
+        }
+        let code = write(target, .selected)
+        guard code == .success else {
+            return .failure(.actionRefused(action: kAXSelectedAttribute, code: code.rawValue))
+        }
+        guard isSelected(target) == true || listHoldsRow() else { return .failure(.selectionNotVerified(kAXRowRole)) }
+        return .success(kAXSelectedAttribute)
+    }
+
+    /// Opens what a double click on a selected row opens: AXOpen on the innermost element of the
+    /// path offering it, the row last, else on the nearest of the row's descendants offering it,
+    /// three levels down at most. Finder's file list offers it on the name field, wherever in the
+    /// row the click landed; its sidebar rows offer only AXShowDefaultUI and AXShowAlternateUI, and
+    /// navigate on the selection alone. A miss or a refused AXOpen keeps the selection it follows.
+    private func open(
+        row     : Node,
+        under path: ArraySlice<Node>,
+        selected: String
+    ) -> Result<RemoteContentActuation, RemoteContentActuationRefusal> {
+        func opens(_ node: Node) -> Bool { actions(node).contains(Self.openAction) }
+        var opener = path.first(where: opens)
+        var level  = children(row)
+        for _ in 0..<3 where opener == nil && !level.isEmpty {
+            opener = level.first(where: opens)
+            level  = Array(level.flatMap(children).prefix(64))
+        }
+        guard let opener else { return .failure(.selectedNotOpened(code: nil)) }
+        let code = perform(opener, Self.openAction)
+        guard code == .success || code == .cannotComplete else {
+            return .failure(.selectedNotOpened(code: code.rawValue))
+        }
+        return .success(RemoteContentActuation(
+            action   : selected + ", then " + Self.openAction,
+            role     : role(opener) ?? kAXUnknownRole,
+            textField: nil
+        ))
     }
 
     /// Performs one action. A panel's default button closes the panel before
@@ -346,25 +400,26 @@ extension RemoteContentActuator where Node == AXUIElement {
                         )
                 }
             },
-            selectionIsSettable: { node in
+            selectionIsSettable: { node, name in
                 var settable = DarwinBoolean(false)
-                return AXUIElementIsAttributeSettable(node, kAXSelectedChildrenAttribute as CFString, &settable)
-                    == .success && settable.boolValue
+                return AXUIElementIsAttributeSettable(node, name as CFString, &settable) == .success
+                    && settable.boolValue
             },
-            selectedChildren: { attribute($0, kAXSelectedChildrenAttribute) },
-            selectChildren  : { list, children in
-                AXUIElementSetMessagingTimeout(list, effectTimeout)
-                return AXUIElementSetAttributeValue(
-                    list,
-                    kAXSelectedChildrenAttribute as CFString,
-                    children as CFArray
-                )
+            selection     : { attribute($0, $1) },
+            writeSelection: { container, name, nodes in
+                AXUIElementSetMessagingTimeout(container, effectTimeout)
+                return AXUIElementSetAttributeValue(container, name as CFString, nodes as CFArray)
             },
             isSelected      : { (attribute($0, kAXSelectedAttribute) as NSNumber?)?.boolValue },
             parent          : { node in
                 guard let parent: AXUIElement = attribute(node, kAXParentAttribute) else { return nil }
                 AXUIElementSetMessagingTimeout(parent, BoundedAccessibilityRead.fastTimeout)
                 return parent
+            },
+            children        : { node in
+                let children: [AXUIElement] = attribute(node, kAXChildrenAttribute) ?? []
+                children.forEach { AXUIElementSetMessagingTimeout($0, BoundedAccessibilityRead.fastTimeout) }
+                return children
             },
             defaultButton   : { attribute($0, kAXDefaultButtonAttribute) }
         )

@@ -536,7 +536,7 @@ struct InputDeliveryTests {
 
     // MARK: context_menu
 
-    @Test("a contextual menu opens with a right click and its row is chosen by the pop-up path")
+    @Test("a contextual menu opens with a right click and its row is chosen by the pop-up path, its keys claiming nothing")
     func contextMenuChoosesByKeyboard() async {
         let actuator = RecordingActuator()
         let windows = ScriptedWindows([[mainWindow], [popupWindow, mainWindow], [popupWindow, mainWindow],
@@ -545,10 +545,10 @@ struct InputDeliveryTests {
                                                            scene([export])]),
                                    actuator: actuator, windows: windows)
             .deliver(request(.contextMenu(on: "Export", item: "Paste")))
-        #expect(outcome.kind == .foundActed, Comment(rawValue: outcome.message))
+        #expect(outcome.kind == .actedUnverified, Comment(rawValue: outcome.message))
         #expect(actuator.gestures == [.click(at: exportPoint, button: .right), .type("Paste"),
                                       .key(code: Key.rightArrow), .key(code: Key.return)])
-        #expect(actuator.confirmations == [.observed])
+        #expect(actuator.confirmations == [.unknown], "a menu closing after typed keys is not the item's effect")
     }
 
     @Test("an item the menu does not offer is an honest miss, and the menu is closed instead of guessed at")

@@ -287,8 +287,10 @@ Driver offers is not yet turned on here.
   grants no input authority; adoption still reattests the candidate.
 - A pop-up is a window of its own. A target inside an open pop-up is chosen with the keyboard from
   `PopupRowPick`'s plan over the scene's rows (the highlight starts on the control's value, the arrows
-  wrap, Return chooses), verified by reading the control's value back; without a readable control the
-  menu's own type-ahead is used, committed only while the list is still open. A target outside an
+  wrap, Return chooses), verified by reading the control's value back. An item of an open native menu
+  is pressed through its accessibility element first; only when none answers is the menu's own
+  type-ahead used, committed only while the list is still open, and that pick answers
+  `acted_unverified`: the menu closing does not confirm the command ran. A target outside an
   open pop-up closes it first and answers `acted_noop`, because clicking through a menu hits the menu.
 - A closed dropdown is opened by its own press action when the application exposes one, so a painted
   caret is never the click target. The press is never used to pick: it toggles, and an option often

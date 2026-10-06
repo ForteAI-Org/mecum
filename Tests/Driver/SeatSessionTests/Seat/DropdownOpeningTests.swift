@@ -130,6 +130,37 @@ struct DropdownOpeningTests {
         #expect(DropdownOpening.nativeMenuItem(named: "Open", in: popup, under: twoLonger, reader: MenuReader()) == nil)
     }
 
+    /// Finder's contextual menu as measured from another process: the application's children are
+    /// its window, its menu bar and the desktop's scroll area, none holding the menu, which is
+    /// reached only by the hit test at the menu window's centre (`WindowReader.contextMenu`).
+    @Test("a contextual menu no child of the application holds is read where its window is drawn")
+    func finderContextualMenuIsReadWhereItIsDrawn() {
+        let compress = row("Compress \u{201C}carla_video_bw\u{201D}")
+        let menu = MenuNode("AXMenu", children: [row("Open"), row("Open With"), compress, row("Quick Look")])
+        let closed = MenuNode("AXMenuBarItem", children: [
+            MenuNode("AXMenu", children: [MenuNode("AXMenuItem", title: "Compress", frame: .zero)])
+        ])
+        let root = MenuNode("AXApplication", children: [
+            MenuNode("AXWindow", children: [MenuNode("AXOutline", children: [MenuNode("AXRow")])]),
+            MenuNode("AXMenuBar", children: [closed]),
+            MenuNode("AXScrollArea"),
+        ])
+        #expect(DropdownOpening.nativeMenuItem(named: "Compress \"carla_video_bw\"", in: popup, under: root,
+                                             reader: MenuReader()) == nil, "the application's tree misses it")
+        #expect(DropdownOpening.nativeMenuItem(named: "Compress \"carla_video_bw\"", in: popup, under: root,
+                                             drawnMenu: { menu }, reader: MenuReader()) === compress)
+
+        // A menu the application's tree holds is read there, and the hit test is never asked.
+        let native = row("Beta")
+        let held = MenuNode("AXApplication", children: [MenuNode("AXWindow", children: [
+            MenuNode("AXMenu", children: [native])
+        ])])
+        #expect(DropdownOpening.nativeMenuItem(named: "Beta", in: popup, under: held, drawnMenu: {
+            Issue.record("the drawn menu is read only when the tree paints no item")
+            return nil
+        }, reader: MenuReader()) === native)
+    }
+
     private func row(_ title: String, enabled: Bool = true) -> MenuNode {
         MenuNode("AXMenuItem", title: title,
                  frame: CGRect(x: 204, y: 310, width: 150, height: 20), enabled: enabled)

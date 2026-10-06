@@ -444,13 +444,17 @@ struct ActionEngineTests {
         #expect(again.gestures.isEmpty)
     }
 
-    @Test("without a readable control the pick falls back to type-ahead and commits only while open")
+    /// Finder's Compress, chosen by type-ahead on 06/10/2026, did nothing while the engine said it was
+    /// selected: a menu that closes after typed keys proves only that it closed.
+    @Test("without a readable control the pick falls back to type-ahead, commits only while open, and claims no effect")
     func popupTypeAhead() async {
         let actuator = RecordingActuator()
         let windows = ScriptedWindows([[popupWindow, mainWindow], [popupWindow, mainWindow], [popupWindow, mainWindow], [popupWindow, mainWindow], [mainWindow]])
         let outcome = await engine(scenes: ScriptedScenes([listScene, scene([export])]), actuator: actuator, windows: windows).act(request("96000"))
-        #expect(outcome.kind == .foundActed, Comment(rawValue: outcome.message))
+        #expect(outcome.kind == .actedUnverified, Comment(rawValue: outcome.message))
         #expect(outcome.message.contains("type-ahead"))
+        #expect(outcome.message.contains("the menu closed but the effect is not confirmed; observe"))
+        #expect(actuator.confirmations.last == .unknown, "a closed menu is not the item's effect")
         #expect(actuator.gestures == [.type("96000"), .key(code: Key.rightArrow), .key(code: Key.return)])
     }
 
@@ -541,6 +545,20 @@ struct ActionEngineTests {
             .act(request("Save"))
         #expect(controls.pressed.isEmpty)
         #expect(actuator.gestures.count == 1)
+    }
+
+    /// Finder on 06/10/2026: a share popover's title and the file's list row, both `carla_video_bw`.
+    @Test("a right click resolves the list row instead of a same-named title text")
+    func rightClickPrefersTheRow() async {
+        let title = SceneElement(id: "text|carlavideobw", kind: .text, label: "carla_video_bw",
+                                 bounds: rect(0.30, 0.06))
+        let row = SceneElement(id: "control|carlavideobw", kind: .control, label: "carla_video_bw",
+                               bounds: rect(0.22, 0.24), role: "AXRow", container: "list view")
+        let actuator = RecordingActuator()
+        let outcome = await engine(scenes: ScriptedScenes([scene([title, row])]), actuator: actuator)
+            .act(request("carla_video_bw", verb: .rightClick, dryRun: true))
+        #expect(outcome.kind == .dryRun, Comment(rawValue: outcome.message))
+        #expect(outcome.message.contains("370,300"), Comment(rawValue: outcome.message))
     }
 
     @Test("where menus open under the person's pointer, right_click is refused off a text field")

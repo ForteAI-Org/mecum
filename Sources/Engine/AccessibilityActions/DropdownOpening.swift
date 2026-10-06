@@ -34,6 +34,7 @@ public enum DropdownOpening {
         let root = AXUIElementCreateApplication(processID)
         AXUIElementSetMessagingTimeout(root, 0.2)
         let selected = nativeMenuItem(named: item, in: menuFrame, under: root,
+                                      drawnMenu: { drawnMenu(in: menuFrame, processID: processID) },
                                       reader: LiveAccessibilityReader())
         guard let selected else {
             throw Failure.controlNotUnique
@@ -50,8 +51,15 @@ public enum DropdownOpening {
     /// its web area and in an AppKit popup; only the latter is a native action recipient.
     /// Two native matches remain ambiguous, and lookup never dispatches an action. Titles compare
     /// by `LabelText.menuTitleKey`: case, bidi controls, typographic quotes and an ellipsis aside.
+    ///
+    /// `drawnMenu` is read only when nothing under `root` paints an item in the frame. Finder's
+    /// contextual menu is under neither the application element nor its windows, whose children
+    /// are a window, the menu bar and the desktop's scroll area; the hit test at the menu window's
+    /// centre reaches it, as `WindowReader.contextMenu` measured. Its absence was why Finder's
+    /// Compress was chosen with keys, and nothing happened, on 06/10/2026.
     static func nativeMenuItem<Reader: AccessibilityTreeReading>(
-        named item: String, in menuFrame: CGRect, under root: Reader.Node, reader: Reader
+        named item: String, in menuFrame: CGRect, under root: Reader.Node,
+        drawnMenu: () -> Reader.Node? = { nil }, reader: Reader
     ) -> Reader.Node? {
         var painted: [(node: Reader.Node, title: String)] = []
         func visit(_ node: Reader.Node, _ depth: Int) {
@@ -68,10 +76,40 @@ public enum DropdownOpening {
             for child in reader.children(node) { visit(child, depth + 1) }
         }
         visit(root, 0)
+        if painted.isEmpty, let menu = drawnMenu() { visit(menu, 0) }
         guard let index = LabelText.menuItemMatch(item, in: painted.map(\.title)),
               reader.isEnabled(painted[index].node) == true
         else { return nil }
         return painted[index].node
+    }
+
+    /// The `AXMenu` drawn at the centre of `menuFrame`, when the element there belongs to
+    /// `processID`: the system-wide hit test answers whatever owns those pixels, and an item of
+    /// another application's menu is never a recipient. The climb from the hit is bounded, since
+    /// the centre may be an item, a separator or the menu itself.
+    private static func drawnMenu(in menuFrame: CGRect, processID: pid_t) -> AXUIElement? {
+        let system = AXUIElementCreateSystemWide()
+        AXUIElementSetMessagingTimeout(system, 0.2)
+        var hit: AXUIElement?
+        var owner: pid_t = 0
+        guard AXUIElementCopyElementAtPosition(system, Float(menuFrame.midX), Float(menuFrame.midY), &hit)
+                == .success,
+              var node = hit, AXUIElementGetPid(node, &owner) == .success, owner == processID
+        else { return nil }
+        let reader = LiveAccessibilityReader()
+        for _ in 0..<8 {
+            if reader.role(node) == kAXMenuRole {
+                AXUIElementSetMessagingTimeout(node, 0.2)
+                return node
+            }
+            var parent: CFTypeRef?
+            guard AXUIElementCopyAttributeValue(node, kAXParentAttribute as CFString, &parent) == .success,
+                  let parent, CFGetTypeID(parent) == AXUIElementGetTypeID()
+            else { return nil }
+            // The type id was checked one line up; a Swift cast cannot see through a CF type here.
+            node = unsafeDowncast(parent, to: AXUIElement.self)
+        }
+        return nil
     }
 
     public enum Failure: Error, CustomStringConvertible {

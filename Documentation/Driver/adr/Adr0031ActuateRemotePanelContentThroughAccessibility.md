@@ -223,6 +223,61 @@ Column view (`AXBrowser`) was not measured: a click there refuses with
 `columnView`, which says to switch to list view. `select` now opens a menu
 button, the view-mode control among them, with AXPress like a popup.
 
+## Follow-up: Finder's rows and its contextual menu (2026-10-06)
+
+A worker drove Finder's own window on a release built from this tree. Four
+defects followed.
+
+- A click on the sidebar's Downloads row was acted as `AXSelected` on the row,
+  and the window stayed on Recents. Measured afterwards on a Finder window with
+  Finder in the background: `AXSelected` on the sidebar row answers 0 and
+  selects it without navigating; the row offers only AXShowDefaultUI and
+  AXShowAlternateUI, and AXOpen answers -25206; `[row]` written to the
+  `AXSelectedRows` of the sidebar's `AXOutline` (description "sidebar"), which
+  is settable, navigates with no activation, 2 of 2 (Documents, then back to
+  Downloads). A row is now selected through the nearest outline or table above
+  it whose `AXSelectedRows` is settable, and the write counts only once the
+  list reads back exactly that row. The row's own `AXSelected`, which navigated
+  in a file panel's sidebar 3 of 3, is the fallback, read back on the row or on
+  the list; neither reading back refuses with `selectionNotVerified`, in a
+  sentence for a row. The list's focus write stays.
+- A double click on the same row answered AXOpen with -25205 from an element
+  under the row, and the window then showed Downloads. A double click now
+  selects the row as one click does, then uses AXOpen on the innermost element
+  of the path offering it, the row last, or else on the nearest of the row's
+  descendants offering it, three levels down: a file list offers it on the
+  name field wherever in the row the click lands. Where nothing offers it, or
+  AXOpen answers anything but success or -25204, the click refuses with
+  `selectedNotOpened`, which may have taken effect and says that a sidebar row
+  opens its folder on selection. -25206, on any action, now reads as nothing
+  done ("not supported"); every other answer, -25205 included, may have acted.
+- The menu a right click opened (AXShowMenu on the file's name field) was
+  chosen with keys: the accessibility press answered no item, three keys
+  reached the window, and the engine answered `found_acted` for a Compress that
+  never happened; the next observation showed Finder's share popover instead.
+  The press missed because `DropdownOpening.select`
+  walked from the application element, and Finder's contextual menu is under
+  neither it nor its windows: measured for `WindowReader.contextMenu`, the
+  application's children are a window, the menu bar and the desktop's scroll
+  area, and only the hit test at the menu window's centre reaches the `AXMenu`.
+  When nothing under the application paints an item in the menu's frame, the
+  `AXMenu` drawn at that centre, owned by the process, is now read. A pick by
+  type-ahead answers `acted_unverified`: the menu closed but the effect is not
+  confirmed. The seat-scoped choice `context_menu` makes was not wired into
+  `act`: the seat tracks a menu only inside `withContextMenu`, so a menu a
+  plain right click opened is never the seat's tracked menu.
+- A right click and `context_menu` on `carla_video_bw` were ambiguous between
+  the share popover's title text and the file's row. With
+  `preferNativeControls`, resolution now counts an `AXRow` as a native target,
+  and a right click asks for it as a click does.
+
+These change the table's first two rows: one click selects through the row's
+list first, and two select the row before AXOpen. Not measured: whether the hit
+test reaches Finder's menu when AXShowMenu opened it on the seat's display,
+whether AXPress on its item then compresses the file, and whether a file
+panel's sidebar outline has settable selected rows. Where it does, its rows are
+now selected through `AXSelectedRows` instead of the measured `AXSelected`.
+
 ## Limits
 
 - No live run was made for this change. The table above is the probe's, on one

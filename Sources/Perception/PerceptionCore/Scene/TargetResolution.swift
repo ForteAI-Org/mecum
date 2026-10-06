@@ -26,7 +26,8 @@ extension SceneSnapshot {
     /// Resolves an action target. `preferStateful` narrows a shared name to the elements carrying
     /// state, which is what a toggle verb wants. `section` restricts the search to one panel.
     /// `preferNativeControls` distinguishes a click target from a plain-text caption only when
-    /// accessibility supplies an interactive role. Multiple matching controls remain ambiguous.
+    /// accessibility supplies an interactive role or a list row. Multiple matching controls remain
+    /// ambiguous.
     /// `preferTextEntry` narrows shared IDs and labels to native text fields; two fields still refuse.
     public func resolve(
         target: String,
@@ -93,11 +94,11 @@ extension SceneSnapshot {
             if !stateful.isEmpty { byLabel = stateful }
         }
         if preferNativeControls, byLabel.count > 1 {
-            let controls = byLabel.filter {
-                $0.kind == .control && AccessibilityAugmentation.interactiveRoles.contains($0.role ?? "")
-            }
+            // A list row is a native target too: Finder's file row beside a popover's title of its name.
+            let nativeRoles = AccessibilityAugmentation.interactiveRoles.union(["AXRow"])
+            let controls = byLabel.filter { $0.kind == .control && nativeRoles.contains($0.role ?? "") }
             let onlyControlsAndCaptions = byLabel.allSatisfy {
-                ($0.kind == .control && AccessibilityAugmentation.interactiveRoles.contains($0.role ?? ""))
+                ($0.kind == .control && nativeRoles.contains($0.role ?? ""))
                     || ($0.kind == .text && ($0.role == nil || $0.role == "AXStaticText"))
             }
             if !controls.isEmpty, onlyControlsAndCaptions { byLabel = controls }
