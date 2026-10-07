@@ -168,6 +168,26 @@ Measures, from `MemoryWiringTests`, Debug build on this Mac:
 
 The agreed budget is 50 ms per action (D5).
 
+## Corrections after the live checks
+
+Codex's live checks of 7 October and the corrective plan that followed them raised nine points. Three
+are fixed on this branch; the rest wait for a decision or for a desktop run.
+
+| Point | Status | What |
+|---|---|---|
+| C05 Closing | fixed, `8bf80d2` | One 3 s deadline the copy no longer extends; the copy cancelled and never published incomplete; nothing admitted after the first call; every write counted; Quit waits while a memory has work; `mecum` closes its memory at its end. `MemoryClosingTests` reproduced the slow copy and the copy started during a close before the fix. |
+| C08 Diagnosis | fixed, `f55a0bc` | `mecum memory --status` reads the file only and says that write counters belong to each process; the Brain page shows the app's own. |
+| C07 Raw `record` | fixed, `1233097` | The documentation says what the raw record is for; a test proves a retried learning applies once. |
+| C07 MCP isolation | proposal | Main gave each external client its own Knowledge directory; the decision is to keep that, on the SQL repositories. One line in `AppModel`; no archive holds `mcp` events today. |
+| C09 Recovery with several processes | proposal | Recovery refused while another process holds the archive, through a presence lock every opener takes before SQLite. |
+| C06 Earlier archives | inventoried | No SQLite archive in the app's own folder; 23 test archives, unchanged. Any change to the DDL's text, even a trigger's message, makes earlier archives a different shape. |
+| C01–C03 Calculator | not touched | Permissions and verification unchanged; Codex compares with main on the desktop. |
+| C04 External MCP | not run | Waits for the desktop. |
+
+Verification of the fixes, after `swift package clean`: `make test` passed, 2802 executed, 94 skipped,
+28 runs, no problems; the unsigned app tests ran 326 tests with the same two environment failures as
+main.
+
 ## Rollback
 
 Main's build reads the JSON Brains, which this branch never writes. Going back to main loses only
