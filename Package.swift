@@ -358,7 +358,8 @@ let package = Package(
         engine("FileKnowledge", ["Memory"], settings: pure),
 
         // The SQLite foundation of the living memory: one file at a chosen path, schema 1, a serial writer
-        // and a separate reader, typed errors. Imports Memory and the SDK's SQLite3 only; wired nowhere yet.
+        // and a separate reader, typed errors. Imports Memory and the SDK's SQLite3 only; AutomationRuntime's
+        // MemoryService composes it.
         engine("SQLiteMemory", ["Memory"], settings: pure,
                resources: [.copy("Resources/brain-living-memory-schema.sql")]),
 

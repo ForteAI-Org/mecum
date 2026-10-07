@@ -1234,7 +1234,7 @@ BEGIN
     SELECT RAISE(ABORT, 'watcher_event_id must be a watcher input event')
     WHERE NOT EXISTS (SELECT 1 FROM memory_events
                       WHERE event_id = NEW.watcher_event_id AND source = 'watcher' AND event_kind = 'input');
-    SELECT RAISE(ABORT, 'agent_event_id must be an app or cli action event')
+    SELECT RAISE(ABORT, 'agent_event_id must be an app, cli or mcp action event')
     WHERE NOT EXISTS (SELECT 1 FROM memory_events
                       WHERE event_id = NEW.agent_event_id AND source IN ('app', 'cli', 'mcp') AND event_kind = 'action');
 END;
@@ -1246,7 +1246,7 @@ BEGIN
     SELECT RAISE(ABORT, 'watcher_event_id must be a watcher input event')
     WHERE NOT EXISTS (SELECT 1 FROM memory_events
                       WHERE event_id = NEW.watcher_event_id AND source = 'watcher' AND event_kind = 'input');
-    SELECT RAISE(ABORT, 'agent_event_id must be an app or cli action event')
+    SELECT RAISE(ABORT, 'agent_event_id must be an app, cli or mcp action event')
     WHERE NOT EXISTS (SELECT 1 FROM memory_events
                       WHERE event_id = NEW.agent_event_id AND source IN ('app', 'cli', 'mcp') AND event_kind = 'action');
 END;

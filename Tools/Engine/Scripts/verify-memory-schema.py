@@ -141,7 +141,7 @@ for tool, args in fixtures.items():
         if isinstance(args[name], list): actual.setdefault(name, []).append(value)
         else: actual[name] = value
     assert actual == args, (tool, actual, args)
-ok("14 app tool envelopes and scalar/list argument round-trips")
+ok("app tool envelopes and scalar/list argument round-trips")
 event("drag_target")
 insert("memory_agent_actions", event_id="drag_target", app_id=1, tool_kind="drag", execution_status="planned")
 argument("from", "File", event_id="drag_target", app_id=1)
