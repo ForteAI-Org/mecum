@@ -87,7 +87,9 @@ struct ActionEngineTests {
 
     final class RecordingObserver: ActionObserving, @unchecked Sendable {
         var records: [ActionRecord] = []
+        var inputs: [InputRecord] = []
         func record(_ record: ActionRecord) async { records.append(record) }
+        func record(_ input: InputRecord) async { inputs.append(input) }
     }
 
     struct FixedExpectation: EffectExpecting {
@@ -223,7 +225,31 @@ struct ActionEngineTests {
         let record = try #require(observer.records.first)
         #expect(record.effect == .stateFlip(from: .off, to: .on))
         #expect(record.verb == .click)
+        #expect(record.before == scene([toggleOff]) && record.after == scene([toggleOn]),
+                "the record carries the perceptions the engine judged the click by")
         #expect(actuator.confirmations == [.observed], "a landed effect closes the delivery as observed")
+    }
+
+    @Test("an input reports what it perceived before and after and the effect it attributed, once, after its outcome")
+    func inputRecord() async throws {
+        let observer = RecordingObserver()
+        let appeared = SceneElement(id: "control|queue", kind: .control, label: "Queue",
+                                    bounds: NormalizedRect(x: 0.4, y: 0.4, width: 0.08, height: 0.03))
+        let outcome = await engine(scenes: ScriptedScenes([scene([export]), scene([export, appeared])]), observer: observer)
+            .deliver(InputRequest(processID: pid, bundleID: "com.x", appName: "X", input: .scroll(lines: -3, over: nil)))
+        #expect(outcome.kind == .foundActed, Comment(rawValue: outcome.message))
+        #expect(observer.records.isEmpty, "an input is not an action record")
+        let input = try #require(observer.inputs.first)
+        #expect(observer.inputs.count == 1)
+        #expect(input.before == scene([export]) && input.after == scene([export, appeared]))
+        #expect(input.effect == .elementsAppeared(labels: ["Queue"]))
+        #expect(input.attempt == .delivered)
+
+        let refused = RecordingObserver()
+        _ = await engine(scenes: ScriptedScenes([scene([export])]), observer: refused)
+            .deliver(InputRequest(processID: pid, bundleID: "com.x", appName: "X", input: .scroll(lines: 0, over: nil)))
+        #expect(refused.inputs.first?.attempt == .notAttempted(reason: "refused"))
+        #expect(refused.inputs.first?.after == nil)
     }
 
     @Test("an identical scene is a ghost and says nothing else changed")
