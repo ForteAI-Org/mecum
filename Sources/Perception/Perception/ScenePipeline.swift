@@ -8,6 +8,9 @@
 import CoreGraphics
 import Foundation
 import PerceptionCore
+#if MECUM_PHASES
+import PhaseSignposts
+#endif
 
 /// ScenePipeline builds a text scene from one window image: text runs from a recognizer, region
 /// boxes from a segmenter, grouped into elements, composed into named panels, hashed into a token.
@@ -97,11 +100,26 @@ public struct ScenePipeline: Sendable {
     public func perceive(_ image: CGImage, of window: Window) async throws -> SceneSnapshot {
         try Task.checkCancellation()
         let text = self.text, regions = self.regions, sections = self.sections, accuracy = self.accuracy
+        #if MECUM_PHASES
+        async let recognized = PhaseInterval.measure("pipeline.ocr") {
+            try text.recognizeText(in: image, accuracy: accuracy)
+        }
+        async let segmented = PhaseInterval.measure("pipeline.segments") {
+            try regions?.segments(in: image) ?? []
+        }
+        async let harvested = PhaseInterval.measure("pipeline.ax") {
+            try await augmentationElements(for: window)
+        }
+        #else
         async let recognized = text.recognizeText(in: image, accuracy: accuracy)
         async let segmented = regions?.segments(in: image) ?? []
         async let harvested = augmentationElements(for: window)
+        #endif
         let (runs, segments) = try await (recognized, segmented)
         try Task.checkCancellation()
+        #if MECUM_PHASES
+        let composing = PhaseInterval.begin("pipeline.compose")
+        #endif
         let visual = try regionFilter?.filter(segments, in: image, protecting: runs.map(\.pixelBox))
             ?? VisualRegions(icons: segments)
         try Task.checkCancellation()
@@ -119,10 +137,27 @@ public struct ScenePipeline: Sendable {
             images   : visual.images,
             overlays : visual.overlays
         )
+        #if MECUM_PHASES
+        composing.end()
+        let waiting = PhaseInterval.begin("pipeline.axWait")
+        #endif
         let nativeElements = try await harvested
+        #if MECUM_PHASES
+        waiting.end()
+        #endif
         try Task.checkCancellation()
+        #if MECUM_PHASES
+        let merging = PhaseInterval.begin("pipeline.merge")
+        #endif
         let merged = Self.augmented(scene, with: nativeElements)
+        #if MECUM_PHASES
+        merging.end()
+        #endif
         guard let controlState else { return merged }
+        #if MECUM_PHASES
+        let stating = PhaseInterval.begin("pipeline.controlState")
+        defer { stating.end() }
+        #endif
         return Self.stated(merged, from: image, segments: visual.icons, reader: controlState)
     }
 

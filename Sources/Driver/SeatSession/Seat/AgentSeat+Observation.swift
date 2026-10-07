@@ -10,6 +10,9 @@ import AppKit
 import CoreGraphics
 import Dispatch
 import os
+#if MECUM_PHASES
+import PhaseSignposts
+#endif
 import SeatCapture
 import SeatCore
 import SeatInput
@@ -343,6 +346,10 @@ extension AgentSeat {
     /// long after it without telling anybody.
     func foldCurrentReading(at now: UInt64 = DispatchTime.now().uptimeNanoseconds) {
 
+        #if MECUM_PHASES
+        let phase = PhaseInterval.begin("seat.foldReading")
+        defer { phase.end() }
+        #endif
         guard assignmentKit.lifecycle.isAssigned else { return }
         let snapshot = readSurfaces()
         var reading  = snapshot.inventory
@@ -1407,6 +1414,9 @@ extension AgentSeat {
         if let context = menuContext {
             return .failure(.menuInteractionActive(parent: context.parent))
         }
+        #if MECUM_PHASES
+        let preCapture = PhaseInterval.begin("seat.preCapture")
+        #endif
         let deadlineNanoseconds = DispatchTime.now().uptimeNanoseconds
             &+ observationProfile.captureDeadlineNanoseconds
         foldCurrentReading()
@@ -1523,6 +1533,9 @@ extension AgentSeat {
         } else {
             region = nil
         }
+        #if MECUM_PHASES
+        preCapture.end()
+        #endif
         let delivered = await captureAndIssue(
             surface            : picture.surface,
             role               : picture.role,
@@ -1745,6 +1758,10 @@ extension AgentSeat {
         isMenu             : Bool
     ) async -> Result<SeatObservationDelivery, ObservationUnavailable> {
 
+        #if MECUM_PHASES
+        let captureLoop = PhaseInterval.begin("seat.captureLoop")
+        defer { captureLoop.end() }
+        #endif
         let barrier = observationIssuer.barrier
         let captureTarget = region.map {
             SeatCaptureTarget.attestedWindowRegion(
@@ -1764,6 +1781,9 @@ extension AgentSeat {
             }
             attempts += 1
 
+            #if MECUM_PHASES
+            let captureSource = PhaseInterval.begin("seat.captureSource")
+            #endif
             let frame: SeatFrame
             do {
                 if isMenu {
@@ -1800,6 +1820,9 @@ extension AgentSeat {
                 lastFailure = .captureFailed(reason: String(describing: error))
                 continue
             }
+            #if MECUM_PHASES
+            captureSource.end()
+            #endif
 
             let arrivedAt = DispatchTime.now().uptimeNanoseconds
 
@@ -1873,6 +1896,10 @@ extension AgentSeat {
         isMenu             : Bool
     ) -> ObservationUnavailable? {
 
+        #if MECUM_PHASES
+        let phase = PhaseInterval.begin("seat.stillCurrent")
+        defer { phase.end() }
+        #endif
         guard !isTearingDown, state != .failed else { return .notAssigned }
         guard let assignment = assignmentKit.lifecycle.current,
               assignment.instance == instance

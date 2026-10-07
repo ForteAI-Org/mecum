@@ -10,6 +10,9 @@ import EngineCore
 import Foundation
 import Perception
 import PerceptionCore
+#if MECUM_PHASES
+import PhaseSignposts
+#endif
 import SeatCapture
 import SeatCore
 import SeatSession
@@ -43,6 +46,10 @@ public struct SeatSceneProvider: SceneProviding {
     }
 
     public func currentScene(of processID: pid_t) async throws -> PerceivedWindow {
+        #if MECUM_PHASES
+        let perception = PhaseInterval.begin("perception")
+        defer { perception.end() }
+        #endif
         let application = identity(processID)
             ?? ApplicationIdentity(bundleID: "pid.\(processID)", name: "pid \(processID)")
         // Only the windows on the seat's display: one left on the person's display is not in this scene.
@@ -53,16 +60,32 @@ public struct SeatSceneProvider: SceneProviding {
         let frame: CGRect
         let observedWindow: AdoptedWindow
         if popups.isEmpty {
+            #if MECUM_PHASES
+            let windowStill = PhaseInterval.begin("capture.windowStill")
+            #endif
             let still = try await target.windowStill()
+            #if MECUM_PHASES
+            windowStill.end()
+            let conversion = PhaseInterval.begin("capture.makeCGImage")
+            #endif
             guard still.geometry.isValid, let pixels = still.makeCGImage() else {
                 throw SeatDrivingFailure.frameUnusable
             }
+            #if MECUM_PHASES
+            conversion.end()
+            #endif
             image = pixels
             frame = still.geometry.screenRect
             guard let captured = await target.lastCapturedWindow else { throw SeatDrivingFailure.frameUnusable }
             observedWindow = captured
         } else {
+            #if MECUM_PHASES
+            let displayStill = PhaseInterval.begin("capture.displayStill")
+            #endif
             let still = try await target.displayStill()
+            #if MECUM_PHASES
+            displayStill.end()
+            #endif
             guard still.geometry.isValid, let pixels = still.makeCGImage() else {
                 throw SeatDrivingFailure.frameUnusable
             }
@@ -92,7 +115,13 @@ public struct SeatSceneProvider: SceneProviding {
             frame       : frame,
             windowNumber: observedWindow.id
         )
+        #if MECUM_PHASES
+        let perceiving = PhaseInterval.begin("pipeline")
+        #endif
         let scene = try await pipeline.perceive(image, of: window)
+        #if MECUM_PHASES
+        perceiving.end()
+        #endif
         await MainActor.run { target.lastSceneImage = image }
         return PerceivedWindow(scene: scene, frame: frame)
     }

@@ -7,6 +7,9 @@
 
 import CoreGraphics
 import Foundation
+#if MECUM_PHASES
+import PhaseSignposts
+#endif
 import SeatCapture
 import SeatCore
 import SeatInput
@@ -138,10 +141,22 @@ public final class SeatTarget {
     /// application's window again, which is what closing and reopening the session used to do.
     @discardableResult
     public func observe() async throws -> SeatObservationDelivery {
+        #if MECUM_PHASES
+        let observing = PhaseInterval.begin("target.observe")
+        defer { observing.end() }
+        let verifying = PhaseInterval.begin("target.verify")
+        #endif
         let seat = try agentSeat()
         try verifyCurrentWindow(of: seat)
+        #if MECUM_PHASES
+        verifying.end()
+        #endif
         let delivered = try await Self.retrying {
             try self.verifyCurrentWindow(of: seat)
+            #if MECUM_PHASES
+            let seatObserving = PhaseInterval.begin("seat.observe")
+            defer { seatObserving.end() }
+            #endif
             switch await seat.observe() {
                 case .success(let delivery): return delivery
                 case .failure(let reason)  : throw reason

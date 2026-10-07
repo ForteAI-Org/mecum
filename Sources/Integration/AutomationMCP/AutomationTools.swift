@@ -4,6 +4,9 @@ import EngineCore
 import Foundation
 import LocalMCP
 import PerceptionCore
+#if MECUM_PHASES
+import PhaseSignposts
+#endif
 import PrivateSymbols
 import SeatCore
 
@@ -222,6 +225,10 @@ public final class AutomationTools {
     }
 
     public func call(_ name: String, _ arguments: JSONValue) async throws -> JSONValue {
+        #if MECUM_PHASES
+        let tool = PhaseInterval.begin("tool", name)
+        defer { tool.end() }
+        #endif
         let before = seen
         // A session that ended leaves no scene to compare the next one against.
         defer { if session.id == nil { seen = [] } }
@@ -342,6 +349,10 @@ public final class AutomationTools {
             value = .object(result)
         default: throw AutomationFailure("Unknown tool: \(name)")
         }
+        #if MECUM_PHASES
+        let rendering = PhaseInterval.begin("render.result")
+        defer { rendering.end() }
+        #endif
         let answered = Self.noted(value, session.seatNotice)
         try record?("← \(name) \(String(decoding: try JSONEncoder().encode(answered), as: UTF8.self))")
         return MCPRouter.toolResult(answered)
@@ -374,6 +385,10 @@ public final class AutomationTools {
     /// of a window the model already read is sent as its `changes` since that revision, when they are
     /// under half the scene's size: a diff any larger saves little and reads worse than the scene.
     private func observation(_ scene: SceneSnapshot, changesOnly: Bool = false) -> JSONValue {
+        #if MECUM_PHASES
+        let rendering = PhaseInterval.begin("render.scene")
+        defer { rendering.end() }
+        #endif
         revision += 1
         let text   = scene.text()
         let number = session.observedWindowNumber

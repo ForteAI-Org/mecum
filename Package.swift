@@ -231,13 +231,18 @@ let package = Package(
         driver("CursorGuard", ["SeatCore", "PrivateSymbols"]),
         
         // Window and display capture, frames and the monitor layer.
-        driver("SeatCapture", ["SeatCore", "WindowPlacement"]),
+        driver("SeatCapture", ["SeatCore", "WindowPlacement", "PhaseSignposts"]),
         
         // The host and the seat: turns, adoption, recovery, watchdog.
-        driver("SeatSession", ["SeatCore", "PrivateSymbols", "VirtualScreens", "WindowPlacement", "SeatInput", "CursorGuard", "SeatCapture"]),
+        driver("SeatSession", ["SeatCore", "PrivateSymbols", "VirtualScreens", "WindowPlacement", "SeatInput", "CursorGuard", "SeatCapture", "PhaseSignposts"]),
         
         // Read-only reader of another application's window.
         driver("TargetReader", ["SeatCore", "WindowPlacement"]),
+
+        // MARK: PhaseSignposts
+        // The `os_signpost` intervals of a phase measurement build. Empty unless `MECUM_PHASES` is set,
+        // which no default build does; see Documentation/Driver/README.md, "Measuring the phases".
+        broker("PhaseSignposts", []),
 
         // MARK: ModelTransports
         // How a model is talked to: one structured request, one streamed
@@ -318,7 +323,7 @@ let package = Package(
         perception("AccessibilityFacts", ["PerceptionCore"], settings: pure),
 
         // The pipeline: roles in, a scene out. Nonisolated on purpose: recognition must not block the UI.
-        perception("Perception", ["PerceptionCore"], settings: pure),
+        perception("Perception", ["PerceptionCore", "PhaseSignposts"], settings: pure),
 
         // One still of a window, or of a region with its pop-up, through ScreenCaptureKit: the foreground eye.
         perception("ScreenCapture", ["PerceptionCore"], settings: pure),
@@ -329,7 +334,7 @@ let package = Package(
         engine("EngineCore", ["PerceptionCore"], settings: pure),
 
         // The act and observe cycle over the roles: resolve, gesture, verify, outcome. Nonisolated on purpose.
-        engine("Engine", ["EngineCore", "PerceptionCore"], settings: pure),
+        engine("Engine", ["EngineCore", "PerceptionCore", "PhaseSignposts"], settings: pure),
 
         // The foreground `Actuating`: synthetic events at the HID system tap.
         engine("HIDActuation", ["EngineCore"], settings: pure),
@@ -361,7 +366,8 @@ let package = Package(
         // Where two layers meet. SeatDriving fills the Engine's roles from the Driver's seat: stills of the
         // adopted window, routed commands inside a Turn, no activation.
         integration("SeatDriving", ["SeatCore", "SeatSession", "SeatCapture", "SeatInput", "WindowPlacement",
-                                    "EngineCore", "PerceptionCore", "Perception", "AccessibilityActions"],
+                                    "EngineCore", "PerceptionCore", "Perception", "AccessibilityActions",
+                                    "PhaseSignposts"],
                     settings: pure),
 
         // MARK: Engine tools
@@ -377,7 +383,7 @@ let package = Package(
                     "WorkspaceActivation", "Memory", "FileKnowledge", "LiveScenes", "PerceptionCore",
                     "SeatDriving", "SeatCore", "SeatSession", "PrivateSymbols", "WindowPlacement"]),
         integration("AutomationMCP", ["AutomationRuntime", "LocalMCP", "EngineCore", "PerceptionCore",
-                                     "PrivateSymbols", "SeatCore", "WindowServerListing"]),
+                                     "PrivateSymbols", "SeatCore", "WindowServerListing", "PhaseSignposts"]),
         // The foreground command line: windows, scene, act, memory. What a model host does, by hand.
         .executableTarget(
             name: "mecum",

@@ -166,6 +166,7 @@ nonisolated func makeControlledFrame(
     screenRect : CGRect,
     sourceWindowFrame: CGRect? = nil,
     receivedAt : UInt64 = 1,
+    displayTime: UInt64? = nil,
     malformed  : Bool = false
 ) -> SeatFrame? {
 
@@ -213,6 +214,7 @@ nonisolated func makeControlledFrame(
         pixelBuffer      : pixelBuffer,
         presentationTime : CMTime(value: CMTimeValue(receivedAt), timescale: 1_000_000),
         receivedAt       : receivedAt,
+        displayTime      : displayTime,
         displayGeneration: 1,
         source           : .window(identity),
         geometry         : geometry

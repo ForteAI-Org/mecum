@@ -10,6 +10,9 @@ import CoreMedia
 import Darwin
 import Foundation
 import os
+#if MECUM_PHASES
+import PhaseSignposts
+#endif
 import SeatCore
 import ScreenCaptureKit
 import Synchronization
@@ -1408,12 +1411,18 @@ public final class SeatCaptureStream {
 
         // Resolved before the owner exists, so a target that cannot be sized
         // fails without a stream to stop.
+        #if MECUM_PHASES
+        let sizing = PhaseInterval.begin("capture.stream.size")
+        #endif
         let size: CGSize
         if let pixelSize {
             size = pixelSize
         } else {
             size = try await naturalPixelSize(of: target, deadline: deadline)
         }
+        #if MECUM_PHASES
+        sizing.end()
+        #endif
 
         let owner = SeatCaptureStream(
             target           : target,
@@ -1422,6 +1431,9 @@ public final class SeatCaptureStream {
         var capturedFrame: SeatFrame?
         var captureError : (any Error)?
         do {
+            #if MECUM_PHASES
+            let starting = PhaseInterval.begin("capture.stream.start")
+            #endif
             try await owner.start(
                 configuration: SeatCaptureConfiguration(
                     pixelSize      : size,
@@ -1429,16 +1441,29 @@ public final class SeatCaptureStream {
                 ),
                 deadline: deadline
             )
+            #if MECUM_PHASES
+            starting.end()
+            let firstFrame = PhaseInterval.begin("capture.stream.firstFrame")
+            #endif
             let frame = try await firstTimestampedFrame(
                 in      : owner.frames,
                 deadline: deadline
             )
+            #if MECUM_PHASES
+            firstFrame.end()
+            #endif
             capturedFrame = frame
         } catch {
             captureError = error
         }
 
+        #if MECUM_PHASES
+        let stopping = PhaseInterval.begin("capture.stream.stop")
+        #endif
         await owner.stop(deadline: CaptureDeadline(timeout: .seconds(5)))
+        #if MECUM_PHASES
+        stopping.end()
+        #endif
         guard case .stopped = owner.state, !owner.hasUnconfirmedResource else {
             if case .failed(_, let failure) = owner.state { throw failure }
             throw CaptureFailure.timedOut(.streamStop)

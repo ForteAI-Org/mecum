@@ -9,6 +9,9 @@ import CoreGraphics
 import EngineCore
 import Foundation
 import PerceptionCore
+#if MECUM_PHASES
+import PhaseSignposts
+#endif
 
 /// ActionEngine performs one action the honest way: perceive this instant, resolve the target by
 /// name, refuse what policy refuses, deliver the gesture through a role, perceive again, and judge
@@ -66,7 +69,15 @@ public struct ActionEngine: Sendable {
         self.dependencies = dependencies
         self.permissions  = permissions
         self.timing       = timing
+        #if MECUM_PHASES
+        self.pause = { duration in
+            let phase = PhaseInterval.begin("pause")
+            defer { phase.end() }
+            await pause(duration)
+        }
+        #else
         self.pause        = pause
+        #endif
     }
 
     // MARK: Observe
