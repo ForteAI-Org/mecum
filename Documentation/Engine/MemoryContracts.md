@@ -15,8 +15,8 @@ shape. Old JSON knowledge is never read at run time and never imported on its ow
 The app, its external MCP clients, the terminal chat and the command line reach the archive through one
 service per Knowledge directory, `MemoryService` (`Sources/Integration/AutomationRuntime/MemoryService.swift`):
 one `memory.sqlite` under the directory, opened on first use, shared by every caller of the process through
-`MemoryService.shared(for:)`, never closed by a session; the app closes it at quit, and the command line waits
-for its queue at the end of each command. The repositories are protocols of the `Memory`
+`MemoryService.shared(for:)`, never closed by a session; the process closes it once at its end, the app at quit
+and `mecum` after its command, within one bounded close ([Closing](MemorySchema.md#closing)). The repositories are protocols of the `Memory`
 module (`Sources/Engine/Memory/Storage`), all implemented over SQLite by `SQLiteMemoryStore` and the
 `SQLite*Repository` types:
 
@@ -146,15 +146,16 @@ included, is refused untouched, never migrated: see [The resource](MemorySchema.
     failure of the task.
   - A fact that could not be written is a gap: a failed write or one dropped at a full queue or at the
     service's close is counted in `MemoryService.status()` (`failed`, `dropped`, `lastFailure`) and logged,
-    never shown to the agent and never retried. A command line process that ends with writes still queued
-    after its flush budget loses them uncounted. No gap is recorded as a row: nothing in SQLite says that
+    never shown to the agent and never retried. The close counts what it could not save: the writes still
+    queued as dropped, the one in flight as failed. No gap is recorded as a row: nothing in SQLite says that
     something is missing.
 
   See [Waiting for a busy lock](MemorySchema.md#waiting-for-a-busy-lock),
   [Failure, cleanup and recovery](MemorySchema.md#failure-cleanup-and-recovery) and
   [Producers](MemorySchema.md#producers).
-- **At the end.** A session's close and a command's end wait up to 3 s for the queue; the app's quit closes
-  every service, each within 3 s. No effect is replayed.
+- **At the end.** A session's close waits up to 3 s for the queue; the process's end closes every service once,
+  within one 3 s deadline that the copy in progress does not extend: the copy is cancelled and never published
+  incomplete, the queue drains, what is left is counted. No effect is replayed.
 - **Copies.** A verified copy a day beside the archive, the newest three kept; a file the library calls corrupt
   is moved aside and the newest copy restored, or the memory starts empty. See
   [Copies and recovery](MemorySchema.md#copies-and-recovery).

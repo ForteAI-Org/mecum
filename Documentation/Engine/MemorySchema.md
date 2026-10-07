@@ -713,12 +713,36 @@ branch; the tables they fill are listed in
 `MemoryService.shared(for:)` hands every runtime, session, tool and command of the process the same
 service for the same Knowledge directory (the path standardized with its symbolic links resolved):
 one `memory.sqlite`, opened on first use as a producer, so the process has one writer per archive.
-No session and no command closes it. A session's close and the end of a command line command wait,
-within the closing budget, for what is queued (`EngineRuntime.finish()`, `flush(within: 3 s)`); the
-app closes every service once at quit (`SeatReleasingDelegate`, `MemoryService.closeAll()`, each
-service within its 3 s `closingBudget`, the whole step bounded at 4 s). What a service still holds
-when its budget is spent is dropped and counted. Two processes on one directory are two services
-and two writers on one file, which the store's lock keeps apart.
+No session and no command closes it. A session's close waits, within 3 s, for what is queued
+(`EngineRuntime.finish()`, `flush(within:)`); the process closes every service once at its end: the app
+at quit (`SeatReleasingDelegate`, `MemoryService.closeAll()`, the step bounded at 4 s) and `mecum` after
+its command (`main.swift`). Two processes on one directory are two services and two writers on one
+file, which the store's lock keeps apart.
+
+### Closing
+
+`MemoryService.close()` closes once, whoever asks and however often; a second call waits for the
+first one's end. Against one deadline, `closingBudget` (3 s) on the monotonic clock from the first call:
+
+1. Nothing new is admitted: a write offered from then on is refused and counted as dropped, no copy
+   starts and no recovery runs.
+2. A copy in progress is cancelled. The store abandons it between two steps and removes its partial
+   file, so an incomplete copy is never published; the next open takes the day's copy again.
+3. The queue drains, a busy archive waited out until the deadline.
+4. What the deadline leaves is counted: the writes still queued as dropped; the one in flight as failed
+   when it ends after the store closes, or at once if it does not end within 250 ms. A write that
+   committed is counted written, once.
+5. The archive closes.
+
+`status().lastClose` says how long the close took and what it saved and did not, and the log says it
+too, as an error when anything was left. In an ordinary close every write is saved: the tests close
+two hundred writes in under 0.1 s. With a lock held past the deadline, the writes are not saved and
+are counted; they live in the process's memory only, so they are gone with it: a durable queue would
+be another design.
+
+The app takes the bounded path of Quit whenever `MemoryService.hasUnfinishedWork` says a service still
+holds writes not committed or a copy in progress, even with no worker, draft or client to wait for: it
+does not wait for the actor, so Quit decides without blocking.
 
 The app's workers, its external MCP clients and its Brain page share the app's Knowledge directory
 (`Knowledge` under `WorkspaceLaunch.directory`, by default `~/Library/Application Support/Mecum`).

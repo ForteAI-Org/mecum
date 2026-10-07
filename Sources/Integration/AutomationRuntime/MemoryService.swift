@@ -176,8 +176,10 @@ public actor MemoryService: BrainReading, BrainApplicationStoring {
         public let state: State
         public let libraryVersion: String?
         public let librarySourceID: String?
-        /// Writes waiting in the queue now.
+        /// Writes waiting in the queue now, in this process's memory only.
         public let pending: Int
+        /// Writes taken from the queue and not yet committed or failed: one at most.
+        public let inFlight: Int
         /// Writes committed since the service was made.
         public let written: Int
         /// Writes that failed: each one a fact the archive does not hold.
@@ -190,6 +192,15 @@ public actor MemoryService: BrainReading, BrainApplicationStoring {
         public let lastBackup: Date?
         /// What the service did with an archive it found corrupt, when it found one.
         public let lastRecovery: String?
+        /// How the close went, once the service closed: how long it took, what it saved and what not.
+        public let lastClose: String?
+    }
+
+    /// Activity is what a quitting process may ask without waiting for the actor: whether this
+    /// service still holds writes not yet committed, or a copy in progress.
+    private struct Activity {
+        var outstanding = 0
+        var copying     = false
     }
 
     /// One write as it waits in the queue: a label for the log and the body.
@@ -211,6 +222,13 @@ public actor MemoryService: BrainReading, BrainApplicationStoring {
 
     private var queue: [Write] = []
     private var drainer: Task<Void, Never>?
+    /// Whether a write is taken from the queue and running now.
+    private var inFlight = false
+    /// False once a close began: no write, copy or open is admitted after that point.
+    private var admitting = true
+    private var closing: Task<Void, Never>?
+    private var lastClose: String?
+    private nonisolated let activity = Mutex(Activity())
     private var written = 0
     private var failed = 0
     private var dropped = 0
@@ -221,6 +239,9 @@ public actor MemoryService: BrainReading, BrainApplicationStoring {
     private var lastBackup: Date?
     private var lastRecovery: String?
     private var backingUp: Task<Void, Never>?
+
+    /// A test's seam into the copy, for the package's tests only: run before the snapshot starts.
+    private var beforeBackup: (@Sendable () async throws -> Void)?
 
     private static let log = Logger(subsystem: "dev.forte.Mecum", category: "Memory")
 
@@ -256,6 +277,14 @@ public actor MemoryService: BrainReading, BrainApplicationStoring {
         }
     }
 
+    /// Whether any service of the process still holds writes not committed or a copy in progress:
+    /// what a quitting process asks before it decides it can end at once. It does not wait.
+    nonisolated public static var hasUnfinishedWork: Bool {
+        services.withLock { services in
+            services.values.contains { $0.activity.withLock { $0.outstanding > 0 || $0.copying } }
+        }
+    }
+
     /// Whether the archive's file is there now, without opening it.
     nonisolated public var archiveExists: Bool { FileManager.default.fileExists(atPath: url.path) }
 
@@ -264,7 +293,7 @@ public actor MemoryService: BrainReading, BrainApplicationStoring {
     /// Adds a write to the queue and returns at once. The write runs after every write enqueued before
     /// it; its failure is a counted gap, never an error for the caller.
     public func enqueue(_ label: String, _ body: @escaping @Sendable (MemoryRepositories) async throws -> Void) {
-        guard state != .closed else {
+        guard admitting, state != .closed else {
             dropped += 1
             return
         }
@@ -276,6 +305,7 @@ public actor MemoryService: BrainReading, BrainApplicationStoring {
             return
         }
         queue.append(Write(label: label, body: body))
+        activity.withLock { $0.outstanding += 1 }
         if drainer == nil { drainer = Task { await self.drain() } }
     }
 
@@ -292,20 +322,34 @@ public actor MemoryService: BrainReading, BrainApplicationStoring {
     }
 
     private func drain() async {
-        while !queue.isEmpty {
+        while !queue.isEmpty, !Task.isCancelled {
             let write = queue.removeFirst()
+            inFlight = true
             do {
                 let repositories = try await ready()
                 try await write.body(repositories)
-                written += 1
+                settle(write, error: nil)
             } catch {
-                failed += 1
-                lastFailure = "\(write.label): \(Self.describe(error))"
-                Self.log.error("memory write failed: \(write.label, privacy: .public): \(Self.describe(error), privacy: .public)")
+                settle(write, error: error)
             }
         }
         drainer = nil
         scheduleBackupIfDue()
+    }
+
+    /// Counts a write that left the queue as committed or failed, once: a write the close already
+    /// counted as not saved is not counted again when it ends.
+    private func settle(_ write: Write, error: (any Error)?) {
+        guard inFlight else { return }
+        inFlight = false
+        activity.withLock { $0.outstanding -= 1 }
+        guard let error else {
+            written += 1
+            return
+        }
+        failed += 1
+        lastFailure = "\(write.label): \(Self.describe(error))"
+        Self.log.error("memory write failed: \(write.label, privacy: .public): \(Self.describe(error), privacy: .public)")
     }
 
     // MARK: Opening
@@ -357,6 +401,18 @@ public actor MemoryService: BrainReading, BrainApplicationStoring {
         }
     }
 
+    // MARK: Test seams
+
+    /// Runs `gate` before each copy's snapshot. For the package's tests only.
+    package func setBeforeBackup(_ gate: (@Sendable () async throws -> Void)?) {
+        beforeBackup = gate
+    }
+
+    /// Forwards the store's waiting events, once the archive is open. For the package's tests only.
+    package func observeStoreWaits(_ observer: (@Sendable (SQLiteMemoryStore.WaitEvent) -> Void)?) async {
+        await store?.observeWaits(observer)
+    }
+
     // MARK: Copies and recovery
 
     /// Opens the store; a file the library calls corrupt is moved aside and the newest copy restored
@@ -378,7 +434,7 @@ public actor MemoryService: BrainReading, BrainApplicationStoring {
     /// Starts a copy of the archive when the newest one is older than `backupInterval`, unless one
     /// is being taken. The copy runs beside the writes; it never holds them up.
     private func scheduleBackupIfDue() {
-        guard state == .open, backingUp == nil else { return }
+        guard admitting, state == .open, backingUp == nil else { return }
         if let newest = lastBackup ?? newestBackup()?.date,
            Date().timeIntervalSince(newest) < Double(configuration.backupInterval.components.seconds) { return }
         backingUp = Task { await self.backup() }
@@ -386,11 +442,16 @@ public actor MemoryService: BrainReading, BrainApplicationStoring {
 
     /// Takes a verified copy of the archive and keeps the newest `keptBackups`.
     private func backup() async {
-        defer { backingUp = nil }
+        activity.withLock { $0.copying = true }
+        defer {
+            backingUp = nil
+            activity.withLock { $0.copying = false }
+        }
         guard let store else { return }
         let stamp       = Self.stamp(Date())
         let destination = directory.appendingPathComponent("\(configuration.fileName).backup-\(stamp)")
         do {
+            if let beforeBackup { try await beforeBackup() }
             _ = try await store.snapshot(to: destination)
             lastBackup = Date()
             for old in backups().dropFirst(max(1, configuration.keptBackups)) {
@@ -453,23 +514,82 @@ public actor MemoryService: BrainReading, BrainApplicationStoring {
         return formatter.string(from: date)
     }
 
-    /// Closes the archive after the queue empties or the closing budget is spent. Definitive.
+    /// Closes the archive within `closingBudget`, once, whoever asks and however often.
+    ///
+    /// From the first call nothing new is admitted: a write offered after it is refused and counted
+    /// as dropped, and no copy starts. Then, against one deadline on the monotonic clock: a copy in
+    /// progress is cancelled (the store removes its partial file, so an incomplete copy is never
+    /// published; the next open takes the day's copy again); the queue drains, a busy archive
+    /// waited out until the deadline. What the deadline leaves is counted, never lost silently: the
+    /// writes still queued as dropped, the one in flight as failed once it ends, or at once if it
+    /// does not end within a short grace. The archive is closed last. A second call waits for the
+    /// first one's end.
     public func close() async {
-        guard state != .closed else { return }
-        await backingUp?.value
-        await flush(within: configuration.closingBudget)
-        let left = queue.count
-        if left > 0 {
-            dropped += left
-            queue.removeAll()
-            Self.log.error("memory closed with \(left) writes not saved")
+        if let closing {
+            await closing.value
+            return
         }
-        drainer?.cancel()
-        state = .closed
+        guard state != .closed else { return }
+        let task = Task { await self.performClose() }
+        closing = task
+        await task.value
+    }
+
+    private func performClose() async {
+        admitting = false
+        let started  = ContinuousClock.now
+        let deadline = started + configuration.closingBudget
+        var copyCancelled = false
+        if let backingUp {
+            backingUp.cancel()
+            copyCancelled = true
+            await waitUntil(deadline) { self.backingUp == nil }
+        }
+        let drained = await waitUntil(deadline) { self.drainer == nil && self.queue.isEmpty }
+        let leftQueued = queue.count
+        if !drained {
+            dropped += leftQueued
+            activity.withLock { $0.outstanding -= leftQueued }
+            queue.removeAll()
+            drainer?.cancel()
+        }
         if let store { await store.close() }
+        let grace = ContinuousClock.now + .milliseconds(250)
+        await waitUntil(grace) { self.drainer == nil }
+        var abandoned = 0
+        if inFlight {
+            inFlight = false
+            failed  += 1
+            abandoned = 1
+            activity.withLock { $0.outstanding -= 1 }
+            lastFailure = "a write did not end within the close"
+        }
+        await waitUntil(grace) { self.backingUp == nil }
+        state        = .closed
         store        = nil
         repositories = nil
         brains       = [:]
+        let took = started.duration(to: .now)
+        let summary = "closed in \(took): \(written) written, \(failed) failed, \(dropped) dropped"
+            + (leftQueued > 0 && !drained ? ", \(leftQueued) still queued at the deadline" : "")
+            + (abandoned > 0 ? ", one write abandoned in flight" : "")
+            + (copyCancelled ? ", the copy in progress cancelled" : "")
+        lastClose = summary
+        if drained && abandoned == 0 {
+            Self.log.info("memory \(summary, privacy: .public)")
+        } else {
+            Self.log.error("memory \(summary, privacy: .public)")
+        }
+    }
+
+    /// Waits until `done` holds or the deadline passes, whichever is first; true when it holds.
+    @discardableResult
+    private func waitUntil(_ deadline: ContinuousClock.Instant, _ done: () -> Bool) async -> Bool {
+        while !done() {
+            guard ContinuousClock.now < deadline else { return false }
+            try? await Task.sleep(for: .milliseconds(1))
+        }
+        return true
     }
 
     // MARK: Reading
@@ -503,8 +623,9 @@ public actor MemoryService: BrainReading, BrainApplicationStoring {
             sourceID = diagnostics.librarySourceID
         }
         return Status(path: url.path, state: state, libraryVersion: version, librarySourceID: sourceID,
-                      pending: queue.count, written: written, failed: failed, dropped: dropped, lastFailure: lastFailure,
-                      lastBackup: lastBackup ?? newestBackup()?.date, lastRecovery: lastRecovery)
+                      pending: queue.count, inFlight: inFlight ? 1 : 0, written: written, failed: failed, dropped: dropped,
+                      lastFailure: lastFailure, lastBackup: lastBackup ?? newestBackup()?.date,
+                      lastRecovery: lastRecovery, lastClose: lastClose)
     }
 
     /// The archive's applications and counts.
