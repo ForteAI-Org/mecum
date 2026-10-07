@@ -138,6 +138,26 @@ struct SQLiteMemoryStoreTests {
         ) { $0.integer(0) }.first == 48)
     }
 
+    @Test("a version 1 file of an earlier development form whose columns match but whose constraints differ is refused untouched")
+    func differentShapeRefused() async throws {
+        let url = try temporaryDatabase()
+        let ddl = try SQLiteMemorySchema.text()
+        let earlier = ddl.replacingOccurrences(of: ",\n         'textSelectionChanged')),", with: ")),")
+        #expect(earlier != ddl)
+        let raw = try SQLiteConnection(path: url.path)
+        try raw.execute(earlier)
+        try raw.execute("PRAGMA user_version = 1")
+        raw.close()
+        let before = try Data(contentsOf: url)
+
+        let error = await storeError { _ = try await SQLiteMemoryStore.open(at: url) }
+        #expect(error == .schema(.differentShape(["table memory_agent_actions"])))
+        #expect(try Data(contentsOf: url) == before)
+
+        let fresh = try await SQLiteMemoryStore.open(at: try temporaryDatabase())
+        await fresh.close()
+    }
+
     @Test("a version 0 file with somebody else's tables is refused and left exactly as found")
     func foreignTables() async throws {
         let url = try temporaryDatabase()

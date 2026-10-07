@@ -23,6 +23,12 @@ public enum MemorySchemaMismatch: Sendable, Equatable {
     /// one. It is refused as found; no migration runs on the store's own initiative.
     case missingColumns([String])
 
+    /// A file at the supported version has every table and column but its schema is not the one
+    /// this build creates: a table, index or trigger is missing, extra or written differently,
+    /// named `type name`. Constraints are part of the shape, so an earlier development form whose
+    /// columns match but whose checks do not is refused here, before a write could fail on them.
+    case differentShape([String])
+
     /// A file with no schema of its own yet (version 0, no table): what a producer's open bootstraps,
     /// and what an open of an existing archive refuses, untouched. `fileIsEmpty` is a file of zero
     /// bytes, with no SQLite header at all; false is a SQLite database with nothing in it.

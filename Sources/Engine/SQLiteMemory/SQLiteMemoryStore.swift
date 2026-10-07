@@ -602,10 +602,10 @@ public actor SQLiteMemoryStore {
         guard integrity == ["ok"] else { throw MemoryStoreError.snapshot(.copyFailedIntegrityCheck(integrity)) }
         let violations = try copy.query("PRAGMA foreign_key_check") { _ in () }.count
         guard violations == 0 else { throw MemoryStoreError.snapshot(.copyHasForeignKeyViolations(violations)) }
-        let expected = SQLiteMemorySchema.tableNames(in: try SQLiteMemorySchema.text())
+        let expected = try Expected(ddl: try SQLiteMemorySchema.text())
         do {
             guard try inspect(copy, expected: expected) == .current else {
-                throw MemoryStoreError.snapshot(.copySchema(.missingTables(expected)))
+                throw MemoryStoreError.snapshot(.copySchema(.missingTables(expected.tables)))
             }
         } catch MemoryStoreError.schema(let mismatch) {
             throw MemoryStoreError.snapshot(.copySchema(mismatch))
@@ -658,14 +658,14 @@ public actor SQLiteMemoryStore {
         defer { opening = nil }
         let path = url.path
         let ddl     : String
-        let expected: [String]
+        let expected: Expected
         let writer  : SQLiteConnection
         do {
             if let unmet = SQLiteLibrary.unmetRequirement() {
                 throw MemoryStoreError.unavailable(.library(found: SQLiteLibrary.version, required: unmet.minimumVersion))
             }
             ddl      = try SQLiteMemorySchema.text()
-            expected = SQLiteMemorySchema.tableNames(in: ddl)
+            expected = try Expected(ddl: ddl)
             writer   = try acquire(path, mayCreate: kind == .producer)
         } catch {
             throw abandonedOpen(after: error)
@@ -804,11 +804,26 @@ public actor SQLiteMemoryStore {
         }
     }
 
-    /// Reads the version and the tables under the write lock and says whether the file is empty
+    /// What an inspection compares a file with: the tables the resource creates, for a refusal that
+    /// names them, and the exact objects a file bootstrapped from it holds.
+    struct Expected {
+        let tables : [String]
+        let objects: Set<SQLiteMemorySchema.SchemaObject>
+
+        init(ddl: String) throws {
+            tables  = SQLiteMemorySchema.tableNames(in: ddl)
+            objects = try SQLiteMemorySchema.objects(of: ddl)
+        }
+    }
+
+    /// Reads the version and the schema under the write lock and says whether the file is empty
     /// or at the schema this build knows. Every other file is refused, untouched: a future version,
     /// a version 0 file with tables of its own, a version 1 file with tables missing, a version 1
-    /// file whose tables lack a column this build writes (an earlier development form).
-    private static func inspect(_ connection: SQLiteConnection, expected: [String]) throws -> Inspection {
+    /// file whose tables lack a column this build writes, and a version 1 file whose tables,
+    /// indexes or triggers are not exactly the ones this build creates (an earlier development form
+    /// with other constraints).
+    private static func inspect(_ connection: SQLiteConnection, expected: Expected) throws -> Inspection {
+        let tables = expected.tables
         let version  = try integerPragma(connection, "user_version")
         let existing = try connection.query(
             "SELECT name FROM sqlite_schema WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
@@ -819,7 +834,7 @@ public actor SQLiteMemoryStore {
         case 0:
             throw MemoryStoreError.schema(.unknownTables(existing))
         case Int64(SQLiteMemorySchema.version):
-            let missing = expected.filter { !existing.contains($0) }
+            let missing = tables.filter { !existing.contains($0) }
             guard missing.isEmpty else { throw MemoryStoreError.schema(.missingTables(missing)) }
             var missingColumns: [String] = []
             for (table, column) in SQLiteMemorySchema.requiredColumns {
@@ -828,6 +843,10 @@ public actor SQLiteMemoryStore {
                 if !columns.contains(column) { missingColumns.append("\(table).\(column)") }
             }
             guard missingColumns.isEmpty else { throw MemoryStoreError.schema(.missingColumns(missingColumns)) }
+            let differences = SQLiteMemorySchema.differences(
+                found: try SQLiteMemorySchema.objects(in: connection), expected: expected.objects
+            )
+            guard differences.isEmpty else { throw MemoryStoreError.schema(.differentShape(differences)) }
             return .current
         default:
             throw MemoryStoreError.schema(.future(
