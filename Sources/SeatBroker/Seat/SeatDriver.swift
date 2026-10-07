@@ -1090,7 +1090,8 @@ final class SeatDriver {
             lastObligations = []
         }
         try await host.start()
-        let created = try host.makeSeat()
+        // The preview already streams the adopted window, so an observation reads it first.
+        let created = try host.makeSeat(liveFrames: preview)
         seat = created
         // The host's stream once per driver and the seat's once per seat. The
         // replaced seat's watcher had the whole restart to drain its stream.

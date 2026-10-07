@@ -18,6 +18,8 @@ protocol PreviewCaptureStreaming: AnyObject {
     func stop(timeout: Duration) async
     func attach(_ layer: MonitorLayer)
     func detach(_ layer: MonitorLayer)
+    func firstFrame(displayedAfter notBefore: UInt64, within bound: Duration) async throws -> SeatFrame
+    func invalidateWindowServerReadings()
 }
 
 extension SeatCaptureStream: PreviewCaptureStreaming {}
@@ -222,6 +224,11 @@ final class PreviewStreamController {
     /// on that same target so it cannot reintroduce host-sized letterboxing.
     func follow(target: SeatCaptureTarget, frame: CGRect, pixelSize: CGSize) {
         guard !isStoppingOrStopped else { return }
+        // An observation that saw the window elsewhere or at another size makes the stream read
+        // the window server again instead of reusing its cached answers.
+        if frame != windowFrame || pixelSize != windowPixelSize {
+            stream?.invalidateWindowServerReadings()
+        }
         windowFrame = frame
         // A reading only settles against the reading before it of the same
         // window. A new recipient starts the budget again.
@@ -531,5 +538,34 @@ final class PreviewStreamController {
             pixelSize: CGSize(width: max(1, pixelSize.width), height: max(1, pixelSize.height)),
             framesPerSecond: 30
         )
+    }
+}
+
+/// The preview is the running stream of the adopted window that observation reads first.
+///
+/// It offers a frame only while it is live on exactly that window: pinned to the display, in
+/// recovery, idle, unavailable or on another target, it declines at once and the seat takes a
+/// Still of its own. What it hands over is checked again by the seat; see `LiveFrameHandover`.
+extension PreviewStreamController: LiveWindowFrameSourcing {
+
+    func liveFrame(
+        of identity             : WindowIdentity,
+        displayedAfter notBefore: UInt64,
+        within bound            : Duration
+    ) async -> Result<SeatFrame, LiveFrameFallback> {
+
+        guard pinnedTarget == nil else { return .failure(.pinnedToDisplay) }
+        switch availability {
+            case .live                : break
+            case .suspended           : return .failure(.recovering)
+            case .idle, .unavailable  : return .failure(.notLive)
+        }
+        guard let stream, stream.isRunning else { return .failure(.notLive) }
+        guard stream.target == .attestedWindow(identity) else { return .failure(.otherWindow) }
+        do {
+            return .success(try await stream.firstFrame(displayedAfter: notBefore, within: bound))
+        } catch {
+            return .failure(.noFrameInBound)
+        }
     }
 }

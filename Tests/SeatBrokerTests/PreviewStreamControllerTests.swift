@@ -1,6 +1,10 @@
 import CoreGraphics
+import CoreMedia
+import CoreVideo
+import IOSurface
 import SeatCapture
 import SeatCore
+import SeatSession
 import Testing
 @testable import SeatBroker
 
@@ -61,6 +65,21 @@ private final class FakePreviewStream: PreviewCaptureStreaming {
     func resumeStart() {
         startContinuation?.resume()
         startContinuation = nil
+    }
+
+    /// What `firstFrame` answers; nil answers a timeout.
+    var offeredFrame: SeatFrame?
+    private(set) var frameWaits: [(notBefore: UInt64, bound: Duration)] = []
+    private(set) var readingInvalidations = 0
+
+    func firstFrame(displayedAfter notBefore: UInt64, within bound: Duration) async throws -> SeatFrame {
+        frameWaits.append((notBefore, bound))
+        guard let offeredFrame else { throw CaptureFailure.timedOut(.still) }
+        return offeredFrame
+    }
+
+    func invalidateWindowServerReadings() {
+        readingInvalidations += 1
     }
 }
 
@@ -737,5 +756,152 @@ func theLabAndTheKitFollowTheSameShapeRule() {
         let followed = asked.following(contentPixelSize: reading,
                                        previousReading: reading, at: .standard)
         #expect(followed?.captureConfiguration(for: .standard).pixelSize == expected)
+    }
+}
+
+/// A 32BGRA frame of `window` over a surface this process made.
+private func liveFrame(of window: WindowIdentity) -> SeatFrame? {
+    let properties: [IOSurfacePropertyKey: any Sendable] = [
+        .width: 4, .height: 4, .bytesPerElement: 4, .bytesPerRow: 16,
+        .pixelFormat: kCVPixelFormatType_32BGRA,
+    ]
+    guard let surface = IOSurface(properties: properties) else { return nil }
+    var unmanaged: Unmanaged<CVPixelBuffer>?
+    guard CVPixelBufferCreateWithIOSurface(
+              kCFAllocatorDefault, unsafeBitCast(surface, to: IOSurfaceRef.self), nil, &unmanaged
+          ) == kCVReturnSuccess,
+          let buffer = unmanaged?.takeRetainedValue()
+    else { return nil }
+    let size = CGSize(width: 4, height: 4)
+    return SeatFrame(
+        surface          : surface,
+        pixelBuffer      : buffer,
+        presentationTime : .zero,
+        receivedAt       : 1,
+        displayTime      : 9,
+        displayGeneration: 1,
+        source           : .window(window),
+        geometry         : FrameGeometryObservation(
+            source              : .window(window),
+            screenRect          : CGRect(origin: .zero, size: size),
+            contentRectInSurface: CGRect(origin: .zero, size: size),
+            scaleFactor         : 1,
+            contentScale        : 1,
+            pixelSize           : size,
+            version             : GeometryObservationVersion(observerGeneration: 1, sequence: 1),
+            capturesFullWindow  : true
+        )
+    )
+}
+
+/// Observation reads the preview first, and only the live stream of the very window it asks for.
+@Test @MainActor
+func theLivePreviewOffersAFrameOfItsOwnWindowOnly() async throws {
+    let events = EventLog()
+    var streams: [FakePreviewStream] = []
+    let controller = PreviewStreamController { target in
+        let stream = FakePreviewStream(target: target, name: "s\(streams.count + 1)", events: events)
+        streams.append(stream)
+        return stream
+    }
+    // Never started: there is nothing to read.
+    #expect(await controller.liveFrame(of: identity(20), displayedAfter: 0, within: .milliseconds(100))
+            .failureReason == .notLive)
+
+    try await controller.start(
+        identity : identity(20),
+        frame    : CGRect(x: 0, y: 0, width: 4, height: 4),
+        pixelSize: CGSize(width: 4, height: 4)
+    )
+    let stream = try #require(streams.first)
+    let offered = try #require(liveFrame(of: identity(20)))
+    stream.offeredFrame = offered
+
+    let answer = await controller.liveFrame(of: identity(20), displayedAfter: 77, within: .milliseconds(100))
+    #expect(try answer.get().surface === offered.surface)
+    #expect(stream.frameWaits.first?.notBefore == 77)
+    #expect(stream.frameWaits.first?.bound == .milliseconds(100))
+
+    #expect(await controller.liveFrame(of: identity(21), displayedAfter: 0, within: .milliseconds(100))
+            .failureReason == .otherWindow)
+
+    stream.offeredFrame = nil
+    #expect(await controller.liveFrame(of: identity(20), displayedAfter: 0, within: .milliseconds(100))
+            .failureReason == .noFrameInBound)
+}
+
+/// A pin to the display outranks observation here as everywhere: no display frame is cropped.
+@Test @MainActor
+func aPinnedPreviewOffersNoWindowFrame() async throws {
+    let events = EventLog()
+    let controller = PreviewStreamController { target in
+        FakePreviewStream(target: target, name: "s", events: events)
+    }
+    try await controller.start(
+        identity : identity(30),
+        frame    : CGRect(x: 0, y: 0, width: 4, height: 4),
+        pixelSize: CGSize(width: 4, height: 4)
+    )
+    controller.pin(to: .display(7), pixelSize: CGSize(width: 1_920, height: 1_080))
+    await controller.waitForPendingTransition()
+    #expect(await controller.liveFrame(of: identity(30), displayedAfter: 0, within: .milliseconds(100))
+            .failureReason == .pinnedToDisplay)
+}
+
+/// A preview in its bounded recovery is not a picture to observe from.
+@Test @MainActor
+func aRecoveringPreviewOffersNoFrame() async throws {
+    let events = EventLog()
+    let controller = recoverableController(
+        plan: PreviewRecoveryPlan(attemptLimit: 3, pause: .seconds(60))
+    ) { target in
+        let stream = FakePreviewStream(target: target, name: "s", events: events)
+        stream.startFails = true
+        return stream
+    }
+    await #expect(throws: (any Error).self) {
+        try await controller.start(identity: identity(40),
+                                   frame: CGRect(x: 0, y: 0, width: 4, height: 4),
+                                   pixelSize: CGSize(width: 4, height: 4))
+    }
+    #expect(await controller.liveFrame(of: identity(40), displayedAfter: 0, within: .milliseconds(100))
+            .failureReason == .recovering)
+    await controller.tearDown()
+}
+
+/// The stream's cached window server answers are dropped when an observation saw the window
+/// elsewhere or at another size, and kept when it saw it where it was.
+@Test @MainActor
+func followDropsTheStreamsCachedReadingsOnlyOnAChange() async throws {
+    let events = EventLog()
+    var streams: [FakePreviewStream] = []
+    let controller = PreviewStreamController { target in
+        let stream = FakePreviewStream(target: target, name: "s\(streams.count + 1)", events: events)
+        streams.append(stream)
+        return stream
+    }
+    let frame = CGRect(x: 0, y: 0, width: 300, height: 200)
+    let size  = CGSize(width: 600, height: 400)
+    try await controller.start(identity: identity(50), frame: frame, pixelSize: size)
+    let stream = try #require(streams.first)
+
+    controller.follow(identity: identity(50), frame: frame, pixelSize: size)
+    await controller.waitForPendingTransition()
+    #expect(stream.readingInvalidations == 0)
+
+    controller.follow(identity: identity(50), frame: frame.offsetBy(dx: 5, dy: 0), pixelSize: size)
+    await controller.waitForPendingTransition()
+    #expect(stream.readingInvalidations == 1)
+
+    controller.follow(identity: identity(50), frame: frame.offsetBy(dx: 5, dy: 0),
+                      pixelSize: CGSize(width: 602, height: 400))
+    await controller.waitForPendingTransition()
+    #expect(stream.readingInvalidations == 2)
+}
+
+private extension Result where Failure == LiveFrameFallback {
+    var failureReason: LiveFrameFallback? {
+        if case .failure(let reason) = self { return reason }
+        return nil
     }
 }

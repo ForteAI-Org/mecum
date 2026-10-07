@@ -27,6 +27,36 @@ struct SeatFrameTests {
         #expect(frame.geometry.version.observerGeneration == frame.displayGeneration)
     }
 
+    @Test("a detached copy has the same pixels and facts over a surface of its own")
+    func detachedCopyOwnsItsSurface() throws {
+        let frame = try #require(makeFakeFrame(width: 33, height: 9, receivedAt: 5, displayTime: 77))
+        CVPixelBufferLockBaseAddress(frame.pixelBuffer, [])
+        let base = try #require(CVPixelBufferGetBaseAddress(frame.pixelBuffer))
+        let rowBytes = CVPixelBufferGetBytesPerRow(frame.pixelBuffer)
+        for byte in 0..<(rowBytes * 9) { base.storeBytes(of: UInt8(truncatingIfNeeded: byte), toByteOffset: byte, as: UInt8.self) }
+        CVPixelBufferUnlockBaseAddress(frame.pixelBuffer, [])
+
+        let copy = try #require(frame.detachedCopy())
+        #expect(copy.surface !== frame.surface)
+        #expect(copy.pixelSize == frame.pixelSize)
+        #expect(copy.displayTime == 77)
+        #expect(copy.receivedAt == 5)
+        #expect(copy.source == frame.source)
+        #expect(copy.geometry == frame.geometry)
+
+        CVPixelBufferLockBaseAddress(frame.pixelBuffer, .readOnly)
+        CVPixelBufferLockBaseAddress(copy.pixelBuffer, .readOnly)
+        defer {
+            CVPixelBufferUnlockBaseAddress(frame.pixelBuffer, .readOnly)
+            CVPixelBufferUnlockBaseAddress(copy.pixelBuffer, .readOnly)
+        }
+        let copied = try #require(CVPixelBufferGetBaseAddress(copy.pixelBuffer))
+        let copyRowBytes = CVPixelBufferGetBytesPerRow(copy.pixelBuffer)
+        for row in 0..<9 {
+            #expect(memcmp(copied.advanced(by: row * copyRowBytes), base.advanced(by: row * rowBytes), 33 * 4) == 0)
+        }
+    }
+
     @Test("makeCGImage draws the frame at its own size and owns the pixels")
     func makeCGImageCopies() throws {
         let frame = try #require(makeFakeFrame(width: 96, height: 48))

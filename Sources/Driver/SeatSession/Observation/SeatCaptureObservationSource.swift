@@ -56,13 +56,33 @@ import SeatCore
 /// buffer is a measurement of an earlier instant: handing it to a stream that
 /// builds its own fresh filter is how the agent came to perceive a picture with
 /// a black band down one side. The size is the filter's, taken at start.
+///
+/// ## A stream that is already running
+///
+/// Starting that stream costs about 135 ms a Still (size 46, start 80, stop 8,
+/// measured 7 October 2026). When the consumer composed `liveFrames`, a window
+/// Still first asks it for a frame displayed after the request, within
+/// `LiveFrameHandover.bound`, and hands it over only after `LiveFrameHandover`
+/// accepts it against fresh window server readings, as a copy out of the
+/// stream's pool. Any refusal takes the Still above. Hosted-sheet crops and
+/// menu surfaces never use it: the running stream shows one window.
 nonisolated public struct SeatCaptureObservationSource: ObservedSurfaceSourcing {
 
     private let displayGeneration: UInt64
     private let timestamps = StillTimestampMemory()
+    private let displayID : CGDirectDisplayID?
+    private let liveFrames: (any LiveWindowFrameSourcing)?
 
-    public init(displayGeneration: UInt64) {
+    /// `liveFrames` is borrowed for the source's life and `displayID` is the display whose scale
+    /// a window's size is checked at; without both, every Still starts its own stream.
+    public init(
+        displayGeneration: UInt64,
+        displayID        : CGDirectDisplayID? = nil,
+        liveFrames       : (any LiveWindowFrameSourcing)? = nil
+    ) {
         self.displayGeneration = displayGeneration
+        self.displayID         = displayID
+        self.liveFrames        = liveFrames
     }
 
     public func supports(_ capability: ObservationCapability) -> Bool {
@@ -83,13 +103,75 @@ nonisolated public struct SeatCaptureObservationSource: ObservedSurfaceSourcing 
         guard deadlineNanoseconds > now else {
             throw ObservationUnavailable.captureDeadlineExpired(attemptsSpent: 0)
         }
-        let target = SeatCaptureTarget.attestedWindow(identity)
+        if let liveFrames, let displayID {
+            let answer = await liveFrame(
+                of                 : identity,
+                displayedAfter     : now,
+                deadlineNanoseconds: deadlineNanoseconds,
+                from               : liveFrames,
+                readings           : { LiveFrameHandover.readings(of: $0, on: displayID) }
+            )
+            if case .success(let frame) = answer { return frame }
+            #if MECUM_PHASES
+            if case .failure(let fallback) = answer {
+                PhaseInterval.event("capture.liveFallback", String(describing: fallback))
+            }
+            #endif
+        }
+        return try await stillOfOwnStream(
+            of                 : identity,
+            observationBarrier : observationBarrier,
+            deadlineNanoseconds: deadlineNanoseconds
+        )
+    }
+
+    /// The Still path that starts its own stream (or takes a one-shot), unchanged by `liveFrames`.
+    private func stillOfOwnStream(
+        of identity        : WindowIdentity,
+        observationBarrier : UInt64,
+        deadlineNanoseconds: UInt64
+    ) async throws -> SeatFrame {
+        let now = DispatchTime.now().uptimeNanoseconds
+        guard deadlineNanoseconds > now else {
+            throw ObservationUnavailable.captureDeadlineExpired(attemptsSpent: 0)
+        }
         return try await capturedStill(
-            of                 : target,
+            of                 : .attestedWindow(identity),
             startedAt          : now,
             observationBarrier : observationBarrier,
             deadlineNanoseconds: deadlineNanoseconds
         )
+    }
+
+    /// Asks `source` for a frame of `identity` displayed after `notBefore` and answers it, copied
+    /// out of the stream's pool, only when `LiveFrameHandover` accepts it against `readings`
+    /// taken after it arrived. The wait is the tighter of the bound and the request's deadline.
+    func liveFrame(
+        of identity             : WindowIdentity,
+        displayedAfter notBefore: UInt64,
+        deadlineNanoseconds     : UInt64,
+        from source             : any LiveWindowFrameSourcing,
+        readings                : (WindowIdentity) -> LiveFrameHandover.Readings
+    ) async -> Result<SeatFrame, LiveFrameFallback> {
+
+        #if MECUM_PHASES
+        let phase = PhaseInterval.begin("capture.liveFrame")
+        defer { phase.end() }
+        #endif
+        let remaining = deadlineNanoseconds > notBefore ? deadlineNanoseconds - notBefore : 0
+        let bound = min(LiveFrameHandover.bound, .nanoseconds(Int64(min(remaining, UInt64(Int64.max)))))
+        let answer = await source.liveFrame(of: identity, displayedAfter: notBefore, within: bound)
+        guard case .success(let frame) = answer else { return answer }
+        if let refusal = LiveFrameHandover.refusal(
+            of            : frame,
+            expected      : identity,
+            displayedAfter: notBefore,
+            readings      : readings(identity)
+        ) {
+            return .failure(refusal)
+        }
+        guard let copy = frame.detachedCopy() else { return .failure(.copyFailed) }
+        return .success(copy)
     }
 
     public func captureWindowRegionStill(
@@ -174,16 +256,17 @@ nonisolated public struct SeatCaptureObservationSource: ObservedSurfaceSourcing 
     /// window it hangs off would need it. This one does not: the measurement
     /// above shows the filter aimed at the menu's own identity delivering the
     /// menu's own pixels with the menu's own frame, so there is nothing left for
-    /// a parent-anchored transform to correct. The body is `captureWindowStill`
-    /// because it is the same native call on the same kind of target, and
-    /// spelling it out twice would only let the two drift apart.
+    /// a parent-anchored transform to correct. The body is the window Still's own
+    /// stream path because it is the same native call on the same kind of target,
+    /// and spelling it out twice would only let the two drift apart. It never asks
+    /// `liveFrames`, which streams the window and not its menu.
     public func captureMenuStill(
         of identity        : WindowIdentity,
         parent             : WindowIdentity,
         observationBarrier : UInt64,
         deadlineNanoseconds: UInt64
     ) async throws -> SeatFrame {
-        try await captureWindowStill(
+        try await stillOfOwnStream(
             of                 : identity,
             observationBarrier : observationBarrier,
             deadlineNanoseconds: deadlineNanoseconds

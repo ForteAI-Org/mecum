@@ -93,6 +93,57 @@ struct TimestampedStillTests {
         #expect(result.displayTime == 42)
     }
 
+    @Test("a running stream's frame displayed at or before the instant is skipped for a later one")
+    func framesBeforeTheInstantAreSkipped() async throws {
+        let clock  = MachAbsoluteContentClock()
+        let before = try #require(makeFakeFrame(receivedAt: 1, displayTime: 1_000))
+        let after  = try #require(makeFakeFrame(receivedAt: 2, displayTime: 2_000))
+        let instant = try #require(clock.displayTimeNanoseconds(fromMachTicks: 1_000))
+        let frames = AsyncStream<SeatFrame> { continuation in
+            continuation.yield(before)
+            continuation.yield(after)
+            continuation.finish()
+        }
+        let result = try await SeatCaptureStream.firstTimestampedFrame(
+            in            : frames,
+            displayedAfter: instant,
+            deadline      : CaptureDeadline(timeout: .seconds(1))
+        )
+        #expect(result.receivedAt == 2)
+    }
+
+    @Test("two waits in turn on one running stream each take the frame that arrived for them")
+    func oneStreamServesSuccessiveWaits() async throws {
+        let pair = AsyncStream<SeatFrame>.makeStream(bufferingPolicy: .bufferingNewest(1))
+        pair.continuation.yield(try #require(makeFakeFrame(receivedAt: 1, displayTime: 10)))
+        let first = try await SeatCaptureStream.firstTimestampedFrame(
+            in      : pair.stream,
+            deadline: CaptureDeadline(timeout: .seconds(1))
+        )
+        pair.continuation.yield(try #require(makeFakeFrame(receivedAt: 2, displayTime: 20)))
+        let second = try await SeatCaptureStream.firstTimestampedFrame(
+            in      : pair.stream,
+            deadline: CaptureDeadline(timeout: .seconds(1))
+        )
+        pair.continuation.finish()
+        #expect(first.receivedAt == 1)
+        #expect(second.receivedAt == 2)
+    }
+
+    @Test("no frame after the instant within the bound is a timeout, never an older frame")
+    func noFrameAfterTheInstantTimesOut() async throws {
+        let pair = AsyncStream<SeatFrame>.makeStream(bufferingPolicy: .bufferingNewest(1))
+        pair.continuation.yield(try #require(makeFakeFrame(displayTime: 10)))
+        defer { pair.continuation.finish() }
+        await #expect(throws: CaptureFailure.timedOut(.still)) {
+            try await SeatCaptureStream.firstTimestampedFrame(
+                in            : pair.stream,
+                displayedAfter: UInt64.max - 1,
+                deadline      : CaptureDeadline(timeout: .milliseconds(30))
+            )
+        }
+    }
+
     @Test("cancelling a timestamp wait ends it without accepting absent evidence")
     func cancellationEndsTheWait() async {
 

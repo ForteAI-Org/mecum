@@ -24,7 +24,7 @@ ORDER = [
     'tool', 'perception',
     'capture.windowStill', 'target.observe', 'target.verify', 'seat.observe',
     'seat.preCapture', 'seat.foldReading', 'seat.captureLoop', 'seat.captureSource',
-    'capture.oneShotStill', 'capture.streamStill', 'capture.stream.size', 'capture.stream.start',
+    'capture.oneShotStill', 'capture.streamStill', 'capture.liveFrame', 'capture.stream.size', 'capture.stream.start',
     'capture.stream.firstFrame', 'capture.stream.stop', 'seat.stillCurrent',
     'capture.displayStill', 'capture.makeCGImage',
     'pipeline', 'pipeline.ocr', 'pipeline.segments', 'pipeline.ax', 'pipeline.compose',

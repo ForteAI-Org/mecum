@@ -381,6 +381,7 @@ operation threw is never ended and is left out. The phases, outermost first:
 | `seat.preCapture`, `seat.foldReading` | The seat's identity and containment work before it captures, and every window reading it folds. |
 | `seat.captureLoop`, `seat.captureSource`, `seat.stillCurrent` | The capture loop, the call into the capture source, and the check that the situation is the same after it. |
 | `capture.oneShotStill`, `capture.streamStill` | The one-shot Still, and the stream Still that replaces it. |
+| `capture.liveFrame` | The wait for a frame of the running window stream, with its hand-over checks ([ADR 0034](adr/Adr0034ObserveFromTheRunningWindowStream.md)). An event `capture.liveFallback` names the reason when a Still was taken instead. |
 | `capture.stream.size`, `.start`, `.firstFrame`, `.stop` | The steps of the stream Still. |
 | `capture.makeCGImage`, `capture.displayStill` | The Frame to image conversion, and the display Still used while a pop-up is open. |
 | `pipeline`, `pipeline.ocr`, `.segments`, `.ax`, `.compose`, `.axWait`, `.merge`, `.controlState` | The scene pipeline and its stages; text, segments and accessibility run concurrently. |
@@ -404,6 +405,10 @@ faster stream after it. `target.observe` and `seat.observe` are equal to the ten
 millisecond, so the `SeatTarget` side costs nothing; what remains of a Still is the stream
 itself (`capture.stream.size` about 46 ms, `.start` about 80 ms, `.stop` about 8 ms), and
 the 310 ms `pause` is the largest part of an action.
+
+Since then a window Still first reads the window stream the Broker's preview already runs, and
+the running stream reads the window server once a second instead of twice a frame; see
+[ADR 0034](adr/Adr0034ObserveFromTheRunningWindowStream.md). That has not been measured live yet.
 
 ## Requirements
 

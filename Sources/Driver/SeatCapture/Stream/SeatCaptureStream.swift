@@ -74,6 +74,9 @@ nonisolated final class FrameReceiver:
 
     private let slot: Mutex<Slot>
 
+    /// The identity and geometry answers reused between frames; see `WindowServerReadingCache`.
+    let readings = WindowServerReadingCache()
+
     #if MECUM_PHASES
     /// Counts this receiver's callbacks for a measurement build; see `FrameStatistics`.
     let statistics = FrameStatistics()
@@ -90,7 +93,7 @@ nonisolated final class FrameReceiver:
     /// Revalidates an identity-bound window before its identity is stamped on
     /// a sample. Display and raw-window captures need no identity query. This
     /// performs bounded WindowServer ownership calls under a gate cached at
-    /// stream start; its 60 fps cost has not yet been measured.
+    /// stream start, at most once per `WindowServerReadingCache` bound.
     private let sourceFailure: @Sendable () -> CaptureFailure?
 
     /// Tells the owning actor once that this receiver's configured Window
@@ -221,7 +224,8 @@ nonisolated final class FrameReceiver:
         #if MECUM_PHASES
         let sourceStarted = mach_absolute_time()
         #endif
-        if let failure = sourceFailure() {
+        let now = DispatchTime.now().uptimeNanoseconds
+        if let failure = readings.identityFailure(at: now, check: sourceFailure) {
             let shouldReport = slot.withLock { state -> Bool in
                 guard !state.sourceWasInvalidated else { return false }
                 state.sourceWasInvalidated = true
@@ -248,7 +252,19 @@ nonisolated final class FrameReceiver:
             observedRevision : observedRevision,
             capturesFullWindow: capturesFullWindow,
             framing           : framing,
-            receivedAt       : receivedAt
+            receivedAt       : receivedAt,
+            sourceRect       : { [readings, source] pixelSize, attachment in
+                let scales = SeatFrame.scales(in: attachment)
+                return readings.screenRect(
+                    at  : now,
+                    for : WindowServerReadingCache.FrameShape(
+                        pixelSize   : pixelSize,
+                        scaleFactor : scales.factor,
+                        contentScale: scales.content
+                    ),
+                    read: { SeatFrame.windowServerRect(of: source) }
+                )
+            }
         ) else {
             #if MECUM_PHASES
             statistics.noteInitFailure()
@@ -1342,6 +1358,33 @@ public final class SeatCaptureStream {
         }
     }
 
+    // MARK: Frames of a running stream
+
+    /// The first complete frame this running stream presents that WindowServer displayed after
+    /// `notBefore`, an uptime instant in nanoseconds, waiting at most `bound`.
+    ///
+    /// It is the rule the stream Still applies to the stream it starts, applied to this one: the
+    /// same timestamp conversion, the same wait for a frame delivered before its display instant.
+    /// It reads `frames`, so it takes the buffered frame out of it; a caller that also iterates
+    /// `frames` shares them with this wait. Throws `timedOut(.still)` when the bound passes and
+    /// `frameUnavailable` when the stream ends first.
+    nonisolated public func firstFrame(
+        displayedAfter notBefore: UInt64,
+        within bound            : Duration
+    ) async throws -> SeatFrame {
+        try await Self.firstTimestampedFrame(
+            in            : frames,
+            displayedAfter: notBefore,
+            deadline      : CaptureDeadline(timeout: bound)
+        )
+    }
+
+    /// Makes the receiver read the window's identity and rectangle again on its next frame,
+    /// for an owner that knows the window moved, was resized or was observed elsewhere.
+    public func invalidateWindowServerReadings() {
+        receiver?.readings.invalidate()
+    }
+
     // MARK: Stills
 
     /// still takes one frame of this stream's target, on request, whether or
@@ -1514,9 +1557,12 @@ public final class SeatCaptureStream {
         return capturedFrame
     }
 
+    /// The first frame of `frames` WindowServer displayed after `notBefore`, on the uptime clock
+    /// `DispatchTime` reads, converted by `MachAbsoluteContentClock`. Zero accepts any valid time.
     static func firstTimestampedFrame(
-        in frames       : AsyncStream<SeatFrame>,
-        deadline        : CaptureDeadline
+        in frames             : AsyncStream<SeatFrame>,
+        displayedAfter notBefore: UInt64 = 0,
+        deadline              : CaptureDeadline
     ) async throws -> SeatFrame {
 
         try deadline.check(.still)
@@ -1528,6 +1574,7 @@ public final class SeatCaptureStream {
                     try deadline.check(.still)
                     guard let ticks = frame.displayTime,
                           let displayedAt = clock.displayTimeNanoseconds(fromMachTicks: ticks),
+                          displayedAt > notBefore,
                           displayedAt < deadline.expiresAt
                     else { continue }
 

@@ -96,6 +96,10 @@ nonisolated public struct SeatFrame: @unchecked Sendable {
     /// Builds a frame from what ScreenCaptureKit delivered, or answers nil when
     /// the sample has no IOSurface path or complete geometry attachments.
     ///
+    /// `sourceRect` answers the window server rectangle a frame without geometry
+    /// attachments is certified from, given the frame's pixel size and attachment.
+    /// A running receiver passes its cache; nil asks the window server directly.
+    ///
     /// The `IOSurfaceRef` from CoreVideo and the `IOSurface` class are two
     /// distinct types in Swift with no bridge, so the cast is by hand and
     /// documented in research note 05, section 11.
@@ -107,7 +111,8 @@ nonisolated public struct SeatFrame: @unchecked Sendable {
         observedRevision : UInt64,
         capturesFullWindow: Bool,
         framing           : (screenRect: CGRect, sourceWindowFrame: CGRect?)? = nil,
-        receivedAt       : UInt64
+        receivedAt       : UInt64,
+        sourceRect       : ((CGSize, [SCStreamFrameInfo: Any]?) -> CGRect?)? = nil
     ) {
         guard
             let pixelBuffer = sampleBuffer.imageBuffer,
@@ -145,7 +150,10 @@ nonisolated public struct SeatFrame: @unchecked Sendable {
             pixelSize         : pixelSize,
             version           : version,
             capturesFullWindow: capturesFullWindow,
-            framing           : framing
+            framing           : framing,
+            sourceRect        : {
+                sourceRect.map { $0(pixelSize, attachment) } ?? Self.windowServerRect(of: source)
+            }
         )
         else { return nil }
 
@@ -260,31 +268,11 @@ nonisolated public struct SeatFrame: @unchecked Sendable {
         pixelSize         : CGSize,
         version           : GeometryObservationVersion,
         capturesFullWindow: Bool,
-        framing           : (screenRect: CGRect, sourceWindowFrame: CGRect?)?
+        framing           : (screenRect: CGRect, sourceWindowFrame: CGRect?)?,
+        sourceRect        : () -> CGRect?
     ) -> FrameGeometryObservation? {
-        let screenRect: CGRect?
         let sourceWindowFrame = framing?.sourceWindowFrame
-        if let framing {
-            screenRect = framing.screenRect
-        } else {
-        #if MECUM_PHASES
-        let queryStarted = mach_absolute_time()
-        #endif
-        switch source {
-        case .display(let displayID):
-            screenRect = CGDisplayBounds(displayID)
-        case .window(let identity):
-            screenRect = WindowServerProbe.geometry(of: identity.windowNumber)?.frame
-        case .unverifiedWindow(let windowNumber):
-            screenRect = WindowServerProbe.geometry(of: windowNumber)?.frame
-        }
-        #if MECUM_PHASES
-        FrameProbe.noteGeometryQuery(
-            ticks    : mach_absolute_time() - queryStarted,
-            screenRect: screenRect
-        )
-        #endif
-        }
+        let screenRect = framing?.screenRect ?? sourceRect()
         guard let screenRect, screenRect.width > 0, screenRect.height > 0,
               pixelSize.width > 0, pixelSize.height > 0
         else { return nil }
@@ -305,9 +293,99 @@ nonisolated public struct SeatFrame: @unchecked Sendable {
         return geometry.isValid ? geometry : nil
     }
 
+    /// Asks the window server where `source` is now. It is the per-frame query a running
+    /// receiver answers from `WindowServerReadingCache` instead.
+    static func windowServerRect(of source: FrameSourceIdentity) -> CGRect? {
+        #if MECUM_PHASES
+        let queryStarted = mach_absolute_time()
+        #endif
+        let screenRect: CGRect? = switch source {
+        case .display(let displayID):
+            CGDisplayBounds(displayID)
+        case .window(let identity):
+            WindowServerProbe.geometry(of: identity.windowNumber)?.frame
+        case .unverifiedWindow(let windowNumber):
+            WindowServerProbe.geometry(of: windowNumber)?.frame
+        }
+        #if MECUM_PHASES
+        FrameProbe.noteGeometryQuery(
+            ticks    : mach_absolute_time() - queryStarted,
+            screenRect: screenRect
+        )
+        #endif
+        return screenRect
+    }
+
+    /// The scale attachments of a sample, which the cache compares to tell a reshaped
+    /// frame from the one its rectangle was read for.
+    static func scales(in attachment: [SCStreamFrameInfo: Any]?) -> (factor: Double?, content: Double?) {
+        (
+            (attachment?[.scaleFactor] as? NSNumber)?.doubleValue,
+            (attachment?[.contentScale] as? NSNumber)?.doubleValue
+        )
+    }
+
     private static func rectangle(_ value: Any?) -> CGRect? {
         if let rectangle = value as? CGRect { return rectangle }
         return (value as? NSValue)?.rectValue
+    }
+
+    /// detachedCopy answers the same Frame over a surface of its own, so a running stream's
+    /// pool gets its surface back at once.
+    ///
+    /// It is what lets a Frame of a running stream be handed to an observation without breaking
+    /// the one frame contract above: the delivery is kept for a whole act cycle, and a surface
+    /// held that long is one the window server's producer cannot write into. Everything else
+    /// (times, source, geometry) is carried over unchanged. Nil when the buffer is not the
+    /// 32BGRA the stream asks for or a surface cannot be made; the caller then takes a Still.
+    package func detachedCopy() -> SeatFrame? {
+
+        guard CVPixelBufferGetPixelFormatType(pixelBuffer) == kCVPixelFormatType_32BGRA else { return nil }
+        let width    = CVPixelBufferGetWidth(pixelBuffer)
+        let height   = CVPixelBufferGetHeight(pixelBuffer)
+        let rowBytes = CVPixelBufferGetBytesPerRow(pixelBuffer)
+        let properties: [IOSurfacePropertyKey: any Sendable] = [
+            .width          : width,
+            .height         : height,
+            .bytesPerElement: 4,
+            .bytesPerRow    : rowBytes,
+            .pixelFormat    : kCVPixelFormatType_32BGRA,
+        ]
+        guard let copySurface = IOSurface(properties: properties) else { return nil }
+        var unmanaged: Unmanaged<CVPixelBuffer>?
+        guard CVPixelBufferCreateWithIOSurface(
+                  kCFAllocatorDefault,
+                  unsafeBitCast(copySurface, to: IOSurfaceRef.self),
+                  nil,
+                  &unmanaged
+              ) == kCVReturnSuccess,
+              let copyBuffer = unmanaged?.takeRetainedValue()
+        else { return nil }
+
+        guard CVPixelBufferLockBaseAddress(pixelBuffer, .readOnly) == kCVReturnSuccess else { return nil }
+        defer { CVPixelBufferUnlockBaseAddress(pixelBuffer, .readOnly) }
+        guard CVPixelBufferLockBaseAddress(copyBuffer, []) == kCVReturnSuccess else { return nil }
+        defer { CVPixelBufferUnlockBaseAddress(copyBuffer, []) }
+        guard let from = CVPixelBufferGetBaseAddress(pixelBuffer),
+              let to   = CVPixelBufferGetBaseAddress(copyBuffer)
+        else { return nil }
+
+        // The new surface may pad its rows differently from the source, so rows are copied one by one.
+        let copyRowBytes = CVPixelBufferGetBytesPerRow(copyBuffer)
+        let usedRowBytes = min(rowBytes, copyRowBytes, width * 4)
+        for row in 0..<height {
+            memcpy(to.advanced(by: row * copyRowBytes), from.advanced(by: row * rowBytes), usedRowBytes)
+        }
+        return SeatFrame(
+            surface          : copySurface,
+            pixelBuffer      : copyBuffer,
+            presentationTime : presentationTime,
+            receivedAt       : receivedAt,
+            displayTime      : displayTime,
+            displayGeneration: displayGeneration,
+            source           : source,
+            geometry         : geometry
+        )
     }
 
     /// makeCGImage draws the frame's pixels into an image that owns its own

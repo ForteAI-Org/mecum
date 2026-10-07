@@ -256,7 +256,11 @@ public final class SeatHost {
     /// makeSeat hands out the seat. v1 is one seat per host and one host per
     /// process, and the second call is `seatLimitReached`: the model admits
     /// `n` and this is the only line that has to change for it.
-    public func makeSeat() throws -> AgentSeat {
+    ///
+    /// `liveFrames` is a running stream of the adopted window the consumer
+    /// already owns, borrowed for the seat's life: a window Still then takes a
+    /// frame of it when one qualifies (see `LiveWindowFrameSourcing`).
+    public func makeSeat(liveFrames: (any LiveWindowFrameSourcing)? = nil) throws -> AgentSeat {
 
         guard state.canAdopt else { throw SessionFailure.hostNotReady(state) }
         guard seat == nil else { throw SessionFailure.seatLimitReached }
@@ -277,7 +281,9 @@ public final class SeatHost {
             expectedMainDisplayID: display.topology.mainDisplayID,
             defaultPlatform      : configuration.platform,
             observationSource    : SeatCaptureObservationSource(
-                displayGeneration: displayGeneration
+                displayGeneration: displayGeneration,
+                displayID        : display.displayID,
+                liveFrames       : liveFrames
             ),
             contentClock         : MachAbsoluteContentClock(),
             observationProfile   : configuration.observationProfile
