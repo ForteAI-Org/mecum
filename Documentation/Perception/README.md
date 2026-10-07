@@ -13,7 +13,7 @@ an action is taken, never a coordinate of their own.
 
 | Module | What it owns |
 |---|---|
-| `PerceptionCore` | pure types and contracts: the scene vocabulary, grouping, composition, difference, pop-up rows, window classification, coordinate conversion, the accessibility harvest and its trust rule, and the roles every adapter fills |
+| `PerceptionCore` | pure types and contracts: the scene vocabulary, grouping, composition, difference, pop-up rows, window classification, coordinate conversion, the accessibility harvest with its trust rule and its read quality (`AccessibilityHarvest`, `CaptureQuality`, `LabelOrigin`), and the roles every adapter fills |
 | `VisionText` | `TextRecognizing` over Apple Vision, tuned for UI labels |
 | `IncrementalText` | `TextRecognizing` over another recognizer: tile hashes decide which lines to read again, and the runs of the frame before are kept |
 | `WindowServerListing` | `WindowListing` over the window server's on-screen list |
@@ -124,6 +124,32 @@ scene.resolve(target: "Export")               // .found, .ambiguous(n) or .none
   Native controls and static values also need at least two visible points on each axis after
   clipping to their container and the capture. Chrome's one-point proxies for offscreen elements
   supply neither an actionable control nor a visible value; scrolling can make them eligible.
+- `AccessibilityAugmentation.harvest` answers the elements with the quality of the walk
+  (`CaptureQuality`): `walkCompleted` is measured, never inferred from the element count, and the
+  first limit met is `stoppedBy` (deadline, element, table or depth budget). Static text the element
+  budget leaves out is a limit like any other. A row scrolled out of view, a frame the trust rule
+  refuses, a sliver too thin to act on or a label outside the length bounds is filtered, not
+  truncated. The window's role and subrole are read with it. `completeness` is derived: `complete`
+  only for a found window and a finished, unstopped walk; a fact nobody observed stays unknown and
+  never adds up to complete, and facts that contradict each other are an `inconsistency` every
+  consumer refuses. `elements(...)` is the same walk without the quality.
+- Each harvested `SceneElement` says where its label came from (`labelOrigin`: title, description,
+  value, column, row content, or `identifier` for a text area named by its accessibility
+  identifier) and, for a row of a table, list or outline and everything inside it, the structural
+  path up to the collection (`collectionPath`). An element built from pixels has no origin, and
+  neither has the `Text area` or `Text field` handle an unnamed editor receives: those names were
+  read from nowhere. `container` keeps the full path a model addresses the element by, row name
+  included; a structural signature reads `collectionPath` and never a row's name. The merge keeps
+  both facts: an upgrade takes the harvested label with its origin, a matched pixel element lends
+  itself the collection path and keeps no origin. The two facts are about the read, not the scene:
+  they are not encoded and not in equality, hashing or the token, while `selectedRange` is in
+  equality and hashing (`AccessibilityHarvestTests`).
+- `SceneAugmenting` answers an `AccessibilityHarvest`, elements and quality together, because an
+  empty list is also what a missing window or an absent grant produces. `ScenePipeline.capture`
+  answers a `SceneCapture`, the scene with that quality; `perceive` is its scene. No augmenter, or
+  a window with no process and frame to read, is an unknown read, never a complete one. The Engine
+  carries the quality on `PerceivedWindow`, and the living memory stores it with each sample
+  ([the memory schema](../Engine/MemorySchema.md#observation-contract-version-1)).
 - `ControlStateReading` fills a gap, it never overrules. The pipeline asks it last, after the
   augmentation stage, and writes a state only onto an element that still carries none, so an
   application that answered for itself always wins. A reading no element covers is dropped rather
@@ -153,7 +179,9 @@ Pure functions do not throw; a degenerate input (empty list, zero-size rect) yie
 zero result, documented per function. `WindowCoordinateContext` refuses a non-positive or
 non-finite scale at construction. `WindowServerWindowListing` throws rather than answer a list it
 did not read. `AccessibilityAugmenter` returns what it read when its budget runs out: fewer labels,
-never wrong ones.
+never wrong ones, and a quality that says the walk stopped at its deadline. Without the
+Accessibility grant it answers an empty harvest whose quality says the grant was absent; a capture
+whose frame matches no window of the tree answers `windowFound` false, which is not a denied grant.
 
 ## Limits
 
@@ -168,9 +196,13 @@ so many scattered rects cost more than a full read while covering almost none of
 
 ## Evidence
 
-Unit: 180 tests in 14 suites for `PerceptionCore` alone, pure, parallel, no permission needed.
-`ScenePipelineTests` drives the roles with doubles that honor their ordering and failure semantics,
-the substitutability evidence for the roles. `IncrementalTextTests` adds 15: the plan's thresholds
+Unit: 190 tests in 15 suites for `PerceptionCore` alone (`swift test list`, 2026-10-07), pure,
+parallel, no permission needed; `AccessibilityHarvestTests` (10) pins the label origins (the
+`identifier` origin and the placeholder handles with none included), the collection path of rows
+and their children, the measured quality under every limit, the degenerate frame, the merge keeping
+the facts and the unchanged wire format. `ScenePipelineTests` drives the roles with doubles that
+honor their ordering and failure semantics, the substitutability evidence for the roles, and the
+capture's quality beside the scene. `IncrementalTextTests` adds 15: the plan's thresholds
 with their measured reasons, the tile grid, and a recording recognizer that proves an unchanged
 frame is never read again and a changed tile costs one line's rect.
 
