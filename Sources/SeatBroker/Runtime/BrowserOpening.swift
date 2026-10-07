@@ -63,7 +63,8 @@ enum BrowserOpening {
     /// Makes the seat ready, opens a window of `app` and seats it, in that order, and answers what
     /// `use` answered. Nothing is pressed before `prepare` succeeds, so a seat that cannot come up
     /// costs the person nothing. When `use` fails, the window `open` made is closed again with
-    /// `close`, and the refusal says whether it was; no other window is ever closed.
+    /// `close`, and the refusal says whether it was; no other window is ever closed. A window that
+    /// was seated stays open here: the session closes it when it finishes with the browser.
     ///
     /// The browser can take the front during or just after the adoption, while the seat knows no
     /// window of the person's to give it back to. So `arm` reads the person's window after
@@ -77,7 +78,7 @@ enum BrowserOpening {
         prepare     : () async throws -> Void,
         arm         : () -> (any FrontRestoring)?,
         open        : (_ tick: () -> Void) async throws -> OpenedWindow,
-        use         : (TargetWindow) async throws -> TargetApp,
+        use         : (OpenedWindow) async throws -> TargetApp,
         close       : (OpenedWindow) async -> Bool,
         tailInterval: Duration = .milliseconds(50)
     ) async throws -> TargetApp {
@@ -94,7 +95,7 @@ enum BrowserOpening {
         let opened = try await open(giveFrontBack)
         let seated: TargetApp
         do {
-            seated = try await use(opened.window)
+            seated = try await use(opened)
         } catch {
             let closing = await close(opened)
                 ? "The new window it opened for the seat was closed again."
@@ -201,9 +202,11 @@ enum BrowserOpening {
         return found.map { OpenedWindow(window: $0, element: nil) }
     }
 
-    /// Presses the close button of `opened` and answers whether the window server stopped listing
-    /// it within a second. The element is the one read by Window ID when the window appeared, so no
-    /// other window can be closed; with no element, or no close button to press, nothing is done.
+    /// Presses the close button of `opened` and answers whether the window is gone within a second
+    /// (20 readings, 50 ms apart), by `isClosed`. The element is the one read by Window ID when the
+    /// window appeared, so no other window can be closed; with no element, or no close button to
+    /// press, nothing is done. Nothing is pressed or typed twice, and an unreadable element or
+    /// window list counts as still there.
     @MainActor
     static func close(_ opened: OpenedWindow) async -> Bool {
         var button: CFTypeRef?
@@ -214,10 +217,38 @@ enum BrowserOpening {
                 == .success
         else { return false }
         for _ in 0..<20 {
-            if !isListed(opened.window) { return true }
+            if isGone(opened.window, element: element) { return true }
             do { try await Task.sleep(for: .milliseconds(50)) } catch { break }
         }
-        return !isListed(opened.window)
+        return isGone(opened.window, element: element)
+    }
+
+    /// Whether a window the person was shown is closed, from four readings taken after the press.
+    /// An application may keep a closed window in the window server, off screen, so being listed
+    /// is not enough to say it is open: accessibility must also no longer have it, since a
+    /// minimized window is off screen too and stays in `AXWindows`. A window on screen never is.
+    static func isClosed(listed: Bool, onScreen: Bool, elementIsValid: Bool, inWindows: Bool) -> Bool {
+        !listed || (!onScreen && (!elementIsValid || !inWindows))
+    }
+
+    /// Takes the four readings for `isClosed`, reading accessibility only for a window that the
+    /// window server lists off screen.
+    private static func isGone(_ window: TargetWindow, element: AXUIElement) -> Bool {
+        guard let row = description(of: window) else {
+            return isClosed(listed: false, onScreen: false, elementIsValid: true, inWindows: true)
+        }
+        if row[kCGWindowIsOnscreen as String] as? Bool ?? false { return false }
+
+        AXUIElementSetMessagingTimeout(element, 0.5)
+        var role: CFTypeRef?
+        let elementIsValid = AXUIElementCopyAttributeValue(element, kAXRoleAttribute as CFString, &role)
+            != .invalidUIElement
+        let application = AXUIElementCreateApplication(window.pid)
+        AXUIElementSetMessagingTimeout(application, 0.5)
+        var windows: CFTypeRef?
+        let read = AXUIElementCopyAttributeValue(application, kAXWindowsAttribute as CFString, &windows)
+        let inWindows = read != .success || ((windows as? [AXUIElement]) ?? []).contains { CFEqual($0, element) }
+        return isClosed(listed: true, onScreen: false, elementIsValid: elementIsValid, inWindows: inWindows)
     }
 
     /// The refusal for a browser that got no window of its own, in a sentence the worker can act on.
@@ -243,9 +274,19 @@ enum BrowserOpening {
         return candidates.first { WindowRelocator.windowNumber(of: $0) == number }
     }
 
-    /// Whether the window server still lists `window` for its process, on screen or not.
-    private static func isListed(_ window: TargetWindow) -> Bool {
-        windowNumbers(of: window.pid).contains(window.windowNumber)
+    /// The window server's row for `window` alone, nil when it no longer lists that Window ID for
+    /// that process. The ID crosses as a raw `CFArray` value, the shape
+    /// `CGWindowListCreateDescriptionFromArray` reads, not as a `CFNumber`.
+    private static func description(of window: TargetWindow) -> [String: Any]? {
+        var values = [UnsafeRawPointer(bitPattern: UInt(window.windowNumber))]
+        guard let requested = values.withUnsafeMutableBufferPointer({
+            CFArrayCreate(kCFAllocatorDefault, $0.baseAddress, $0.count, nil)
+        }) else { return nil }
+        let rows = CGWindowListCreateDescriptionFromArray(requested) as? [[String: Any]] ?? []
+        return rows.first {
+            $0[kCGWindowNumber as String] as? Int == window.windowNumber
+                && $0[kCGWindowOwnerPID as String] as? pid_t == window.pid
+        }
     }
 
     /// Every window the window server has for `pid`, on screen or not.

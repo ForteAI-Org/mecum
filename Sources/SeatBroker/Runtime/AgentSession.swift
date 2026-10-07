@@ -10,6 +10,7 @@ import SeatCapture
 import SeatCore
 import SeatDriving
 import SeatSession
+import WindowPlacement
 
 /// One background display and one seat, used by one application at a time.
 /// `observe` perceives the current frame; `execute` runs one action against
@@ -69,7 +70,26 @@ public final class AgentSession {
         let pid: pid_t
         let name: String
         let provenance: AppProvenance
+        /// Set only when the seat adopted the window `BrowserOpening.seat` opened.
+        var openedWindow: OpenedWindowRecord?
     }
+
+    /// The window this session opened in a browser, with the identity the seat attested when it
+    /// adopted it. Finishing closes exactly this window and never one found by title or frame.
+    struct OpenedWindowRecord {
+        let opened  : BrowserOpening.OpenedWindow
+        let identity: WindowIdentity
+    }
+
+    /// Whether the window server still lists a window with exactly this attested identity: the
+    /// same process, Window ID and owner connection, so a reused Window ID answers false.
+    var isWindowPresent: (WindowIdentity) -> Bool = {
+        WindowServerProbe.identity(of: $0.windowNumber) == $0
+    }
+
+    /// Presses the close button of a window this session opened. `BrowserOpening.close` is the
+    /// only bound there is: it answers whether the window server stopped listing it within a second.
+    var closeWindow: (BrowserOpening.OpenedWindow) async -> Bool = { await BrowserOpening.close($0) }
 
     init(driver: SeatDriver, ledger: LaunchLedger, perception: ScenePipeline,
          recorder: RunRecorder, environment: SeatBroker) {
@@ -95,6 +115,12 @@ public final class AgentSession {
     /// as no member of that assignment, and the sentence the person gets would
     /// name a Window ID rather than the application nobody gave back.
     public func use(_ window: TargetWindow, of app: TargetApp) async throws {
+        try await use(window, of: app, opening: nil)
+    }
+
+    /// `use`, told which browser window this session just opened, if it did. That window is closed
+    /// when the session finishes with the application (`finishWithHeldApp`).
+    func use(_ window: TargetWindow, of app: TargetApp, opening opened: BrowserOpening.OpenedWindow?) async throws {
         guard isOpen else { throw SeatBrokerError.sessionClosed }
         if let refusal = await finishWithHeldApp() {
             throw SeatBrokerError.driver(refusal)
@@ -110,6 +136,12 @@ public final class AgentSession {
                        provenance: ledger.provenance(of: window.pid))
         do {
             try await driver.adopt(window)
+            // Only a window the seat attested is ever closed, and only the one this open made.
+            if let opened, opened.window.windowNumber == window.windowNumber,
+               let identity = driver.window?.reference.identity,
+               identity.windowNumber == window.windowNumber, identity.processID == window.pid {
+                held?.openedWindow = OpenedWindowRecord(opened: opened, identity: identity)
+            }
         } catch {
             // A refusal to quit is added to the failure and never replaces it:
             // the adoption's own sentence is still the diagnosis.
@@ -142,7 +174,8 @@ public final class AgentSession {
     /// its main window is the person's. The seat is made ready before the new
     /// window is asked for, and a new window it could not take is closed
     /// again. When no new window appears the open refuses before anything is
-    /// released, and takes none of the others.
+    /// released, and takes none of the others. The window it opened is the one
+    /// the session closes when it finishes with the browser, and only that one.
     @discardableResult
     public func open(applicationNamed name: String, windowTitled title: String? = nil) async throws -> TargetApp {
         guard isOpen else { throw SeatBrokerError.sessionClosed }
@@ -170,12 +203,12 @@ public final class AgentSession {
                     )
                 },
                 open   : { try await BrowserOpening.openWindow(of: wanted, tick: $0) },
-                use    : { window in
+                use    : { newWindow in
                     let opened = TargetApp(pid: wanted.pid, bundleID: wanted.bundleID, name: wanted.name,
-                                           bundleURL: wanted.bundleURL, windows: [window],
+                                           bundleURL: wanted.bundleURL, windows: [newWindow.window],
                                            bundleName: wanted.bundleName, version: wanted.version,
                                            lastUsed: wanted.lastUsed)
-                    try await self.use(window, of: opened)
+                    try await self.use(newWindow.window, of: opened, opening: newWindow)
                     return opened
                 },
                 close  : { await BrowserOpening.close($0) }
@@ -218,8 +251,8 @@ public final class AgentSession {
 
     /// Records `pid` as the held application with the ledger's provenance, as `use` does before its
     /// adoption, but adopts nothing. Only for the controlled tests, which have no display to adopt on.
-    func holdWithoutAdopting(_ pid: pid_t, name: String) {
-        held = HeldApp(pid: pid, name: name, provenance: ledger.provenance(of: pid))
+    func holdWithoutAdopting(_ pid: pid_t, name: String, openedWindow: OpenedWindowRecord? = nil) {
+        held = HeldApp(pid: pid, name: name, provenance: ledger.provenance(of: pid), openedWindow: openedWindow)
     }
 
     /// Finishes with the held application and keeps the queue's session reusable.
@@ -248,6 +281,9 @@ public final class AgentSession {
     /// It is the only place that terminates an application a seat held; one
     /// that never reached a seat is quit by `LaunchLedger.quitUnseated`.
     ///
+    /// A browser window this session opened is closed before the release, while it is still on
+    /// the virtual display (`closingThenReleasing`). The sentence says when it could not be.
+    ///
     /// Between the two comes the handback of the assigned application, which is
     /// the same rule one step out: the kit binds the assignment to the first
     /// instance it is handed, `release` of a window never ends it, and without
@@ -259,17 +295,47 @@ public final class AgentSession {
     private func finishWithHeldApp() async -> String? {
         guard let held else { return nil }
         self.held = nil
-        await driver.release()
+        let leftOpen = await Self.closingThenReleasing(
+            held.openedWindow,
+            isPresent: isWindowPresent,
+            close    : closeWindow,
+            release  : { await self.driver.release() }
+        )
+        let notClosed = leftOpen
+            ? "The new \(held.name) window opened for this session could not be closed, "
+                + "so it was returned to your desktop still open."
+            : nil
         let handback = driver.releaseAssignedApplication()
         let finish = Self.finishing(held.provenance.finish(windowRestored: !driver.hasUnrestoredWindow),
                                     handback: handback, app: held.name)
+        var sentences = [notClosed, finish.sentence].compactMap { $0 }
         if finish.quits {
             guard await ledger.quitHandedBack(held.pid) else {
-                return "\(held.name) was returned to your desktop but is still running after the quit request. "
-                    + "It may be waiting for an unsaved-document decision. No document was discarded."
+                sentences = [notClosed].compactMap { $0 } + ["\(held.name) was returned to your desktop but is "
+                    + "still running after the quit request. It may be waiting for an unsaved-document "
+                    + "decision. No document was discarded."]
+                return sentences.joined(separator: " ")
             }
         }
-        return finish.sentence
+        return sentences.isEmpty ? nil : sentences.joined(separator: " ")
+    }
+
+    /// Closes the window the session opened, when it is still there, and then runs `release`. The
+    /// close comes first because the window is still on the virtual display: the person does not
+    /// see it come back and go. There is one attempt and no keys; a window that did not close goes
+    /// home with the others. Answers true only when a window was there to close and stayed open.
+    static func closingThenReleasing(
+        _ record : OpenedWindowRecord?,
+        isPresent: (WindowIdentity) -> Bool,
+        close    : (BrowserOpening.OpenedWindow) async -> Bool,
+        release  : () async -> Void
+    ) async -> Bool {
+        var leftOpen = false
+        if let record, isPresent(record.identity) {
+            leftOpen = await !close(record.opened)
+        }
+        await release()
+        return leftOpen
     }
 
     /// Whether the held application's process may be terminated now, and what

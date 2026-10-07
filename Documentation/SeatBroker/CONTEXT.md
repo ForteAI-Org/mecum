@@ -112,6 +112,24 @@ application and window, or, once released, the application and window the last
 session had. The agent observes or reopens it directly, with no `status` or
 `windows` call first. Nothing reopens on its own.
 
+### The browser window Mecum opened (7 October 2026)
+
+A browser that was already running is given a new window of its own, and that
+is the window the seat adopts (`BrowserOpening.seat`). When the session
+finishes with the browser, before the seat releases anything, it closes that
+window and only that one: the window server must still list the identity the
+seat attested at adoption (same process, Window ID and owner connection), and
+the window is closed with its accessibility close button, once, with no keys
+and no second attempt. A window that does not close within `BrowserOpening.close`'s
+one second (a "close N tabs" sheet, a page asking to stay, a stale element) goes
+back to the person with the others, and the session-end sentence says it stayed
+open. An application may keep a closed window listed by the window server but off
+screen (Safari does), so accessibility is what says it is gone: off screen and either
+its element is invalid or `AXWindows` no longer has it; a minimized window stays in
+`AXWindows` and counts as open. Windows the browser opened during the session are
+members and go back as before. The unit tests fake the press and the window server
+(`OpenedWindowClosingTests`); no real browser was closed by them.
+
 ## After a crash
 
 A process that ends without `applicationShouldTerminate` (a crash, `kill -9`)

@@ -105,7 +105,7 @@ struct BrowserOpeningTests {
                     return BrowserOpening.OpenedWindow(window: Self.window, element: nil)
                 },
                 use         : { adopted in
-                    log.lines.append("use \(adopted.windowNumber)")
+                    log.lines.append("use \(adopted.window.windowNumber)")
                     if useFails { throw SeatBrokerError.driver("The host failed.") }
                     return app
                 },
