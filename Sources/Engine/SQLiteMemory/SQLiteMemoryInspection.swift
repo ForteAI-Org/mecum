@@ -40,6 +40,9 @@ public enum SQLiteMemoryInspection {
         case unreadable(String)
         /// The file was not read, and why: a recovery holds it, or it cannot be read as it lies.
         case unavailable(String)
+        /// A recovery began and did not finish: what its record says. Nothing was read, and the
+        /// memory opens nothing until a recovery completes it.
+        case interruptedRecovery(String)
     }
 
     public struct Report: Sendable, Equatable {
@@ -88,8 +91,11 @@ public enum SQLiteMemoryInspection {
                           backups: siblings.filter { $0.hasPrefix("\(name).backup-") },
                           quarantined: siblings.filter { $0.hasPrefix("\(name).corrupt-") })
         }
-        // A missing archive gets no lock file either: nothing is made beside a file that is not there.
-        guard manager.fileExists(atPath: url.path) else { return report(.missing) }
+        // A missing archive gets no lock file either: nothing is made beside a file that is not there,
+        // unless a recovery's record says one stopped there.
+        guard manager.fileExists(atPath: url.path) || SQLiteMemoryRecovery.pending(of: url) != nil else {
+            return report(.missing)
+        }
         let presence: SQLiteMemoryPresence
         do {
             guard let taken = try SQLiteMemoryPresence.take(.shared, of: url) else {
@@ -100,6 +106,7 @@ public enum SQLiteMemoryInspection {
             return report(.unavailable("the archive's presence lock could not be taken: \(error)"))
         }
         defer { presence.release() }
+        if let pending = SQLiteMemoryRecovery.pending(of: url) { return report(.interruptedRecovery(pending)) }
         guard manager.fileExists(atPath: url.path) else { return report(.missing) }
         var attempt = 0
         while true {

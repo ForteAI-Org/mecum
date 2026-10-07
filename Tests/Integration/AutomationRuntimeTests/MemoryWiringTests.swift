@@ -208,6 +208,45 @@ struct MemoryWiringTests {
         await service.close()
     }
 
+    @Test("a recovery that stopped half way is completed from its record on the next open, or the service stays degraded saying why, never with an empty memory in its place")
+    func interruptedRecoveryCompletesOrRefuses() async throws {
+        struct Stop: Error {}
+        let directory = try W.directory()
+        let archive   = directory.appendingPathComponent("memory.sqlite")
+        let store     = try await SQLiteMemoryStore.open(at: archive)
+        _ = try await store.write { try $0.execute("INSERT INTO brain_apps (bundle_id) VALUES ('com.example.kept')") }
+        let copy = directory.appendingPathComponent("memory.sqlite.backup-2026-10-07T000000.000Z")
+        _ = try await store.snapshot(to: copy)
+        await store.close()
+        for suffix in ["-wal", "-shm"] { try? FileManager.default.removeItem(atPath: archive.path + suffix) }
+        try Data(repeating: 0x5A, count: 8192).write(to: archive)
+        // The recovery stops once the files moved aside, before the copy is in place, as a process ending there would.
+        #expect(throws: Stop.self) {
+            _ = try SQLiteMemoryRecovery.recover(archive, copies: { [copy] }, stamp: "stopped") { if $0 == .movedAside { throw Stop() } }
+        }
+        #expect(!FileManager.default.fileExists(atPath: archive.path))
+
+        try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: copy.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: copy.path) }
+        let service = MemoryService(directory: directory, configuration: .init(reopenInterval: .milliseconds(50)))
+        await #expect(throws: (any Error).self) { _ = try await service.brain(of: W.bundle) }
+        let refused = await service.status()
+        guard case .degraded(let reason) = refused.state else { Issue.record("not degraded: \(refused.state)"); return }
+        #expect(reason.contains("cannot be completed") && reason.contains("every file is kept"), "\(reason)")
+        #expect(!FileManager.default.fileExists(atPath: archive.path), "no empty memory in its place")
+        #expect(try files(service, ".corrupt-stopped").count == 1, "the original is kept aside")
+
+        try FileManager.default.setAttributes([.posixPermissions: 0o644], ofItemAtPath: copy.path)
+        try await Task.sleep(for: .milliseconds(80))
+        #expect(try await service.brain(of: W.bundle) == nil)
+        let completed = await service.status()
+        #expect(completed.state == .open, "\(completed.state)")
+        #expect(completed.lastRecovery?.contains("stopped half way was completed") == true, "\(completed.lastRecovery ?? "")")
+        #expect(try rawRows("SELECT bundle_id FROM brain_apps", at: archive) == ["com.example.kept"], "the copy's data is back")
+        #expect(!FileManager.default.fileExists(atPath: archive.path + ".recovering"))
+        await service.close()
+    }
+
     // MARK: The recorder
 
     @Test("a call through its recorder is planned, started, sampled, taught to the Brain and completed with its result and effect")

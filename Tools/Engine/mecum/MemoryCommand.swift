@@ -87,6 +87,9 @@ enum MemoryCommand {
             case .refused(let mismatch): print("this build: refuses it and leaves it as it is; " + describe(mismatch))
             case .unreadable(let why):   print("this build: cannot read it as a database: \(why)")
             case .unavailable(let why):  print("this build: did not read it: \(why)")
+            case .interruptedRecovery(let why):
+                print("this build: did not read it: \(why). Mecum's memory opens nothing until a recovery completes "
+                      + "it from that record, on its next open, or says why it cannot")
         }
         if let bytes = report.bytes { print("size: \(bytes) bytes" + (report.journalBytes.map { ", journal \($0) bytes" } ?? "")) }
         for table in SQLiteMemoryInspection.countedTables {

@@ -45,7 +45,8 @@ import Synchronization
 /// The store holds the archive's presence lock shared (`SQLiteMemoryPresence`) from before its first
 /// connection until its last one, and the last one of a copy still in flight, has closed: a
 /// recovery, which takes the lock exclusive, is refused meanwhile, and an open waits for a recovery
-/// in progress within one lock budget, then answers `contention`.
+/// in progress within one lock budget, then answers `contention`. An open that finds the record of a
+/// recovery that stopped half way opens nothing and makes nothing (`interruptedRecovery`).
 public actor SQLiteMemoryStore {
 
     /// Configuration is the store's waiting policy, chosen at composition. The defaults are what
@@ -533,7 +534,7 @@ public actor SQLiteMemoryStore {
         _ = try connection(.writer)
         let target = Self.resolved(destination)
         let own    = Self.resolved(url).path
-        guard !["", "-wal", "-shm", "-journal", ".lock"].map({ own + $0 }).contains(target.path) else {
+        guard !["", "-wal", "-shm", "-journal", ".lock", ".recovering"].map({ own + $0 }).contains(target.path) else {
             throw MemoryStoreError.snapshot(.destinationIsTheSource)
         }
         guard !FileManager.default.fileExists(atPath: target.path) else {
@@ -718,11 +719,20 @@ public actor SQLiteMemoryStore {
             expected = try Expected(ddl: ddl)
             // A reader of a file that is not there makes nothing beside it, not even the lock file.
             if kind == .existingArchive, !FileManager.default.fileExists(atPath: path) {
+                if let pending = SQLiteMemoryRecovery.pending(of: url) {
+                    throw MemoryStoreError.unavailable(.interruptedRecovery(pending))
+                }
                 throw MemoryStoreError(SQLiteConnection.Failure(
                     primary: SQLITE_CANTOPEN, extended: SQLITE_CANTOPEN, message: "unable to open database file"
                 ), phase: .open)
             }
             try await takePresence()
+            // Under the shared presence no recovery is in progress, so a record beside the archive is one
+            // that stopped half way: nothing opens the archive, or makes an empty one, until a recovery
+            // completes it from that record.
+            if let pending = SQLiteMemoryRecovery.pending(of: url) {
+                throw MemoryStoreError.unavailable(.interruptedRecovery(pending))
+            }
             writer   = try acquire(path, mayCreate: kind == .producer)
         } catch {
             throw abandonedOpen(after: error)

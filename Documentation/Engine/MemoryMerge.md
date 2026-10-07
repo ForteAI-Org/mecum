@@ -172,8 +172,9 @@ The agreed budget is 50 ms per action (D5).
 
 ## Corrections after the live checks
 
-Codex's live checks of 7 October and the corrective plan that followed them raised nine points, and
-Codex's review of `f7d31bd` six more remarks on the first fixes (R1–R6). This branch fixes the points
+Codex's live checks of 7 October and the corrective plan that followed them raised nine points,
+Codex's review of `f7d31bd` six more remarks on the first fixes (R1–R6), and the review of `1523558`
+one more (R7). This branch fixes the points
 that needed no desktop; the rest wait for a decision on data or for a desktop run.
 
 | Point | Status | What |
@@ -183,6 +184,7 @@ that needed no desktop; the rest wait for a decision on data or for a desktop ru
 | C07 Raw `record` | fixed, `1233097` | The documentation says what the raw record is for; a test proves a retried learning applies once. |
 | C07 MCP isolation | fixed | As on main, each external client's memory is `MCP/Knowledge/<profile>`, now an SQL archive of its own. Nothing was moved: no archive inventoried holds `mcp` events. A test has two clients and a worker write and learn apart. |
 | C09 Recovery with several processes | fixed | A presence lock beside the archive, taken shared by every store, its copies and the diagnosis, and exclusive by a recovery, which is refused while anybody holds it and reads the archive again once it holds it. Proved with real processes. See [Copies and recovery](MemorySchema.md#copies-and-recovery). |
+| R7 Interrupted recovery | fixed | Codex rebuilt the state between quarantine and publication on `1523558`: the next open made an empty archive (`bootstrapped=1`) beside the copy that held the data. A recovery now writes its record before it moves anything and removes it only when complete; no store opens, or makes, the archive while it is there; the next recovery completes it from the record or the service stays degraded with every file kept. T13b kills a real recovering process at each stage, fails the copy and restarts two processes at once. |
 | C06 Earlier archives | inventoried | No SQLite archive in the app's own folder; 23 test archives, unchanged. Any change to the DDL's text, even a trigger's message, makes earlier archives a different shape. |
 | C01–C03 Calculator | not touched | Permissions and verification unchanged; Codex compares with main on the desktop. |
 | C04 External MCP | not run | Waits for the desktop. |

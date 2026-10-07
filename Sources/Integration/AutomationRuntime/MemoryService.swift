@@ -123,7 +123,10 @@ nonisolated public struct MemoryRepositories: Sendable {
 /// `memory.sqlite.corrupt-<date>`, never deleted, and the newest sound copy takes its place; with no
 /// copy the memory starts empty. Either way `status()` says what happened. The recovery runs under
 /// the archive's exclusive presence lock (`SQLiteMemoryRecovery`): while another process holds the
-/// archive it is refused, nothing moves, and the service stays degraded until its next attempt.
+/// archive it is refused, nothing moves, and the service stays degraded until its next attempt. A
+/// recovery that stopped half way, in this process or another, is completed from its record on the
+/// next open, or the service stays degraded saying why, with every file kept: it never starts an
+/// empty memory in its place.
 public actor MemoryService: BrainReading, BrainApplicationStoring {
 
     nonisolated public struct Configuration: Sendable, Equatable {
@@ -474,7 +477,12 @@ public actor MemoryService: BrainReading, BrainApplicationStoring {
         } catch {
             firstError = error
         }
-        guard Self.isCorrupt(firstError), FileManager.default.fileExists(atPath: url.path) else { throw firstError }
+        let interrupted: Bool
+        if case MemoryStoreError.unavailable(.interruptedRecovery) = firstError { interrupted = true } else { interrupted = false }
+        guard interrupted || (Self.isCorrupt(firstError) && FileManager.default.fileExists(atPath: url.path)) else {
+            throw firstError
+        }
+        let restoredOrEmpty = { (restored: String?) in restored.map { "the copy \($0) restored" } ?? "the memory started empty" }
         switch try SQLiteMemoryRecovery.recover(url, copies: { self.backups().map(\.url) }, stamp: Self.stamp(Date())) {
         case .inUse:
             throw MemoryUnavailable("the archive could not be read and another process holds it: "
@@ -483,8 +491,12 @@ public actor MemoryService: BrainReading, BrainApplicationStoring {
             // Recovered by another process since the error, or readable now: opened as it is.
             break
         case .recovered(let aside, let restored):
-            let recovery = "the archive could not be read; it was moved to \(aside) and "
-                + (restored.map { "the copy \($0) restored" } ?? "the memory started empty")
+            let recovery = "the archive could not be read; it was moved to \(aside) and " + restoredOrEmpty(restored)
+            lastRecovery = recovery
+            Self.log.error("memory recovered: \(recovery, privacy: .public)")
+        case .resumed(let aside, let restored):
+            let recovery = "a recovery that had stopped half way was completed from its record: the archive was moved "
+                + "to \(aside) and " + restoredOrEmpty(restored)
             lastRecovery = recovery
             Self.log.error("memory recovered: \(recovery, privacy: .public)")
         }
@@ -741,6 +753,7 @@ public actor MemoryService: BrainReading, BrainApplicationStoring {
     /// A sentence for an error of the memory: its kind and case, never a text the agent typed or read.
     nonisolated public static func describe(_ error: any Error) -> String {
         if let unavailable = error as? MemoryUnavailable { return unavailable.description }
+        if case MemoryStoreError.unavailable(.interruptedRecovery(let why))? = error as? MemoryStoreError { return why }
         if let store = error as? MemoryStoreError { return "\(store)" }
         if error is CancellationError { return "cancelled" }
         return String(describing: type(of: error)) + ": " + "\(error)".prefix(160)

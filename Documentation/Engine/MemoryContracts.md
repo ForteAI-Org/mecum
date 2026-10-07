@@ -162,7 +162,8 @@ included, is refused untouched, never migrated: see [The resource](MemorySchema.
   [Closing](MemorySchema.md#closing).
 - **Copies.** A verified copy a day beside the archive, the newest three kept; a file the library calls corrupt
   is moved aside and the newest sound copy restored, or the memory starts empty, only while no other process
-  holds the archive. See [Copies and recovery](MemorySchema.md#copies-and-recovery) and
+  holds the archive. A recovery that stopped half way is completed from its record or refused with every file
+  kept; no open makes an empty archive in its place. See [Copies and recovery](MemorySchema.md#copies-and-recovery) and
   [The presence lock](MemorySchema.md#the-presence-lock).
 - **Diagnosis.** `mecum memory --status` reads the file in one read transaction under the presence lock and
   changes nothing of it; it cannot see another process's write counters. See

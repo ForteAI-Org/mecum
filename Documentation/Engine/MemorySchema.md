@@ -841,20 +841,42 @@ archive's presence lock taken exclusive ([The presence lock](#the-presence-lock)
    it since the error that led here: a file that now reads, or fails for another reason, is left as it
    is (`notCorrupt`) and opened as it is.
 3. The newest copy that passes `quick_check` and has this build's schema is chosen before anything
-   moves. The file, with its `-wal` and `-shm`, is moved aside as `memory.sqlite.corrupt-<UTC instant>`,
-   never deleted; the chosen copy is cloned beside it and renamed into place without clobbering, then
-   read once more. With no sound copy the memory starts empty.
-4. The lock is let go and the store opens as any opener does, taking the lock shared. Whoever took it
-   in between finds a sound archive and leaves it.
+   moves, and the recovery writes its record, `memory.sqlite.recovering`: the name the files move to
+   and the copy chosen, or none. The record is synced and renamed into place, and the directory synced,
+   before anything moves.
+4. The `-wal` and `-shm`, then the file, are moved aside as `memory.sqlite.corrupt-<UTC instant>`, never
+   deleted; the chosen copy is cloned beside the archive's place and renamed into it without
+   clobbering, then read once more. With no sound copy the memory starts empty.
+5. The record is removed: only then is the recovery complete. The lock is let go and the store opens as
+   any opener does, taking the lock shared. Whoever took it in between finds a sound archive and leaves
+   it.
 
-`status().lastRecovery` says which happened. `MemoryWiringTests` proves the daily copy, the restore,
-the empty start and the refusal while held; `SQLiteRecoveryCoordinationTests` proves, with real
-processes, the refusal while another process holds the archive open (its later writes land in the
-same file), two recoveries that both saw the old error (one recovers, the other is refused while it
-works and then leaves the recovered archive as it is, while an open waits and a diagnosis reads
-nothing), a killed holder leaving no lock, and a copy that still holds the archive after its store
-closed. A process killed between moving the file aside and placing the copy leaves no archive: the
-next open starts it empty, and the copy and the moved file stay beside it to be restored by hand.
+A recovery that stops half way (a process killed, a copy that cannot be read or put in place) leaves
+its record. While the record is there no store opens the archive and none makes an empty one: every
+open answers `MemoryStoreError.unavailable(.interruptedRecovery)`, with what the record holds. The next
+recovery, which the service asks for on that answer, completes it from the record alone, never
+choosing another copy: a file at the archive's place that is the recorded copy byte for byte was
+published and only the record is left to remove; a file that is not the copy and does not read is the
+original, moved aside as recorded; a file that reads as an archive and is not the copy is not one the
+recovery made, so it refuses. A recorded copy that is gone or does not read, or a destination already
+taken, is refused too: the service stays `degraded` saying why ("cannot be completed", "every file is
+kept") and tries again after `reopenInterval`; nothing is guessed and nothing is deleted. A recovery
+with no copy completes as one that starts the memory empty and says so: only then does an open make
+the empty archive. A directory that never had an archive has no record, and its first open makes the
+archive as before.
+
+`status().lastRecovery` says which happened, a completed interruption included. `MemoryWiringTests`
+proves the daily copy, the restore, the empty start, the refusal while held, and a stopped recovery
+that the service first refuses (its copy unreadable) and then completes. `SQLiteRecoveryCoordinationTests`
+proves, with real processes, the refusal while another process holds the archive open (its later
+writes land in the same file), two recoveries that both saw the old error (one recovers, the other is
+refused while it works and then leaves the recovered archive as it is, while an open waits and a
+diagnosis reads nothing), a killed holder leaving no lock, and a copy that still holds the archive
+after its store closed. `SQLiteRecoveryInterruptionTests` (T13b) kills a real recovering process after
+its record, after the files moved and after the copy was published, makes the copy unreadable once
+the files moved, and restarts two processes at once: in every case the opens refuse or wait, none
+makes an empty archive, and the next recovery completes with the copy's event, sample and Brain; a
+new directory still makes its archive, and a corruption with no copy starts empty saying so.
 Restoring the rest of the app (its workspace, its conversations) is outside the memory.
 
 ### The presence lock
@@ -896,6 +918,7 @@ files, and says so instead.
 | not a database | not readable, with the library's reason |
 | a recovery holding the archive | not read: a recovery holds it |
 | a WAL file whose `-wal` and `-shm` are not beside it | not read: a read-only reader cannot make them without changing the directory |
+| the record of a recovery that stopped | not read: what the record holds; the memory opens nothing until a recovery completes it |
 
 It never creates the archive, bootstraps, migrates, recovers or copies. The only file it may make is the
 empty lock file beside an archive that a build with the lock never opened. The library may update the

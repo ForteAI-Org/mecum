@@ -91,5 +91,11 @@ public enum MemoryStoreError: Error, Sendable, Equatable {
         /// both connections. The fault is the one that was answered then. Close this instance and
         /// open a new one on the same path once the cause is removed: no reset, no other file.
         case failed(MemoryStoreFault)
+
+        /// A recovery of the archive began and did not finish: its record is beside the archive, and
+        /// no store opens the archive, nor makes an empty one, until a recovery completes it from that
+        /// record. Also the answer of a recovery that cannot complete it. The sentence says what the
+        /// record holds or why the recovery stopped; every file is kept.
+        case interruptedRecovery(String)
     }
 }

@@ -49,6 +49,12 @@ final class Probe {
         recover-after <path> [hold]        open the archive, answer `saw <error>`, wait for `go`, then recover;
                                            with hold, answer `holding` with the exclusive lock held and keep it
                                            until the next line, then answer the recovery
+        recover-stop <path> <stage>        recover, and at the stage (recorded, movedAside, published, finished)
+                                           answer `stopped <stage>` and wait: `continue` goes on, any other
+                                           line stops the recovery there, and a kill ends the process there
+        open-recovering <path> [stage]     open as the memory service does: an archive the library calls
+                                           corrupt, or a recovery that stopped, is recovered first (answering
+                                           `recovery ...`, stopping at the stage if given), then opened
         inspect <path>                     the read-only diagnosis: inspect <shape> version=<n|none>
         checkpoint
         diagnostics
@@ -91,6 +97,12 @@ final class Probe {
             case "measure"         : try await measure(arguments)
             case "recover"         : try recover(arguments, hold: false)
             case "recover-after"   : try await recoverAfter(arguments)
+            case "recover-stop":
+                guard arguments.count == 2, let stage = SQLiteMemoryRecovery.Stage(rawValue: arguments[1]) else {
+                    emit("error usage recover-stop"); return .answered
+                }
+                try recover([arguments[0]], hold: false, stop: stage)
+            case "open-recovering" : try await openRecovering(arguments)
             case "inspect"         : inspect(arguments)
             case "checkpoint"      : try await checkpoint()
             case "diagnostics"     : try await diagnostics()
@@ -318,7 +330,9 @@ final class Probe {
 
     /// Recovers the archive at the path from the copies beside it (`<name>.backup-*`, newest name
     /// first), as `MemoryService` does; `hold` keeps the exclusive lock until the next line.
-    private func recover(_ arguments: [String], hold: Bool) throws {
+    private struct Stopped: Error {}
+
+    private func recover(_ arguments: [String], hold: Bool, stop: SQLiteMemoryRecovery.Stage? = nil) throws {
         guard let path = arguments.first else { emit("error usage recover"); return }
         let archive = URL(fileURLWithPath: path)
         let copies  = {
@@ -327,15 +341,48 @@ final class Probe {
             return names.filter { $0.hasPrefix("\(archive.lastPathComponent).backup-") }.sorted(by: >)
                 .map { directory.appendingPathComponent($0) }
         }
-        let outcome = try SQLiteMemoryRecovery.recover(
-            archive, copies: copies, stamp: "probe-\(getpid())",
-            whileHeld: hold ? { Probe.emit("holding"); _ = readLine() } : nil
-        )
+        let outcome = try SQLiteMemoryRecovery.recover(archive, copies: copies, stamp: "probe-\(getpid())") { stage in
+            if hold, stage == .finished {
+                Probe.emit("holding")
+                _ = readLine()
+            }
+            if stage == stop {
+                // Blocked on purpose: a kill ends the process at this stage, `continue` goes on.
+                Probe.emit("stopped \(stage.rawValue)")
+                guard readLine() == "continue" else { throw Stopped() }
+            }
+        }
         switch outcome {
         case .inUse                            : emit("recovery inUse")
         case .notCorrupt                       : emit("recovery notCorrupt")
         case .recovered(let aside, let restored): emit("recovery recovered aside=\(aside) restored=\(restored ?? "none")")
+        case .resumed(let aside, let restored)  : emit("recovery resumed aside=\(aside) restored=\(restored ?? "none")")
         }
+    }
+
+    /// Opens as `MemoryService` does: when the open finds a file the library calls corrupt, or the record
+    /// of a recovery that stopped, it recovers first and opens again. Every other error is answered.
+    private func openRecovering(_ arguments: [String]) async throws {
+        guard let path = arguments.first else { emit("error usage open-recovering"); return }
+        do {
+            try await open([path])
+            return
+        } catch let error as MemoryStoreError {
+            guard Self.needsRecovery(error, at: URL(fileURLWithPath: path)) else { throw error }
+        }
+        try recover([path], hold: false, stop: arguments.count > 1 ? SQLiteMemoryRecovery.Stage(rawValue: arguments[1]) : nil)
+        try await open([path])
+    }
+
+    private static func needsRecovery(_ error: MemoryStoreError, at url: URL) -> Bool {
+        let fault: MemoryStoreFault
+        switch error {
+        case .unavailable(.interruptedRecovery)                         : return true
+        case .open(let found), .failed(let found), .locked(let found), .contract(let found): fault = found
+        case .unavailable(.failed(let found))                           : fault = found
+        default                                                         : return false
+        }
+        return (fault.code.primary == 11 || fault.code.primary == 26) && FileManager.default.fileExists(atPath: url.path)
     }
 
     /// Sees the archive's error as an open does, then waits for `go` before recovering: two helpers
@@ -364,6 +411,7 @@ final class Probe {
         case .refused    : shape = "refused"
         case .unreadable : shape = "unreadable"
         case .unavailable: shape = "unavailable"
+        case .interruptedRecovery: shape = "interruptedRecovery"
         }
         emit("inspect \(shape) version=\(report.schemaVersion.map(String.init) ?? "none")")
     }
