@@ -71,6 +71,36 @@ struct MCPTests {
         }
         #expect(calls == 2)
     }
+
+    /// A provider child that connects and exits before it says anything hands the host's connection two
+    /// states at once, ready and cancelled; the host's channel takes the first and the process goes on.
+    @Test
+    func aConnectionCancelledAsItBecomesReadyDoesNotEndTheHost() async throws {
+        let router = MCPRouter(tools: [definition]) { _, _ in MCPRouter.toolResult(.object(["status": .string("ok")])) }
+        let host = LocalMCPHost(router: router)
+        let endpoint = try await host.start()
+        defer { host.stop() }
+        let port = try #require(NWEndpoint.Port(rawValue: endpoint.port))
+        for _ in 0..<20 {
+            let fleeting = NWConnection(host: "127.0.0.1", port: port, using: .tcp)
+            fleeting.start(queue: .global(qos: .userInitiated))
+            fleeting.cancel()
+            let channel = MCPChannel(NWConnection(host: "127.0.0.1", port: port, using: .tcp))
+            try await channel.start()
+            channel.close()
+        }
+        // One channel's own start, ready and then cancelled by its owner before the handler ran.
+        let own = MCPChannel(NWConnection(host: "127.0.0.1", port: port, using: .tcp))
+        let starting = Task { try await own.start() }
+        own.close()
+        _ = try? await starting.value
+        let channel = MCPChannel(NWConnection(host: "127.0.0.1", port: port, using: .tcp))
+        try await channel.start()
+        try await channel.write(.object(["token": .string(endpoint.token), "message": request("tools/call")]))
+        let answer = try #require(try await channel.read())
+        #expect(answer["result"].payload["status"].string == "ok")
+        channel.close()
+    }
 }
 
 extension JSONValue {
