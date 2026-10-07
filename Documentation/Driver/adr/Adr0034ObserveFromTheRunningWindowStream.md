@@ -122,7 +122,9 @@ receiver's own bookkeeping; the hand-over above does not rely on it.
 The 30 fps itself is unchanged. The next measurement, idle CPU with the cache, decides it: if the
 rest cost stays above 1.5 ms a second, the options are a lower rate while nothing is pending and
 nobody watches, or stopping the stream when no layer is attached. Both move this ADR's bound: at
-10 fps a qualifying frame can be 100 ms away, and a stopped stream is a fallback on every Still.
+10 fps a qualifying frame can be 100 ms away, and a stopped stream is a fallback on every Still. The lower rate is what was done: see
+[ADR 0036](Adr0036RestTheWindowStreamNobodyUses.md), which keeps this bound by declining at
+rest instead of waiting.
 
 ## Part 2: "unchanged" (implemented)
 

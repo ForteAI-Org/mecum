@@ -118,7 +118,7 @@ struct SeatSettlerTests {
     }
 
     @Test("a source that declines at once is today's fixed pause exactly",
-          arguments: [LiveFrameFallback.notLive, .pinnedToDisplay, .recovering, .otherWindow])
+          arguments: [LiveFrameFallback.notLive, .pinnedToDisplay, .recovering, .resting, .otherWindow])
     func unavailableSourceIsTheFixedPause(_ refusal: LiveFrameFallback) async {
         let stream = ScriptedStream { _ in 7 }
         stream.refusal = refusal

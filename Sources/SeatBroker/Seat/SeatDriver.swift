@@ -621,12 +621,15 @@ final class SeatDriver {
 
     func acquireTurn() async throws -> Turn {
         guard let seat else { throw SeatBrokerError.sessionClosed }
+        // A Turn comes before a Command and its settle: the resting stream wakes now (ADR 0036).
+        preview.noteActivity(.turn)
         return try await mapped { try await seat.acquire() }
     }
 
     func send(_ input: ActionInput, observation: SeatObservationReference,
               turn: Turn) async throws -> InputReceipt {
         guard let seat, window != nil else { throw SeatBrokerError.sessionClosed }
+        preview.noteActivity(.command)
         return try await mapped {
             switch input {
             case .command(let command):

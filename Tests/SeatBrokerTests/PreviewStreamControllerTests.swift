@@ -22,6 +22,7 @@ private final class FakePreviewStream: PreviewCaptureStreaming {
     var stopKeepsResource = false
     var updateFails = false
     private(set) var configuredPixelSize: CGSize = .zero
+    private(set) var configuredFramesPerSecond = 0
     private var startContinuation: CheckedContinuation<Void, Never>?
 
     init(target: SeatCaptureTarget, name: String, events: EventLog) {
@@ -35,6 +36,7 @@ private final class FakePreviewStream: PreviewCaptureStreaming {
         events.values.append("start \(name)")
         hasUnconfirmedResource = true
         configuredPixelSize = configuration.pixelSize
+        configuredFramesPerSecond = configuration.framesPerSecond
         if startPauses {
             await withCheckedContinuation { startContinuation = $0 }
         }
@@ -46,6 +48,7 @@ private final class FakePreviewStream: PreviewCaptureStreaming {
         events.values.append("update \(name)")
         if updateFails { throw Failure.start }
         configuredPixelSize = configuration.pixelSize
+        configuredFramesPerSecond = configuration.framesPerSecond
     }
 
     func stop(timeout: Duration) async {
@@ -897,6 +900,140 @@ func followDropsTheStreamsCachedReadingsOnlyOnAChange() async throws {
                       pixelSize: CGSize(width: 602, height: 400))
     await controller.waitForPendingTransition()
     #expect(stream.readingInvalidations == 2)
+}
+
+/// A controller whose rest delay is `delay`, over fake streams kept in `streams`.
+@MainActor
+private func restingController(
+    delay  : Duration,
+    events : EventLog,
+    streams: @escaping (FakePreviewStream) -> Void
+) -> PreviewStreamController {
+    PreviewStreamController(rest: PreviewRestPlan(delay: delay)) { target in
+        let stream = FakePreviewStream(target: target, name: "s", events: events)
+        streams(stream)
+        return stream
+    }
+}
+
+/// With nothing using it and nobody watching, the stream asks for the rest rate after the delay,
+/// in place: the same stream, still live.
+@Test @MainActor
+func anUnusedStreamRestsAfterTheDelay() async throws {
+    let events = EventLog()
+    var streams: [FakePreviewStream] = []
+    let controller = restingController(delay: .milliseconds(20), events: events) { streams.append($0) }
+    try await controller.start(identity: identity(60), frame: CGRect(x: 0, y: 0, width: 4, height: 4),
+                               pixelSize: CGSize(width: 4, height: 4))
+    let stream = try #require(streams.first)
+    #expect(stream.configuredFramesPerSecond == 30)
+    events.values.removeAll()
+
+    await controller.waitForRestTimer()
+
+    #expect(controller.isResting)
+    #expect(stream.configuredFramesPerSecond == 1)
+    #expect(events.values == ["update s"])
+    #expect(streams.count == 1)
+    #expect(controller.availability == .live)
+    await controller.tearDown()
+}
+
+/// A Turn, a Command or a followed observation wakes the stream before any frame is asked for,
+/// so the frame request that follows reads the stream at its full rate.
+@Test @MainActor
+func aUseLeavesTheRestBeforeAFrameIsRequested() async throws {
+    let window = identity(61)
+    for activity in [PreviewActivity.turn, .command, .observation] {
+        let events = EventLog()
+        var streams: [FakePreviewStream] = []
+        let controller = restingController(delay: .milliseconds(200), events: events) { streams.append($0) }
+        let frame = CGRect(x: 0, y: 0, width: 4, height: 4)
+        try await controller.start(identity: window, frame: frame, pixelSize: CGSize(width: 4, height: 4))
+        let stream = try #require(streams.first)
+        await controller.waitForRestTimer()
+        #expect(stream.configuredFramesPerSecond == 1)
+
+        if activity == .observation {
+            controller.follow(identity: window, frame: frame, pixelSize: CGSize(width: 4, height: 4))
+        } else {
+            controller.noteActivity(activity)
+        }
+        #expect(!controller.isResting)
+        await controller.waitForPendingTransition()
+        #expect(stream.configuredFramesPerSecond == 30, "\(activity)")
+
+        let offered = try #require(liveFrame(of: window))
+        stream.offeredFrame = offered
+        let answer = await controller.liveFrame(of: window, displayedAfter: 5, within: .milliseconds(100))
+        #expect(try answer.get().surface === offered.surface, "\(activity)")
+        #expect(stream.frameWaits.map(\.notBefore) == [5])
+        await controller.tearDown()
+    }
+}
+
+/// A frame request that finds the stream resting never reaches the stream, so no frame from the
+/// rest can be handed over: it declines with `resting`, which is the Still, and wakes the stream
+/// for the next request, which waits for a frame displayed after its own instant.
+@Test @MainActor
+func aRequestDuringRestTakesTheStillAndWakesTheStream() async throws {
+    let events = EventLog()
+    var streams: [FakePreviewStream] = []
+    let controller = restingController(delay: .milliseconds(200), events: events) { streams.append($0) }
+    let window = identity(62)
+    try await controller.start(identity: window, frame: CGRect(x: 0, y: 0, width: 4, height: 4),
+                               pixelSize: CGSize(width: 4, height: 4))
+    let stream = try #require(streams.first)
+    stream.offeredFrame = liveFrame(of: window)
+    await controller.waitForRestTimer()
+
+    let during = await controller.liveFrame(of: window, displayedAfter: 7, within: .milliseconds(100))
+    #expect(during.failureReason == .resting)
+    #expect(stream.frameWaits.isEmpty)
+    #expect(!controller.isResting)
+
+    // The wake is queued, not confirmed: the next request still takes the Still.
+    let waking = await controller.liveFrame(of: window, displayedAfter: 8, within: .milliseconds(100))
+    #expect(waking.failureReason == .resting)
+    #expect(stream.frameWaits.isEmpty)
+
+    await controller.waitForPendingTransition()
+    #expect(stream.configuredFramesPerSecond == 30)
+    let after = await controller.liveFrame(of: window, displayedAfter: 9, within: .milliseconds(100))
+    #expect(after.failureReason == nil)
+    #expect(stream.frameWaits.last?.notBefore == 9)
+    await controller.tearDown()
+}
+
+/// While a layer shows the stream it keeps its rate whatever the delay; closing the picture
+/// starts the delay, and opening it again wakes the stream.
+@Test @MainActor
+func aShownStreamDoesNotRest() async throws {
+    let events = EventLog()
+    var streams: [FakePreviewStream] = []
+    let controller = restingController(delay: .milliseconds(20), events: events) { streams.append($0) }
+    let layer = MonitorLayer(contentsScale: 2)
+    controller.attach(layer)
+    try await controller.start(identity: identity(63), frame: CGRect(x: 0, y: 0, width: 4, height: 4),
+                               pixelSize: CGSize(width: 4, height: 4))
+    let stream = try #require(streams.first)
+
+    await controller.waitForRestTimer()
+    try await Task.sleep(for: .milliseconds(60))
+    #expect(!controller.isResting)
+    #expect(stream.configuredFramesPerSecond == 30)
+    #expect(!events.values.contains("update s"))
+
+    controller.detach(layer)
+    await controller.waitForRestTimer()
+    #expect(controller.isResting)
+    #expect(stream.configuredFramesPerSecond == 1)
+
+    controller.attach(layer)
+    #expect(!controller.isResting)
+    await controller.waitForPendingTransition()
+    #expect(stream.configuredFramesPerSecond == 30)
+    await controller.tearDown()
 }
 
 private extension Result where Failure == LiveFrameFallback {

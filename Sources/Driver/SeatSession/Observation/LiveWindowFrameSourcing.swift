@@ -23,7 +23,7 @@ import SeatCore
 /// A conformer answers the first complete Frame of `identity` that WindowServer displayed after
 /// `notBefore`, an uptime instant in nanoseconds, waiting at most `bound`, or the reason it has
 /// none. It declines rather than waits when it is not streaming that exact window right now:
-/// another window, the whole display, a recovery, no stream at all.
+/// another window, the whole display, a recovery, no stream at all, a stream at its rest rate.
 ///
 /// Nothing a conformer answers is trusted as evidence. `SeatCaptureObservationSource` attests the
 /// window's identity, the display time, the window's rectangle and the frame's size again at the
@@ -50,6 +50,10 @@ public enum LiveFrameFallback: Error, Equatable, Sendable {
 
     /// The stream stopped and its bounded recovery is still trying.
     case recovering
+
+    /// The stream is running at a lower rate because nothing used it for a while. The request
+    /// woke it, and a later request reads it at its full rate; this one takes the Still.
+    case resting
 
     /// The person pinned the live picture to the whole display, and a display frame is never
     /// cropped into a window observation.

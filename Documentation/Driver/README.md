@@ -389,6 +389,7 @@ operation threw is never ended and is left out. The phases, outermost first:
 | `delivery.prepare`, `delivery`, `delivery.confirm` | Getting the Turn and the observation, posting the Command, and confirming it. |
 | `pause` | Every fixed wait of the act cycle. |
 | `settle` | The wait after a gesture on a streamed seat window, until its frames stop changing or the cap ([ADR 0035](adr/Adr0035SettleOnTheRunningWindowStream.md)); named `settle:stable`, `:quiet`, `:cap` or `:fallback.<reason>` by how it ended. |
+| `preview.update` | One configuration update of the running window stream, named `reshape`, `rate.1` (it rests) or `rate.30` (it wakes); events `preview.rest` say `enter` and `leave.<use>` ([ADR 0036](adr/Adr0036RestTheWindowStreamNobodyUses.md)). |
 | `render.scene`, `render.result` | Writing the scene for the model, and encoding and recording the answer. |
 
 Splitting the identity cost of a Still: `target.observe` minus `seat.observe` is the
@@ -413,7 +414,8 @@ the running stream reads the window server once a second instead of twice a fram
 [ADR 0034](adr/Adr0034ObserveFromTheRunningWindowStream.md). That has not been measured live yet.
 The wait after a gesture then watches that same stream and ends once the window settled, capped
 at the fixed pause; see [ADR 0035](adr/Adr0035SettleOnTheRunningWindowStream.md). Not measured
-live either.
+live either. While nobody uses or shows it, that stream rests at one frame a second; see
+[ADR 0036](adr/Adr0036RestTheWindowStreamNobodyUses.md). Not measured live.
 
 ## Requirements
 
