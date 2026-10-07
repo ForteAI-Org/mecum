@@ -34,6 +34,8 @@ public struct ActionEngine: Sendable {
         public var activation: (any ApplicationActivating)?
         public var expectations: (any EffectExpecting)?
         public var observer: (any ActionObserving)?
+        /// Ends the wait after a gesture once the window settled; nil sleeps the fixed pause.
+        public var settling: (any Settling)?
 
         public init(
             scenes      : any SceneProviding,
@@ -42,7 +44,8 @@ public struct ActionEngine: Sendable {
             controls    : (any ControlPressing)? = nil,
             activation  : (any ApplicationActivating)? = nil,
             expectations: (any EffectExpecting)? = nil,
-            observer    : (any ActionObserving)? = nil
+            observer    : (any ActionObserving)? = nil,
+            settling    : (any Settling)? = nil
         ) {
             self.scenes       = scenes
             self.actuator     = actuator
@@ -51,6 +54,7 @@ public struct ActionEngine: Sendable {
             self.activation   = activation
             self.expectations = expectations
             self.observer     = observer
+            self.settling     = settling
         }
     }
 
@@ -272,7 +276,7 @@ public struct ActionEngine: Sendable {
             return ActOutcome(.actedUnverified, "\(request.verb.performed) '\(element.label)': delivery failed: "
                 + "\(error)", scene: nil)
         }
-        await pause(timing.clickSettle)
+        await settle(pid)
         guard let after = await perceive(pid)?.scene else {
             await dependencies.actuator.confirm(.unknown, in: pid)
             return ActOutcome(
@@ -346,7 +350,7 @@ public struct ActionEngine: Sendable {
             await dependencies.actuator.confirm(.unknown, in: pid)
             return ActOutcome(.actedUnverified, "set '\(element.label)': delivery failed: \(error)")
         }
-        await pause(timing.clickSettle)
+        await settle(pid)
         let after = await perceive(pid)?.scene
         let readBack = await dependencies.controls?.toggleState(at: point, in: pid)
             ?? after?.elements.first(where: { $0.id == element.id })?.state
@@ -568,7 +572,7 @@ public struct ActionEngine: Sendable {
         if let error = await send([.insert(text)], to: pid) {
             return ActOutcome(.actedUnverified, "inserting text: delivery failed: \(error); observe before any retry")
         }
-        await pause(timing.clickSettle)
+        await settle(pid)
         let after = await perceive(pid)?.scene
         let value = await dependencies.controls?.focusedFieldValue(in: pid)
         let verified = expecting != nil && value != nil && value == expecting
@@ -627,7 +631,7 @@ public struct ActionEngine: Sendable {
         if let error = await send(gestures, to: pid) {
             return ActOutcome(.actedUnverified, "typing into '\(element.label)': delivery failed: \(error)")
         }
-        await pause(timing.clickSettle)
+        await settle(pid)
         let after = await perceive(pid)?.scene
         let readBack = await dependencies.controls?.focusedFieldValue(in: pid)
             ?? after?.elements.first(where: { $0.id == element.id })?.value
@@ -822,6 +826,7 @@ public struct ActionEngine: Sendable {
         if let error = await send([.click(at: point, button: .right)], to: pid) {
             return ActOutcome(.actedUnverified, "right-clicking '\(element.label)': delivery failed: \(error)")
         }
+        // The fixed pause on purpose: the menu is a window of its own, which the target's frames never show.
         await pause(timing.clickSettle)
         let popups = (await surfaces(pid)).popups
         guard let menu = popups.first(where: { !before.popups.contains($0) }) ?? popups.first,
@@ -912,6 +917,13 @@ public struct ActionEngine: Sendable {
         }
     }
 
+    /// Waits for a gesture's effect before it is judged: the settling role's wait, capped at the click
+    /// settle, when the composition gave one, and otherwise the click settle itself.
+    private func settle(_ processID: pid_t) async {
+        guard let settling = dependencies.settling else { return await pause(timing.clickSettle) }
+        await settling.settle(in: processID, cap: timing.clickSettle)
+    }
+
     /// Delivers the gestures in order and answers the error that stopped them, nil when all went out.
     /// A failure closes the delivery as unknown: what went out before it is never repeated.
     private func send(_ gestures: [Gesture], to processID: pid_t) async -> (any Error)? {
@@ -935,7 +947,7 @@ public struct ActionEngine: Sendable {
         repaint    : String
     ) async -> ActOutcome {
         let pid = request.processID
-        await pause(timing.clickSettle)
+        await settle(pid)
         guard let after = await perceive(pid)?.scene else {
             await dependencies.actuator.confirm(.unknown, in: pid)
             return ActOutcome(.actedUnverified, "\(performed): no scene could be read afterwards; observe when "

@@ -146,7 +146,7 @@ public final class AutomationSession: AutomationSessionOperating {
     }
 
     public func menu(path: String) async throws -> ActOutcome {
-        let (application, _, seat) = try current()
+        let (application, runtime, seat) = try current()
         if case .refuse(let sentence) = try await SeatAdmission.awaited(
             seat.agentSeat(),
             application: application.localizedName ?? "the application"
@@ -157,6 +157,7 @@ public final class AutomationSession: AutomationSessionOperating {
             path,
             processID        : application.processIdentifier,
             allowsDestructive: allowsDestructive,
+            settling         : runtime.settling,
             observe          : { try await self.observe() }
         )
     }

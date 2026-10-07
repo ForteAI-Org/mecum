@@ -14,6 +14,9 @@
 /// An adaptive wait was measured and rejected: proving a window has stopped changing costs two
 /// captures, more than the sleep it would replace. Anything here that changes must change with a
 /// printed settle run in the commit message.
+///
+/// A seat whose window is already streamed watches frames it receives anyway, which costs no
+/// capture: there a `Settling` role ends the click settle early and the value here is its cap.
 public struct ActionTiming: Sendable, Equatable {
 
     /// After a click, before the verifying re-perception.

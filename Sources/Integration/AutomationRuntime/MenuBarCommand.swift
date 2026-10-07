@@ -382,6 +382,7 @@ public enum MenuBarCommand {
         allowsDestructive: Bool,
         withFront        : (@escaping @MainActor () -> Void) async -> String?,
         frontReturned    : () -> Bool,
+        settling         : (any Settling)? = nil,
         observe          : () async throws -> SceneSnapshot
     ) async throws -> ActOutcome {
         let before = windowSignature(of: processID)
@@ -401,6 +402,7 @@ public enum MenuBarCommand {
             before       : before,
             frontIssue   : frontIssue,
             frontReturned: frontReturned,
+            settling     : settling,
             observe      : observe
         )
     }
@@ -420,6 +422,7 @@ public enum MenuBarCommand {
         allowsDestructive: Bool,
         refresh          : (() async -> Refresh)? = nil,
         preparesEnabledItems: Bool = false,
+        settling         : (any Settling)? = nil,
         observe          : () async throws -> SceneSnapshot
     ) async throws -> ActOutcome {
 
@@ -430,8 +433,19 @@ public enum MenuBarCommand {
             press: { AXUIElementPerformAction($0, kAXPressAction as CFString) },
             refresh: refresh
         )
-        return try await observedOutcome(pressed, outcome: outcome, processID: processID, before: before, observe: observe)
+        return try await observedOutcome(
+            pressed,
+            outcome  : outcome,
+            processID: processID,
+            before   : before,
+            settling : settling,
+            observe  : observe
+        )
     }
+
+    /// The wait after a press before its effect is observed. With a settling role it is the cap of
+    /// that role's wait, which ends once the window settled.
+    static let pressSettle: Duration = .milliseconds(400)
 
     /// Retains an acknowledged dispatch even when its later observation fails.
     ///
@@ -446,10 +460,15 @@ public enum MenuBarCommand {
         before       : [String],
         frontIssue   : String? = nil,
         frontReturned: () -> Bool = { false },
+        settling     : (any Settling)? = nil,
         observe      : () async throws -> SceneSnapshot
     ) async throws -> ActOutcome {
         guard let pressed else { return outcome }
-        try? await Task.sleep(for: .milliseconds(400))
+        if let settling {
+            await settling.settle(in: processID, cap: pressSettle)
+        } else {
+            try? await Task.sleep(for: pressSettle)
+        }
         let scene: SceneSnapshot
         do {
             scene = try await observe()

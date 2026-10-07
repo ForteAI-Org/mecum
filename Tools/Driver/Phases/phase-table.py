@@ -29,7 +29,7 @@ ORDER = [
     'capture.displayStill', 'capture.makeCGImage',
     'pipeline', 'pipeline.ocr', 'pipeline.segments', 'pipeline.ax', 'pipeline.compose',
     'pipeline.axWait', 'pipeline.merge', 'pipeline.controlState',
-    'delivery.prepare', 'delivery', 'delivery.confirm', 'pause',
+    'delivery.prepare', 'delivery', 'delivery.confirm', 'pause', 'settle',
     'render.scene', 'render.result',
 ]
 
@@ -65,6 +65,8 @@ def durations(lines, process=None, tick_ms=1.0):
             open_intervals[key] = (event['machTimestamp'], event.get('eventMessage', ''))
         elif key in open_intervals:
             started, detail = open_intervals.pop(key)
+            # A detail given at the end (why a wait ended) names the phase in place of the begin's.
+            detail = event.get('eventMessage') or detail
             name = key[2] + (':' + detail if detail else '')
             found[name].append((event['machTimestamp'] - started) * tick_ms)
     return found

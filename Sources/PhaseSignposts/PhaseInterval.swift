@@ -51,6 +51,12 @@ public struct PhaseInterval: Sendable {
         Self.signposter.endInterval(name, state)
     }
 
+    /// Ends the interval with a detail known only at its end, such as why a wait ended; the table
+    /// names the phase with it in place of the begin's. Call it, or `end()`, once.
+    public func end(_ detail: String) {
+        Self.signposter.endInterval(name, state, "\(detail, privacy: .public)")
+    }
+
     /// Runs `body` inside one interval, for work that is an expression and not a statement.
     public static func measure<T>(
         _ name: StaticString,

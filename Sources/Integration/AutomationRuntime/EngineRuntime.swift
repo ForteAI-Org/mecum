@@ -30,6 +30,8 @@ public struct EngineRuntime {
     public let actuator: any Actuating
     public let controls: any ControlPressing
     public let activation: (any ApplicationActivating)?
+    /// The seat's adaptive wait after a gesture; nil in the foreground, which sleeps the fixed pause.
+    public let settling: (any Settling)?
     public let store: FileKnowledgeStore
     public let memory: BrainMemory
 
@@ -40,11 +42,13 @@ public struct EngineRuntime {
             actuator   = SeatActuator(target: seat)
             controls   = SeatControls()
             activation = nil
+            settling   = SeatSettler(target: seat)
         } else {
             scenes = ProductionPerception.foregroundScenes()
             actuator   = HIDActuator()
             controls   = AccessibilityController()
             activation = WorkspaceActivator()
+            settling   = nil
         }
         store = FileKnowledgeStore(
             directory  : knowledgeDirectory,
@@ -69,7 +73,8 @@ public struct EngineRuntime {
                 controls    : controls,
                 activation  : activation,
                 expectations: memory,
-                observer    : memory
+                observer    : memory,
+                settling    : settling
             ),
             permissions: ActionPermissions(
                 allowsDestructive           : allowsDestructive,

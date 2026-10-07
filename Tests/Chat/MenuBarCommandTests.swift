@@ -270,6 +270,40 @@ struct MenuBarCommandTests {
         viewportPixelSize: .init(width: 100, height: 100), elements: []
     )
 
+    /// A settling role that records each wait and how many observations had run by then.
+    final class RecordingSettling: Settling, @unchecked Sendable {
+        var waits: [(processID: pid_t, cap: Duration, observations: Int)] = []
+        var observations = 0
+        func settle(in processID: pid_t, cap: Duration) async {
+            waits.append((processID, cap, observations))
+        }
+    }
+
+    @Test("A press settles through the seat's role with the 400 ms as its cap, before the observation")
+    func aPressSettlesBeforeItIsObserved() async throws {
+        let settling = RecordingSettling()
+        let dispatched = await MenuBarCommand.runInFront(
+            read     : { .press(Node("New..."), path: "File > New...") },
+            press    : { _ in .success },
+            withFront: { command in command(); return nil }
+        )
+        let result = try await MenuBarCommand.observedOutcome(
+            dispatched.pressed,
+            outcome  : dispatched.outcome,
+            processID: 4242,
+            before   : [],
+            settling : settling,
+            observe  : { settling.observations += 1; return Self.scene }
+        )
+        #expect(result.scene == Self.scene)
+        #expect(settling.waits.count == 1)
+        #expect(settling.waits.first?.processID == 4242)
+        #expect(settling.waits.first?.cap == .milliseconds(400))
+        #expect(settling.waits.first?.observations == 0, "the scene is observed after the settle")
+        #expect(settling.observations == 1)
+        #expect(MenuBarCommand.pressSettle == .milliseconds(400))
+    }
+
     @Test("A handback that was not verified but is verified by the observation gets the window verdict",
           arguments: [true, false])
     func aLateVerifiedReturnGetsTheWindowVerdict(_ windowOpened: Bool) async throws {

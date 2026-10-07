@@ -387,7 +387,8 @@ operation threw is never ended and is left out. The phases, outermost first:
 | `capture.makeCGImage`, `capture.displayStill` | The Frame to image conversion, and the display Still used while a pop-up is open. |
 | `pipeline`, `pipeline.ocr`, `.segments`, `.ax`, `.compose`, `.axWait`, `.merge`, `.controlState` | The scene pipeline and its stages; text, segments and accessibility run concurrently. |
 | `delivery.prepare`, `delivery`, `delivery.confirm` | Getting the Turn and the observation, posting the Command, and confirming it. |
-| `pause` | Every wait of the act cycle. |
+| `pause` | Every fixed wait of the act cycle. |
+| `settle` | The wait after a gesture on a streamed seat window, until its frames stop changing or the cap ([ADR 0035](adr/Adr0035SettleOnTheRunningWindowStream.md)); named `settle:stable`, `:quiet`, `:cap` or `:fallback.<reason>` by how it ended. |
 | `render.scene`, `render.result` | Writing the scene for the model, and encoding and recording the answer. |
 
 Splitting the identity cost of a Still: `target.observe` minus `seat.observe` is the
@@ -410,6 +411,9 @@ the 310 ms `pause` is the largest part of an action.
 Since then a window Still first reads the window stream the Broker's preview already runs, and
 the running stream reads the window server once a second instead of twice a frame; see
 [ADR 0034](adr/Adr0034ObserveFromTheRunningWindowStream.md). That has not been measured live yet.
+The wait after a gesture then watches that same stream and ends once the window settled, capped
+at the fixed pause; see [ADR 0035](adr/Adr0035SettleOnTheRunningWindowStream.md). Not measured
+live either.
 
 ## Requirements
 

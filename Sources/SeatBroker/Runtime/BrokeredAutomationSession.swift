@@ -404,7 +404,7 @@ public final class BrokeredAutomationSession: AutomationSessionOperating {
     }
 
     public func menu(path: String) async throws -> ActOutcome {
-        let (application, _, seat) = try current()
+        let (application, runtime, seat) = try current()
         let agentSeat = try seat.agentSeat()
         if case .refuse(let sentence) = await SeatAdmission.awaited(
             agentSeat,
@@ -435,6 +435,7 @@ public final class BrokeredAutomationSession: AutomationSessionOperating {
                     return Self.briefMenuFailure(outcome)
                 },
                 frontReturned: { agentSeat.frontIsBackAfterCommand },
+                settling: runtime.settling,
                 observe: { try await self.observe() }
             )
         }
@@ -442,6 +443,7 @@ public final class BrokeredAutomationSession: AutomationSessionOperating {
             path,
             processID        : processID,
             allowsDestructive: allowsDestructive,
+            settling         : runtime.settling,
             observe          : { try await self.observe() }
         )
     }

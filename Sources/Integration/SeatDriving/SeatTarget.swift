@@ -34,6 +34,8 @@ public final class SeatTarget {
     private let isBorrowed: Bool
     /// Told of every observation taken through a borrow, so the owner can follow the window read here.
     private let observed: (@MainActor (SeatObservationDelivery) -> Void)?
+    /// The owner's running stream of the window, which `SeatSettler` watches; nil when nobody runs one.
+    package let liveFrames: (any LiveWindowFrameSourcing)?
 
     /// The observation the last Frame was delivered with, and whether a Command already consumed it.
     private var delivery: SeatObservationDelivery?
@@ -52,6 +54,7 @@ public final class SeatTarget {
         host = SeatHost(configuration: configuration)
         isBorrowed = false
         observed   = nil
+        liveFrames = nil
     }
 
     /// Wraps a host and a seat another owner started, so the Engine's roles act on that owner's seat.
@@ -67,15 +70,18 @@ public final class SeatTarget {
     /// here, so the owner's live picture shows the window the engine reads and not the one it adopted.
     /// The first observation must match `initialWindow`, or the selected window at the borrow when
     /// it is omitted. Later window following remains available after that first identity is verified.
+    /// `liveFrames` is the owner's running stream of the window, borrowed like the seat.
     package init(
         borrowing host: SeatHost,
         seat          : AgentSeat,
         initialWindow : WindowIdentity? = nil,
+        liveFrames    : (any LiveWindowFrameSourcing)? = nil,
         observed      : (@MainActor (SeatObservationDelivery) -> Void)? = nil
     ) {
-        self.host     = host
-        self.seat     = seat
-        self.observed = observed
+        self.host       = host
+        self.seat       = seat
+        self.observed   = observed
+        self.liveFrames = liveFrames
         isBorrowed    = true
         self.initialWindow = initialWindow ?? seat.currentTarget?.reference.identity
     }

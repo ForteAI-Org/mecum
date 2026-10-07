@@ -591,7 +591,8 @@ final class SeatDriver {
         let target = SeatTarget(
             borrowing    : host,
             seat         : seat,
-            initialWindow: identity
+            initialWindow: identity,
+            liveFrames   : preview
         ) { [weak self] delivery in
             self?.preview.follow(delivery)
         }
