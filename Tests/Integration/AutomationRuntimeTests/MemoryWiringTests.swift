@@ -120,6 +120,69 @@ struct MemoryWiringTests {
         await service.close()
     }
 
+    // MARK: Copies and recovery
+
+    private func files(_ service: MemoryService, _ marker: String) throws -> [String] {
+        try FileManager.default.contentsOfDirectory(atPath: service.directory.path).filter { $0.contains(marker) }.sorted()
+    }
+
+    @Test("opening takes a verified copy of the archive once an interval, and keeps the newest copies only")
+    func dailyCopy() async throws {
+        let service = try W.service()
+        _ = await W.recorder(service, session: nil).observe(W.window([W.open, W.save]))
+        #expect(await service.flush(within: .seconds(10)))
+        for _ in 0..<200 where try files(service, ".backup-").isEmpty { try await Task.sleep(for: .milliseconds(10)) }
+        #expect(try files(service, ".backup-").count == 1)
+        #expect(await service.status().lastBackup != nil)
+        await service.close()
+        let again = MemoryService(directory: service.directory)
+        _ = try await again.ready()
+        try await Task.sleep(for: .milliseconds(200))
+        #expect(try files(again, ".backup-").count == 1, "a copy younger than the interval is enough")
+        await again.close()
+    }
+
+    @Test("a corrupt archive is moved aside with its date, never deleted, and the newest copy takes its place")
+    func corruptRestoredFromCopy() async throws {
+        let service = try W.service()
+        _ = await W.recorder(service, session: nil).observe(W.window([W.open, W.save]))
+        #expect(await service.flush(within: .seconds(10)))
+        await service.close()
+        // A copy is the archive as it was opened, like the JSON store's copy before the day's first save:
+        // the next opening, once the interval has passed, keeps what the first one learned.
+        let next = MemoryService(directory: service.directory, configuration: .init(backupInterval: .zero))
+        _ = try await next.ready()
+        for _ in 0..<200 where try files(next, ".backup-").count < 2 { try await Task.sleep(for: .milliseconds(10)) }
+        await next.close()
+        for suffix in ["-wal", "-shm"] { try? FileManager.default.removeItem(atPath: service.url.path + suffix) }
+        try Data(repeating: 0x5A, count: 8192).write(to: service.url)
+
+        let reopened = MemoryService(directory: service.directory)
+        do {
+            let brain = try await reopened.brain(of: W.bundle)
+            #expect(brain?.objects.count == 2, "the copy's Brain is back")
+        } catch { Issue.record("reopen: \(error) \(await reopened.status())") }
+        let status = await reopened.status()
+        #expect(status.state == .open)
+        #expect(status.lastRecovery?.contains("restored") == true, "\(status.lastRecovery ?? "")")
+        let aside = try files(reopened, ".corrupt-")
+        #expect(aside.count == 1)
+        #expect(try Data(contentsOf: reopened.directory.appendingPathComponent(aside[0])) == Data(repeating: 0x5A, count: 8192))
+        await reopened.close()
+    }
+
+    @Test("a corrupt archive with no copy is moved aside and the memory starts empty, saying so")
+    func corruptWithoutCopyStartsEmpty() async throws {
+        let directory = try W.directory()
+        try Data(repeating: 0x5A, count: 8192).write(to: directory.appendingPathComponent("memory.sqlite"))
+        let service = MemoryService(directory: directory)
+        #expect(try await service.brain(of: W.bundle) == nil)
+        let status = await service.status()
+        #expect(status.state == .open && status.lastRecovery?.contains("started empty") == true)
+        #expect(try files(service, ".corrupt-").count == 1)
+        await service.close()
+    }
+
     // MARK: The recorder
 
     @Test("a call through its recorder is planned, started, sampled, taught to the Brain and completed with its result and effect")

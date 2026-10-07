@@ -110,6 +110,13 @@ nonisolated public struct MemoryRepositories: Sendable {
 ///
 /// Reads of a Brain are cached per application and kept while the archive's data version, as the
 /// reading connection sees it, has not moved: a commit by this process or by another one moves it.
+///
+/// The archive keeps itself recoverable, as the JSON files before it did. Once a `backupInterval`,
+/// on opening and then while it is written, the service takes a consistent, verified copy of the
+/// archive beside it (`memory.sqlite.backup-<date>`), keeping the newest `keptBackups`. A file the
+/// library calls corrupt or not a database is moved aside, with its journal, as
+/// `memory.sqlite.corrupt-<date>`, never deleted, and the newest copy takes its place; with no copy
+/// the memory starts empty. Either way `status()` says what happened.
 public actor MemoryService: BrainReading, BrainApplicationStoring {
 
     nonisolated public struct Configuration: Sendable, Equatable {
@@ -129,18 +136,28 @@ public actor MemoryService: BrainReading, BrainApplicationStoring {
         /// How long the end of the process waits for the queue to empty before what is left is a gap.
         public var closingBudget: Duration
 
+        /// How old the newest copy of the archive may be before another is taken.
+        public var backupInterval: Duration
+
+        /// How many copies are kept, the newest first.
+        public var keptBackups: Int
+
         public init(
             fileName      : String = "memory.sqlite",
             store         : SQLiteMemoryStore.Configuration = SQLiteMemoryStore.Configuration(),
             reopenInterval: Duration = .seconds(5),
             queueLimit    : Int = 4096,
-            closingBudget : Duration = .seconds(3)
+            closingBudget : Duration = .seconds(3),
+            backupInterval: Duration = .seconds(86_400),
+            keptBackups   : Int = 3
         ) {
             self.fileName       = fileName
             self.store          = store
             self.reopenInterval = reopenInterval
             self.queueLimit     = queueLimit
             self.closingBudget  = closingBudget
+            self.backupInterval = backupInterval
+            self.keptBackups    = keptBackups
         }
     }
 
@@ -169,6 +186,10 @@ public actor MemoryService: BrainReading, BrainApplicationStoring {
         public let dropped: Int
         /// The last failure, in a sentence with no content of the agent's.
         public let lastFailure: String?
+        /// When the newest copy of the archive was taken, when one exists.
+        public let lastBackup: Date?
+        /// What the service did with an archive it found corrupt, when it found one.
+        public let lastRecovery: String?
     }
 
     /// One write as it waits in the queue: a label for the log and the body.
@@ -196,6 +217,10 @@ public actor MemoryService: BrainReading, BrainApplicationStoring {
     private var lastFailure: String?
 
     private var brains: [String: (version: Int64, brain: UIBrain?)] = [:]
+
+    private var lastBackup: Date?
+    private var lastRecovery: String?
+    private var backingUp: Task<Void, Never>?
 
     private static let log = Logger(subsystem: "dev.forte.Mecum", category: "Memory")
 
@@ -280,6 +305,7 @@ public actor MemoryService: BrainReading, BrainApplicationStoring {
             }
         }
         drainer = nil
+        scheduleBackupIfDue()
     }
 
     // MARK: Opening
@@ -308,7 +334,7 @@ public actor MemoryService: BrainReading, BrainApplicationStoring {
     private func performOpen() async throws -> MemoryRepositories {
         do {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-            let store = try await SQLiteMemoryStore.open(at: url, configuration: configuration.store)
+            let store = try await openRecovering()
             guard state != .closed else {
                 await store.close()
                 throw MemoryUnavailable("the memory is closed")
@@ -318,6 +344,7 @@ public actor MemoryService: BrainReading, BrainApplicationStoring {
             self.repositories = repositories
             state             = .open
             degradedSince     = nil
+            scheduleBackupIfDue()
             return repositories
         } catch {
             if state != .closed {
@@ -330,9 +357,106 @@ public actor MemoryService: BrainReading, BrainApplicationStoring {
         }
     }
 
+    // MARK: Copies and recovery
+
+    /// Opens the store; a file the library calls corrupt is moved aside and the newest copy restored
+    /// first, then the store is opened once more.
+    private func openRecovering() async throws -> SQLiteMemoryStore {
+        let firstError: any Error
+        do {
+            return try await SQLiteMemoryStore.open(at: url, configuration: configuration.store)
+        } catch {
+            firstError = error
+        }
+        guard Self.isCorrupt(firstError), FileManager.default.fileExists(atPath: url.path) else { throw firstError }
+        let recovery = try recover()
+        lastRecovery = recovery
+        Self.log.error("memory recovered: \(recovery, privacy: .public)")
+        return try await SQLiteMemoryStore.open(at: url, configuration: configuration.store)
+    }
+
+    /// Starts a copy of the archive when the newest one is older than `backupInterval`, unless one
+    /// is being taken. The copy runs beside the writes; it never holds them up.
+    private func scheduleBackupIfDue() {
+        guard state == .open, backingUp == nil else { return }
+        if let newest = lastBackup ?? newestBackup()?.date,
+           Date().timeIntervalSince(newest) < Double(configuration.backupInterval.components.seconds) { return }
+        backingUp = Task { await self.backup() }
+    }
+
+    /// Takes a verified copy of the archive and keeps the newest `keptBackups`.
+    private func backup() async {
+        defer { backingUp = nil }
+        guard let store else { return }
+        let stamp       = Self.stamp(Date())
+        let destination = directory.appendingPathComponent("\(configuration.fileName).backup-\(stamp)")
+        do {
+            _ = try await store.snapshot(to: destination)
+            lastBackup = Date()
+            for old in backups().dropFirst(max(1, configuration.keptBackups)) {
+                try? FileManager.default.removeItem(at: old.url)
+            }
+        } catch {
+            Self.log.error("memory copy failed: \(Self.describe(error), privacy: .public)")
+        }
+    }
+
+    /// Moves a corrupt archive aside with its journal and puts the newest copy in its place, and
+    /// says what it did. Nothing is deleted.
+    private func recover() throws -> String {
+        let manager = FileManager.default
+        let stamp   = Self.stamp(Date())
+        let aside   = "\(configuration.fileName).corrupt-\(stamp)"
+        for suffix in ["", "-wal", "-shm"] {
+            let file = URL(fileURLWithPath: url.path + suffix)
+            guard manager.fileExists(atPath: file.path) else { continue }
+            try manager.moveItem(at: file, to: directory.appendingPathComponent(aside + suffix))
+        }
+        guard let newest = newestBackup() else {
+            return "the archive could not be read; it was moved to \(aside) and the memory started empty"
+        }
+        try manager.copyItem(at: newest.url, to: url)
+        return "the archive could not be read; it was moved to \(aside) and the copy of \(Self.stamp(newest.date)) restored"
+    }
+
+    /// The copies of the archive beside it, the newest first.
+    private nonisolated func backups() -> [(url: URL, date: Date)] {
+        let prefix = "\(configuration.fileName).backup-"
+        let files  = (try? FileManager.default.contentsOfDirectory(
+            at: directory, includingPropertiesForKeys: [.contentModificationDateKey], options: [.skipsHiddenFiles]
+        )) ?? []
+        return files
+            .filter { $0.lastPathComponent.hasPrefix(prefix) }
+            .map { ($0, (try? $0.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast) }
+            .sorted { $0.1 > $1.1 }
+    }
+
+    private nonisolated func newestBackup() -> (url: URL, date: Date)? { backups().first }
+
+    /// Whether the library said the file is corrupt or is not a database at all.
+    nonisolated static func isCorrupt(_ error: any Error) -> Bool {
+        let fault: MemoryStoreFault?
+        switch error as? MemoryStoreError {
+            case .open(let f)?, .failed(let f)?, .locked(let f)?, .contract(let f)?: fault = f
+            case .unavailable(.failed(let f))?: fault = f
+            default: fault = nil
+        }
+        guard let fault else { return false }
+        return fault.code.primary == 11 || fault.code.primary == 26
+    }
+
+    private nonisolated static func stamp(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale     = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone   = TimeZone(identifier: "UTC")
+        formatter.dateFormat = "yyyy-MM-dd'T'HHmmss.SSS'Z'"
+        return formatter.string(from: date)
+    }
+
     /// Closes the archive after the queue empties or the closing budget is spent. Definitive.
     public func close() async {
         guard state != .closed else { return }
+        await backingUp?.value
         await flush(within: configuration.closingBudget)
         let left = queue.count
         if left > 0 {
@@ -379,7 +503,8 @@ public actor MemoryService: BrainReading, BrainApplicationStoring {
             sourceID = diagnostics.librarySourceID
         }
         return Status(path: url.path, state: state, libraryVersion: version, librarySourceID: sourceID,
-                      pending: queue.count, written: written, failed: failed, dropped: dropped, lastFailure: lastFailure)
+                      pending: queue.count, written: written, failed: failed, dropped: dropped, lastFailure: lastFailure,
+                      lastBackup: lastBackup ?? newestBackup()?.date, lastRecovery: lastRecovery)
     }
 
     /// The archive's applications and counts.
