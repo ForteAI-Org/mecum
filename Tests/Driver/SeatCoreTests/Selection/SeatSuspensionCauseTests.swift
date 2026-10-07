@@ -13,7 +13,7 @@ import Testing
 @Suite("A suspension as a consumer reads it")
 struct SeatSuspensionCauseTests {
 
-    @Test("a window left open outside the seat reads as what it is and what clears it")
+    @Test("a window left open outside the seat reads as what it is and what the seat does")
     func aContainmentBlockReadsAsAClause() {
         let cause = SeatSuspensionCause(.containmentNotVerified(blocks: [
             .surfaceOutsideSeat(windowNumber: 38030),
@@ -28,7 +28,7 @@ struct SeatSuspensionCauseTests {
         ]))
         #expect(cause == .containmentNotVerified(blocks: [
             "window 38030 of the application is open on the person's screen, outside the seat, "
-                + "and closing it there clears this",
+                + "until the seat takes it in",
             "window 38030 could not be moved into the seat: no way to move it is qualified on this build",
             "window 38030 was not contained within 1.1 s",
         ]))

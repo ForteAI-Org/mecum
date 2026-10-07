@@ -799,8 +799,23 @@ public final class AgentSeat {
             // surface does not reopen ordinary command admission.
             && (state == .unavailable || state.acceptsCommands
                 || selectedContainmentRecoveryMayAdmit(window)
-                || selectedModalRecoveryMayAdmit(window))
+                || selectedModalRecoveryMayAdmit(window)
+                || commandBornMayAdmit(window))
             && session[window.windowNumber] == nil
+    }
+
+    /// A window the Command pressed in a brief activation opened, admitted
+    /// while the seat waits on the focus episode that Command's own activation
+    /// began (ADR 0033). The record says it is the target's, absent before the
+    /// press and first seen inside its margin; this adds that it is a modal
+    /// panel by level or by the nucleus' own attestation of a dialog.
+    private func commandBornMayAdmit(_ window: WindowReference) -> Bool {
+        guard state == .waiting, let recovery = focusRecovery,
+              recovery.episodeBeganDuringCommand, !recovery.isRestoring,
+              let sighting = recovery.commandSighting(of: window)
+        else { return false }
+        return sighting.level == CrossCheckedSurfaceReader.modalPanelLevel
+            || window.identity.map(selectionKit.isApplicationModal) == true
     }
 
     private func selectedContainmentRecoveryMayAdmit(_ window: WindowReference) -> Bool {
@@ -1028,6 +1043,9 @@ public final class AgentSeat {
             for waiter in waiting { waiter.resume() }
         }
         let previous = state
+        // A window the Command opened is taken in while the seat waits on that
+        // Command's own episode, and the seat goes back to waiting after it.
+        let resumesWaiting = previous == .waiting && commandBornMayAdmit(inbound)
         transition(to: .starting, reason: .requested)
 
         // Centred, then clamped so the whole window fits: the frame comes from
@@ -1130,7 +1148,11 @@ public final class AgentSeat {
             windowInventory.clearAttempts(of: record.window.id)
             refreshWindowFollowing()
 
-            transition(to: previous == .degraded ? .degraded : .ready, reason: .requested)
+            transition(
+                to: previous == .degraded ? .degraded
+                    : (resumesWaiting && focusRecovery?.isPaused == true ? .waiting : .ready),
+                reason: .requested
+            )
             // The instance is handed over to the assignment nucleus here, at the
             // one moment the seat knows it is driving it, and the observation of
             // whatever was current before stops being current with the target.
@@ -1193,7 +1215,8 @@ public final class AgentSeat {
                 restorationError: rollback.error
             )
             if state != .failed, !isTearingDown {
-                transition(to: failsTheSeat ? .failed : previous, reason: .cancelled)
+                let back = resumesWaiting && focusRecovery?.isPaused != true ? SeatState.ready : previous
+                transition(to: failsTheSeat ? .failed : back, reason: .cancelled)
                 if state == .failed { turns.failAll(with: SessionFailure.seatNotReady(.failed)) }
             }
             throw error
@@ -3643,6 +3666,7 @@ public final class AgentSeat {
         defer { windowFollowPassInFlight = false }
         windowFollowScanCount += 1
         let surfaces = sensing.windowSurfaces(ownedBy: Set(processes.map(\.processID)))
+        focusRecovery?.noteCommandWindows(surfaces)
         // The level is the reading's and is kept for the evidence line: it is
         // not carried by a change, and re-reading it per candidate would cost.
         let levels = Dictionary(
@@ -3664,20 +3688,24 @@ public final class AgentSeat {
                 case .appeared(let window), .reappeared(let window):
                     guard state.acceptsCommands || containmentOnlyFollowWait
                             || selectedModalRecoveryMayAdmit(window)
+                            || commandBornMayAdmit(window)
                     else {
                         windowInventory.offerAgain(window.windowNumber)
                         continue
                     }
                     await transferDetectedWindow(window, level: levels[window.windowNumber])
+                    await noteCommandWindowAdoption(window)
 
                 case .appearedInVirtualDisplay(let window):
                     guard state.acceptsCommands || containmentOnlyFollowWait
                             || selectedModalRecoveryMayAdmit(window)
+                            || commandBornMayAdmit(window)
                     else {
                         windowInventory.offerAgain(window.windowNumber)
                         continue
                     }
                     await ownWindowBornInSeat(window, level: levels[window.windowNumber])
+                    await noteCommandWindowAdoption(window)
 
                 case .leftVirtualDisplay(let window):
                     guard state.acceptsCommands || containmentOnlyFollowWait
@@ -3694,6 +3722,19 @@ public final class AgentSeat {
                     }
             }
         }
+        // A pass that ran only for the Command's windows still settles the
+        // registers, as the reconciliation a waiting seat always gets.
+        if commandEpisodeFollowMayProceed {
+            foldCurrentReading()
+            publishCoherentState()
+        }
+    }
+
+    /// Tells the focus recovery that a window of the Command's record is now
+    /// held, which is when its one extra handback may be made (ADR 0033).
+    private func noteCommandWindowAdoption(_ window: WindowReference) async {
+        guard session[window.windowNumber] != nil else { return }
+        await focusRecovery?.commandWindowWasAdopted(window.windowNumber)
     }
 
     /// Whether a target that left the on-screen list is still the window server's
@@ -4380,6 +4421,11 @@ public final class AgentSeat {
         await withBriefTargetActivation(until: isReady, atMost: .seconds(2), performOnce: performOnce)
     }
 
+    /// Whether the front is back with the person after the last Command pressed
+    /// in a brief activation, when that activation's handback was not verified
+    /// and the one extra handback of ADR 0033 was (a read, no input).
+    package var frontIsBackAfterCommand: Bool { focusRecovery?.frontIsBackAfterCommand ?? false }
+
     private func withBriefTargetActivation(
         until isReady: @MainActor () -> Bool,
         atMost bound : Duration,
@@ -4412,8 +4458,12 @@ public final class AgentSeat {
         defer {
             actionInFlight = false
             restoreActionState(previous, reason: .requested)
-            // What the application did while it was in front is looked for now.
-            requestWindowFollow()
+            // What the application did while it was in front is looked for now,
+            // and through the margin of the Command's record when there is one.
+            requestWindowFollow(
+                through: recovery.commandProvenance == nil
+                    ? .zero : .nanoseconds(Int64(CommandProvenance.marginNanoseconds))
+            )
         }
         var scopedCommand: (@MainActor () -> Bool)?
         if let command = performOnce {
@@ -4610,7 +4660,7 @@ public final class AgentSeat {
         Task { @MainActor [weak focusRecovery] in await focusRecovery?.refreshPreparation() }
     }
 
-    private func focusRecoveryChanged(_ report: UserFocusRecoveryReport) {
+    func focusRecoveryChanged(_ report: UserFocusRecoveryReport) {
         lastFocusRecovery = report
         eventChannel.yield(.userFocusRecoveryChanged(report))
         // The event carries this to a consumer that subscribes, and the one the
@@ -5253,15 +5303,24 @@ public final class AgentSeat {
         if focusRecovery?.isRestoring == true {
             return .reconciliationOnly(reason: "a focus request is in flight and unverified")
         }
-        if state == .waiting, !containmentOnlyFollowWait {
+        if state == .waiting, !containmentOnlyFollowWait, !commandEpisodeFollowMayProceed {
             return .reconciliationOnly(reason: "the seat is waiting for the person")
         }
         if !state.acceptsCommands,
            !containmentOnlyFollowWait,
-           !recoverySuccessorFollowMayProceed {
+           !recoverySuccessorFollowMayProceed,
+           !commandEpisodeFollowMayProceed {
             return .standDown(reason: "the seat is \(state.rawValue)")
         }
         return .full
+    }
+
+    /// The seat waits on the episode its Command's own activation began, so the
+    /// pass may read and take in the windows that Command opened (ADR 0033).
+    /// Each of them still has to pass `commandBornMayAdmit`; any other window
+    /// is offered again and left where it is.
+    private var commandEpisodeFollowMayProceed: Bool {
+        state == .waiting && focusRecovery?.episodeBeganDuringCommand == true
     }
 
     /// A newly discovered modal can itself be the one uncontained surface that

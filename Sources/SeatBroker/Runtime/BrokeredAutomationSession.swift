@@ -434,6 +434,7 @@ public final class BrokeredAutomationSession: AutomationSessionOperating {
                     if case .ready = outcome { return nil }
                     return Self.briefMenuFailure(outcome)
                 },
+                frontReturned: { agentSeat.frontIsBackAfterCommand },
                 observe: { try await self.observe() }
             )
         }
@@ -465,7 +466,7 @@ public final class BrokeredAutomationSession: AutomationSessionOperating {
                 return .stillDisabled(reason: nil)
             case .handbackNotVerified:
                 return .stillDisabled(reason: "It was brought forward for a moment, but the return to "
-                    + "the person's own window was not verified. Observe before more input.")
+                    + "the person's own window was not verified.")
             case .refused(let refusal):
                 let because: String
                 switch refusal {

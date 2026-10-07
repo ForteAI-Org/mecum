@@ -146,6 +146,15 @@ final class UserFocusRecovery {
     /// explains nothing any more. See `expectActivation(of:until:)`.
     private var expectedActivation: (processID: Int32, deadline: UInt64)?
 
+    /// The record of the Command pressed in the brief activation running or
+    /// just over, and the task that settles it when its margin ends (ADR 0033).
+    private(set) var commandProvenance: CommandProvenance?
+    private var commandMarginTask: Task<Void, Never>?
+
+    /// The target whose Command's extra handback was verified, kept past the
+    /// record's margin until the next press or a reset. See `frontIsBackAfterCommand`.
+    private var commandReturnedFrom: Int32?
+
     /// How often a brief activation reads its caller's condition while the
     /// target is in front.
     static let briefActivationPollNanoseconds: UInt64 = 20_000_000
@@ -535,6 +544,7 @@ final class UserFocusRecovery {
         performOnce  : (@MainActor () -> Bool)? = nil
     ) async -> (outcome: BriefActivationOutcome, summary: String) {
         guard !isPaused else { return (.refused(.seatNotReady), "the focus recovery is paused") }
+        defer { closeCommandProvenance() }
         rememberUserWindow()
         guard let person = destination, sensing.frontmostProcessID == person.processID else {
             return (.refused(.noUserWindow), "no window of the person's own is in front to come back to")
@@ -565,7 +575,13 @@ final class UserFocusRecovery {
                 && adopted().contains(where: { $0.hasSameIdentity(as: target) })
                 && now() < start &+ bound && !Task.isCancelled && !isPaused
                 && isFrontmost(target.processID) && sensing.frontmostProcessID == target.processID
-            if !canPerform || !performOnce() { readyAfter = nil }
+            if canPerform { openCommandProvenance(for: target, person: person) }
+            if canPerform, performOnce() {
+                noteCommandWindows(sensing.windowSurfaces(ownedBy: [target.processID]))
+            } else {
+                readyAfter = nil
+                commandProvenance = nil
+            }
         }
 
         let inFront = now() &- start
@@ -590,6 +606,7 @@ final class UserFocusRecovery {
         let handback = await giveFrontBack(to: person, targets: adopted())
         let handbackDuration = now() &- handbackStart
         endExpectedActivation()
+        closeCommandProvenance()
         guard handback.verified else {
             summary += ", and the front was not verified back on window \(person.windowNumber) within "
                 + Self.milliseconds(Self.briefHandbackLimitNanoseconds)
@@ -1039,6 +1056,7 @@ final class UserFocusRecovery {
             note("process \(processID) is in front because the seat brought it there on purpose")
             return
         }
+        if absorbsCommandActivation(of: processID, source: source, at: detected) { return }
         // Outside a Turn nothing had armed this, so the activation returned in
         // silence. It is the first signal of the operation, so it opens it.
         openOperationOnActivation(at: detected)
@@ -1335,6 +1353,10 @@ final class UserFocusRecovery {
         closure              = nil
         expectedClosure      = nil
         expectedActivation   = nil
+        commandProvenance    = nil
+        commandReturnedFrom  = nil
+        commandMarginTask?.cancel()
+        commandMarginTask    = nil
         holdIsArmed          = false
         operationIsArmed     = false
         operationHasTransfer = false
@@ -1369,6 +1391,155 @@ final class UserFocusRecovery {
             activatingProcessID: activatingPID, requestCode: code,
             frontmostRestoredNanoseconds: frontmostRestored,
             elapsedNanoseconds: now() &- started, detail: detail, timing: timing))
+    }
+
+    // MARK: A Command's provenance (ADR 0033)
+
+    /// Opens the record of the Command about to be pressed, with the target's
+    /// windows read right now. An unattested target opens nothing.
+    private func openCommandProvenance(for target: WindowReference, person: WindowReference) {
+        commandMarginTask?.cancel()
+        commandProvenance = nil
+        commandReturnedFrom = nil
+        guard let process = target.identity?.process else { return }
+        let before = sensing.windowSurfaces(ownedBy: [target.processID]).map {
+            Set($0.map(\.reference.windowNumber))
+        }
+        commandProvenance = CommandProvenance(
+            process           : process,
+            person            : person,
+            windowsBeforePress: before,
+            pressedAt         : now()
+        )
+    }
+
+    /// Ends the brief activation's part of the record at the handback, or at
+    /// whatever ended the activation first, and starts its margin.
+    private func closeCommandProvenance() {
+        guard commandProvenance?.handbackAt == nil, commandProvenance != nil else { return }
+        commandProvenance?.close(at: now())
+        commandMarginTask?.cancel()
+        commandMarginTask = Task { @MainActor [weak self] in
+            await EventLoopWait.sleep(.nanoseconds(Int64(CommandProvenance.marginNanoseconds)))
+            guard !Task.isCancelled else { return }
+            await self?.settleCommandProvenance()
+        }
+    }
+
+    /// Writes one line for every window of the target that is new since the
+    /// press. The seat's follow pass calls it with its own reading, and it
+    /// moves nothing.
+    func noteCommandWindows(_ surfaces: [WindowSurface]?, at instant: UInt64? = nil) {
+        guard let surfaces, let pressedAt = commandProvenance?.pressedAt else { return }
+        let fresh = commandProvenance?.sight(
+            surfaces,
+            at           : instant ?? now(),
+            virtualBounds: sensing.virtualDisplayBounds
+        ) ?? []
+        for sighting in fresh { Self.log.notice("\(sighting.line(pressedAt: pressedAt), privacy: .public)") }
+    }
+
+    /// The sighting behind a window of the Command's target, nil when the
+    /// Command does not explain it.
+    func commandSighting(of window: WindowReference) -> CommandProvenance.Sighting? {
+        commandProvenance?.sighting(of: window)
+    }
+
+    /// Whether the person holds the front again after the Command: its extra
+    /// handback was verified, the recovery is not paused and the target is not
+    /// in front. A read; it asks for nothing and says nothing about timing.
+    var frontIsBackAfterCommand: Bool {
+        guard let processID = commandReturnedFrom else { return false }
+        return !isPaused && !isFrontmost(processID) && sensing.frontmostProcessID != processID
+    }
+
+    /// Whether the episode now open began while the record was valid, which is
+    /// what lets a window the Command opened be taken in while the seat waits.
+    var episodeBeganDuringCommand: Bool { isPaused && commandProvenance?.covers(started) == true }
+
+    /// An activation of the target inside the record's validity is the
+    /// Command's effect: its own notification arriving late, or the target
+    /// retaking the front for a window the Command opened. It closes no gate,
+    /// reports nothing and spends nothing. The handback that ended unverified
+    /// and the context menu's own poll are the seat's judgement, not this.
+    private func absorbsCommandActivation(
+        of processID: Int32,
+        source      : UserFocusRecoveryTiming.ActivationSource,
+        at instant  : UInt64
+    ) -> Bool {
+        guard source == .workspaceNotification || source == .unspecified,
+              let record = commandProvenance, record.process.processID == processID,
+              record.covers(instant)
+        else { return false }
+        Self.log.notice("""
+            process \(processID, privacy: .public) activated \(Self.milliseconds(instant &- record.pressedAt), privacy: .public) \
+            after the Command's press: its effect, not the person's focus
+            """)
+        if !record.adopted.isEmpty {
+            Task { @MainActor [weak self] in await self?.completeCommandHandback() }
+        }
+        return true
+    }
+
+    /// The seat took in a window the Command opened. If the target holds the
+    /// front, this is the moment for the one extra handback.
+    func commandWindowWasAdopted(_ windowNumber: Int) async {
+        guard commandProvenance?.sightings[windowNumber] != nil else { return }
+        commandProvenance?.noteAdopted(windowNumber)
+        await completeCommandHandback()
+    }
+
+    /// The margin ended: one handback attempt when the target holds the front
+    /// and a window of the Command is there, today's behaviour when it holds
+    /// the front and there is nothing to explain it. Either way the record ends.
+    func settleCommandProvenance() async {
+        guard let record = commandProvenance, let end = record.validUntil, now() >= end else { return }
+        let processID = record.process.processID
+        // The follow pass may be busy elsewhere, so read once more. Settle runs
+        // right at the margin's end: the read counts as its last instant.
+        noteCommandWindows(sensing.windowSurfaces(ownedBy: [processID]), at: end &- 1)
+        if isFrontmost(processID), sensing.frontmostProcessID == processID {
+            if commandProvenance?.sightings.isEmpty == false { await completeCommandHandback() }
+            if commandProvenance?.pressedAt == record.pressedAt {
+                commandProvenance = nil
+                if !isPaused, isFrontmost(processID) {
+                    Self.log.notice("""
+                        the margin of the Command ended with process \(processID, privacy: .public) \
+                        still in front: the ordinary recovery has it
+                        """)
+                    activationChanged(to: processID, source: .briefActivationHandback)
+                }
+            }
+        }
+        if commandProvenance?.pressedAt == record.pressedAt { commandProvenance = nil }
+    }
+
+    /// Gives the front back to the person's window once more, at most once for
+    /// a Command, and only while the target holds it. An unverified answer ends
+    /// the record, so the ordinary recovery takes the target's activation.
+    private func completeCommandHandback() async {
+        guard var record = commandProvenance, !record.handbackRetried, !Task.isCancelled else { return }
+        let processID = record.process.processID
+        guard isFrontmost(processID), sensing.frontmostProcessID == processID else { return }
+        record.handbackRetried = true
+        commandProvenance = record
+        expectActivation(of: processID, until: now() &+ Self.briefHandbackLimitNanoseconds)
+        let handback = await giveFrontBack(to: record.person, targets: adopted())
+        endExpectedActivation()
+        guard handback.verified else {
+            Self.log.notice("""
+                the extra handback after the Command was not verified \
+                (\(handback.refusal ?? "no agreeing readings", privacy: .public))
+                """)
+            if commandProvenance?.pressedAt == record.pressedAt { commandProvenance = nil }
+            if !isPaused, isFrontmost(processID) {
+                activationChanged(to: processID, source: .briefActivationHandback)
+            }
+            return
+        }
+        Self.log.notice("the front went back to window \(record.person.windowNumber, privacy: .public) after the Command's window")
+        commandReturnedFrom = processID
+        if !isPaused { await refreshPreparation() }
     }
 
     isolated deinit { timer?.invalidate() }

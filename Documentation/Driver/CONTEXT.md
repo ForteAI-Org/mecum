@@ -190,6 +190,14 @@ The component that watches the User Seat while a Command is in flight, so that a
 voluntary change by the person is told apart from an anomaly of the target.
 _Avoid_: transient observer, watcher (the Orchestrator's learning pipeline)
 
+**Command Provenance**:
+The record of one Command pressed inside a brief activation: the target's
+attested process, its on-screen window numbers read right before the press, the
+press and the handback. It stays valid until the handback plus a short margin
+and says only what the Command can explain: an activation of that process and a
+window of it first seen in that interval. It adopts nothing and moves nothing.
+_Avoid_: origin (`bornDuringAssignment` is per assignment), trace, cause
+
 **Watchdog**:
 The eight checks that re-verify the seat invariants (main display, physical
 geometry, display online, tap active, tap never disabled, pointer out of the

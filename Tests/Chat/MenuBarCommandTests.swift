@@ -8,6 +8,7 @@
 import ApplicationServices
 @testable import AutomationRuntime
 import EngineCore
+import PerceptionCore
 import Testing
 
 /// The walk of a menu path over a fake menu bar shaped like Photoshop's, measured on 30/09/2026.
@@ -262,6 +263,57 @@ struct MenuBarCommandTests {
         }
         #expect(presses == 1)
         #expect(observations == 1)
+    }
+
+    private static let scene = SceneSnapshot(
+        bundleID: "test", appName: "Test", windowTitle: "Open",
+        viewportPixelSize: .init(width: 100, height: 100), elements: []
+    )
+
+    @Test("A handback that was not verified but is verified by the observation gets the window verdict",
+          arguments: [true, false])
+    func aLateVerifiedReturnGetsTheWindowVerdict(_ windowOpened: Bool) async throws {
+        let dispatched = await MenuBarCommand.runInFront(
+            read     : { .press(Node("Place Embedded..."), path: "File > Place Embedded...") },
+            press    : { _ in .success },
+            withFront: { command in command(); return "The return was not verified." }
+        )
+        let result = try await MenuBarCommand.observedOutcome(
+            dispatched.pressed,
+            outcome      : dispatched.outcome,
+            processID    : -1,
+            before       : windowOpened ? ["AXWindow|AXDialog|Open"] : [],
+            frontIssue   : "The return was not verified.",
+            frontReturned: { true },
+            observe      : { Self.scene }
+        )
+        #expect(result.kind == (windowOpened ? .foundActed : .actedUnverified))
+        #expect(result.scene == Self.scene)
+        #expect(!result.message.contains("not verified"))
+        #expect(!result.message.contains("Observe"))
+    }
+
+    @Test("A handback still not verified keeps actedUnverified with the scene and no advice to observe")
+    func aReturnStillNotVerifiedAttachesTheSceneAndAsksForNothing() async throws {
+        let dispatched = await MenuBarCommand.runInFront(
+            read     : { .press(Node("Place Embedded..."), path: "File > Place Embedded...") },
+            press    : { _ in .success },
+            withFront: { command in command(); return "The return was not verified." }
+        )
+        let result = try await MenuBarCommand.observedOutcome(
+            dispatched.pressed,
+            outcome      : dispatched.outcome,
+            processID    : -1,
+            before       : [],
+            frontIssue   : "The return was not verified.",
+            frontReturned: { false },
+            observe      : { Self.scene }
+        )
+        #expect(result.kind == .actedUnverified)
+        #expect(result.scene == Self.scene)
+        #expect(result.message.hasPrefix("pressed File > Place Embedded... The return was not verified."))
+        #expect(!result.message.localizedCaseInsensitiveContains("observe"))
+        #expect(result.message.contains("Do not repeat"))
     }
 
     @Test("An unprepared listing warns that disabled flags and history may be stale without requesting input")

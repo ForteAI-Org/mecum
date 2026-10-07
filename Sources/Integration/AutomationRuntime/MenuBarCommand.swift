@@ -374,20 +374,35 @@ public enum MenuBarCommand {
     /// Performs an admitted menu command once during the consumer-supplied
     /// foreground scope, then observes its effect after handback. Input is
     /// separate from readiness, and cleanup failure stays in the outcome.
+    /// `frontReturned` is read once, after the observation: a handback that
+    /// was not verified when the scope ended may be verified by then.
     public static func performInFront(
         _ path           : String,
         processID        : pid_t,
         allowsDestructive: Bool,
         withFront        : (@escaping @MainActor () -> Void) async -> String?,
+        frontReturned    : () -> Bool,
         observe          : () async throws -> SceneSnapshot
     ) async throws -> ActOutcome {
         let before = windowSignature(of: processID)
+        var frontIssue: String?
         let (pressed, outcome, _) = await runInFront(
             read: { resolve(path, processID: processID, allowsDestructive: allowsDestructive) },
             press: { AXUIElementPerformAction($0, kAXPressAction as CFString) },
-            withFront: withFront
+            withFront: { command in
+                frontIssue = await withFront(command)
+                return frontIssue
+            }
         )
-        return try await observedOutcome(pressed, outcome: outcome, processID: processID, before: before, observe: observe)
+        return try await observedOutcome(
+            pressed,
+            outcome      : outcome,
+            processID    : processID,
+            before       : before,
+            frontIssue   : frontIssue,
+            frontReturned: frontReturned,
+            observe      : observe
+        )
     }
 
     /// Runs `path` and, when it pressed an item, observes the scene after it. Pressing is verified
@@ -419,12 +434,19 @@ public enum MenuBarCommand {
     }
 
     /// Retains an acknowledged dispatch even when its later observation fails.
+    ///
+    /// `frontIssue` is what the foreground scope reported after the press. When
+    /// `frontReturned` then reads true the scope's issue is over and the
+    /// window verdict applies. When it reads false the scene is attached and the
+    /// message does not ask for another observation (ADR 0033).
     static func observedOutcome(
-        _ pressed: String?,
-        outcome  : ActOutcome,
-        processID: pid_t,
-        before   : [String],
-        observe  : () async throws -> SceneSnapshot
+        _ pressed    : String?,
+        outcome      : ActOutcome,
+        processID    : pid_t,
+        before       : [String],
+        frontIssue   : String? = nil,
+        frontReturned: () -> Bool = { false },
+        observe      : () async throws -> SceneSnapshot
     ) async throws -> ActOutcome {
         guard let pressed else { return outcome }
         try? await Task.sleep(for: .milliseconds(400))
@@ -434,11 +456,15 @@ public enum MenuBarCommand {
         } catch {
             return ActOutcome(.actedUnverified, outcome.message
                 + " Observation after dispatch failed: \(error). Do not repeat this command. "
-                + "Observe the session before further input; if observation remains unavailable, "
+                + "Observe the session before further input. If observation stays unavailable, "
                 + "stop and report this error.")
         }
-        if outcome.kind == .actedUnverified {
-            return ActOutcome(.actedUnverified, outcome.message, scene: scene)
+        if outcome.kind == .actedUnverified, !(frontIssue != nil && frontReturned()) {
+            guard let frontIssue else { return ActOutcome(.actedUnverified, outcome.message, scene: scene) }
+            return ActOutcome(.actedUnverified, (pressed.hasSuffix(".") ? "pressed \(pressed)" : "pressed \(pressed).")
+                + " \(frontIssue) The scene is attached."
+                + " The seat accepts no input until the front is back with the person's window."
+                + " Do not repeat it blind.", scene: scene)
         }
         let changed = windowSignature(of: processID) != before
         return changed

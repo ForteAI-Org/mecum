@@ -119,7 +119,7 @@ nonisolated private extension ContainmentBlock {
                 "window \(number) was seen once and no second reading confirmed it yet"
             case .surfaceOutsideSeat(let number):
                 "window \(number) of the application is open on the person's screen, outside the "
-                    + "seat, and closing it there clears this"
+                    + "seat, until the seat takes it in"
             case .surfaceAbsent(let number):
                 "window \(number) was not in the last reading"
             case .attemptSpent(let number):
