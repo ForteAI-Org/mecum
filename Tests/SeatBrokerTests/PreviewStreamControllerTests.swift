@@ -1,9 +1,11 @@
 import CoreGraphics
 import CoreMedia
 import CoreVideo
+import Darwin
 import IOSurface
-import SeatCapture
+@testable import SeatCapture
 import SeatCore
+import SeatDriving
 import SeatSession
 import Testing
 @testable import SeatBroker
@@ -75,8 +77,21 @@ private final class FakePreviewStream: PreviewCaptureStreaming {
     private(set) var frameWaits: [(notBefore: UInt64, bound: Duration)] = []
     private(set) var readingInvalidations = 0
 
+    /// True makes the next wait find the frames ended, as a stream that stopped does.
+    var endsFrames = false
+
+    /// When set, waits are served by the running stream's own waiting, fed by `offer`.
+    var waiters: FrameWaiters?
+
     func firstFrame(displayedAfter notBefore: UInt64, within bound: Duration) async throws -> SeatFrame {
         frameWaits.append((notBefore, bound))
+        if endsFrames {
+            isRunning = false
+            throw CaptureFailure.frameUnavailable
+        }
+        if let waiters {
+            return try await waiters.first(displayedAfter: notBefore, deadline: CaptureDeadline(timeout: bound))
+        }
         guard let offeredFrame else { throw CaptureFailure.timedOut(.still) }
         return offeredFrame
     }
@@ -763,7 +778,7 @@ func theLabAndTheKitFollowTheSameShapeRule() {
 }
 
 /// A 32BGRA frame of `window` over a surface this process made.
-private func liveFrame(of window: WindowIdentity) -> SeatFrame? {
+private func liveFrame(of window: WindowIdentity, displayTime: UInt64 = 9) -> SeatFrame? {
     let properties: [IOSurfacePropertyKey: any Sendable] = [
         .width: 4, .height: 4, .bytesPerElement: 4, .bytesPerRow: 16,
         .pixelFormat: kCVPixelFormatType_32BGRA,
@@ -781,7 +796,7 @@ private func liveFrame(of window: WindowIdentity) -> SeatFrame? {
         pixelBuffer      : buffer,
         presentationTime : .zero,
         receivedAt       : 1,
-        displayTime      : 9,
+        displayTime      : displayTime,
         displayGeneration: 1,
         source           : .window(window),
         geometry         : FrameGeometryObservation(
@@ -1033,6 +1048,113 @@ func aShownStreamDoesNotRest() async throws {
     #expect(!controller.isResting)
     await controller.waitForPendingTransition()
     #expect(stream.configuredFramesPerSecond == 30)
+    await controller.tearDown()
+}
+
+/// A stream pinned to the display is shown to the person, so it keeps its rate whatever the
+/// delay; unpinning starts the delay.
+@Test @MainActor
+func aPinnedStreamDoesNotRest() async throws {
+    let events = EventLog()
+    var streams: [FakePreviewStream] = []
+    let controller = restingController(delay: .milliseconds(20), events: events) { streams.append($0) }
+    let size = CGSize(width: 4, height: 4)
+    try await controller.start(identity: identity(64), frame: CGRect(origin: .zero, size: size),
+                               pixelSize: size)
+
+    controller.pin(to: .display(13), pixelSize: size)
+    await controller.waitForPendingTransition()
+    let pinned = try #require(streams.last)
+    await controller.waitForRestTimer()
+    try await Task.sleep(for: .milliseconds(60))
+    #expect(!controller.isResting)
+    #expect(pinned.configuredFramesPerSecond == 30)
+
+    controller.pin(to: nil, pixelSize: size)
+    await controller.waitForPendingTransition()
+    let window = try #require(streams.last)
+    await controller.waitForRestTimer()
+    #expect(controller.isResting)
+    #expect(window.configuredFramesPerSecond == 1)
+    await controller.tearDown()
+}
+
+/// A stream whose frames ended is not live: the answer is `notLive`, never a frame wait that ran
+/// out, the preview stops reading as live, and the next observation it follows replaces the stream.
+@Test @MainActor
+func aStreamWhoseFramesEndedIsNotLive() async throws {
+    let events = EventLog()
+    var streams: [FakePreviewStream] = []
+    let controller = PreviewStreamController { target in
+        let stream = FakePreviewStream(target: target, name: "s\(streams.count + 1)", events: events)
+        streams.append(stream)
+        return stream
+    }
+    let window = identity(70)
+    let frame  = CGRect(x: 0, y: 0, width: 4, height: 4)
+    try await controller.start(identity: window, frame: frame, pixelSize: frame.size)
+    let ended = try #require(streams.first)
+    ended.endsFrames = true
+
+    #expect(await controller.liveFrame(of: window, displayedAfter: 0, within: .milliseconds(100))
+            .failureReason == .notLive)
+    #expect(controller.availability == .unavailable("The preview stream ended."))
+    #expect(await controller.liveFrame(of: window, displayedAfter: 0, within: .milliseconds(100))
+            .failureReason == .notLive)
+    #expect(ended.frameWaits.count == 1, "a stream known to have ended is not waited on again")
+
+    controller.follow(identity: window, frame: frame, pixelSize: frame.size)
+    await controller.waitForPendingTransition()
+    #expect(events.values.suffix(3) == ["stop s1", "make s2", "start s2"])
+    #expect(controller.availability == .live)
+    await controller.tearDown()
+}
+
+/// The live run of 7 October: a settle whose last frame wait ran to the cap, with no change, ended
+/// the frames for every observation after it. The observation that follows must get its frame.
+@Test @MainActor
+func aSettleEndingAtItsCapLeavesTheStreamServingObservation() async throws {
+    let events  = EventLog()
+    let waiters = FrameWaiters()
+    let controller = PreviewStreamController { target in
+        let stream = FakePreviewStream(target: target, name: "s", events: events)
+        stream.waiters = waiters
+        return stream
+    }
+    let window = identity(71)
+    let rect   = CGRect(x: 0, y: 0, width: 4, height: 4)
+    try await controller.start(identity: window, frame: rect, pixelSize: rect.size)
+    let clock = MachAbsoluteContentClock()
+
+    // Two identical frames, each presented just before its wait, then none: the last wait runs
+    // to the cap in the stream's own waiting.
+    var answers: [LiveFrameFallback?] = []
+    let ending = await SeatSettler.wait(
+        cap        : .milliseconds(500),
+        next       : { after, bound in
+            if answers.count < 2, let frame = liveFrame(of: window, displayTime: mach_absolute_time()) {
+                waiters.offer(frame)
+            }
+            let answer = await controller.liveFrame(of: window, displayedAfter: after, within: bound)
+            answers.append(answer.failureReason)
+            return answer
+        },
+        displayedAt: { $0.displayTime.flatMap { clock.displayTimeNanoseconds(fromMachTicks: $0) } },
+        now        : { DispatchTime.now().uptimeNanoseconds },
+        sleep      : { try? await Task.sleep(for: $0) }
+    )
+    #expect(ending == .quiet)
+    #expect(answers == [nil, nil, .noFrameInBound])
+
+    // The observation waits first; a frame presented off the main actor a moment later serves it.
+    let notBefore = DispatchTime.now().uptimeNanoseconds
+    let offered = try #require(liveFrame(of: window, displayTime: mach_absolute_time() + 1))
+    Task.detached {
+        try? await Task.sleep(for: .milliseconds(20))
+        waiters.offer(offered)
+    }
+    let answer = await controller.liveFrame(of: window, displayedAfter: notBefore, within: .seconds(2))
+    #expect(try answer.get().surface === offered.surface)
     await controller.tearDown()
 }
 

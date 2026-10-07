@@ -39,8 +39,9 @@ the use. A layer attached or detached is a use too.
 The Lab shows the stream through `LivePreviewView`, which attaches its `MonitorLayer` to the
 controller while the view is in a window and detaches it when the view leaves its window. A
 controller with any layer attached never rests, and attaching one wakes it: the person watching
-gets 30 fps exactly as before. A view in a window that is hidden or covered still counts as
-shown; that only costs the rest it could have had.
+gets 30 fps exactly as before. A stream pinned to the display is shown the same way: it never
+rests while pinned, pinning wakes it and unpinning starts the delay. A view in a window that is
+hidden or covered still counts as shown; that only costs the rest it could have had.
 
 ### Freshness
 
@@ -73,7 +74,7 @@ already takes. A stream started while the controller rests starts at the rest ra
 ## Measuring it
 
 With phases on, `preview.rest` events say `enter` and `leave.<use>` (`frameRequest`,
-`observation`, `adoption`, `turn`, `command`, `layer`), and `preview.update` times each
+`observation`, `adoption`, `turn`, `command`, `layer`, `pin`), and `preview.update` times each
 configuration update, named `reshape`, `rate.1` (the rest) or `rate.30` (the wake). A request
 declined during a rest is `capture.liveFallback` `resting`, and its settle `settle:fallback.resting`.
 

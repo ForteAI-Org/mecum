@@ -361,6 +361,10 @@ public final class SeatCaptureStream {
     public private(set) var lastContentPixelSize: CGSize?
 
     private let continuation: AsyncStream<SeatFrame>.Continuation
+
+    /// The waits for a frame of this running stream; see `FrameWaiters`. Finished with `frames`.
+    private let frameWaiters = FrameWaiters()
+
     private var receiver          : FrameReceiver?
     private var stream            : SCStream?
     private var layers            : [MonitorLayer] = []
@@ -395,6 +399,7 @@ public final class SeatCaptureStream {
     isolated deinit {
         receiver?.refuseFurtherFrames()
         continuation.finish()
+        frameWaiters.finish()
         for observer in stateObservers.values { observer.finish() }
     }
 
@@ -1340,6 +1345,7 @@ public final class SeatCaptureStream {
         configuration = nil
         layers.removeAll()
         continuation.finish()
+        frameWaiters.finish()
     }
 
     private func finishStateConsumers() {
@@ -1365,15 +1371,14 @@ public final class SeatCaptureStream {
     ///
     /// It is the rule the stream Still applies to the stream it starts, applied to this one: the
     /// same timestamp conversion, the same wait for a frame delivered before its display instant.
-    /// It reads `frames`, so it takes the buffered frame out of it; a caller that also iterates
-    /// `frames` shares them with this wait. Throws `timedOut(.still)` when the bound passes and
-    /// `frameUnavailable` when the stream ends first.
+    /// It does not read `frames`: it waits in `FrameWaiters`, so a wait that times out or is
+    /// cancelled leaves the stream and every other wait as they were, and waits may overlap. Throws
+    /// `timedOut(.still)` when the bound passes and `frameUnavailable` once the stream has ended.
     nonisolated public func firstFrame(
         displayedAfter notBefore: UInt64,
         within bound            : Duration
     ) async throws -> SeatFrame {
-        try await Self.firstTimestampedFrame(
-            in            : frames,
+        try await frameWaiters.first(
             displayedAfter: notBefore,
             deadline      : CaptureDeadline(timeout: bound)
         )
@@ -1559,6 +1564,10 @@ public final class SeatCaptureStream {
 
     /// The first frame of `frames` WindowServer displayed after `notBefore`, on the uptime clock
     /// `DispatchTime` reads, converted by `MachAbsoluteContentClock`. Zero accepts any valid time.
+    ///
+    /// A timeout cancels the iteration, and cancelling the task that iterates an `AsyncStream`
+    /// terminates it. It is therefore for a stream the caller stops right after, as
+    /// `timestampedStill` does; waits on a running stream go through `firstFrame`.
     static func firstTimestampedFrame(
         in frames             : AsyncStream<SeatFrame>,
         displayedAfter notBefore: UInt64 = 0,
@@ -1577,17 +1586,7 @@ public final class SeatCaptureStream {
                           displayedAt > notBefore,
                           displayedAt < deadline.expiresAt
                     else { continue }
-
-                    // ScreenCaptureKit can deliver a frame before its scheduled display instant.
-                    // Wait against the original deadline without changing the frame's timestamp.
-                    var now = DispatchTime.now().uptimeNanoseconds
-                    while displayedAt > now {
-                        try await Task.sleep(nanoseconds: displayedAt - now)
-                        try Task.checkCancellation()
-                        try deadline.check(.still)
-                        now = DispatchTime.now().uptimeNanoseconds
-                    }
-                    try deadline.check(.still)
+                    try await FrameWaiters.awaitDisplay(at: displayedAt, deadline: deadline)
                     return frame
                 }
                 try Task.checkCancellation()
@@ -1721,6 +1720,7 @@ public final class SeatCaptureStream {
         // the reading is taken here because only a frame carries the geometry.
         lastContentPixelSize = frame.geometry.contentPixelSize
         continuation.yield(frame)
+        frameWaiters.offer(frame)
     }
 
     /// The pixel size the target has now, read from a filter built for it here.

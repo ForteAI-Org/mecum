@@ -278,6 +278,9 @@ final class PreviewStreamController {
     /// which is the honest answer to a seat holding nothing.
     func pin(to target: SeatCaptureTarget?, pixelSize: CGSize) {
         pinnedTarget = target
+        // A pinned stream is shown like an attached layer: pinning wakes it,
+        // unpinning starts the rest delay.
+        noteActivity(.pin)
         // A pinned size is the display's bounds and not a measurement of what a
         // capture filled, so it needs no settle budget: it is handed in as its
         // own previous reading, which is what says "already settled".
@@ -563,11 +566,12 @@ final class PreviewStreamController {
         }
     }
 
-    /// Rests the stream when nobody shows it and it runs live on the window or display wanted.
+    /// Rests the stream when nobody shows it (no layer, no pin) and it runs live on the window or
+    /// display wanted.
     /// Anything else leaves it alone, and the next use arms the delay again.
     private func enterRestIfUnused() {
-        guard !isResting, layers.isEmpty, !isStoppingOrStopped, availability == .live,
-              let stream, stream.isRunning, stream.target == desiredTarget
+        guard !isResting, layers.isEmpty, pinnedTarget == nil, !isStoppingOrStopped,
+              availability == .live, let stream, stream.isRunning, stream.target == desiredTarget
         else { return }
         isResting = true
         #if MECUM_PHASES
@@ -683,13 +687,32 @@ extension PreviewStreamController: LiveWindowFrameSourcing {
             case .suspended           : return .failure(.recovering)
             case .idle, .unavailable  : return .failure(.notLive)
         }
-        guard let stream, stream.isRunning else { return .failure(.notLive) }
+        guard let stream, stream.isRunning else {
+            markEnded(stream)
+            return .failure(.notLive)
+        }
         guard stream.target == .attestedWindow(identity) else { return .failure(.otherWindow) }
         guard streamFramesPerSecond == Self.activeFramesPerSecond else { return .failure(.resting) }
         do {
             return .success(try await stream.firstFrame(displayedAfter: notBefore, within: bound))
+        } catch CaptureFailure.frameUnavailable {
+            markEnded(stream)
+            return .failure(.notLive)
         } catch {
             return .failure(.noFrameInBound)
         }
+    }
+
+    /// Makes a live preview whose current stream is no longer running unavailable, so a dead stream
+    /// never reads as live. The next observation the preview follows replaces it, as for any stream
+    /// that is not running. A transition under way is left alone: it sets the availability it ends
+    /// with, and its fast path for a running stream would never set it back to live.
+    private func markEnded(_ ended: (any PreviewCaptureStreaming)?) {
+        guard availability == .live, transition == nil,
+              let ended, ended === stream, !ended.isRunning
+        else { return }
+        lastFailure = "The preview stream ended."
+        for layer in layers { layer.markStale() }
+        availability = .unavailable(lastFailure ?? "")
     }
 }
