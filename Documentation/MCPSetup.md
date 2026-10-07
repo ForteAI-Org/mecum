@@ -1,6 +1,6 @@
 # Use Mecum with your AI assistant
 
-Connect a local MCP client to Mecum to observe and operate macOS applications, use Chrome, and optionally access passive interaction events and shared memory. Your client supplies the model; the running Mecum app supplies the tools.
+Connect a local MCP client to Mecum to observe and operate macOS applications, use Chrome, and optionally access passive interaction events. Your client supplies the model; the running Mecum app supplies the tools.
 
 Mecum exposes its bridge over **local STDIO**. The client and Mecum must run on the same Mac. The helper is included in `Mecum.app`; it needs no separate Node.js or Python installation. Tool results are passed to your AI client and may be sent to its model provider: a local bridge does not mean local model inference.
 
@@ -236,9 +236,10 @@ If the interface only accepts a server URL, this local configuration cannot be p
 | Desktop apps | Discover applications/windows, observe interfaces, resolve targets and perform engine actions. |
 | Browser | Use the Chrome tools through the engine's supported browser connection modes. |
 | Passive Watcher | Explicitly start, read and stop passive interaction observation. |
-| Shared Brain and living memory | Access shared knowledge and memory context, and record only outcomes accepted by the learning rules. |
 
-Desktop and Browser are selected by default when creating a grant. Watcher and shared memory require explicit selection. Without shared memory, the client has its own Brain and no access to the shared living-memory store. Watcher events are not automatically learned.
+Desktop and Browser are selected by default when creating a grant. Watcher requires explicit selection. Watcher events are not automatically learned.
+
+Each grant has a living memory and a Brain of its own, in `MCP/Knowledge/<grant>` under Mecum's support directory: what one client learns is not read by the app's workers or by another client. No option shares it.
 
 The helper forwards requests to the running app. It does not grant macOS permissions or start Mecum automatically. Changing capabilities requires revoking the grant and creating a new one.
 

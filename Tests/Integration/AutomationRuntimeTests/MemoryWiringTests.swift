@@ -377,6 +377,48 @@ struct MemoryWiringTests {
         await service.close()
     }
 
+    @Test("C07: two external clients and a worker each write and learn into an archive of their own, as on main, and none reads the others' knowledge")
+    @MainActor
+    func privateArchivesPerClient() async throws {
+        // The directories the app gives them: the workers' Knowledge, and MCP/Knowledge/<profile> for each client.
+        let support = try W.directory()
+        let clientA = UUID(), clientB = UUID()
+        let places: [(directory: URL, producer: CallProducer, learns: SceneElement)] = [
+            (support.appendingPathComponent("Knowledge", isDirectory: true),
+             CallProducer(source: .app, streamID: "worker-1", traceID: "worker-trace"), W.open),
+            (support.appendingPathComponent("MCP/Knowledge/\(clientA.uuidString)", isDirectory: true),
+             CallProducer(source: .mcp, streamID: "mcp-\(clientA.uuidString)"), W.format),
+            (support.appendingPathComponent("MCP/Knowledge/\(clientB.uuidString)", isDirectory: true),
+             CallProducer(source: .mcp, streamID: "mcp-\(clientB.uuidString)"), W.save),
+        ]
+        for place in places {
+            try FileManager.default.createDirectory(at: place.directory, withIntermediateDirectories: true)
+            let session = RecordedSession(directory: place.directory)
+            let tools   = AutomationTools(session: session)
+            tools.producer = place.producer
+            _ = try await tools.call("status", .object([:]))
+            _ = try await tools.call("act", .object(["session": .string(session.id!.uuidString), "target": .string(place.learns.label)]))
+            let service  = MemoryService.shared(for: place.directory)
+            let recorder = CallRecorder(memory: service, brain: W.brain(service), context: ActionContext(
+                source: place.producer.source, streamID: place.producer.streamID, traceID: nil, sessionID: nil))
+            _ = await recorder.observe(W.window([place.learns]))
+            #expect(await service.flush(within: .seconds(10)))
+        }
+        let archives = Set(places.map { MemoryService.shared(for: $0.directory).url.path })
+        #expect(archives.count == 3, "three archives: \(archives.sorted())")
+        for place in places {
+            let service = MemoryService.shared(for: place.directory)
+            #expect(FileManager.default.fileExists(atPath: service.url.path))
+            let producers = try rawRows("SELECT DISTINCT source || '/' || source_stream_id FROM memory_events", at: service.url)
+            #expect(producers == ["\(place.producer.source.rawValue)/\(place.producer.streamID)"],
+                    "only its own producer in \(service.url.lastPathComponent) of \(place.directory.lastPathComponent): \(producers)")
+            let labels = try await service.brain(of: W.bundle)?.objects.map(\.label) ?? []
+            #expect(labels == [place.learns.label], "only what it learned itself: \(labels)")
+            #expect(await service.status().failed == 0)
+            await service.close()
+        }
+    }
+
     // MARK: What an action waits for
 
     @Test("an action does not wait for a busy archive: every write of a call is offered at once, and saved once the lock goes")
@@ -475,4 +517,11 @@ final class RecordedSession: AutomationSessionOperating {
     func select(control: String, item: String) async throws -> ActOutcome { ActOutcome(.foundActed, "selected") }
     func deliver(_ input: InputRequest.Input, section: String?) async throws -> ActOutcome { ActOutcome(.actedUnverified, "typed") }
     func close() async {}
+}
+
+/// The text rows of a query on a bare read-only connection to an archive, outside any service.
+func rawRows(_ sql: String, at url: URL) throws -> [String] {
+    let connection = try SQLiteConnection(path: url.path, readOnly: true)
+    defer { connection.close() }
+    return try connection.query(sql) { try $0.text(0) ?? "" }
 }

@@ -24,9 +24,10 @@ final class AppModel {
 
     let settings = ModelSettingsStore()
 
-    /// External clients share the app's Seat broker, each with an engine state of its own, and learn
-    /// into the same living memory as the workers: their calls are recorded with the `mcp` source and
-    /// the profile as their stream, so they stay apart from the workers' in the archive.
+    /// External clients share the app's Seat broker and each have private engine state, as on main:
+    /// each profile's calls and learning go to a living memory of its own (`knowledgeDirectory(of:)`),
+    /// apart from the workers' and from every other client's, recorded with the `mcp` source and the
+    /// profile as their stream.
     lazy var mcp = MCPConnectionsModel(
         directory: WorkspaceLaunch.directory.appendingPathComponent("MCP", isDirectory: true),
         executable: Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/mecum-bridge")
@@ -34,7 +35,7 @@ final class AppModel {
         let desktop = BrokeredAutomationSession(
             broker: broker,
             workerID: UUID(),
-            knowledgeDirectory: WorkspaceLaunch.directory.appendingPathComponent("Knowledge", isDirectory: true)
+            knowledgeDirectory: Self.knowledgeDirectory(of: profile.id, under: WorkspaceLaunch.directory)
         )
         let session = ExternalMCPSession(
             profile: profile,
@@ -47,6 +48,12 @@ final class AppModel {
             activity: activity
         )
         return MCPHostSession(router: session.router) { await session.close() }
+    }
+
+    /// The Knowledge directory of an external client's profile, under the app's support directory:
+    /// `MCP/Knowledge/<profile>`, the path main gave it, now holding that client's `memory.sqlite`.
+    nonisolated static func knowledgeDirectory(of profile: UUID, under support: URL) -> URL {
+        support.appendingPathComponent("MCP/Knowledge/" + profile.uuidString, isDirectory: true)
     }
 
     init() {
