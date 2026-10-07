@@ -67,7 +67,9 @@ enum MemoryCommand {
     }
 
     /// Prints what the archive file is, read only: this command opens no memory service, so it creates,
-    /// migrates, recovers and copies nothing, and it has no counters of another process's writes.
+    /// migrates, recovers and copies nothing, and it has no counters of another process's writes. It
+    /// reads in one read transaction under the archive's presence lock, so it never reads while a
+    /// recovery moves the files, and says so instead.
     private static func printStatus(of url: URL) {
         let report = SQLiteMemoryInspection.inspect(url)
         print("archive: \(report.path)")
@@ -75,13 +77,16 @@ enum MemoryCommand {
         if let unmet = SQLiteLibrary.unmetRequirement() {
             print("  below the memory's requirement: \(unmet.minimumVersion)")
         }
+        let known = SQLiteMemoryInspection.supportedVersion
+        if let version = report.schemaVersion { print("schema version: \(version); this build opens version \(known)") }
         switch report.shape {
-            case .missing:              print("state: no archive at this path")
-            case .empty:                print("state: a database with no schema yet")
-            case .matches:              print("state: schema \(report.schemaVersion ?? 0), exactly the shape this build creates")
-            case .differs(let objects): print("state: schema \(report.schemaVersion ?? 0), another shape; this build refuses it untouched: "
-                                              + objects.prefix(8).joined(separator: ", ") + (objects.count > 8 ? ", …" : ""))
-            case .unreadable(let why):  print("state: not readable as a database: \(why)")
+            case .missing:               print("this build: no archive at this path; Mecum's memory would create it")
+            case .empty:                 print("this build: a database with no schema yet; Mecum's memory would create its schema in it, "
+                                               + "a reader refuses it")
+            case .current:               print("this build: opens it; version \(known) and exactly the shape this build creates")
+            case .refused(let mismatch): print("this build: refuses it and leaves it as it is; " + describe(mismatch))
+            case .unreadable(let why):   print("this build: cannot read it as a database: \(why)")
+            case .unavailable(let why):  print("this build: did not read it: \(why)")
         }
         if let bytes = report.bytes { print("size: \(bytes) bytes" + (report.journalBytes.map { ", journal \($0) bytes" } ?? "")) }
         for table in SQLiteMemoryInspection.countedTables {
@@ -91,6 +96,20 @@ enum MemoryCommand {
         if !report.quarantined.isEmpty { print("moved aside after a recovery: " + report.quarantined.joined(separator: ", ")) }
         print("writes waiting, failed or dropped live in the memory of the process that offered them;")
         print("this command has its own and shows none. The app shows its own on Settings > Brain.")
+    }
+
+    /// Why this build refuses a file, in a sentence.
+    private static func describe(_ mismatch: MemorySchemaMismatch) -> String {
+        func listed(_ names: [String]) -> String { names.prefix(8).joined(separator: ", ") + (names.count > 8 ? ", …" : "") }
+        switch mismatch {
+            case .future(let found, let supported): return "schema \(found) is newer than the \(supported) this build knows; "
+                                                           + "its shape was not compared"
+            case .unknownTables(let tables):        return "version 0 with tables of somebody else's: \(listed(tables))"
+            case .missingTables(let tables):        return "tables missing: \(listed(tables))"
+            case .missingColumns(let columns):      return "an earlier development form, columns missing: \(listed(columns))"
+            case .differentShape(let objects):      return "another shape: \(listed(objects))"
+            case .uninitialized:                    return "no schema yet"
+        }
     }
 
     /// Copies the Brain of every application file in an earlier JSON Knowledge directory into the

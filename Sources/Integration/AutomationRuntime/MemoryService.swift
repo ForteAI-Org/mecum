@@ -115,8 +115,10 @@ nonisolated public struct MemoryRepositories: Sendable {
 /// on opening and then while it is written, the service takes a consistent, verified copy of the
 /// archive beside it (`memory.sqlite.backup-<date>`), keeping the newest `keptBackups`. A file the
 /// library calls corrupt or not a database is moved aside, with its journal, as
-/// `memory.sqlite.corrupt-<date>`, never deleted, and the newest copy takes its place; with no copy
-/// the memory starts empty. Either way `status()` says what happened.
+/// `memory.sqlite.corrupt-<date>`, never deleted, and the newest sound copy takes its place; with no
+/// copy the memory starts empty. Either way `status()` says what happened. The recovery runs under
+/// the archive's exclusive presence lock (`SQLiteMemoryRecovery`): while another process holds the
+/// archive it is refused, nothing moves, and the service stays degraded until its next attempt.
 public actor MemoryService: BrainReading, BrainApplicationStoring {
 
     nonisolated public struct Configuration: Sendable, Equatable {
@@ -425,9 +427,19 @@ public actor MemoryService: BrainReading, BrainApplicationStoring {
             firstError = error
         }
         guard Self.isCorrupt(firstError), FileManager.default.fileExists(atPath: url.path) else { throw firstError }
-        let recovery = try recover()
-        lastRecovery = recovery
-        Self.log.error("memory recovered: \(recovery, privacy: .public)")
+        switch try SQLiteMemoryRecovery.recover(url, copies: { self.backups().map(\.url) }, stamp: Self.stamp(Date())) {
+        case .inUse:
+            throw MemoryUnavailable("the archive could not be read and another process holds it: "
+                                    + "the recovery was refused and nothing was moved")
+        case .notCorrupt:
+            // Recovered by another process since the error, or readable now: opened as it is.
+            break
+        case .recovered(let aside, let restored):
+            let recovery = "the archive could not be read; it was moved to \(aside) and "
+                + (restored.map { "the copy \($0) restored" } ?? "the memory started empty")
+            lastRecovery = recovery
+            Self.log.error("memory recovered: \(recovery, privacy: .public)")
+        }
         return try await SQLiteMemoryStore.open(at: url, configuration: configuration.store)
     }
 
@@ -460,24 +472,6 @@ public actor MemoryService: BrainReading, BrainApplicationStoring {
         } catch {
             Self.log.error("memory copy failed: \(Self.describe(error), privacy: .public)")
         }
-    }
-
-    /// Moves a corrupt archive aside with its journal and puts the newest copy in its place, and
-    /// says what it did. Nothing is deleted.
-    private func recover() throws -> String {
-        let manager = FileManager.default
-        let stamp   = Self.stamp(Date())
-        let aside   = "\(configuration.fileName).corrupt-\(stamp)"
-        for suffix in ["", "-wal", "-shm"] {
-            let file = URL(fileURLWithPath: url.path + suffix)
-            guard manager.fileExists(atPath: file.path) else { continue }
-            try manager.moveItem(at: file, to: directory.appendingPathComponent(aside + suffix))
-        }
-        guard let newest = newestBackup() else {
-            return "the archive could not be read; it was moved to \(aside) and the memory started empty"
-        }
-        try manager.copyItem(at: newest.url, to: url)
-        return "the archive could not be read; it was moved to \(aside) and the copy of \(Self.stamp(newest.date)) restored"
     }
 
     /// The copies of the archive beside it, the newest first.

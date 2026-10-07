@@ -166,11 +166,11 @@ func rawCount(_ sql: String, at url: URL, readOnly: Bool = true) throws -> Int64
     return try connection.query(sql) { $0.integer(0) ?? -1 }.first ?? -1
 }
 
-/// The names in a directory, apart from the file itself and its journals: what a snapshot or an
-/// interrupted one left behind.
+/// The names in a directory, apart from the file itself, its journals and its presence lock: what a
+/// snapshot or an interrupted one left behind.
 func strayFiles(beside url: URL) throws -> [String] {
     let own = url.lastPathComponent
     return try FileManager.default.contentsOfDirectory(atPath: url.deletingLastPathComponent().path)
-        .filter { ![own, own + "-wal", own + "-shm", own + "-journal"].contains($0) }
+        .filter { ![own, own + "-wal", own + "-shm", own + "-journal", own + ".lock"].contains($0) }
         .sorted()
 }

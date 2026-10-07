@@ -44,6 +44,12 @@ final class Probe {
         limit-file-size <bytes|wal>        RLIMIT_FSIZE for this process; `wal` = the log's current size
         unlimit-file-size
         measure <stream> <count> <bytes>   count writes, latency percentiles and waits
+        recover <path>                     recover the archive under its exclusive presence lock:
+                                           recovery inUse | notCorrupt | recovered aside=<name> restored=<copy|none>
+        recover-after <path> [hold]        open the archive, answer `saw <error>`, wait for `go`, then recover;
+                                           with hold, answer `holding` with the exclusive lock held and keep it
+                                           until the next line, then answer the recovery
+        inspect <path>                     the read-only diagnosis: inspect <shape> version=<n|none>
         checkpoint
         diagnostics
         version
@@ -83,6 +89,9 @@ final class Probe {
             case "limit-file-size" : try await limitFileSize(arguments)
             case "unlimit-file-size": unlimitFileSize()
             case "measure"         : try await measure(arguments)
+            case "recover"         : try recover(arguments, hold: false)
+            case "recover-after"   : try await recoverAfter(arguments)
+            case "inspect"         : inspect(arguments)
             case "checkpoint"      : try await checkpoint()
             case "diagnostics"     : try await diagnostics()
             case "version"         : emit("sqlite \(SQLiteLibrary.version) \(SQLiteLibrary.sourceID)")
@@ -304,6 +313,60 @@ final class Probe {
     }
 
     private struct HoldAborted: Error {}
+
+    // MARK: Recovery and diagnosis
+
+    /// Recovers the archive at the path from the copies beside it (`<name>.backup-*`, newest name
+    /// first), as `MemoryService` does; `hold` keeps the exclusive lock until the next line.
+    private func recover(_ arguments: [String], hold: Bool) throws {
+        guard let path = arguments.first else { emit("error usage recover"); return }
+        let archive = URL(fileURLWithPath: path)
+        let copies  = {
+            let directory = archive.deletingLastPathComponent()
+            let names = (try? FileManager.default.contentsOfDirectory(atPath: directory.path)) ?? []
+            return names.filter { $0.hasPrefix("\(archive.lastPathComponent).backup-") }.sorted(by: >)
+                .map { directory.appendingPathComponent($0) }
+        }
+        let outcome = try SQLiteMemoryRecovery.recover(
+            archive, copies: copies, stamp: "probe-\(getpid())",
+            whileHeld: hold ? { Probe.emit("holding"); _ = readLine() } : nil
+        )
+        switch outcome {
+        case .inUse                            : emit("recovery inUse")
+        case .notCorrupt                       : emit("recovery notCorrupt")
+        case .recovered(let aside, let restored): emit("recovery recovered aside=\(aside) restored=\(restored ?? "none")")
+        }
+    }
+
+    /// Sees the archive's error as an open does, then waits for `go` before recovering: two helpers
+    /// that both saw the old error before either took the lock.
+    private func recoverAfter(_ arguments: [String]) async throws {
+        guard let path = arguments.first else { emit("error usage recover-after"); return }
+        do {
+            let store = try await SQLiteMemoryStore.open(at: URL(fileURLWithPath: path))
+            await store.close()
+            emit("saw nothing")
+        } catch let error as MemoryStoreError {
+            emit("saw \(Self.describe(error))")
+        }
+        guard readLine() == "go" else { emit("error expected go"); return }
+        try recover([path], hold: arguments.count > 1 && arguments[1] == "hold")
+    }
+
+    private func inspect(_ arguments: [String]) {
+        guard let path = arguments.first else { emit("error usage inspect"); return }
+        let report = SQLiteMemoryInspection.inspect(URL(fileURLWithPath: path))
+        let shape: String
+        switch report.shape {
+        case .missing    : shape = "missing"
+        case .empty      : shape = "empty"
+        case .current    : shape = "current"
+        case .refused    : shape = "refused"
+        case .unreadable : shape = "unreadable"
+        case .unavailable: shape = "unavailable"
+        }
+        emit("inspect \(shape) version=\(report.schemaVersion.map(String.init) ?? "none")")
+    }
 
     private func increment(_ arguments: [String]) async throws {
         let store = try opened()

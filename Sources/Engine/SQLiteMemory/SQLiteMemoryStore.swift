@@ -40,6 +40,11 @@ import SQLite3
 /// A snapshot copies the file through the library's backup API into a path of the caller's,
 /// consistent as of one read transaction, verified before it is handed over; a checkpoint moves
 /// the write-ahead log into the file passively, never waiting on readers or other processes.
+///
+/// The store holds the archive's presence lock shared (`SQLiteMemoryPresence`) from before its first
+/// connection until its last one, and the last one of a copy still in flight, has closed: a
+/// recovery, which takes the lock exclusive, is refused meanwhile, and an open waits for a recovery
+/// in progress within one lock budget, then answers `contention`.
 public actor SQLiteMemoryStore {
 
     /// Configuration is the store's waiting policy, chosen at composition. The defaults are what
@@ -207,6 +212,8 @@ public actor SQLiteMemoryStore {
     private var snapshots       = 0
     private var waitObserver    : (@Sendable (WaitEvent) -> Void)?
     private var refusedRollback : SQLiteConnection.Failure?
+    private var stepGate        : (@Sendable () async throws -> Void)?
+    private var presence        : SQLiteMemoryPresence?
     private let clock           = ContinuousClock()
 
     /// Lifecycle is the store's state: `opening` while an open is in flight, so a second open
@@ -341,6 +348,7 @@ public actor SQLiteMemoryStore {
         writer    = nil
         reader    = nil
         lifecycle = .closed
+        releasePresenceWhenIdle()
     }
 
     /// What the store knows about its file and its waiting, read from the reader connection.
@@ -391,6 +399,14 @@ public actor SQLiteMemoryStore {
     /// The same seam, with the library's failure as the module's own type.
     func refuseNextRollback(with failure: SQLiteConnection.Failure) {
         refusedRollback = failure
+    }
+
+    /// A test's seam into a snapshot, for the package's tests only: awaited between two steps of every
+    /// copy, after the yield, while the copy holds its connections and its partial file. The store is
+    /// free meanwhile, so a close can run; the copy sees it, or its task's cancellation, when the gate
+    /// returns or throws.
+    package func holdSnapshots(between gate: (@Sendable () async throws -> Void)?) {
+        stepGate = gate
     }
 
     // MARK: Transactions
@@ -498,7 +514,7 @@ public actor SQLiteMemoryStore {
         _ = try connection(.writer)
         let target = Self.resolved(destination)
         let own    = Self.resolved(url).path
-        guard !["", "-wal", "-shm", "-journal"].map({ own + $0 }).contains(target.path) else {
+        guard !["", "-wal", "-shm", "-journal", ".lock"].map({ own + $0 }).contains(target.path) else {
             throw MemoryStoreError.snapshot(.destinationIsTheSource)
         }
         guard !FileManager.default.fileExists(atPath: target.path) else {
@@ -536,6 +552,8 @@ public actor SQLiteMemoryStore {
                 if progress.remaining == 0 { break }
                 waitObserver?(.yielding(.snapshot, remaining: progress.remaining))
                 await Task.yield()
+                // The gate's own error is not the copy's: what it waited for is seen at the loop's head.
+                if let stepGate { try? await stepGate() }
             }
             try backup.finish()
             copying.backup = nil
@@ -654,7 +672,7 @@ public actor SQLiteMemoryStore {
     // MARK: Opening
 
     /// What the inspection of a file found: nothing yet, or the schema this build knows.
-    private enum Inspection: Equatable {
+    enum Inspection: Equatable {
         case empty, current
     }
 
@@ -675,6 +693,13 @@ public actor SQLiteMemoryStore {
             }
             ddl      = try SQLiteMemorySchema.text()
             expected = try Expected(ddl: ddl)
+            // A reader of a file that is not there makes nothing beside it, not even the lock file.
+            if kind == .existingArchive, !FileManager.default.fileExists(atPath: path) {
+                throw MemoryStoreError(SQLiteConnection.Failure(
+                    primary: SQLITE_CANTOPEN, extended: SQLITE_CANTOPEN, message: "unable to open database file"
+                ), phase: .open)
+            }
+            try await takePresence()
             writer   = try acquire(path, mayCreate: kind == .producer)
         } catch {
             throw abandonedOpen(after: error)
@@ -729,10 +754,41 @@ public actor SQLiteMemoryStore {
     /// What an open that did not succeed answers: `closed` when a close arrived meanwhile, which
     /// prevails and stays; otherwise the error, with the store not opened again.
     private func abandonedOpen(after error: any Error) -> any Error {
+        defer { releasePresenceWhenIdle() }
         if lifecycle == .closed { return MemoryStoreError.unavailable(.closed) }
         lifecycle = .notOpened
         return error
     }
+
+    /// Takes the archive's presence lock shared, before the first connection. A recovery in progress
+    /// holds it exclusive: the open waits for it as for a busy lock, within one budget, and then
+    /// answers `contention`.
+    private func takePresence() async throws {
+        guard presence == nil else { return }
+        let path = url.path
+        try await retrying(phase: .open) {
+            try stillOpening()
+            guard let taken = try SQLiteMemoryPresence.take(.shared, of: url) else {
+                throw Busy(failure: SQLiteConnection.Failure(
+                    primary : SQLITE_BUSY,
+                    extended: SQLITE_BUSY,
+                    message : "a recovery of \(path) holds its presence lock"
+                ), phase: .open)
+            }
+            presence = taken
+        }
+    }
+
+    /// Lets go of the presence lock once nothing of this store holds the archive's files: no
+    /// connection of its own or of a copy still in flight, and no open in progress or done.
+    private func releasePresenceWhenIdle() {
+        guard liveHandles == 0, lifecycle != .open, lifecycle != .opening else { return }
+        presence?.release()
+        presence = nil
+    }
+
+    /// Whether the store holds the archive's presence lock now: for the package's tests.
+    package var holdsPresence: Bool { presence?.isHeld == true }
 
     private func stillOpening() throws {
         guard lifecycle == .opening else { throw MemoryStoreError.unavailable(.closed) }
@@ -759,6 +815,7 @@ public actor SQLiteMemoryStore {
         guard connection.isOpen else { return }
         connection.close()
         liveHandles -= 1
+        releasePresenceWhenIdle()
     }
 
     /// Lets go of both connections after a transaction that could not be ended: nothing more goes
@@ -771,6 +828,7 @@ public actor SQLiteMemoryStore {
         writer    = nil
         reader    = nil
         lifecycle = .failed(fault)
+        releasePresenceWhenIdle()
     }
 
     /// Opens one connection with foreign keys on and verified. The journal is dealt with apart,
@@ -831,7 +889,7 @@ public actor SQLiteMemoryStore {
     /// file whose tables lack a column this build writes, and a version 1 file whose tables,
     /// indexes or triggers are not exactly the ones this build creates (an earlier development form
     /// with other constraints).
-    private static func inspect(_ connection: SQLiteConnection, expected: Expected) throws -> Inspection {
+    static func inspect(_ connection: SQLiteConnection, expected: Expected) throws -> Inspection {
         let tables = expected.tables
         let version  = try integerPragma(connection, "user_version")
         let existing = try connection.query(

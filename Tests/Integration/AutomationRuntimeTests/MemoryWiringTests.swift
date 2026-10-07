@@ -183,6 +183,31 @@ struct MemoryWiringTests {
         await service.close()
     }
 
+    @Test("a corrupt archive another holder has open is not recovered: nothing moves, the service stays degraded, and recovers once the holder let go")
+    func recoveryRefusedWhileHeld() async throws {
+        let directory = try W.directory()
+        let archive   = directory.appendingPathComponent("memory.sqlite")
+        let garbage   = Data(repeating: 0x5A, count: 8192)
+        try garbage.write(to: archive)
+        // Another holder of the archive: a store or a diagnosis of another process, here a presence of this one.
+        let holder  = try #require(try SQLiteMemoryPresence.take(.shared, of: archive))
+        let service = MemoryService(directory: directory, configuration: .init(reopenInterval: .milliseconds(50)))
+        await #expect(throws: (any Error).self) { _ = try await service.brain(of: W.bundle) }
+        let refused = await service.status()
+        guard case .degraded(let reason) = refused.state else { Issue.record("not degraded: \(refused.state)"); return }
+        #expect(reason.contains("recovery was refused"), "\(reason)")
+        #expect(try Data(contentsOf: archive) == garbage, "the archive is as it was")
+        #expect(try files(service, ".corrupt-").isEmpty, "nothing was moved aside")
+
+        holder.release()
+        try await Task.sleep(for: .milliseconds(80))
+        #expect(try await service.brain(of: W.bundle) == nil)
+        let recovered = await service.status()
+        #expect(recovered.state == .open && recovered.lastRecovery?.contains("started empty") == true)
+        #expect(try files(service, ".corrupt-").count == 1)
+        await service.close()
+    }
+
     // MARK: The recorder
 
     @Test("a call through its recorder is planned, started, sampled, taught to the Brain and completed with its result and effect")
