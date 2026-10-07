@@ -44,7 +44,7 @@ Decisions were taken by Tommaso Mazzarini on 7 October 2026.
 |---|---|---|
 | D1 | Merge or transplant | Transplant |
 | D2 | Earlier JSON Brains | Not imported automatically; `mecum memory --import-json <dir>` imports them by hand |
-| D3 | External MCP clients | One archive shared with the app's workers, source `mcp` |
+| D3 | External MCP clients | First one archive shared with the app's workers; reversed after the live checks (C07): each client keeps a private archive, as on main, source `mcp` |
 | D4 | Concurrent access | Common practice without needless complexity: one writer, an ordered queue, actions never wait |
 | D5 | Latency budget | 50 ms added per action at most, to be lowered later if needed |
 | D6 | Schema version | Left to the implementer: version 1 with an exact shape check |
@@ -59,8 +59,10 @@ Decisions were taken by Tommaso Mazzarini on 7 October 2026.
 - **The Brain is in SQLite.** Main's JSON Brains are neither read nor written at run time. A build of
   this branch starts with an empty Brain unless the JSON files are imported (D2). Main's builds keep
   reading the JSON files, which this branch never changes, so going back loses nothing older.
-- **External clients share the workers' Brain.** Main gave each external client its own
-  `MCP/Knowledge/<profile>` directory. They now learn into the app's archive, as `mcp` (D3).
+- **External clients keep a Brain of their own, now in SQLite.** As on main, each client's directory is
+  `MCP/Knowledge/<profile>`, and its archive is the `memory.sqlite` there, apart from the workers' and
+  the other clients' (D3, C07). Like the workers' Brain, a client's starts empty unless its JSON files
+  are imported: `mecum memory --import-json <dir> --knowledge <dir>` with the client's directory as both.
 - **A memory failure no longer fails an observation.** Main's `observe` threw when the JSON store
   could not save. Writes are now queued, and a failed write is a counted gap (D4).
 - **The command line's `scene` reports the Brain's counts after its write.** It prints "not
@@ -170,23 +172,28 @@ The agreed budget is 50 ms per action (D5).
 
 ## Corrections after the live checks
 
-Codex's live checks of 7 October and the corrective plan that followed them raised nine points. Three
-are fixed on this branch; the rest wait for a decision or for a desktop run.
+Codex's live checks of 7 October and the corrective plan that followed them raised nine points, and
+Codex's review of `f7d31bd` six more remarks on the first fixes (R1–R6). This branch fixes the points
+that needed no desktop; the rest wait for a decision on data or for a desktop run.
 
 | Point | Status | What |
 |---|---|---|
-| C05 Closing | fixed, `8bf80d2` | One 3 s deadline the copy no longer extends; the copy cancelled and never published incomplete; nothing admitted after the first call; every write counted; Quit waits while a memory has work; `mecum` closes its memory at its end. `MemoryClosingTests` reproduced the slow copy and the copy started during a close before the fix. |
-| C08 Diagnosis | fixed, `f55a0bc` | `mecum memory --status` reads the file only and says that write counters belong to each process; the Brain page shows the app's own. |
+| C05 Closing | fixed, `8bf80d2`, completed after R2–R3 | `closingBudget` bounds the whole close: admission ends at the first call, the copy is cancelled and never published after it, the queue drains until the last fifth of the bound, and the archive closes in a task the close does not wait on past the bound. Each write is counted by what it committed: written, failed (nothing), partial (a part), dropped (never ran) or unsettled (still running at the bound, counted again when it ends). The copy is held between two steps by a test gate and cancelled there. Before the fix, `f7d31bd` counted as failed a write whose row was in the archive. See [Closing](MemorySchema.md#closing). |
+| C08 Diagnosis | fixed, `f55a0bc`, corrected after R1 and R6 | `mecum memory --status` no longer opens a file as `immutable` because no `-wal` or `-shm` is beside it: it reads with the library's locks, in one read transaction, under the presence lock, and says when it cannot read the file as it lies. It reports the version apart from what this build's open would do, so a newer version is refused as newer. See [Diagnosis](MemorySchema.md#diagnosis). |
 | C07 Raw `record` | fixed, `1233097` | The documentation says what the raw record is for; a test proves a retried learning applies once. |
-| C07 MCP isolation | proposal | Main gave each external client its own Knowledge directory; the decision is to keep that, on the SQL repositories. One line in `AppModel`; no archive holds `mcp` events today. |
-| C09 Recovery with several processes | proposal | Recovery refused while another process holds the archive, through a presence lock every opener takes before SQLite. |
+| C07 MCP isolation | fixed | As on main, each external client's memory is `MCP/Knowledge/<profile>`, now an SQL archive of its own. Nothing was moved: no archive inventoried holds `mcp` events. A test has two clients and a worker write and learn apart. |
+| C09 Recovery with several processes | fixed | A presence lock beside the archive, taken shared by every store, its copies and the diagnosis, and exclusive by a recovery, which is refused while anybody holds it and reads the archive again once it holds it. Proved with real processes. See [Copies and recovery](MemorySchema.md#copies-and-recovery). |
 | C06 Earlier archives | inventoried | No SQLite archive in the app's own folder; 23 test archives, unchanged. Any change to the DDL's text, even a trigger's message, makes earlier archives a different shape. |
 | C01–C03 Calculator | not touched | Permissions and verification unchanged; Codex compares with main on the desktop. |
 | C04 External MCP | not run | Waits for the desktop. |
 
-Verification of the fixes, after `swift package clean`: `make test` passed, 2802 executed, 94 skipped,
-28 runs, no problems; the unsigned app tests ran 326 tests with the same two environment failures as
-main.
+The unsigned app tests fail the same two tests on main (`eff301c`, 325 tests) and on this branch, at
+the same lines. `SlashCommandTeamTests` "/model and /effort" asks the installed Claude Code for its
+catalogue, which does not offer `claude-opus-5`, so `/model claude-opus-5` is refused and stays in the
+draft: it depends on the machine. `ToolBridgeTests` writes a request to the bundled bridge and closes
+its input at once; since `7346f8b` (6 October, on main) the bridge closes its connection when its
+input ends, before the answer arrives, so the test reads nothing: a test that main's own change left
+behind, not a matter of signing.
 
 ## Rollback
 

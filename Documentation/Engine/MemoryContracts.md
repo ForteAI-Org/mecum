@@ -52,8 +52,9 @@ Every row below is written through `MemoryService`'s queue by a `CallRecorder`. 
 workers (`TeamModel`, source `app`, stream `worker-<id>`, the message as the trace), the app's external MCP
 clients (`ExternalMCPSession`, source `mcp`, stream `mcp-<profile>`, no trace), `mecum chat` (`ChatCommand`,
 source `cli`, stream `chat-<conversation>`, the conversation as the trace), and the command line's `scene`
-and `act` (source `cli`, stream `mecum-<pid>`, one trace per process). The app's workers and its external
-clients share the app's Knowledge directory, so they learn into one archive.
+and `act` (source `cli`, stream `mecum-<pid>`, one trace per process). The app's workers learn into the app's
+Knowledge directory; each external client into a directory of its own, `MCP/Knowledge/<profile>`, as on main, so
+each client has an archive of its own and none reads what the workers or the other clients learned.
 
 | Producer | Role and call | Tables written | Read back by |
 | --- | --- | --- | --- |
@@ -144,21 +145,28 @@ included, is refused untouched, never migrated: see [The resource](MemorySchema.
   - The service answers `MemoryUnavailable` to a read while the archive cannot be opened (`degraded`, retried
     after 5 s) or after it closed. A busy lock is ordinary contention: waited for by the service's task, never a
     failure of the task.
-  - A fact that could not be written is a gap: a failed write or one dropped at a full queue or at the
-    service's close is counted in `MemoryService.status()` (`failed`, `dropped`, `lastFailure`) and logged,
-    never shown to the agent and never retried. The close counts what it could not save: the writes still
-    queued as dropped, the one in flight as failed. No gap is recorded as a row: nothing in SQLite says that
-    something is missing.
+  - A fact that could not be written is a gap: a write that failed, saved in part or was dropped at a full
+    queue or at the service's close is counted in `MemoryService.status()` (`failed`, `partial`, `dropped`,
+    `lastFailure`) and logged, never shown to the agent and never retried. Each write is counted by what it
+    committed: `failed` saved nothing, `partial` saved a part, `dropped` never ran, and a write still running
+    when the close returned is `unsettled`, its outcome unknown. No gap is recorded as a row: nothing in SQLite
+    says that something is missing.
 
   See [Waiting for a busy lock](MemorySchema.md#waiting-for-a-busy-lock),
   [Failure, cleanup and recovery](MemorySchema.md#failure-cleanup-and-recovery) and
   [Producers](MemorySchema.md#producers).
 - **At the end.** A session's close waits up to 3 s for the queue; the process's end closes every service once,
-  within one 3 s deadline that the copy in progress does not extend: the copy is cancelled and never published
-  incomplete, the queue drains, what is left is counted. No effect is replayed.
+  each close bounded as a whole by 3 s from its first call: nothing is admitted from that call on, the copy is
+  cancelled and never published, the queue drains until the last fifth of the bound, the archive closes in a
+  task the close does not wait on past the bound, and every write is counted. No effect is replayed. See
+  [Closing](MemorySchema.md#closing).
 - **Copies.** A verified copy a day beside the archive, the newest three kept; a file the library calls corrupt
-  is moved aside and the newest copy restored, or the memory starts empty. See
-  [Copies and recovery](MemorySchema.md#copies-and-recovery).
+  is moved aside and the newest sound copy restored, or the memory starts empty, only while no other process
+  holds the archive. See [Copies and recovery](MemorySchema.md#copies-and-recovery) and
+  [The presence lock](MemorySchema.md#the-presence-lock).
+- **Diagnosis.** `mecum memory --status` reads the file in one read transaction under the presence lock and
+  changes nothing of it; it cannot see another process's write counters. See
+  [Diagnosis](MemorySchema.md#diagnosis).
 
 ## Reads and paging
 

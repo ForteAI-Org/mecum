@@ -725,32 +725,58 @@ file, which the store's lock keeps apart.
 ### Closing
 
 `MemoryService.close()` closes once, whoever asks and however often; a second call waits for the
-first one's end. Against one deadline, `closingBudget` (3 s) on the monotonic clock from the first call:
+first one's end. `closingBudget` (3 s) bounds the whole close, from the first call to its return, on
+the monotonic clock:
 
-1. Nothing new is admitted: a write offered from then on is refused and counted as dropped, no copy
-   starts and no recovery runs.
-2. A copy in progress is cancelled. The store abandons it between two steps and removes its partial
-   file, so an incomplete copy is never published; the next open takes the day's copy again.
-3. The queue drains, a busy archive waited out until the deadline.
-4. What the deadline leaves is counted: the writes still queued as dropped; the one in flight as failed
-   when it ends after the store closes, or at once if it does not end within 250 ms. A write that
-   committed is counted written, once.
-5. The archive closes.
+1. **Admission ends at the first call**, before it gives the actor back: a write offered from then
+   on is refused and counted as dropped; `ready()` and every read or open that goes through it
+   (`brain(of:)`, `apply`, `overview()`, …) throw `MemoryUnavailable("the memory is closing")`; no
+   copy and no recovery start. Only the writes already accepted run on, and the drain may still open
+   the archive for them.
+2. **The copy in progress is cancelled.** The store sees the cancellation between two steps, and once
+   more after the verification and before the rename, so a copy is handed over only by a snapshot
+   nobody stopped; the partial file is removed, and the next open takes the day's copy again.
+3. **The queue drains until the last fifth of the bound** (at most 500 ms of it, so 2.5 s of 3 s), a
+   busy archive waited out meanwhile. What is still queued then never ran and is counted as dropped;
+   the running write is cancelled, which a lock wait and a cooperative body see at once.
+4. **The archive is closed by a task of its own**, and the close waits, until the deadline, for it, for
+   the running write to end and for the copy to let go of its connections.
+5. **At the deadline the close returns, whatever is left.** It never waits past it: an operation that
+   holds the store's actor synchronously (a long transaction body, a copy's step or verification, the
+   checkpoint the library runs when its last connection closes) finishes after the return, the archive
+   closes when it ends, and the presence lock is let go then, or by the kernel with the process.
 
-`status().lastClose` says how long the close took and what it saved and did not, and the log says it
-too, as an error when anything was left. In an ordinary close every write is saved: the tests close
-two hundred writes in under 0.1 s. With a lock held past the deadline, the writes are not saved and
-are counted; they live in the process's memory only, so they are gone with it: a durable queue would
-be another design.
+Each write is counted once, by what it committed: the store counts the commits of the task that runs
+it (`SQLiteMemoryStore.CommitTally`). `written` ended without an error; `failed` ended with an error
+before any commit, so the archive holds none of it; `partial` ended with an error after a commit (a
+queued write may hold two transactions, a call's `planned` and its `started`), so the archive holds a
+part; `dropped` never ran. A write still running at the deadline is `unsettled`: it may still commit,
+so its outcome is unknown when the close returns; if it ends later in the process it leaves
+`unsettled` for the count it ended in. `status().lastClose` says how long the close took, the counts,
+what the deadline left (writes queued, the write running with the commits it had made, the copy, an
+archive still closing), and the log says it too, as an error when anything was left.
+
+`MemoryClosingTests` measures each case against a 1 s bound with 150 ms of tolerance for the polling
+and the actor hops, and prints each measure (`MEMORY-CLOSE`). In an ordinary close every write is
+saved: two hundred in under 0.1 s. A write held by a lock past the bound is cancelled and failed, the
+rest dropped; a write suspended before its commit is failed, after it partial, and its row is in the
+archive; a transaction that holds the store for 1.6 s leaves the close at the bound, the write
+unsettled, then written once it commits, and the presence lock held until the store closed. The
+writes are in the process's memory only: those a lock keeps past the bound are gone with the process,
+counted; a durable queue would be another design.
 
 The app takes the bounded path of Quit whenever `MemoryService.hasUnfinishedWork` says a service still
 holds writes not committed or a copy in progress, even with no worker, draft or client to wait for: it
 does not wait for the actor, so Quit decides without blocking.
 
-The app's workers, its external MCP clients and its Brain page share the app's Knowledge directory
-(`Knowledge` under `WorkspaceLaunch.directory`, by default `~/Library/Application Support/Mecum`).
-`mecum` and `mecum chat` default to the same `~/Library/Application Support/Mecum/Knowledge` and take
-`--knowledge <dir>`, so a running app and a `mecum` process are, by default, two writers on one file.
+The app's workers and its Brain page share the app's Knowledge directory (`Knowledge` under
+`WorkspaceLaunch.directory`, by default `~/Library/Application Support/Mecum`). Each external MCP client
+has a directory of its own, as on main: `MCP/Knowledge/<profile>` under the same support directory
+(`AppModel.knowledgeDirectory(of:under:)`), so each client writes and learns into its own
+`memory.sqlite`, apart from the workers' and the other clients'
+(`MemoryWiringTests.privateArchivesPerClient`). `mecum` and `mecum chat` default to the workers'
+`~/Library/Application Support/Mecum/Knowledge` and take `--knowledge <dir>`, so a running app and a
+`mecum` process are, by default, two writers on one file.
 
 ### The queue
 
@@ -767,9 +793,10 @@ it as `dropped`. The queue is in memory: a process that ends without its closing
 it held, with nothing in the archive to say so.
 
 `status()` reports the path, the state (`notOpened`, `open`, `degraded` with its reason, `closed`),
-the linked library's version and source id while open, and the writes pending, written, failed and
-dropped since the service was made, with the last failure and, from `52523ae`, the newest copy and
-the last recovery.
+the linked library's version and source id, and the writes pending, in flight, written, failed,
+partial, dropped and unsettled since the service was made ([Closing](#closing)), with the last failure,
+the newest copy, the last recovery and the last close. These counts live in the process: another
+process, `mecum memory --status` among them, cannot read them ([Diagnosis](#diagnosis)).
 
 ### Degraded
 
@@ -800,14 +827,80 @@ the Brain. Past the budget the enrichment is one observation behind; the call is
 From `52523ae` the archive keeps itself recoverable. Once a `backupInterval` (one day), checked when
 the archive opens and whenever the queue empties, the service takes a verified copy through
 `snapshot(to:)` beside the archive, `memory.sqlite.backup-<UTC instant>`, and keeps the newest
-`keptBackups` (3). The copy runs beside the writes and never holds them up; a close waits for one in
-progress. A copy taken at the open is the archive as it was opened. An open that fails because the
-library calls the file corrupt (`SQLITE_CORRUPT`, 11) or not a database (`SQLITE_NOTADB`, 26) moves
-the file, with its `-wal` and `-shm`, aside as `memory.sqlite.corrupt-<UTC instant>`, never deleting
-it, copies the newest backup into its place and opens again; with no backup the memory starts
-empty. `status().lastRecovery` says which happened. `MemoryWiringTests` proves the daily copy, the
-restore and the empty start. Restoring the rest of the app (its workspace, its conversations) is
-outside the memory.
+`keptBackups` (3). The copy runs beside the writes and never holds them up; a close cancels one in
+progress ([Closing](#closing)). A copy taken at the open is the archive as it was opened.
+
+An open that fails because the library calls the file corrupt (`SQLITE_CORRUPT`, 11) or not a
+database (`SQLITE_NOTADB`, 26) asks `SQLiteMemoryRecovery` to recover it, which does so only under the
+archive's presence lock taken exclusive ([The presence lock](#the-presence-lock)):
+
+1. While anybody else holds the archive, the recovery is refused at once (`inUse`): nothing is read,
+   moved or copied, the service stays `degraded` ("the recovery was refused and nothing was moved")
+   and tries again after `reopenInterval`.
+2. Under the lock the archive is read again, as the open reads it. Another process may have recovered
+   it since the error that led here: a file that now reads, or fails for another reason, is left as it
+   is (`notCorrupt`) and opened as it is.
+3. The newest copy that passes `quick_check` and has this build's schema is chosen before anything
+   moves. The file, with its `-wal` and `-shm`, is moved aside as `memory.sqlite.corrupt-<UTC instant>`,
+   never deleted; the chosen copy is cloned beside it and renamed into place without clobbering, then
+   read once more. With no sound copy the memory starts empty.
+4. The lock is let go and the store opens as any opener does, taking the lock shared. Whoever took it
+   in between finds a sound archive and leaves it.
+
+`status().lastRecovery` says which happened. `MemoryWiringTests` proves the daily copy, the restore,
+the empty start and the refusal while held; `SQLiteRecoveryCoordinationTests` proves, with real
+processes, the refusal while another process holds the archive open (its later writes land in the
+same file), two recoveries that both saw the old error (one recovers, the other is refused while it
+works and then leaves the recovered archive as it is, while an open waits and a diagnosis reads
+nothing), a killed holder leaving no lock, and a copy that still holds the archive after its store
+closed. A process killed between moving the file aside and placing the copy leaves no archive: the
+next open starts it empty, and the copy and the moved file stay beside it to be restored by hand.
+Restoring the rest of the app (its workspace, its conversations) is outside the memory.
+
+### The presence lock
+
+Every participant that holds the archive's files open takes `flock(2)` on `memory.sqlite.lock`
+beside it (`SQLiteMemoryPresence`), made on first use and never moved or deleted:
+
+- **A store** takes it shared before its first connection and lets it go once its last connection
+  closed, those of a copy still in flight included, and only when it is no longer open or opening. An
+  open that finds it held exclusive waits within one lock budget, as for a busy lock, then answers
+  `contention` at the open ("a recovery … holds its presence lock"). A reader of an archive that is not
+  there makes no lock file.
+- **A diagnosis** takes it shared for the time of its reading ([Diagnosis](#diagnosis)).
+- **A recovery** takes it exclusive without waiting, and is refused while anybody holds it.
+
+The lock belongs to the open file, not to the process, so two holders in one process exclude each other
+as two processes do; the kernel lets go of the lock of a process that ended. It coordinates only the
+code that takes it: a build before it, or a tool that opens the file itself (`sqlite3`), is not
+coordinated, and `flock` is not reliable on a network volume. The lock file holds no data.
+
+### Diagnosis
+
+`mecum memory --status [--knowledge <dir>]` (`SQLiteMemoryInspection`) says what the archive file is
+without opening a memory service: whether it is there, its size and its log's, its `user_version`,
+what this build's open would make of it, and, when the open would take it, a few row counts; then the
+copies and the files a recovery moved aside. It reads with a read-only connection and the library's
+locks, all in one read transaction, so version, shape and counts are one committed state even while
+another process commits (`SQLiteMemoryInspectionTests.oneCommittedState`); it never opens a file as
+`immutable`. It takes the presence lock shared first, so it never reads while a recovery moves the
+files, and says so instead.
+
+| What it finds | What it prints |
+|---|---|
+| no file | no archive at this path; Mecum's memory would create it. No lock file is made. |
+| a database with no schema | Mecum's memory would create its schema in it; a reader refuses it |
+| this build's version and exactly its shape | it opens it, with the counts |
+| a newer version | refused and left as it is: schema N is newer than this build's; its shape is not compared |
+| another shape, tables missing, columns missing, somebody else's tables | refused and left as it is, with the objects named |
+| not a database | not readable, with the library's reason |
+| a recovery holding the archive | not read: a recovery holds it |
+| a WAL file whose `-wal` and `-shm` are not beside it | not read: a read-only reader cannot make them without changing the directory |
+
+It never creates the archive, bootstraps, migrates, recovers or copies. The only file it may make is the
+empty lock file beside an archive that a build with the lock never opened. The library may update the
+`-shm` index while reading, as for any reader; it holds no data. The counters of writes live in each
+process: this command has its own and shows none; the app shows its own on Settings > Brain.
 
 ### Recorders
 
