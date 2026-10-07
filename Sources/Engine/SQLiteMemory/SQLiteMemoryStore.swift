@@ -8,6 +8,7 @@
 import Foundation
 import Memory
 import SQLite3
+import Synchronization
 
 /// SQLiteMemoryStore is the living memory's one SQLite file, opened explicitly at a path the
 /// composition root chose and used through typed transactions. It owns two connections: a writer,
@@ -215,6 +216,23 @@ public actor SQLiteMemoryStore {
     private var stepGate        : (@Sendable () async throws -> Void)?
     private var presence        : SQLiteMemoryPresence?
     private let clock           = ContinuousClock()
+
+    /// CommitTally counts the write transactions one task committed, through any store, for an owner
+    /// that must tell a write that saved nothing from one that saved a part of its work: the owner
+    /// binds a tally to `tally` around the work, and every commit of `write` in it counts once.
+    package final class CommitTally: Sendable {
+
+        private let count = Mutex(0)
+
+        package init() {}
+
+        package var commits: Int { count.withLock { $0 } }
+
+        fileprivate func committed() { count.withLock { $0 += 1 } }
+    }
+
+    /// The tally the commits of the current task count into, when its owner bound one.
+    @TaskLocal package static var tally: CommitTally?
 
     /// Lifecycle is the store's state: `opening` while an open is in flight, so a second open
     /// joins it and a close ends it; `failed` once a connection could not be trusted, until close.
@@ -441,6 +459,7 @@ public actor SQLiteMemoryStore {
             try body(SQLiteTransaction(connection: writer))
         }
         commits += 1
+        Self.tally?.committed()
         return value
     }
 
@@ -564,6 +583,10 @@ public actor SQLiteMemoryStore {
             try Self.settle(copy: copy)
             release(copy)
             copying.copy = nil
+            // A cancellation or a close that arrived while the copy was verified still prevails: a copy
+            // is handed over only by a snapshot nobody stopped.
+            if Task.isCancelled { throw MemoryStoreError.cancelled(.snapshot) }
+            try stillOpen()
             try Self.move(copying.partialPath, to: target.path)
             copying.removeJournals()
             snapshots += 1

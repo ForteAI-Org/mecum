@@ -77,7 +77,12 @@ nonisolated public struct MemoryRepositories: Sendable {
     public let graph       : SQLiteBrainGraphRepository
     public let traces      : SQLiteTraceRepository
 
+    /// The store under the roles, for the package's tests: a write that holds it, as a long
+    /// transaction of a producer would.
+    package let store: SQLiteMemoryStore
+
     init(store: SQLiteMemoryStore) {
+        self.store   = store
         captures     = SQLiteCaptureRepository(store: store)
         scenes       = SQLiteSceneRepository(store: store)
         calls        = SQLiteAgentCallRepository(store: store)
@@ -135,7 +140,8 @@ public actor MemoryService: BrainReading, BrainApplicationStoring {
         /// The most writes that may wait in the queue; what arrives beyond it is a counted gap.
         public var queueLimit: Int
 
-        /// How long the end of the process waits for the queue to empty before what is left is a gap.
+        /// The whole close, from its first call to its return (`close()`): the queue drains until the
+        /// last fifth of it, at most 500 ms, which is kept for closing the archive.
         public var closingBudget: Duration
 
         /// How old the newest copy of the archive may be before another is taken.
@@ -180,14 +186,22 @@ public actor MemoryService: BrainReading, BrainApplicationStoring {
         public let librarySourceID: String?
         /// Writes waiting in the queue now, in this process's memory only.
         public let pending: Int
-        /// Writes taken from the queue and not yet committed or failed: one at most.
+        /// Writes taken from the queue and running now: one at most.
         public let inFlight: Int
-        /// Writes committed since the service was made.
+        /// Writes that ended with every change of theirs committed, since the service was made.
         public let written: Int
-        /// Writes that failed: each one a fact the archive does not hold.
+        /// Writes that ended with an error before any change of theirs was committed: each one a fact
+        /// the archive does not hold.
         public let failed: Int
-        /// Writes dropped because the queue was full: facts the archive does not hold either.
+        /// Writes that ended with an error after some of their changes were committed (a call's
+        /// record without its start): the archive holds a part of each.
+        public let partial: Int
+        /// Writes that never ran: the queue was full, the close had begun, or the close's bound came
+        /// while they waited. Facts the archive does not hold either.
         public let dropped: Int
+        /// Writes still running when the close returned, which the archive may hold whole, in part or
+        /// not at all. One that ends later in the process leaves this count for the one it ended in.
+        public let unsettled: Int
         /// The last failure, in a sentence with no content of the agent's.
         public let lastFailure: String?
         /// When the newest copy of the archive was taken, when one exists.
@@ -224,16 +238,23 @@ public actor MemoryService: BrainReading, BrainApplicationStoring {
 
     private var queue: [Write] = []
     private var drainer: Task<Void, Never>?
-    /// Whether a write is taken from the queue and running now.
-    private var inFlight = false
-    /// False once a close began: no write, copy or open is admitted after that point.
+    /// The write taken from the queue and running now, with the tally of what it committed.
+    private var running: (label: String, tally: SQLiteMemoryStore.CommitTally)?
+    /// Whether the close counted the running write as unsettled, so its end corrects that count.
+    private var runningUnsettled = false
+    /// False from the first `close()` call on: no write, read, open or copy is admitted after it, and
+    /// only the writes already accepted run, to be drained.
     private var admitting = true
     private var closing: Task<Void, Never>?
+    /// True once the close let go of the archive: an open still in flight then closes what it opened.
+    private var storeClosing = false
     private var lastClose: String?
     private nonisolated let activity = Mutex(Activity())
     private var written = 0
     private var failed = 0
+    private var partial = 0
     private var dropped = 0
+    private var unsettled = 0
     private var lastFailure: String?
 
     private var brains: [String: (version: Int64, brain: UIBrain?)] = [:]
@@ -241,6 +262,8 @@ public actor MemoryService: BrainReading, BrainApplicationStoring {
     private var lastBackup: Date?
     private var lastRecovery: String?
     private var backingUp: Task<Void, Never>?
+    /// How the last copy ended: handed over, or abandoned with nothing published.
+    private var lastCopyPublished: Bool?
 
     /// A test's seam into the copy, for the package's tests only: run before the snapshot starts.
     private var beforeBackup: (@Sendable () async throws -> Void)?
@@ -326,40 +349,59 @@ public actor MemoryService: BrainReading, BrainApplicationStoring {
     private func drain() async {
         while !queue.isEmpty, !Task.isCancelled {
             let write = queue.removeFirst()
-            inFlight = true
+            let tally = SQLiteMemoryStore.CommitTally()
+            running = (write.label, tally)
             do {
-                let repositories = try await ready()
-                try await write.body(repositories)
-                settle(write, error: nil)
+                try await SQLiteMemoryStore.$tally.withValue(tally) {
+                    try await write.body(try await self.open())
+                }
+                settle(write, tally: tally, error: nil)
             } catch {
-                settle(write, error: error)
+                settle(write, tally: tally, error: error)
             }
         }
         drainer = nil
         scheduleBackupIfDue()
     }
 
-    /// Counts a write that left the queue as committed or failed, once: a write the close already
-    /// counted as not saved is not counted again when it ends.
-    private func settle(_ write: Write, error: (any Error)?) {
-        guard inFlight else { return }
-        inFlight = false
-        activity.withLock { $0.outstanding -= 1 }
+    /// Counts a write that ended, once, by what it committed: written when it ended without an error,
+    /// failed when it ended with one before any commit, partial when after one. A write the close
+    /// counted as unsettled leaves that count for this one.
+    private func settle(_ write: Write, tally: SQLiteMemoryStore.CommitTally, error: (any Error)?) {
+        running = nil
+        if runningUnsettled {
+            runningUnsettled = false
+            unsettled -= 1
+        } else {
+            activity.withLock { $0.outstanding -= 1 }
+        }
         guard let error else {
             written += 1
             return
         }
-        failed += 1
-        lastFailure = "\(write.label): \(Self.describe(error))"
-        Self.log.error("memory write failed: \(write.label, privacy: .public): \(Self.describe(error), privacy: .public)")
+        if tally.commits > 0 { partial += 1 } else { failed += 1 }
+        let saved = tally.commits > 0 ? " after \(tally.commits) of its changes were saved" : ""
+        lastFailure = "\(write.label)\(saved): \(Self.describe(error))"
+        Self.log.error("memory write failed\(saved, privacy: .public): \(write.label, privacy: .public): \(Self.describe(error), privacy: .public)")
     }
 
     // MARK: Opening
 
     /// The repositories of the open archive, opening it first when needed. Throws `MemoryUnavailable`
-    /// while the service is degraded and the reopen interval has not passed, or when it is closed.
+    /// while the service is degraded and the reopen interval has not passed, and from the first
+    /// `close()` call on: a new request is not admitted once the close began.
     public func ready() async throws -> MemoryRepositories {
+        guard admitting else {
+            throw MemoryUnavailable(state == .closed ? "the memory is closed" : "the memory is closing")
+        }
+        return try await open()
+    }
+
+    /// The repositories for a write already accepted: during a close as well, until it let go of the
+    /// archive, so the queue it drains can still be saved.
+    private func open() async throws -> MemoryRepositories {
         if let repositories, state == .open { return repositories }
+        guard !storeClosing else { throw MemoryUnavailable("the memory is closed") }
         switch state {
             case .closed:
                 throw MemoryUnavailable("the memory is closed")
@@ -381,7 +423,7 @@ public actor MemoryService: BrainReading, BrainApplicationStoring {
         do {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
             let store = try await openRecovering()
-            guard state != .closed else {
+            guard state != .closed, !storeClosing else {
                 await store.close()
                 throw MemoryUnavailable("the memory is closed")
             }
@@ -413,6 +455,12 @@ public actor MemoryService: BrainReading, BrainApplicationStoring {
     /// Forwards the store's waiting events, once the archive is open. For the package's tests only.
     package func observeStoreWaits(_ observer: (@Sendable (SQLiteMemoryStore.WaitEvent) -> Void)?) async {
         await store?.observeWaits(observer)
+    }
+
+    /// Holds every copy between two of its steps at `gate`, once the archive is open. For the
+    /// package's tests only.
+    package func holdCopySteps(_ gate: (@Sendable () async throws -> Void)?) async {
+        await store?.holdSnapshots(between: gate)
     }
 
     // MARK: Copies and recovery
@@ -465,11 +513,13 @@ public actor MemoryService: BrainReading, BrainApplicationStoring {
         do {
             if let beforeBackup { try await beforeBackup() }
             _ = try await store.snapshot(to: destination)
-            lastBackup = Date()
+            lastBackup        = Date()
+            lastCopyPublished = true
             for old in backups().dropFirst(max(1, configuration.keptBackups)) {
                 try? FileManager.default.removeItem(at: old.url)
             }
         } catch {
+            lastCopyPublished = false
             Self.log.error("memory copy failed: \(Self.describe(error), privacy: .public)")
         }
     }
@@ -508,68 +558,95 @@ public actor MemoryService: BrainReading, BrainApplicationStoring {
         return formatter.string(from: date)
     }
 
-    /// Closes the archive within `closingBudget`, once, whoever asks and however often.
+    /// Closes the archive within `closingBudget`, once, whoever asks and however often, and accounts
+    /// for every write it was offered.
     ///
-    /// From the first call nothing new is admitted: a write offered after it is refused and counted
-    /// as dropped, and no copy starts. Then, against one deadline on the monotonic clock: a copy in
-    /// progress is cancelled (the store removes its partial file, so an incomplete copy is never
-    /// published; the next open takes the day's copy again); the queue drains, a busy archive
-    /// waited out until the deadline. What the deadline leaves is counted, never lost silently: the
-    /// writes still queued as dropped, the one in flight as failed once it ends, or at once if it
-    /// does not end within a short grace. The archive is closed last. A second call waits for the
-    /// first one's end.
+    /// Admission ends at the first call, before it returns to the caller's actor: a write offered
+    /// after it is refused and counted as dropped, a read or an open (`ready()` and what calls it) is
+    /// refused, and no copy starts. Only the writes already accepted run on. Then, against one
+    /// deadline on the monotonic clock, `closingBudget` after the first call:
+    ///
+    /// 1. a copy in progress is cancelled: the store removes its partial file and publishes nothing
+    ///    after the cancellation; the next open takes the day's copy again;
+    /// 2. the queue drains until the last fifth of the bound (at most 500 ms of it), a busy archive
+    ///    waited out meanwhile; what is still queued then never runs and is counted as dropped, and
+    ///    the running write is cancelled;
+    /// 3. the archive is closed by a task of its own, and the close waits, until the deadline, for it,
+    ///    for the running write to end and for the copy to let go.
+    ///
+    /// The close returns at the deadline whatever is left, never waiting on past it: a synchronous
+    /// operation that holds the store (a long transaction, a copy's verification) finishes after the
+    /// return, and the archive closes when it ends, or with the process. A write still running then is
+    /// unsettled, since it may still commit; if it ends later in the process, it is counted again by
+    /// how it ended. `lastClose` says which of these happened. A second call waits for the first.
     public func close() async {
         if let closing {
             await closing.value
             return
         }
         guard state != .closed else { return }
+        admitting = false
         let task = Task { await self.performClose() }
         closing = task
         await task.value
     }
 
+    /// The part of a close's bound kept for closing the archive once the queue's drain is over.
+    static func closingReserve(of budget: Duration) -> Duration {
+        min(budget / 5, .milliseconds(500))
+    }
+
     private func performClose() async {
-        admitting = false
         let started  = ContinuousClock.now
         let deadline = started + configuration.closingBudget
-        var copyCancelled = false
-        if let backingUp {
-            backingUp.cancel()
-            copyCancelled = true
-            await waitUntil(deadline) { self.backingUp == nil }
+        let copying  = backingUp != nil
+        backingUp?.cancel()
+        let drained = await waitUntil(deadline - Self.closingReserve(of: configuration.closingBudget)) {
+            self.drainer == nil && self.queue.isEmpty
         }
-        let drained = await waitUntil(deadline) { self.drainer == nil && self.queue.isEmpty }
-        let leftQueued = queue.count
+        let leftQueued = drained ? 0 : queue.count
         if !drained {
             dropped += leftQueued
             activity.withLock { $0.outstanding -= leftQueued }
             queue.removeAll()
             drainer?.cancel()
         }
-        if let store { await store.close() }
-        let grace = ContinuousClock.now + .milliseconds(250)
-        await waitUntil(grace) { self.drainer == nil }
-        var abandoned = 0
-        if inFlight {
-            inFlight = false
-            failed  += 1
-            abandoned = 1
-            activity.withLock { $0.outstanding -= 1 }
-            lastFailure = "a write did not end within the close"
+        storeClosing = true
+        opening?.cancel()
+        let archiveClosed = Flag()
+        if let store {
+            Task { await store.close(); archiveClosed.raise() }
+        } else {
+            archiveClosed.raise()
         }
-        await waitUntil(grace) { self.backingUp == nil }
+        await waitUntil(deadline) { archiveClosed.isRaised && self.running == nil && self.backingUp == nil }
+        var stillRunning = ""
+        if let running {
+            unsettled       += 1
+            runningUnsettled = true
+            activity.withLock { $0.outstanding -= 1 }
+            stillRunning = ", one write (\(running.label)) still running at the bound after \(running.tally.commits) commits"
+        }
+        let copy: String
+        switch (copying, backingUp == nil, lastCopyPublished) {
+            case (false, _, _):        copy = ""
+            case (true, false, _):     copy = ", the copy still stopping at the bound (it publishes nothing once stopped)"
+            case (true, true, true?):  copy = ", the copy in progress finished before it was stopped"
+            case (true, true, _):      copy = ", the copy in progress stopped with nothing published"
+        }
         state        = .closed
         store        = nil
         repositories = nil
         brains       = [:]
         let took = started.duration(to: .now)
-        let summary = "closed in \(took): \(written) written, \(failed) failed, \(dropped) dropped"
-            + (leftQueued > 0 && !drained ? ", \(leftQueued) still queued at the deadline" : "")
-            + (abandoned > 0 ? ", one write abandoned in flight" : "")
-            + (copyCancelled ? ", the copy in progress cancelled" : "")
+        let summary = "closed in \(took): \(written) written, \(failed) failed, \(partial) partial, \(dropped) dropped, "
+            + "\(unsettled) unsettled"
+            + (leftQueued > 0 ? ", \(leftQueued) still queued at the end of the drain" : "")
+            + stillRunning + copy
+            + (archiveClosed.isRaised ? "" : ", the archive still closing at the bound (a synchronous operation holds it; "
+               + "it closes when that ends, or with the process)")
         lastClose = summary
-        if drained && abandoned == 0 {
+        if drained && stillRunning.isEmpty && archiveClosed.isRaised {
             Self.log.info("memory \(summary, privacy: .public)")
         } else {
             Self.log.error("memory \(summary, privacy: .public)")
@@ -584,6 +661,16 @@ public actor MemoryService: BrainReading, BrainApplicationStoring {
             try? await Task.sleep(for: .milliseconds(1))
         }
         return true
+    }
+
+    /// Flag is raised once, by a task the close does not wait on past its bound, and read without waiting.
+    private final class Flag: Sendable {
+
+        private let raised = Mutex(false)
+
+        func raise() { raised.withLock { $0 = true } }
+
+        var isRaised: Bool { raised.withLock { $0 } }
     }
 
     // MARK: Reading
@@ -618,7 +705,8 @@ public actor MemoryService: BrainReading, BrainApplicationStoring {
             sourceID = diagnostics.librarySourceID
         }
         return Status(path: url.path, state: state, libraryVersion: version, librarySourceID: sourceID,
-                      pending: queue.count, inFlight: inFlight ? 1 : 0, written: written, failed: failed, dropped: dropped,
+                      pending: queue.count, inFlight: running == nil ? 0 : 1, written: written, failed: failed,
+                      partial: partial, dropped: dropped, unsettled: unsettled,
                       lastFailure: lastFailure, lastBackup: lastBackup ?? newestBackup()?.date,
                       lastRecovery: lastRecovery, lastClose: lastClose)
     }

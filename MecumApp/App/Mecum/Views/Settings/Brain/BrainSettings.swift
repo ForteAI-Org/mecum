@@ -91,7 +91,8 @@ struct BrainSettings: View {
         }
         var lines = ["Memory \(state) at \(status.path), SQLite \(status.libraryVersion ?? "unknown")."]
         lines.append("Since Mecum started: \(status.written) saved, \(status.failed) failed, \(status.dropped) dropped, "
-                     + "\(status.pending + status.inFlight) not yet saved.")
+                     + "\(status.pending + status.inFlight) not yet saved."
+                     + (status.partial > 0 ? " \(status.partial) saved in part." : ""))
         if let copy = status.lastBackup { lines.append("Last copy: \(copy.formatted(date: .abbreviated, time: .shortened)).") }
         if let recovery = status.lastRecovery { lines.append(recovery) }
         return lines.joined(separator: "\n")
