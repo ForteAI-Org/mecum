@@ -35,8 +35,11 @@ enum SceneCommand {
         let perceived = try await runtime.scenes.currentScene(of: application.processIdentifier)
         let elapsed = started.duration(to: .now)
         // Every look teaches the brain, as the watcher's did; the map printed is the enriched one.
-        let learned = try await runtime.memory.observe(perceived.scene)
-        let scene = await runtime.memory.enrich(perceived.scene)
+        let recorder = runtime.commandLineRecorder()
+        let scene = await recorder.observe(perceived)
+        await runtime.finish()
+        let key = BrainApplicationKey.observe(CaptureSampleKey(eventID: recorder.eventID, phase: .current))
+        let learned = try? await runtime.service.application(key)
         if invocation.flags.contains("json") {
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.sortedKeys, .prettyPrinted]
@@ -46,9 +49,12 @@ enum SceneCommand {
         }
         let frame = perceived.frame
         let size = "\(Int(frame.width))×\(Int(frame.height)) pt"
+        let brain = switch learned?.outcome {
+            case .observed(let created, let updated, _)?: "brain: \(created) new anchors, \(updated) seen again"
+            default: "brain: not recorded (\(await runtime.service.status().lastFailure ?? "memory unavailable"))"
+        }
         let summary = "perceived \(scene.elements.count) elements in \(elapsed), frame \(size), token \(scene.token); "
-            + "brain: \(learned.created) new anchors, \(learned.updated) seen again\n"
+            + brain + "\n"
         FileHandle.standardError.write(Data(summary.utf8))
-        await runtime.finish()
     }
 }

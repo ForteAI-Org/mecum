@@ -6,9 +6,11 @@
 //
 
 import AppKit
+import AutomationMCP
 import AutomationRuntime
 import ChatCore
 import Foundation
+import Memory
 import ModelTransports
 import Observation
 import PerceptionCore
@@ -636,6 +638,8 @@ final class TeamModel {
                         default: AppPreferences.workersSearchWebDefault,
                         in     : preferences
                     )
+                    // The memory traces this turn's calls to the message it answers.
+                    host.callProducer.traceID = message.id.uuidString
                     // The turn gives the seat back as it ends when another entry is waiting for it.
                     try await desktop.turn {
                         try await host.run(
@@ -711,6 +715,7 @@ final class TeamModel {
             },
             seatLine        : { desktop.turnStatus }
         )
+        host.callProducer = CallProducer(source: .app, streamID: "worker-" + workerID.uuidString)
         hosts[conversationID] = host
         return (host, desktop)
     }

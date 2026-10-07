@@ -18,11 +18,18 @@ struct BrainSettings: View {
     let directory: URL
 
     @State private var apps: [BrainApp] = []
+    @State private var unavailable: String?
 
     var body: some View {
         NavigationStack {
             Group {
-                if apps.isEmpty {
+                if let unavailable {
+                    ContentUnavailableView(
+                        "Brain Unavailable",
+                        systemImage: "exclamationmark.triangle",
+                        description: Text("The Brain's memory could not be read: \(unavailable)")
+                    )
+                } else if apps.isEmpty {
                     ContentUnavailableView(
                         "No App Knowledge Yet",
                         systemImage: "brain",
@@ -50,6 +57,11 @@ struct BrainSettings: View {
                 if let app = apps.first(where: { $0.bundleID == bundleID }) { BrainAppView(app: app) }
             }
         }
-        .task { apps = BrainLibrary.apps(in: directory) }
+        .task {
+            switch await BrainLibrary.apps(in: directory) {
+                case .loaded(let loaded)    : apps = loaded; unavailable = nil
+                case .unavailable(let why)  : apps = []; unavailable = why
+            }
+        }
     }
 }

@@ -1,4 +1,3 @@
-import AutomationRuntime
 //
 //  MemoryCommand.swift
 //  Mecum
@@ -7,28 +6,39 @@ import AutomationRuntime
 //
 
 import AppKit
-import FileKnowledge
+import AutomationRuntime
 import Foundation
 import Memory
 import PerceptionCore
+import SQLiteMemory
 
-/// MemoryCommand prints what memory holds for an application: the brain's size and clock, its most
-/// established anchors with what they do, its groups, and its routes with their standing.
+/// MemoryCommand prints what the living memory holds for an application: the Brain's size and clock,
+/// its most established anchors with what they do, and its groups. With `--import-json <dir>` it
+/// copies the Brains of an earlier JSON Knowledge directory into the memory instead.
 enum MemoryCommand {
 
     static func run(_ invocation: Invocation) async throws {
-        let application = try ApplicationLookup.running(try invocation.positional(0, "<app>"))
         let runtime = Runtime(invocation: invocation)
-        let bundleID = application.bundleIdentifier ?? "pid.\(application.processIdentifier)"
-        guard let knowledge = try await runtime.store.load(bundleID: bundleID) else {
-            print("nothing remembered about \(bundleID) under \(await runtime.store.directory.path)")
+        if let source = invocation.options["import-json"] {
+            try await importJSON(from: URL(fileURLWithPath: (source as NSString).expandingTildeInPath, isDirectory: true),
+                                 into: runtime)
             return
         }
-        let brain = knowledge.brain
+        let application = try ApplicationLookup.running(try invocation.positional(0, "<app>"))
+        let bundleID = application.bundleIdentifier ?? "pid.\(application.processIdentifier)"
+        let brain: UIBrain
+        do {
+            guard let stored = try await runtime.service.brain(of: bundleID) else {
+                print("nothing remembered about \(bundleID) in \(runtime.service.url.path)")
+                return
+            }
+            brain = stored
+        } catch {
+            print("the memory in \(runtime.service.url.path) cannot be read: \(MemoryService.describe(error))")
+            return
+        }
         print("\(bundleID): \(brain.objects.count) anchors, \(brain.groups.count) groups, "
-            + "\(brain.transitions.count) transitions, \(knowledge.windows.count) window states "
-            + "(\(knowledge.objectCount) objects), \(knowledge.menuCommands.count) menu commands, "
-            + "\(knowledge.routes.count) routes; observed \(brain.ingestEpoch) times")
+            + "\(brain.transitions.count) transitions; observed \(brain.ingestEpoch) times")
         let established = brain.objects.sorted { $0.seenCount > $1.seenCount }.prefix(15)
         if !established.isEmpty { print("anchors, most seen first:") }
         for anchor in established {
@@ -45,17 +55,51 @@ enum MemoryCommand {
             let members = "\(group.memberAnchors.count) \(group.sharedKind.rawValue)s"
             print("group \(group.name ?? group.axis.rawValue): \(members), seen \(group.seenCount)×")
         }
-        for route in knowledge.routes {
-            let standing = route.isActionable
-                ? "actionable"
-                : (route.demotedAt == nil ? "unearned" : "demoted: \(route.demotionCause ?? "")")
-            print("route \"\(route.name)\" ✓×\(route.evidence) \(standing)")
-            for step in route.steps { print("    \(step.summary)") }
-        }
         let opportunities = brain.namingOpportunities(limit: 5)
         if !opportunities.isEmpty { print("worth naming:") }
         for opportunity in opportunities {
             print("  \(opportunity.anchor.anchorKey.prefix(8)) score \(opportunity.score): \(opportunity.context)")
         }
+    }
+
+    /// Copies the Brain of every application file in an earlier JSON Knowledge directory into the
+    /// memory, as that application's projection, when the memory holds no Brain of it yet. The JSON
+    /// files are only read, never changed. An imported Brain has no evidence in the memory: the
+    /// counts it carries are the file's, and what the agent learns from now on adds to them.
+    private static func importJSON(from source: URL, into runtime: Runtime) async throws {
+        let files = ((try? FileManager.default.contentsOfDirectory(
+            at: source, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles]
+        )) ?? []).filter { file in
+            // The allowlist and a quarantined file are the store's own, not an application's.
+            let name = file.deletingPathExtension().lastPathComponent
+            return file.pathExtension == "json" && name != "allowlist" && !name.contains(".corrupt-")
+        }.sorted { $0.path < $1.path }
+        let decoder = KnowledgeCoding.makeDecoder()
+        let knowledge = files.compactMap { file -> AppKnowledge? in
+            guard let data = try? Data(contentsOf: file) else { return nil }
+            return try? decoder.decode(AppKnowledge.self, from: data)
+        }
+        guard !knowledge.isEmpty else {
+            print("no application files in \(source.path)")
+            return
+        }
+        let repositories = try await runtime.service.ready()
+        var imported = 0
+        for app in knowledge {
+            let brain = app.brain
+            do {
+                if try await repositories.brains.importProjection(brain, into: app.bundleID, now: Date()) {
+                    imported += 1
+                    print("imported \(app.bundleID): \(brain.objects.count) anchors, \(brain.groups.count) groups, "
+                          + "\(brain.transitions.count) transitions")
+                } else {
+                    print("kept \(app.bundleID): the memory already holds its Brain")
+                }
+            } catch {
+                print("could not import \(app.bundleID): \(MemoryService.describe(error))")
+            }
+        }
+        await runtime.finish()
+        print("\(imported) of \(knowledge.count) applications imported into \(runtime.service.url.path)")
     }
 }

@@ -3,15 +3,34 @@ import AutomationRuntime
 import EngineCore
 import Foundation
 import LocalMCP
+import Memory
 import PerceptionCore
 import PrivateSymbols
 import SeatCore
+
+/// CallProducer is who makes a set of tool calls, as the living memory records them: the source (the
+/// app's worker, an external client, the command line), the stream that tells two producers of one
+/// source apart, and the trace the producer is in now (a message, a conversation), which it updates.
+public struct CallProducer: Sendable, Equatable {
+    public var source: MemoryEventSource
+    public var streamID: String
+    public var traceID: String?
+
+    public init(source: MemoryEventSource, streamID: String, traceID: String? = nil) {
+        self.source   = source
+        self.streamID = streamID
+        self.traceID  = traceID
+    }
+}
 
 /// AutomationTools is the MCP adapter over AutomationSession. It validates a complete request before effects,
 /// requires the current ephemeral session ID, and records authoritative outcomes for the transcript.
 public final class AutomationTools {
     public let session: any AutomationSessionOperating
     public var record: ((String) throws -> Void)?
+    /// Who makes the calls, as the living memory records them: the app's worker, an external client,
+    /// the command line's chat. Each call is recorded under it, with the trace it names at that moment.
+    public var producer = CallProducer(source: .app, streamID: "tools-\(UUID().uuidString)")
     private var revision = 0
     /// The last scene sent to the model of each window it read, most recent last: what the next scene
     /// of that window is sent as changes against.
@@ -238,7 +257,53 @@ public final class AutomationTools {
         }
     }
 
+    /// Runs the call under its recorder, when the session has a memory: the call is recorded planned and
+    /// started before any effect, the engine reports to the recorder through `CallRecorder.current`, and
+    /// the call's end carries the result the tool answered, or its error. A request the contract cannot
+    /// represent is not recorded and the call runs as it always did.
     private func dispatch(_ name: String, _ arguments: JSONValue) async throws -> JSONValue {
+        let request = try? Self.callRequest(name, arguments == .null ? JSONValue.object([:]) : arguments)
+        guard let request, let recorder = makeRecorder(sessionID: session.id) else {
+            return try await answer(name, arguments, recorder: nil)
+        }
+        if case .batch = request {} else { await recorder.begin(request, app: memoryApplication) }
+        do {
+            let value = try await CallRecorder.$current.withValue(recorder) {
+                try await self.answer(name, arguments, recorder: recorder)
+            }
+            await recorder.end(.completed, result: lastResult, tool: request.tool)
+            return value
+        } catch {
+            await recorder.end(.failed, result: .error(message: String(describing: error)), tool: request.tool)
+            throw error
+        }
+    }
+
+    /// The recorder of one call over this session's memory, under the producer and its current trace.
+    private func makeRecorder(sessionID: UUID?, parent: CallRecorder? = nil, position: Int? = nil) -> CallRecorder? {
+        guard let directory = session.memoryDirectory else { return nil }
+        let service = MemoryService.shared(for: directory)
+        let brain   = BrainMemory(brains: service, applications: service, clock: { service.clock.brainNow() })
+        let context: ActionContext
+        if let parent, let position {
+            context = parent.context.child(position)
+        } else {
+            context = ActionContext(source: producer.source, streamID: producer.streamID, traceID: producer.traceID,
+                                    sessionID: sessionID?.uuidString)
+        }
+        return CallRecorder(memory: service, brain: brain, context: context)
+    }
+
+    /// The application the session holds, as a call's event names it.
+    private var memoryApplication: AppContextIdentity? {
+        session.memoryApplication.map { AppContextIdentity(bundleID: $0) }
+    }
+
+    /// The typed result of the call `answer` concluded last, for its record.
+    private var lastResult: AgentCallResult?
+
+    private func answer(_ name: String, _ arguments: JSONValue, recorder: CallRecorder?) async throws -> JSONValue {
+        lastResult = nil
         let arguments = arguments == .null ? JSONValue.object([:]) : arguments
         guard let definition = Self.definitions.first(where: { $0["name"].string == name }),
               let values = arguments.object else { throw AutomationFailure("Invalid tool arguments.") }
@@ -257,23 +322,33 @@ public final class AutomationTools {
         }
         switch name {
         case "status":
+            let screen = Permissions.preflight(.screenRecording), access = Permissions.preflight(.accessibility)
+            let post = Permissions.preflight(.postEvent)
             value = .object(["session": session.id.map { .string($0.uuidString) } ?? .null,
                 "permissions": .object([
-                    "screenRecording": .bool(Permissions.preflight(.screenRecording)),
-                    "accessibility": .bool(Permissions.preflight(.accessibility)),
-                    "postEvent": .bool(Permissions.preflight(.postEvent))
+                    "screenRecording": .bool(screen),
+                    "accessibility": .bool(access),
+                    "postEvent": .bool(post)
                 ])])
+            lastResult = .status(StatusResult(sessionID: session.id?.uuidString, screenRecording: screen,
+                                              accessibility: access, postEvent: post))
         case "windows":
             let apps: [NSRunningApplication]
             if values["app"] != nil { apps = [try RunningApplicationLookup.running(try string(arguments, "app"))] }
             else { apps = NSWorkspace.shared.runningApplications.filter { $0.activationPolicy == .regular } }
+            var listed: [ListedApplication] = []
             value = .object(["applications": .array(try apps.map { app in
                 let rows = try session.windowCandidates(ownedBy: app.processIdentifier)
+                listed.append(ListedApplication(
+                    name: app.localizedName ?? "", bundleID: app.bundleIdentifier ?? "", pid: Int64(app.processIdentifier),
+                    windows: rows.map { ListedWindow(number: Int64($0.number), title: $0.title ?? "") }
+                ))
                 return .object(["name": .string(app.localizedName ?? ""),
                     "bundleID": .string(app.bundleIdentifier ?? ""), "pid": .number(Double(app.processIdentifier)),
                     "windows": .array(rows.map { .object(["id": .number(Double($0.number)),
                                                          "title": .string($0.title ?? "")]) })])
             })])
+            lastResult = .listing(ListingResult(kind: .windows, applications: listed))
         case "apps":
             let found = try await session.applications(matching: optionalString(arguments, "query"))
             let shown = found.prefix(Self.applicationLimit)
@@ -282,36 +357,58 @@ public final class AutomationTools {
                 listing["more"] = .string("\(found.count - shown.count) more not listed; pass a query to find them.")
             }
             value = .object(listing)
+            lastResult = .listing(ListingResult(kind: .apps, applications: shown.map {
+                ListedApplication(name: $0.name, bundleID: $0.bundleID, version: $0.version, isRunning: $0.isRunning,
+                                  location: $0.location, isDefaultBrowser: $0.isDefaultBrowser)
+            }, hiddenCount: found.count - shown.count))
         case "open_session":
             let scene = try await session.open(application: string(arguments, "app"),
                                                 window: Self.windowTitle(arguments))
             value = observation(scene)
+            lastResult = await observed(by: recorder)
         case "observe":
             if values["full"] != nil, arguments["full"].bool == nil {
                 throw AutomationFailure("full must be true or false.")
             }
             let scene = try await session.observe()
             value = observation(scene, changesOnly: arguments["full"].bool != true)
+            lastResult = await observed(by: recorder)
         case "menu":
-            value = outcome(try await session.menu(path: string(arguments, "path")))
+            let done = try await session.menu(path: string(arguments, "path"))
+            value = outcome(done)
+            lastResult = .outcome(done.kind, message: done.message)
         case "press":
-            value = outcome(try await session.press(button: string(arguments, "button")))
+            let done = try await session.press(button: string(arguments, "button"))
+            value = outcome(done)
+            lastResult = .outcome(done.kind, message: done.message)
         case "act", "select", "type_text", "insert_text", "press_key", "scroll", "drag", "context_menu":
             let step = try Step(name, arguments)
-            value = outcome(try await perform(step))
+            let done = try await perform(step)
+            value = outcome(done)
+            lastResult = .outcome(done.kind, message: done.message)
         case "batch":
             guard let rows = arguments["steps"].array, (1...20).contains(rows.count) else {
                 throw AutomationFailure("batch requires 1...20 steps.")
             }
             let steps = try rows.map { try Step(string($0, "operation"), $0) }
+            // Each step is a call of its own, the batch's child at its position, recorded planned with it.
+            let children = recorder.map { parent in
+                steps.indices.compactMap { makeRecorder(sessionID: session.id, parent: parent, position: $0) }
+            }
+            if let recorder, let children, children.count == steps.count {
+                await recorder.begin(batch: zip(children, steps).map { ($0, $1.callRequest) }, app: memoryApplication)
+            }
             var results: [JSONValue] = []
             var complete = true
             var verified = 0
             for (index, step) in steps.enumerated() {
                 try Task.checkCancellation()
+                let child = children?.indices.contains(index) == true ? children?[index] : nil
+                await child?.startStep()
                 let result: ActOutcome
-                do { result = try await perform(step) }
+                do { result = try await CallRecorder.$current.withValue(child) { try await self.perform(step) } }
                 catch {
+                    await child?.end(.failed, result: .error(message: String(describing: error)), tool: step.callRequest.tool)
                     let guidance = session.id == nil
                         ? "Earlier effects remain. Use status and list current windows before opening a new session."
                         : "Earlier effects remain. Observe before deciding the next step."
@@ -324,22 +421,26 @@ public final class AutomationTools {
                 }
                 let value = outcome(result)
                 results.append(value)
+                await child?.end(.completed, result: .outcome(result.kind, message: result.message), tool: step.callRequest.tool)
                 try record?("← batch step \(index + 1) \(String(decoding: try JSONEncoder().encode(value), as: UTF8.self))")
                 let accepted = result.kind == .foundActed
                     || (result.kind == .actedNoop && step.isToggle)
                 if !accepted { complete = false; break }
                 verified += 1
             }
+            for child in (children ?? []).dropFirst(results.count) { await child.skip() }
             value = .object(["status": .string(complete ? "completed" : "stopped"),
                              "steps": .array(results), "attemptedSteps": .number(Double(results.count)),
                              "verifiedSteps": .number(Double(verified)),
                              "requested": .number(Double(steps.count))])
+            lastResult = .batch(stopped: !complete, attempted: results.count, verified: verified)
         case "close_session":
             await session.close()
             var result: [String: JSONValue] = ["status": .string("closed"),
                                                "message": .string("Application session closed.")]
             if let warning = session.closeWarning { result["warning"] = .string(warning) }
             value = .object(result)
+            lastResult = .closed(message: "Application session closed.")
         default: throw AutomationFailure("Unknown tool: \(name)")
         }
         let answered = Self.noted(value, session.seatNotice)
@@ -357,6 +458,31 @@ public final class AutomationTools {
         else { return value }
         object["notice"] = .string(notice)
         return .object(object)
+    }
+
+    /// The typed answer of an observation the recorder wrote as a sample: nil when it wrote none, which
+    /// the record keeps as an explicit gap.
+    private func observed(by recorder: CallRecorder?) async -> AgentCallResult? {
+        guard let recorder, let id = session.id, let sample = await recorder.lastObservation else { return nil }
+        return .observation(ObservationResult(sessionID: id.uuidString, sessionRevision: Int64(revision),
+                                              observedAtMS: recorder.memory.clock.calendarMS(), sample: sample))
+    }
+
+    /// The request of a call as the contract keeps it, from the arguments `answer` will decode the
+    /// same way; it throws for arguments the call itself would refuse.
+    static func callRequest(_ name: String, _ arguments: JSONValue) throws -> AgentCallRequest {
+        switch name {
+            case "status"       : return .status
+            case "windows"      : return .windows(app: try optionalString(arguments, "app"))
+            case "apps"         : return .apps(query: try optionalString(arguments, "query"))
+            case "open_session" : return .openSession(app: try requiredString(arguments, "app"), window: try windowTitle(arguments))
+            case "observe"      : return .observe(full: arguments["full"].bool == true)
+            case "menu"         : return .menu(path: try requiredString(arguments, "path"))
+            case "press"        : return .press(button: try requiredString(arguments, "button"))
+            case "batch"        : return .batch
+            case "close_session": return .closeSession
+            default             : return try Step(name, arguments).callRequest
+        }
     }
 
     private func perform(_ step: Step) async throws -> ActOutcome {
@@ -517,6 +643,18 @@ public final class AutomationTools {
 
         var isToggle: Bool {
             if case .act(_, .setToggle, _, _) = self { true } else { false }
+        }
+
+        /// The step as the call contract keeps it.
+        var callRequest: AgentCallRequest {
+            switch self {
+                case .act(let target, let verb, let section, let state):
+                    .act(target: target, verb: verb, value: state, section: section)
+                case .select(let control, let item):
+                    .select(control: control, item: item)
+                case .input(let input, let section):
+                    .input(input, section: section)
+            }
         }
 
         init(_ name: String, _ args: JSONValue) throws {

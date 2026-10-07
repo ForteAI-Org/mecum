@@ -45,6 +45,13 @@ final class WorkerAgentHost {
     private let workingDirectory: URL
     private let bridgeExecutable: URL
     private let tools           : AutomationTools
+
+    /// How the living memory records this host's calls: who makes them, and the trace of the message
+    /// the worker is answering now, which the owner sets before each turn.
+    var callProducer: CallProducer {
+        get { tools.producer }
+        set { tools.producer = newValue }
+    }
     private let router          : MCPRouter
     private let host            : LocalMCPHost
     private let provider        = CLIProvider()

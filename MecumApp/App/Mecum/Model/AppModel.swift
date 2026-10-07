@@ -24,7 +24,9 @@ final class AppModel {
 
     let settings = ModelSettingsStore()
 
-    /// External clients share the app's Seat broker and each have private engine state.
+    /// External clients share the app's Seat broker, each with an engine state of its own, and learn
+    /// into the same living memory as the workers: their calls are recorded with the `mcp` source and
+    /// the profile as their stream, so they stay apart from the workers' in the archive.
     lazy var mcp = MCPConnectionsModel(
         directory: WorkspaceLaunch.directory.appendingPathComponent("MCP", isDirectory: true),
         executable: Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/mecum-bridge")
@@ -32,9 +34,7 @@ final class AppModel {
         let desktop = BrokeredAutomationSession(
             broker: broker,
             workerID: UUID(),
-            knowledgeDirectory: WorkspaceLaunch.directory.appendingPathComponent(
-                "MCP/Knowledge/" + profile.id.uuidString, isDirectory: true
-            )
+            knowledgeDirectory: WorkspaceLaunch.directory.appendingPathComponent("Knowledge", isDirectory: true)
         )
         let session = ExternalMCPSession(
             profile: profile,

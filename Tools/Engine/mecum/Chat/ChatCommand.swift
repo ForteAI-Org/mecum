@@ -6,6 +6,7 @@ import Darwin
 import FileConversations
 import Foundation
 import LocalMCP
+import Memory
 import PrivateSymbols
 
 /// ChatCommand composes the terminal, provider adapter, transcript store and one ephemeral MCP host.
@@ -68,6 +69,8 @@ enum ChatCommand {
             ?? support.appendingPathComponent("Knowledge", isDirectory: true)
         let tools = ChatTools(session: AutomationSession(knowledgeDirectory: knowledge,
                                                         allowsDestructive: options.allowDestructive))
+        tools.producer = CallProducer(source: .cli, streamID: "chat-" + selected.id.uuidString,
+                                      traceID: selected.id.uuidString)
         tools.record = { text in
             print("  \(text.prefix(240))")
             try transcript.append(.tool, text)

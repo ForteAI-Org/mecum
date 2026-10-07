@@ -286,9 +286,18 @@ let package = Package(
             "SeatBroker",
             ["SeatBroker", "PerceptionCore", "SeatCore", "SeatCapture",
              "SeatSession", "SeatInput", "TargetReader", "EngineCore", "ModelTransports",
-             "SeatDriving", "AutomationRuntime", "Engine", "AutomationMCP", "LocalMCP"]
+             "SeatDriving", "AutomationRuntime", "Engine", "AutomationMCP", "LocalMCP", "Memory"]
         ),
         brokerTests("ModelTransports", ["ModelTransports"]),
+        // The living memory wired to the tools, the sessions and the engine: the queue, the recorder, the
+        // calls the tools record and what an action waits for. No desktop, no seat.
+        .testTarget(
+            name         : "AutomationRuntimeTests",
+            dependencies : ["AutomationRuntime", "AutomationMCP", "Memory", "SQLiteMemory", "EngineCore",
+                            "PerceptionCore", "LocalMCP"].map { .target(name: $0) },
+            path         : "Tests/Integration/AutomationRuntimeTests",
+            swiftSettings: suite
+        ),
 
         // Host (TCC, real display) and Live (fixture and reader) tiers, gated by
         // AGENTSEAT_HOST_TESTS=1 and AGENTSEAT_LIVE_TESTS=1 and run serialized.
@@ -381,16 +390,16 @@ let package = Package(
         .target(name: "LocalMCP", path: "Sources/Chat/LocalMCP", swiftSettings: facility),
         integration("AutomationRuntime", ["Perception", "VisionText", "PixelSections", "PixelRegions", "WindowServerListing", "AccessibilityFacts",
                     "ScreenCapture", "Engine", "EngineCore", "HIDActuation", "AccessibilityActions",
-                    "WorkspaceActivation", "Memory", "FileKnowledge", "LiveScenes", "PerceptionCore",
+                    "WorkspaceActivation", "Memory", "SQLiteMemory", "LiveScenes", "PerceptionCore",
                     "SeatDriving", "SeatCore", "SeatSession", "PrivateSymbols", "WindowPlacement"]),
-        integration("AutomationMCP", ["AutomationRuntime", "LocalMCP", "EngineCore", "PerceptionCore",
+        integration("AutomationMCP", ["AutomationRuntime", "LocalMCP", "EngineCore", "PerceptionCore", "Memory",
                                      "PrivateSymbols", "SeatCore", "WindowServerListing"]),
         // The foreground command line: windows, scene, act, memory. What a model host does, by hand.
         .executableTarget(
             name: "mecum",
             dependencies: ["Perception", "PerceptionCore", "VisionText", "WindowServerListing", "AccessibilityFacts",
                            "ScreenCapture", "Engine", "EngineCore", "HIDActuation", "AccessibilityActions",
-                           "WorkspaceActivation", "Memory", "FileKnowledge", "LiveScenes",
+                           "WorkspaceActivation", "Memory", "FileKnowledge", "SQLiteMemory", "LiveScenes",
                            "SeatDriving", "SeatCore", "SeatSession", "PrivateSymbols", "AutomationRuntime",
                            "ChatCore", "CLIProviders", "FileConversations", "LocalMCP", "AutomationMCP", "SceneOverlay", "InteractionListener", "InteractionObservation"].map { .target(name: $0) },
             path: "Tools/Engine/mecum",

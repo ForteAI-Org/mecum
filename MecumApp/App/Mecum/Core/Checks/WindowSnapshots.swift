@@ -345,7 +345,8 @@ enum WindowSnapshots {
 
             // The Brain, from a knowledge directory the run names, since the snapshot store learns nothing.
             if let knowledge = ProcessInfo.processInfo.environment["MECUM_SNAPSHOT_KNOWLEDGE_DIR"],
-               let app = BrainLibrary.apps(in: URL(filePath: knowledge, directoryHint: .isDirectory)).first {
+               case .loaded(let known) = await BrainLibrary.apps(in: URL(filePath: knowledge, directoryHint: .isDirectory)),
+               let app = known.first {
                 let brains: [(name: String, page: AnyView)] = [
                     ("brain-apps", AnyView(BrainSettings(directory: URL(filePath: knowledge, directoryHint: .isDirectory)))),
                     ("brain-graph", AnyView(BrainGraphView(simulation: BrainSimulation(graph: BrainGraph(brain: app.brain))))),

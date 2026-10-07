@@ -1,6 +1,8 @@
 import AutomationMCP
 import AutomationRuntime
+import Foundation
 import LocalMCP
+import Memory
 
 /// ExternalMCPSession exposes the current engine for one authenticated client connection.
 /// The host serializes requests and drains them before closing this session. Disconnects
@@ -36,6 +38,7 @@ final class ExternalMCPSession {
     ) {
         self.profile = profile
         self.tools = AutomationTools(session: session)
+        self.tools.producer = CallProducer(source: .mcp, streamID: "mcp-" + profile.id.uuidString)
         self.perform = perform
         self.activity = activity
     }

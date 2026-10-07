@@ -6,6 +6,7 @@
 //
 
 import AppKit
+import AutomationRuntime
 import Foundation
 import Memory
 
@@ -28,37 +29,33 @@ struct BrainApp: Identifiable {
     }
 }
 
-/// BrainLibrary reads the Brain's files, one JSON file per application in the
-/// knowledge directory the workers and the command line share. It only reads,
-/// through the kit's own decoder and without the store's lock, so a worker
-/// writing at the same time is never held up; a file caught mid-write is read
-/// again on the next visit.
+/// BrainLibraryState is what the Brain page can show: the applications the living memory holds a
+/// Brain of, possibly none yet, or an archive that cannot be read, with the reason, which is never
+/// shown as an empty Brain.
+enum BrainLibraryState {
+    case loaded([BrainApp])
+    case unavailable(String)
+}
+
+/// BrainLibrary reads the Brain from the living memory of the knowledge directory the workers and the
+/// command line share: the process's own `MemoryService` for it, which reads without waiting for a
+/// worker writing at the same time. A directory with no archive yet holds no Brain, and reading it
+/// creates nothing.
 enum BrainLibrary {
 
-    static func apps(in directory: URL) -> [BrainApp] {
-        let files = (try? FileManager.default.contentsOfDirectory(
-            at                        : directory,
-            includingPropertiesForKeys: nil,
-            options                   : [.skipsHiddenFiles]
-        )) ?? []
-        let decoder = KnowledgeCoding.makeDecoder()
-
-        return files
-            .filter { $0.pathExtension == "json" && !isBookkeeping($0) }
-            .compactMap { file -> BrainApp? in
-                guard let data = try? Data(contentsOf: file),
-                      let knowledge = try? decoder.decode(AppKnowledge.self, from: data)
-                else { return nil }
-
-                return app(for: knowledge)
+    static func apps(in directory: URL) async -> BrainLibraryState {
+        let memory = MemoryService.shared(for: directory)
+        guard memory.archiveExists else { return .loaded([]) }
+        do {
+            var apps: [BrainApp] = []
+            for entry in try await memory.overview().apps {
+                guard let brain = try await memory.brain(of: entry.bundleID) else { continue }
+                apps.append(app(for: AppKnowledge(bundleID: entry.bundleID, brain: brain)))
             }
-            .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
-    }
-
-    /// The allowlist and a quarantined file are the store's own, not an application's.
-    private static func isBookkeeping(_ file: URL) -> Bool {
-        let name = file.deletingPathExtension().lastPathComponent
-        return name == "allowlist" || name.contains(".corrupt-")
+            return .loaded(apps.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending })
+        } catch {
+            return .unavailable(MemoryService.describe(error))
+        }
     }
 
     private static func app(for knowledge: AppKnowledge) -> BrainApp {

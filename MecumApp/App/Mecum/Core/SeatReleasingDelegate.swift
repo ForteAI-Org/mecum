@@ -6,6 +6,7 @@
 //
 
 import AppKit
+import AutomationRuntime
 import SeatBroker
 
 /// Quitting gives the seat back and keeps what was typed.
@@ -62,6 +63,12 @@ final class SeatReleasingDelegate: NSObject, NSApplicationDelegate {
                 for team in agents { await team.closeAgentHosts() }
                 // A worker's seat is parked warm once given back; this takes its display down too.
                 await model?.broker.queue.shutdown()
+            }
+
+            // What the workers and the clients taught is written before the process ends, within the
+            // memory's own closing budget; what is left after it is a counted gap.
+            await Self.bounded(.seconds(4)) {
+                await MemoryService.closeAll()
             }
 
             sender.reply(toApplicationShouldTerminate: true)

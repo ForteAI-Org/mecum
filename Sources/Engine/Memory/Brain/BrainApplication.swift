@@ -164,6 +164,16 @@ public struct BrainApplicationCommand: Sendable {
         )
     }
 
+    /// What an action taught, as `BrainMemory.record` reads it: the verb, the target element's
+    /// detection and the effect, which must be one the projection can store and rebuild.
+    public static func record(_ record: ActionRecord, eventID: String, requestedAt: Date) throws -> BrainApplicationCommand {
+        try BrainApplicationCommand(
+            key: .record(eventID: eventID), bundleID: record.bundleID, requestedAtMS: try canonical(requestedAt),
+            input: .record(verb: record.verb, target: BrainDetection(record.element),
+                           effect: try record.effect.map { try TransitionEffectRecord(effect: $0.encoded) })
+        )
+    }
+
     /// A deliberate naming, as `BrainUpdater.setName` takes it.
     public static func setName(
         _ name     : String,

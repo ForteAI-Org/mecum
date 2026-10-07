@@ -91,6 +91,23 @@ public struct SQLiteBrainRepository: BrainStoring {
         }
     }
 
+    /// Writes a whole Brain as the application's projection, for the manual import of an earlier JSON
+    /// Knowledge directory: false, changing nothing, when the application already has anchors, groups
+    /// or transitions. No application or evidence row is written: the imported counts are the file's.
+    ///
+    /// The rows are written at the Brain's own last instant, never later: a row the import stamps
+    /// is then no newer than what the file says it saw. `now` is used only for a Brain that saw
+    /// nothing.
+    public func importProjection(_ imported: UIBrain, into bundleID: String, now: Date) async throws -> Bool {
+        let latest = (imported.objects.map(\.lastSeen) + imported.groups.map(\.lastSeen)
+            + imported.transitions.map(\.lastObserved)).max() ?? now
+        return try await mutate(bundleID, now: latest) { brain, _ in
+            guard brain.objects.isEmpty, brain.groups.isEmpty, brain.transitions.isEmpty else { return (false, DecayReport()) }
+            brain = imported
+            return (true, DecayReport())
+        }
+    }
+
     /// Loads the projection, applies the body at the canonical clock and writes the difference, in
     /// one write transaction. The body answers its result and what it retired.
     private func mutate<T: Sendable>(

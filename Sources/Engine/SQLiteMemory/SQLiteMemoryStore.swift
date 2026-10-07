@@ -439,6 +439,15 @@ public actor SQLiteMemoryStore {
         }
     }
 
+    /// The archive's data version as the reader sees it: a number that moves whenever a commit by
+    /// another connection, of this process or another one, changed the file since the reader last
+    /// looked. A cache of what was read stays good while it does not move.
+    public func dataVersion() async throws -> Int64 {
+        try await read { snapshot in
+            try snapshot.query("PRAGMA data_version") { $0.integer(0) ?? 0 }.first ?? 0
+        }
+    }
+
     // MARK: Checkpoint
 
     /// Runs one passive checkpoint on the writer: frames of the log are copied into the file as far

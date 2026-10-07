@@ -9,7 +9,6 @@ import AppKit
 import AccessibilityActions
 import Engine
 import EngineCore
-import FileKnowledge
 import Foundation
 import HIDActuation
 import Memory
@@ -23,6 +22,10 @@ import WorkspaceActivation
 /// roles are the foreground pair (a still of the real screen, events at the HID tap, the workspace
 /// raising the application); with one they are the Seat's (its stills, its routed commands, no
 /// raising at all), and the engine is the same.
+///
+/// Memory is the living memory of the Knowledge directory: the process's one `MemoryService` for
+/// it, shared with every other runtime on the same directory, and the Brain read from it. What a
+/// call teaches reaches the memory through the call's `CallRecorder`, which `recorder(_:)` makes.
 public struct EngineRuntime {
 
     public let windows = WindowServerWindowListing()
@@ -30,7 +33,7 @@ public struct EngineRuntime {
     public let actuator: any Actuating
     public let controls: any ControlPressing
     public let activation: (any ApplicationActivating)?
-    public let store: FileKnowledgeStore
+    public let service: MemoryService
     public let memory: BrainMemory
 
     public init(knowledgeDirectory: URL, seat: SeatTarget? = nil) {
@@ -46,16 +49,21 @@ public struct EngineRuntime {
             controls   = AccessibilityController()
             activation = WorkspaceActivator()
         }
-        store = FileKnowledgeStore(
-            directory  : knowledgeDirectory,
-            clock      : { Date() },
-            diagnostics: { Logger(subsystem: "dev.forte.Mecum", category: "Knowledge").error("\($0, privacy: .private)") }
-        )
-        memory = BrainMemory(store: store, clock: { Date() })
+        let service = MemoryService.shared(for: knowledgeDirectory)
+        self.service = service
+        memory = BrainMemory(brains: service, applications: service, clock: { service.clock.brainNow() })
     }
 
-    /// The engine over the foreground adapters, remembering through the brain.
+    /// The recorder of a call made outside the tools, for the engine and the session to report to: a
+    /// command line action, or a session's own observation. A call through the tools brings its own.
+    public func recorder(_ context: ActionContext) -> CallRecorder {
+        CallRecorder(memory: service, brain: memory, context: context)
+    }
+
+    /// The engine over the foreground adapters, expecting from the Brain and reporting to the call's
+    /// recorder, which carries what it saw and taught to the memory.
     public func engine(
+        recorder                    : CallRecorder,
         allowsDestructive           : Bool,
         contextMenusOnTextFieldsOnly: Bool = false,
         selectsFieldsByTripleClick  : Bool = false,
@@ -69,7 +77,7 @@ public struct EngineRuntime {
                 controls    : controls,
                 activation  : activation,
                 expectations: memory,
-                observer    : memory
+                observer    : recorder
             ),
             permissions: ActionPermissions(
                 allowsDestructive           : allowsDestructive,
@@ -80,9 +88,9 @@ public struct EngineRuntime {
         )
     }
 
-    /// Writes every pending memory change before the process exits.
+    /// Waits, within the memory's closing budget, for what this process still has to write.
     public func finish() async {
-        await store.flush()
+        await service.flush(within: service.configuration.closingBudget)
     }
 
 }

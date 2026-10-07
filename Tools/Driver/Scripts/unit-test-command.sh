@@ -9,7 +9,7 @@ fi
 
 # Keeping the other targets in SwiftPM preserves their XCTest execution as well
 # as their Swift Testing suites. Filtered-out and empty Swift Testing bundles
-# produce no summary, so the enclosing tier requires 26 here and one below.
+# produce no summary, so the enclosing tier requires 27 here and one below.
 "$@" test --no-parallel --skip '^SeatSessionTests[./]'
 mecum_unit_bin_dir=$("$@" build --show-bin-path)
 exec .build/native-driver-test-main \

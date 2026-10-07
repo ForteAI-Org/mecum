@@ -33,14 +33,14 @@ BASELINES := Tests/Driver/Benchmarks/Baselines
 BENCH_OUT := .build/bench
 REPORTS   := Documentation/Driver/compatibility
 
-# SwiftPM filters out SeatSession and reports 26 Swift Testing summaries.
+# SwiftPM filters out SeatSession and reports 27 Swift Testing summaries.
 # Filtering also omits the empty Swift Testing companions of the two XCTest-only
 # targets; their XCTest tests still run. SeatSession's 674 tests run separately
-# through the synchronous native entry point, for 27 required summaries:
+# through the synchronous native entry point, for 28 required summaries:
 # AppKit RunLoop pumping can also end this otherwise pure bundle before its
 # async main reports completion.
 # The app's own tests remain in MecumTests. This is a run count, not a test count.
-UNIT_BUNDLES := 27
+UNIT_BUNDLES := 28
 
 # The seat cycle, alone in its own process.
 HOST_CYCLE_TESTS := 1

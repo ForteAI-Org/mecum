@@ -10,6 +10,7 @@ import AutomationRuntime
 import Engine
 import EngineCore
 import Foundation
+import Memory
 import PerceptionCore
 import SeatBroker
 import SeatDriving
@@ -115,7 +116,8 @@ struct BorrowedSeatSpikeTests {
         }
         if let control {
             print("SPIKE act: click \(control.role ?? "") '\(control.label)' #\(control.id)")
-            let outcome = await runtime.engine(allowsDestructive: false).act(ActionRequest(
+            let recorder = runtime.recorder(ActionContext(source: .system, streamID: "borrowed-seat-spike"))
+            let outcome = await runtime.engine(recorder: recorder, allowsDestructive: false).act(ActionRequest(
                 processID: pid,
                 bundleID : opened.bundleID,
                 appName  : opened.name,
