@@ -62,7 +62,8 @@ import SeatCore
 /// Starting that stream costs about 135 ms a Still (size 46, start 80, stop 8,
 /// measured 7 October 2026). When the consumer composed `liveFrames`, a window
 /// Still first asks it for a frame displayed after the request, within
-/// `LiveFrameHandover.bound`, and hands it over only after `LiveFrameHandover`
+/// `LiveFrameHandover.bound` (`boundAfterRest` when it must wake the stream), and
+/// hands it over only after `LiveFrameHandover`
 /// accepts it against fresh window server readings, as a copy out of the
 /// stream's pool. Any refusal takes the Still above. Hosted-sheet crops and
 /// menu surfaces never use it: the running stream shows one window.
@@ -145,7 +146,7 @@ nonisolated public struct SeatCaptureObservationSource: ObservedSurfaceSourcing 
 
     /// Asks `source` for a frame of `identity` displayed after `notBefore` and answers it, copied
     /// out of the stream's pool, only when `LiveFrameHandover` accepts it against `readings`
-    /// taken after it arrived. The wait is the tighter of the bound and the request's deadline.
+    /// taken after it arrived. Each wait is the tighter of its bound and the request's deadline.
     func liveFrame(
         of identity             : WindowIdentity,
         displayedAfter notBefore: UInt64,
@@ -159,8 +160,13 @@ nonisolated public struct SeatCaptureObservationSource: ObservedSurfaceSourcing 
         defer { phase.end() }
         #endif
         let remaining = deadlineNanoseconds > notBefore ? deadlineNanoseconds - notBefore : 0
-        let bound = min(LiveFrameHandover.bound, .nanoseconds(Int64(min(remaining, UInt64(Int64.max)))))
-        let answer = await source.liveFrame(of: identity, displayedAfter: notBefore, within: bound)
+        let left = Duration.nanoseconds(Int64(min(remaining, UInt64(Int64.max))))
+        let answer = await source.liveFrame(
+            of             : identity,
+            displayedAfter : notBefore,
+            within         : min(LiveFrameHandover.bound, left),
+            afterRestWithin: min(LiveFrameHandover.boundAfterRest, left)
+        )
         guard case .success(let frame) = answer else { return answer }
         if let refusal = LiveFrameHandover.refusal(
             of            : frame,

@@ -44,6 +44,13 @@ nonisolated enum LiveFrameHandover {
     /// later, so three frame intervals is the bound; a stream that misses it is not delivering.
     static let bound: Duration = .milliseconds(100)
 
+    /// How long an observation waits when the stream first has to be woken from its rest rate
+    /// (ADR 0036). The wake, `preview.update:rate.30`, measured 59 to 69 ms across six apps on
+    /// 7 October 2026, and the first 30 fps frame after it is up to 33 ms later: about 100 ms in
+    /// the worst measured case, which `bound` would miss. 150 ms leaves about 50 ms of scheduling
+    /// slack, and a wake that misses it costs the Still as before.
+    static let boundAfterRest: Duration = .milliseconds(150)
+
     /// What the window server says about the window at the hand-over.
     struct Readings: Equatable {
         var identity    : WindowIdentity?

@@ -23,7 +23,8 @@ import SeatCore
 /// A conformer answers the first complete Frame of `identity` that WindowServer displayed after
 /// `notBefore`, an uptime instant in nanoseconds, waiting at most `bound`, or the reason it has
 /// none. It declines rather than waits when it is not streaming that exact window right now:
-/// another window, the whole display, a recovery, no stream at all, a stream at its rest rate.
+/// another window, the whole display, a recovery, no stream at all. A stream at a rest rate it
+/// wakes, and then waits for a frame displayed after the instant like any other (ADR 0036).
 ///
 /// Nothing a conformer answers is trusted as evidence. `SeatCaptureObservationSource` attests the
 /// window's identity, the display time, the window's rectangle and the frame's size again at the
@@ -39,6 +40,28 @@ public protocol LiveWindowFrameSourcing: AnyObject, Sendable {
         displayedAfter notBefore: UInt64,
         within bound            : Duration
     ) async -> Result<SeatFrame, LiveFrameFallback>
+
+    /// As `liveFrame(of:displayedAfter:within:)`, with a longer bound for a request that finds the
+    /// stream at a rest rate and must wake it first. The default ignores it, for a source with no
+    /// rest rate.
+    func liveFrame(
+        of identity              : WindowIdentity,
+        displayedAfter notBefore : UInt64,
+        within bound             : Duration,
+        afterRestWithin restBound: Duration
+    ) async -> Result<SeatFrame, LiveFrameFallback>
+}
+
+extension LiveWindowFrameSourcing {
+
+    public func liveFrame(
+        of identity              : WindowIdentity,
+        displayedAfter notBefore : UInt64,
+        within bound             : Duration,
+        afterRestWithin restBound: Duration
+    ) async -> Result<SeatFrame, LiveFrameFallback> {
+        await liveFrame(of: identity, displayedAfter: notBefore, within: bound)
+    }
 }
 
 /// LiveFrameFallback is why an observation took a stream Still instead of a frame of the running
@@ -51,8 +74,9 @@ public enum LiveFrameFallback: Error, Equatable, Sendable {
     /// The stream stopped and its bounded recovery is still trying.
     case recovering
 
-    /// The stream is running at a lower rate because nothing used it for a while. The request
-    /// woke it, and a later request reads it at its full rate; this one takes the Still.
+    /// The stream was at a lower rate because nothing used it for a while. The request woke it
+    /// and waited, but the wake was still unconfirmed and no frame displayed after the instant
+    /// came within the bound; the Still is taken, and a later request finds the stream awake.
     case resting
 
     /// The person pinned the live picture to the whole display, and a display frame is never

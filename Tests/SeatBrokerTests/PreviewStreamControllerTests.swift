@@ -23,9 +23,11 @@ private final class FakePreviewStream: PreviewCaptureStreaming {
     var startPauses = false
     var stopKeepsResource = false
     var updateFails = false
+    var updatePauses = false
     private(set) var configuredPixelSize: CGSize = .zero
     private(set) var configuredFramesPerSecond = 0
     private var startContinuation: CheckedContinuation<Void, Never>?
+    private var updateContinuation: CheckedContinuation<Void, Never>?
 
     init(target: SeatCaptureTarget, name: String, events: EventLog) {
         self.target = target
@@ -48,6 +50,9 @@ private final class FakePreviewStream: PreviewCaptureStreaming {
 
     func updateConfiguration(_ configuration: SeatCaptureConfiguration, timeout: Duration) async throws {
         events.values.append("update \(name)")
+        if updatePauses {
+            await withCheckedContinuation { updateContinuation = $0 }
+        }
         if updateFails { throw Failure.start }
         configuredPixelSize = configuration.pixelSize
         configuredFramesPerSecond = configuration.framesPerSecond
@@ -65,6 +70,11 @@ private final class FakePreviewStream: PreviewCaptureStreaming {
 
     func detach(_ layer: MonitorLayer) {
         events.values.append("detach \(name)")
+    }
+
+    func resumeUpdate() {
+        updateContinuation?.resume()
+        updateContinuation = nil
     }
 
     func resumeStart() {
@@ -987,37 +997,210 @@ func aUseLeavesTheRestBeforeAFrameIsRequested() async throws {
     }
 }
 
-/// A frame request that finds the stream resting never reaches the stream, so no frame from the
-/// rest can be handed over: it declines with `resting`, which is the Still, and wakes the stream
-/// for the next request, which waits for a frame displayed after its own instant.
-@Test @MainActor
-func aRequestDuringRestTakesTheStillAndWakesTheStream() async throws {
-    let events = EventLog()
-    var streams: [FakePreviewStream] = []
-    let controller = restingController(delay: .milliseconds(200), events: events) { streams.append($0) }
-    let window = identity(62)
-    try await controller.start(identity: window, frame: CGRect(x: 0, y: 0, width: 4, height: 4),
-                               pixelSize: CGSize(width: 4, height: 4))
-    let stream = try #require(streams.first)
-    stream.offeredFrame = liveFrame(of: window)
+/// A resting stream whose frames are served by a `FrameWaiters` the test feeds, as the running
+/// stream's own waiting is.
+@MainActor
+private func restedController(
+    window: WindowIdentity,
+    events: EventLog
+) async throws -> (PreviewStreamController, FakePreviewStream, FrameWaiters) {
+    let waiters = FrameWaiters()
+    var made: FakePreviewStream?
+    let controller = restingController(delay: .milliseconds(200), events: events) {
+        $0.waiters = waiters
+        made = $0
+    }
+    let rect = CGRect(x: 0, y: 0, width: 4, height: 4)
+    try await controller.start(identity: window, frame: rect, pixelSize: rect.size)
+    let stream = try #require(made)
     await controller.waitForRestTimer()
+    #expect(controller.isResting)
+    return (controller, stream, waiters)
+}
 
-    let during = await controller.liveFrame(of: window, displayedAfter: 7, within: .milliseconds(100))
-    #expect(during.failureReason == .resting)
-    #expect(stream.frameWaits.isEmpty)
+/// Presents a frame displayed at the moment it is called, from off the main actor after `delay`.
+private func presentFrame(of window: WindowIdentity, to waiters: FrameWaiters, after delay: Duration) {
+    Task.detached {
+        try? await Task.sleep(for: delay)
+        if let frame = liveFrame(of: window, displayTime: mach_absolute_time()) {
+            waiters.offer(frame)
+        }
+    }
+}
+
+/// A request that finds the stream resting wakes it and waits for a frame displayed after its own
+/// instant, within the longer after-rest bound, instead of declining at once.
+@Test @MainActor
+func aRequestDuringRestWakesTheStreamAndWaitsForAFreshFrame() async throws {
+    let window = identity(62)
+    let (controller, stream, waiters) = try await restedController(window: window, events: EventLog())
+
+    let notBefore = DispatchTime.now().uptimeNanoseconds
+    presentFrame(of: window, to: waiters, after: .milliseconds(25))
+    let answer = await controller.liveFrame(
+        of             : window,
+        displayedAfter : notBefore,
+        within         : .milliseconds(100),
+        afterRestWithin: .milliseconds(400)
+    )
+    let frame = try answer.get()
+    let clock = MachAbsoluteContentClock()
+    let shown = try #require(frame.displayTime.flatMap { clock.displayTimeNanoseconds(fromMachTicks: $0) })
+    #expect(shown > notBefore)
+    #expect(stream.frameWaits.map(\.bound) == [.milliseconds(400)])
     #expect(!controller.isResting)
-
-    // The wake is queued, not confirmed: the next request still takes the Still.
-    let waking = await controller.liveFrame(of: window, displayedAfter: 8, within: .milliseconds(100))
-    #expect(waking.failureReason == .resting)
-    #expect(stream.frameWaits.isEmpty)
 
     await controller.waitForPendingTransition()
     #expect(stream.configuredFramesPerSecond == 30)
-    let after = await controller.liveFrame(of: window, displayedAfter: 9, within: .milliseconds(100))
-    #expect(after.failureReason == nil)
-    #expect(stream.frameWaits.last?.notBefore == 9)
+
+    // Awake and confirmed: the plain bound again.
+    let next = DispatchTime.now().uptimeNanoseconds
+    presentFrame(of: window, to: waiters, after: .milliseconds(10))
+    #expect(await controller.liveFrame(
+        of             : window,
+        displayedAfter : next,
+        within         : .milliseconds(100),
+        afterRestWithin: .milliseconds(400)
+    ).failureReason == nil)
+    #expect(stream.frameWaits.map(\.bound) == [.milliseconds(400), .milliseconds(100)])
+    #expect(waiters.waitingCount == 0)
     await controller.tearDown()
+}
+
+/// No qualifying frame inside the after-rest bound: the request declines, with nothing handed over
+/// and nothing left waiting. The wake had been confirmed, so the reason is `noFrameInBound`.
+@Test @MainActor
+func aRequestDuringRestWithNoFrameInTheBoundDeclines() async throws {
+    let window = identity(65)
+    let (controller, stream, waiters) = try await restedController(window: window, events: EventLog())
+
+    let started = DispatchTime.now().uptimeNanoseconds
+    let answer = await controller.liveFrame(
+        of             : window,
+        displayedAfter : started,
+        within         : .milliseconds(100),
+        afterRestWithin: .milliseconds(40)
+    )
+    let waited = DispatchTime.now().uptimeNanoseconds - started
+    #expect(answer.failureReason == .noFrameInBound)
+    #expect(waited < 400_000_000, "the wait ends with its bound")
+    #expect(stream.configuredFramesPerSecond == 30, "the stream was woken all the same")
+    #expect(waiters.waitingCount == 0)
+    await controller.tearDown()
+}
+
+/// While the wake update is still in flight the stream is at the rest rate and unconfirmed: a frame
+/// displayed after the instant is served all the same, and with none the reason is `resting`.
+@Test @MainActor
+func aRequestWhileTheWakeIsInFlightFollowsTheSameRule() async throws {
+    let window = identity(66)
+    let events = EventLog()
+    let (controller, stream, waiters) = try await restedController(window: window, events: events)
+    stream.updatePauses = true
+    events.values.removeAll()
+    controller.noteActivity(.turn)
+    for _ in 0..<100 where events.values.isEmpty { await Task.yield() }
+    #expect(events.values == ["update s"], "the wake update is in flight")
+    #expect(stream.configuredFramesPerSecond == 1, "and not confirmed")
+
+    let notBefore = DispatchTime.now().uptimeNanoseconds
+    presentFrame(of: window, to: waiters, after: .milliseconds(15))
+    let served = await controller.liveFrame(
+        of             : window,
+        displayedAfter : notBefore,
+        within         : .milliseconds(100),
+        afterRestWithin: .milliseconds(400)
+    )
+    #expect(served.failureReason == nil, "a frame at the rest rate, displayed after the instant, is fresh")
+    #expect(stream.frameWaits.map(\.bound) == [.milliseconds(400)])
+
+    let missed = await controller.liveFrame(
+        of             : window,
+        displayedAfter : DispatchTime.now().uptimeNanoseconds,
+        within         : .milliseconds(100),
+        afterRestWithin: .milliseconds(40)
+    )
+    #expect(missed.failureReason == .resting, "the wake never confirmed inside the bound")
+
+    stream.updatePauses = false
+    stream.resumeUpdate()
+    await controller.waitForPendingTransition()
+    #expect(stream.configuredFramesPerSecond == 30)
+    #expect(waiters.waitingCount == 0)
+    await controller.tearDown()
+}
+
+/// A frame displayed before the request's instant is never handed over, whether it was kept from
+/// the rest or presented during the wait.
+@Test @MainActor
+func aFrameDisplayedBeforeTheRequestIsNeverHandedOver() async throws {
+    let window = identity(67)
+    let (controller, _, waiters) = try await restedController(window: window, events: EventLog())
+
+    let drawnDuringRest = try #require(liveFrame(of: window, displayTime: mach_absolute_time()))
+    waiters.offer(drawnDuringRest)
+    try await Task.sleep(for: .milliseconds(5))
+    let notBefore = DispatchTime.now().uptimeNanoseconds
+
+    // Delivered during the wait, but displayed before the instant.
+    Task.detached {
+        try? await Task.sleep(for: .milliseconds(10))
+        if let late = liveFrame(of: window, displayTime: drawnDuringRest.displayTime ?? 1) { waiters.offer(late) }
+    }
+    let answer = await controller.liveFrame(
+        of             : window,
+        displayedAfter : notBefore,
+        within         : .milliseconds(100),
+        afterRestWithin: .milliseconds(60)
+    )
+    #expect(answer.failureReason == .noFrameInBound)
+    await controller.tearDown()
+}
+
+/// A settle that finds the stream resting wakes it and uses the frames that come, and never waits
+/// past its cap, with frames or without.
+@Test @MainActor
+func aSettleDuringRestUsesTheFramesThatComeWithinItsCap() async throws {
+    let window = identity(68)
+    let cap: Duration = .milliseconds(200)
+    let clock = MachAbsoluteContentClock()
+
+    func settle(_ controller: PreviewStreamController) async -> (SeatSettler.Ending, UInt64) {
+        let started = DispatchTime.now().uptimeNanoseconds
+        let ending = await SeatSettler.wait(
+            cap        : cap,
+            next       : { after, bound in
+                await controller.liveFrame(of: window, displayedAfter: after, within: bound)
+            },
+            displayedAt: { $0.displayTime.flatMap { clock.displayTimeNanoseconds(fromMachTicks: $0) } },
+            now        : { DispatchTime.now().uptimeNanoseconds },
+            sleep      : { try? await Task.sleep(for: $0) }
+        )
+        return (ending, DispatchTime.now().uptimeNanoseconds - started)
+    }
+
+    // Frames arrive once the wake is under way: they are used, nothing changes, the whole cap.
+    let (woken, wokenStream, wokenWaiters) = try await restedController(window: window, events: EventLog())
+    let producer = Task.detached {
+        try? await Task.sleep(for: .milliseconds(30))
+        while !Task.isCancelled {
+            if let frame = liveFrame(of: window, displayTime: mach_absolute_time()) { wokenWaiters.offer(frame) }
+            try? await Task.sleep(for: .milliseconds(15))
+        }
+    }
+    let (quiet, quietElapsed) = await settle(woken)
+    producer.cancel()
+    #expect(quiet == .quiet)
+    #expect(quietElapsed <= 200_000_000 + 150_000_000)
+    #expect(wokenStream.configuredFramesPerSecond == 30)
+    await woken.tearDown()
+
+    // No frame ever comes: the settle still ends at its cap, as the fixed pause would.
+    let (silent, _, _) = try await restedController(window: window, events: EventLog())
+    let (none, noneElapsed) = await settle(silent)
+    #expect(none == .fallback(.noFrameInBound))
+    #expect(noneElapsed <= 200_000_000 + 150_000_000)
+    await silent.tearDown()
 }
 
 /// While a layer shows the stream it keeps its rate whatever the delay; closing the picture

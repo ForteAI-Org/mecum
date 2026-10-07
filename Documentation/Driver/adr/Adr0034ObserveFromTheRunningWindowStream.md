@@ -123,8 +123,8 @@ The 30 fps itself is unchanged. The next measurement, idle CPU with the cache, d
 rest cost stays above 1.5 ms a second, the options are a lower rate while nothing is pending and
 nobody watches, or stopping the stream when no layer is attached. Both move this ADR's bound: at
 10 fps a qualifying frame can be 100 ms away, and a stopped stream is a fallback on every Still. The lower rate is what was done: see
-[ADR 0036](Adr0036RestTheWindowStreamNobodyUses.md), which keeps this bound by declining at
-rest instead of waiting.
+[ADR 0036](Adr0036RestTheWindowStreamNobodyUses.md), which keeps the 100 ms bound for a stream at 30 fps and
+gives a request that must wake a resting one a 150 ms bound.
 
 ## Part 2: "unchanged" (implemented)
 

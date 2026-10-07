@@ -670,8 +670,10 @@ final class PreviewStreamController {
 /// Still of its own. What it hands over is checked again by the seat; see `LiveFrameHandover`.
 ///
 /// Every request is a use. One that finds the stream resting, or not yet confirmed back at the
-/// active rate, wakes it and declines with `resting` at once: the worst case of the first
-/// observation after a rest is the Still, never a wait on the update and never an older frame.
+/// active rate, wakes it and waits, within `afterRestWithin`, for a frame displayed after its own
+/// instant, which `FrameWaiters` enforces: a frame drawn during the rest is never handed over, and
+/// a frame at the rest rate displayed after the instant is as fresh as any. When none comes the
+/// request declines and the seat takes the Still, so the worst case is today's: never an error.
 extension PreviewStreamController: LiveWindowFrameSourcing {
 
     func liveFrame(
@@ -679,7 +681,24 @@ extension PreviewStreamController: LiveWindowFrameSourcing {
         displayedAfter notBefore: UInt64,
         within bound            : Duration
     ) async -> Result<SeatFrame, LiveFrameFallback> {
+        await liveFrame(
+            of             : identity,
+            displayedAfter : notBefore,
+            within         : bound,
+            afterRestWithin: bound
+        )
+    }
 
+    /// Declines with `resting` only when the wake was still unconfirmed at the end of the bound,
+    /// and with `noFrameInBound` when the stream was awake and still delivered no frame in time.
+    func liveFrame(
+        of identity              : WindowIdentity,
+        displayedAfter notBefore : UInt64,
+        within bound             : Duration,
+        afterRestWithin restBound: Duration
+    ) async -> Result<SeatFrame, LiveFrameFallback> {
+
+        let wasResting = isResting
         noteActivity(.frameRequest)
         guard pinnedTarget == nil else { return .failure(.pinnedToDisplay) }
         switch availability {
@@ -692,14 +711,18 @@ extension PreviewStreamController: LiveWindowFrameSourcing {
             return .failure(.notLive)
         }
         guard stream.target == .attestedWindow(identity) else { return .failure(.otherWindow) }
-        guard streamFramesPerSecond == Self.activeFramesPerSecond else { return .failure(.resting) }
+        let isWaking = wasResting || streamFramesPerSecond != Self.activeFramesPerSecond
         do {
-            return .success(try await stream.firstFrame(displayedAfter: notBefore, within: bound))
+            return .success(try await stream.firstFrame(
+                displayedAfter: notBefore,
+                within        : isWaking ? restBound : bound
+            ))
         } catch CaptureFailure.frameUnavailable {
             markEnded(stream)
             return .failure(.notLive)
         } catch {
-            return .failure(.noFrameInBound)
+            let unconfirmed = isWaking && streamFramesPerSecond != Self.activeFramesPerSecond
+            return .failure(unconfirmed ? .resting : .noFrameInBound)
         }
     }
 

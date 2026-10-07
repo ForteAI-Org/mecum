@@ -18,6 +18,7 @@ private final class ScriptedLiveFrames: LiveWindowFrameSourcing {
 
     var answer: Result<SeatFrame, LiveFrameFallback> = .failure(.notLive)
     private(set) var asked: [(identity: WindowIdentity, notBefore: UInt64, bound: Duration)] = []
+    private(set) var askedAfterRest: [Duration] = []
 
     func liveFrame(
         of identity             : WindowIdentity,
@@ -26,6 +27,16 @@ private final class ScriptedLiveFrames: LiveWindowFrameSourcing {
     ) async -> Result<SeatFrame, LiveFrameFallback> {
         asked.append((identity, notBefore, bound))
         return answer
+    }
+
+    func liveFrame(
+        of identity              : WindowIdentity,
+        displayedAfter notBefore : UInt64,
+        within bound             : Duration,
+        afterRestWithin restBound: Duration
+    ) async -> Result<SeatFrame, LiveFrameFallback> {
+        askedAfterRest.append(restBound)
+        return await liveFrame(of: identity, displayedAfter: notBefore, within: bound)
     }
 }
 
@@ -96,6 +107,7 @@ struct LiveFrameHandoverTests {
         #expect(live.asked.first?.identity == window)
         #expect(live.asked.first?.notBefore == displayedAt - 1)
         #expect(live.asked.first?.bound == LiveFrameHandover.bound)
+        #expect(live.askedAfterRest == [LiveFrameHandover.boundAfterRest])
     }
 
     @Test("a frame displayed at or before the instant is refused")
@@ -121,6 +133,7 @@ struct LiveFrameHandoverTests {
         )
         #expect(result.failureReason == .noFrameInBound)
         #expect(live.asked.first?.bound == .milliseconds(40))
+        #expect(live.askedAfterRest == [.milliseconds(40)], "the after-rest wait is held to the deadline too")
     }
 
     @Test("a source that is pinned, recovering or not live is a fallback with its reason")

@@ -10,8 +10,8 @@
 /// A running stream of an unchanged window still delivers about 29 complete frames a second on
 /// macOS 27, and that is most of an open session's CPU at rest. While no layer shows the stream
 /// and nothing used it for `delay`, `PreviewStreamController` asks it for `framesPerSecond`
-/// instead of 30. The next use wakes it, and until the full rate is confirmed observation takes
-/// a Still and the settle waits its cap, as with no stream at all: never an older frame.
+/// instead of 30. The next use wakes it, and a request meanwhile waits for a frame displayed after
+/// its own instant, within a bound, before it takes a Still: never an older frame.
 struct PreviewRestPlan: Equatable {
 
     /// How long the stream goes unused before it rests: 2.5 s. An act cycle's own gaps (observe,

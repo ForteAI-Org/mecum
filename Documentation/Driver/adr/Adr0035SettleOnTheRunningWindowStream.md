@@ -49,7 +49,7 @@ It answers `stable` once frames have stayed identical for the stability interval
 change; `cap` at the cap with frames still changing; `quiet` at the cap with none changed. A
 source that declines (`notLive`, `recovering`, `pinnedToDisplay`, `otherWindow`) or any frame it
 cannot place answers `fallback` after waiting out the rest of the cap: the fixed pause exactly when the source
-declines at once. No wait exceeds the cap. The first frame has nothing before it to compare with,
+declines at once. A resting stream is woken and its frames used (ADR 0036). No wait exceeds the cap. The first frame has nothing before it to compare with,
 so an effect already drawn in it reads as no change and costs the cap.
 
 ### The contract

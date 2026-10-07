@@ -46,21 +46,38 @@ hidden or covered still counts as shown; that only costs the rest it could have 
 ### Freshness
 
 A request that finds the stream resting, or not yet confirmed back at 30 fps, wakes it and
-declines at once with the new `LiveFrameFallback.resting`. It never asks the stream for a
-frame, so no frame drawn during the rest can be handed over, and the seat takes its stream
-Still as for any other fallback: the worst case of the first observation after a rest is
-today's Still (about 130 ms), never a wait on the update and never an error. The rate counts as
-active only once `updateConfiguration` has returned; a request made while a rest update is still
-in flight waits for a frame displayed after its own instant within the 100 ms bound, as before,
-and falls back if none comes. `LiveFrameHandover`'s checks and the one frame contract are
-unchanged.
+waits for a frame, as it would on a stream at 30 fps, instead of declining. Revised on 7 October
+2026 after the live measurement of the wake (below); the first version declined at once with
+`LiveFrameFallback.resting` and took the Still.
 
-The settle reads the same source: during a rest or a wake it gets `resting` and waits the rest
-of its cap, which is the fixed pause (ADR 0035), so no settle ends early on a slow stream.
+What keeps a frame drawn during the rest from being handed over is the rule every request
+already has, not a check of the rate: `FrameWaiters` serves a frame only if its display time is
+strictly after the request's instant (`notBefore`), the newest frame kept included. A frame
+displayed after the instant is fresh whatever the rate, so one at the rest rate that arrives
+before the wake is confirmed is served too. `LiveFrameHandover`'s checks and the one frame
+contract are unchanged.
 
-Waiting for the wake inside the bound was not chosen because the update's latency has not been
-measured. If the live run shows it reliably under about 50 ms, the first request could wait for
-the wake and the 30 fps frame after it instead of taking the Still.
+The wait is bounded as the request is. A request that finds the stream awake and confirmed waits
+`LiveFrameHandover.bound`, 100 ms, as before. One that must wake it waits
+`LiveFrameHandover.boundAfterRest`, 150 ms, and both are cut to what is left of the request's
+deadline. The wake, `preview.update:rate.30`, measured 59 to 69 ms (median) across six apps, and
+the first 30 fps frame after it is up to 33 ms later: about 100 ms in the worst measured case,
+which the plain bound would miss at random. 150 ms leaves about 50 ms for the main actor hop that
+starts the update. A wake that misses it costs the Still on top of the wait, so the worst case is
+about 150 + 135 ms, against 135 ms before; only a stream whose wake is slower than any measured
+pays it.
+
+When no qualifying frame comes inside the bound the request declines and the seat takes its
+stream Still, never an error. The reason says what was found at the end of the bound:
+`resting` when the wake was still unconfirmed (the update had not returned), `noFrameInBound`
+when the stream was awake and delivered nothing in time. `LiveWindowFrameSourcing` carries the
+longer bound as `afterRestWithin`, which a source with no rest rate ignores; the settle reads the
+plain method.
+
+The settle reads the same source with its own bound, what is left of its cap, for both. During a
+rest it wakes the stream and uses the frames that come, as it does on a running one, and never
+waits past its cap: the first frame it sees is the one after the wake, and silence is the cap, as
+before. A settle whose wake is still unconfirmed at the cap ends as the fixed pause (`resting`).
 
 ### Serialization
 
@@ -76,15 +93,17 @@ already takes. A stream started while the controller rests starts at the rest ra
 With phases on, `preview.rest` events say `enter` and `leave.<use>` (`frameRequest`,
 `observation`, `adoption`, `turn`, `command`, `layer`, `pin`), and `preview.update` times each
 configuration update, named `reshape`, `rate.1` (the rest) or `rate.30` (the wake). A request
-declined during a rest is `capture.liveFallback` `resting`, and its settle `settle:fallback.resting`.
+declined after waiting out a rest whose wake never confirmed is `capture.liveFallback` `resting`
+(`noFrameInBound` when the stream was awake), and its settle `settle:fallback.resting`. The wait
+for the wake is inside the request's `capture.liveFrame` interval.
 
 To be measured live, none of it is yet:
 
 - host CPU at rest with one session, proc_pid_rusage only, after more than the delay: target
   1.5 ms a second, against about 20 before;
-- `preview.update:rate.30`, the wake latency, median and maximum, which decides the paragraph
-  above;
-- the first `observe` after a rest: its `tool:observe` time and that its fallback is `resting`;
+- the first `observe` after a rest: its `tool:observe` time and its `capture.liveFrame` interval,
+  and that none falls back (the wake latency, `preview.update:rate.30`, is measured: 59 to 69 ms
+  median across six apps);
 - frames a second at rest and window server readings a second, from `frames.second` and
   `geometry.second`.
 
@@ -94,7 +113,8 @@ which makes every first observation after a rest a Still and adds a stream start
 ## Consequences
 
 - An idle session's stream delivers about one frame a second instead of about 29.
-- The first observation of a tool call that comes more than 2.5 s after the last one is a Still
-  again, about 100 ms slower than a frame of the running stream; an observation or settle within
-  the delay is unchanged.
+- The first observation of a tool call that comes more than 2.5 s after the last one waits for the
+  wake and one frame (about 60 to 100 ms, measured for the wake only) instead of taking a Still of
+  about 135 ms; a wake that is slower than 150 ms is the Still after the wait. An observation or
+  settle within the delay is unchanged.
 - The Lab's picture is unchanged while it is shown.
