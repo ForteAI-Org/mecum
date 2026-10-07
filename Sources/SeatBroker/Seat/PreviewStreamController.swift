@@ -1,5 +1,8 @@
 import CoreGraphics
 import Foundation
+#if MECUM_PHASES
+import PhaseSignposts
+#endif
 import SeatCapture
 import SeatCore
 import SeatSession
@@ -116,7 +119,13 @@ final class PreviewStreamController {
     /// Whether the person has a live picture, and why not when they do not.
     /// It is nothing to do with the adoption: the seat holds the window in
     /// every one of these states and input still waits for a fresh observation.
+    #if MECUM_PHASES
+    private(set) var availability: PreviewAvailability = .idle {
+        didSet { PhaseInterval.event("preview.availability", String(describing: availability)) }
+    }
+    #else
     private(set) var availability: PreviewAvailability = .idle
+    #endif
 
     /// The bounded recovery: the task running it, how many attempts it has
     /// spent, and the monotone instant its window started at.
@@ -179,6 +188,9 @@ final class PreviewStreamController {
     /// invalidate an observation that Mecum has already qualified.
     func follow(_ delivery: SeatObservationDelivery) {
         guard !isStoppingOrStopped else { return }
+        #if MECUM_PHASES
+        PhaseInterval.event("preview.follow", "pinned=\(pinnedTarget != nil)")
+        #endif
         let target = delivery.captureTarget
             ?? .attestedWindow(delivery.reference.recipient)
         // Under a pin the window's own frame is the one thing taken from the
@@ -361,6 +373,9 @@ final class PreviewStreamController {
         }
 
         if let stream {
+            #if MECUM_PHASES
+            PhaseInterval.event("preview.replace", "stop")
+            #endif
             detachLayersFromCurrentStream()
             await stream.stop(timeout: .seconds(5))
             guard !stream.hasUnconfirmedResource else {
@@ -387,6 +402,9 @@ final class PreviewStreamController {
             return
         }
 
+        #if MECUM_PHASES
+        PhaseInterval.event("preview.replace", "start")
+        #endif
         let replacement = makeStream(target)
         stream = replacement
         streamPixelSize = pixelSize
@@ -429,9 +447,15 @@ final class PreviewStreamController {
             streamPixelSize = size
             for layer in layers { layer.markStale() }
             lastFailure = nil
+            #if MECUM_PHASES
+            PhaseInterval.event("preview.reshape", "ok")
+            #endif
             return true
         } catch {
             lastFailure = String(describing: error)
+            #if MECUM_PHASES
+            PhaseInterval.event("preview.reshape", "refused")
+            #endif
             return false
         }
     }
@@ -469,6 +493,9 @@ final class PreviewStreamController {
                 try? await Task.sleep(for: self.recovery.pause)
                 guard !self.isStoppingOrStopped, self.desiredTarget == target else { break }
                 self.recoveryAttempts += 1
+                #if MECUM_PHASES
+                PhaseInterval.event("preview.recovery", "attempt=\(self.recoveryAttempts)")
+                #endif
                 // Through the transition chain and not straight into the
                 // replacement: an observation arriving mid-recovery must not
                 // end up building a second stream beside this one.

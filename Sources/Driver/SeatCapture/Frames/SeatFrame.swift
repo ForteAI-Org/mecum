@@ -10,6 +10,9 @@ import CoreMedia
 import CoreVideo
 import Darwin
 import IOSurface
+#if MECUM_PHASES
+import PhaseSignposts
+#endif
 import SeatCore
 import ScreenCaptureKit
 import WindowPlacement
@@ -264,6 +267,9 @@ nonisolated public struct SeatFrame: @unchecked Sendable {
         if let framing {
             screenRect = framing.screenRect
         } else {
+        #if MECUM_PHASES
+        let queryStarted = mach_absolute_time()
+        #endif
         switch source {
         case .display(let displayID):
             screenRect = CGDisplayBounds(displayID)
@@ -272,6 +278,12 @@ nonisolated public struct SeatFrame: @unchecked Sendable {
         case .unverifiedWindow(let windowNumber):
             screenRect = WindowServerProbe.geometry(of: windowNumber)?.frame
         }
+        #if MECUM_PHASES
+        FrameProbe.noteGeometryQuery(
+            ticks    : mach_absolute_time() - queryStarted,
+            screenRect: screenRect
+        )
+        #endif
         }
         guard let screenRect, screenRect.width > 0, screenRect.height > 0,
               pixelSize.width > 0, pixelSize.height > 0

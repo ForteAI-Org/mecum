@@ -74,6 +74,11 @@ nonisolated final class FrameReceiver:
 
     private let slot: Mutex<Slot>
 
+    #if MECUM_PHASES
+    /// Counts this receiver's callbacks for a measurement build; see `FrameStatistics`.
+    let statistics = FrameStatistics()
+    #endif
+
     /// What runs on the main actor for each frame that made it through. The
     /// stream sets it, weakly, so the receiver never keeps the stream alive.
     private let present: @MainActor @Sendable (SeatFrame, UInt64) -> Void
@@ -197,6 +202,12 @@ nonisolated final class FrameReceiver:
         of outputType   : SCStreamOutputType
     ) {
         let receivedAt = mach_absolute_time()
+        #if MECUM_PHASES
+        statistics.record(
+            FrameProbeSampling.sample(sampleBuffer, hashing: FrameProbe.hashesFrames),
+            at: receivedAt
+        )
+        #endif
         guard outputType == .screen,
               sampleBuffer.isValid,
               Self.isComplete(sampleBuffer)
@@ -207,6 +218,9 @@ nonisolated final class FrameReceiver:
             slot.withLock { $0.stale += 1 }
             return
         }
+        #if MECUM_PHASES
+        let sourceStarted = mach_absolute_time()
+        #endif
         if let failure = sourceFailure() {
             let shouldReport = slot.withLock { state -> Bool in
                 guard !state.sourceWasInvalidated else { return false }
@@ -219,6 +233,9 @@ nonisolated final class FrameReceiver:
             sourceInvalidated(captureGeneration, ObjectIdentifier(stream), failure)
             return
         }
+        #if MECUM_PHASES
+        let sourceChecked = mach_absolute_time()
+        #endif
         let observedRevision = slot.withLock { state -> UInt64 in
             state.nextObservedRevision &+= 1
             return state.nextObservedRevision
@@ -232,8 +249,23 @@ nonisolated final class FrameReceiver:
             capturesFullWindow: capturesFullWindow,
             framing           : framing,
             receivedAt       : receivedAt
-        ) else { return }
+        ) else {
+            #if MECUM_PHASES
+            statistics.noteInitFailure()
+            #endif
+            return
+        }
+        #if MECUM_PHASES
+        let frameBuilt = mach_absolute_time()
+        #endif
         deliver(frame)
+        #if MECUM_PHASES
+        statistics.addCosts(
+            callback : mach_absolute_time() - receivedAt,
+            source   : sourceChecked - sourceStarted,
+            frameInit: frameBuilt - sourceChecked
+        )
+        #endif
     }
 
     /// Only `complete` is a frame. `idle`, `blank` and `suspended` are
@@ -736,6 +768,14 @@ public final class SeatCaptureStream {
                 }
             }
         )
+        #if MECUM_PHASES
+        receiver.statistics.begin(
+            description: "source=\(target.windowNumber == nil ? "display" : "window") "
+                + "framing=\(target.framing == nil ? 0 : 1) fps=\(configuration.framesPerSecond) "
+                + "size=\(Int(configuration.pixelSize.width))x\(Int(configuration.pixelSize.height))",
+            counters: { [weak receiver] in receiver?.counts ?? (produced: 0, coalesced: 0, stale: 0) }
+        )
+        #endif
         let capture = SCStream(
             filter       : filter,
             configuration: configuration.makeStreamConfiguration(for: target),

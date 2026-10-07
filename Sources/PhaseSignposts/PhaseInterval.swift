@@ -40,6 +40,12 @@ public struct PhaseInterval: Sendable {
         )
     }
 
+    /// Emits one point event with a free-text message, for a fact that has no duration: a frame's
+    /// status, a preview state change. `Tools/Driver/Phases/phase-table.py` ignores events.
+    public static func event(_ name: StaticString, _ detail: String) {
+        signposter.emitEvent(name, id: signposter.makeSignpostID(), "\(detail, privacy: .public)")
+    }
+
     /// Ends the interval started by `begin`. Call it once.
     public func end() {
         Self.signposter.endInterval(name, state)

@@ -51,7 +51,10 @@ public actor SeatActuator: Actuating {
         #if MECUM_PHASES
         preparing.end()
         let delivery = PhaseInterval.begin("delivery")
-        defer { delivery.end() }
+        defer {
+            delivery.end()
+            FrameProbe.markInput()
+        }
         #endif
         switch gesture {
             case .click(let point, let button, let count):

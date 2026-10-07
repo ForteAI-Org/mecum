@@ -3,6 +3,9 @@ import AutomationRuntime
 import CoreGraphics
 import Foundation
 import OSLog
+#if MECUM_PHASES
+import PhaseSignposts
+#endif
 import PrivateSymbols
 import ScreenCaptureKit
 import SeatCapture
@@ -138,6 +141,9 @@ final class SeatDriver {
     /// there is none yet: the display is created with the host, on the first
     /// adoption, and before that there is nothing to watch.
     func setPreviewShowsDisplay(_ showsDisplay: Bool) -> Bool {
+        #if MECUM_PHASES
+        PhaseInterval.event("preview.showsDisplay", "asked=\(showsDisplay)")
+        #endif
         guard showsDisplay, let displayID = host.displayID,
               let bounds = host.sensing?.virtualDisplayBounds
         else {

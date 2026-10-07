@@ -257,7 +257,7 @@ let package = Package(
              "Perception", "VisionText", "PixelRegions", "PixelSections", "PixelControlState",
              "AccessibilityFacts", "EngineCore", "IncrementalText", "ModelTransports", "SeatDriving",
              // A worker's tools reach the desktop through the broker's own conformer of their session role.
-             "AutomationRuntime", "Engine", "Memory"]
+             "AutomationRuntime", "Engine", "Memory", "PhaseSignposts"]
         ),
 
         // MARK: Driver tools
