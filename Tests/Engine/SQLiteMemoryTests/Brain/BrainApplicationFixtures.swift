@@ -90,6 +90,12 @@ enum BrainApplicationFixtures {
         try .observe(detections: detections, window: window, bundleID: bundle, sample: sample, requestedAt: at)
     }
 
+    static func record(_ eventID: String, _ element: SceneElement, effect: SceneEffect?, verb: ActionVerb = .click,
+                       at: Date = t0) throws -> BrainApplicationCommand {
+        try .record(ActionRecord(bundleID: bundle, element: element, verb: verb, effect: effect, windowTitleAfter: nil),
+                    eventID: eventID, requestedAt: at)
+    }
+
     static func element(_ label: String, index: Int) -> SceneElement {
         SceneElement(id: "control|\(label)", kind: .control, label: label,
                      bounds: NormalizedRect(x: 0.5, y: 0.1 + 0.05 * Double(index), width: 0.03, height: 0.017))
