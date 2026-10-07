@@ -456,12 +456,15 @@ commit; no brain is cached across calls; every read is one snapshot (`store.read
 | `ingest(detections, into:, now:, window:)` | `BrainUpdater.ingest` with the same window scope. |
 | `setName(name, anchorKey:, in:, now:)` | `BrainUpdater.setName`: source `llm`, the old label appended as an alias. |
 | `decay(in:, now:, maxObjects:, retention:)` | `BrainUpdater.decay` with the same retention; explicit for tests, since an ingest that ticks the clock decays on its own. |
+| `record(record, now:)` | `BrainMemory.record`'s rules on the raw projection: no effect teaches nothing, an element with no unique anchor teaches nothing except a menu reveal, which first ingests the element alone. It moves the counters on every call: a retry of the same action counts twice. For tests and low-level tools only. |
 | `importProjection(brain, into:, now:)` | no algorithm: writes a whole `UIBrain` read from an earlier JSON file as the application's projection, for `mecum memory --import-json`, and answers false, changing nothing, when the application already has an anchor, a group or a transition. The mutation runs at the Brain's own last instant (`now` only for a Brain that saw nothing), so no row is stamped later than the file saw it. No application or evidence row is written: the imported counts are the file's. |
 
-The raw `record` of memory-model's repository is not on this branch: an action's record reaches the
-projection only through the applications register, which keeps the rules (no effect teaches
-nothing; an element with no unique anchor teaches nothing, except a menu reveal, which first ingests
-the element alone and then records).
+A producer never calls these: an action's record reaches the projection through the applications
+register (`BrainApplicationStoring.apply`), keyed by the call's event, which applies one action once
+whatever the retries, with the same rules. The raw `record`, `ingest`, `observe`, `setName` and
+`decay` exist for the repository's own tests and for low-level tools; a new producer that used them
+would count a retried fact twice. A retry of the same logical operation reuses its key (its event);
+an action intentionally made again is a new call with a new event, so a new key.
 
 The clock is a value: the repository quantizes it once to its canonical millisecond
 (`BrainClock.canonical`, nearest millisecond, ties away from zero) and runs the algorithm on that

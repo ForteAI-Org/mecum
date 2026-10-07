@@ -296,6 +296,35 @@ struct MemoryWiringTests {
         await service.close()
     }
 
+    @Test("one action's learning is keyed by its event: a retry applies once, another payload under that key is refused, a new action is a new key")
+    func learningIdempotency() async throws {
+        let service  = try W.service()
+        let recorder = W.recorder(service)
+        _ = await recorder.observe(W.window([W.open, W.format]))
+        await recorder.begin(.act(target: "Format", verb: .click, value: nil, section: nil), app: AppContextIdentity(bundleID: W.bundle))
+        #expect(await service.flush(within: .seconds(10)))
+        let at   = Date(timeIntervalSince1970: 1_790_000_000)
+        let menu = ActionRecord(bundleID: W.bundle, element: W.format, verb: .click,
+                                effect: .menuOpened(labels: ["Bold", "Italic"]), windowTitleAfter: nil)
+        let first = try await service.apply(try .record(menu, eventID: recorder.eventID, requestedAt: at))
+        #expect(first.receipt == .committed)
+        let retry = try await service.apply(try .record(menu, eventID: recorder.eventID, requestedAt: at))
+        #expect(retry.receipt == .alreadyApplied && retry.applicationID == first.applicationID)
+        let other = ActionRecord(bundleID: W.bundle, element: W.format, verb: .click,
+                                 effect: .windowTitleChanged(title: "Format"), windowTitleAfter: nil)
+        await #expect(throws: (any Error).self, "another payload under the same key is refused") {
+            _ = try await service.apply(try .record(other, eventID: recorder.eventID, requestedAt: at))
+        }
+        let evidence = try #require(try await service.brain(of: W.bundle)?.transitions.first?.evidence)
+        let again = W.recorder(service)
+        await again.begin(.act(target: "Format", verb: .click, value: nil, section: nil), app: AppContextIdentity(bundleID: W.bundle))
+        #expect(await service.flush(within: .seconds(10)))
+        #expect(try await service.apply(try .record(menu, eventID: again.eventID, requestedAt: at)).receipt == .committed)
+        #expect(try await service.brain(of: W.bundle)?.transitions.first?.evidence == evidence + 1,
+                "a new action is new evidence; the retry was not")
+        await service.close()
+    }
+
     // MARK: The tools
 
     @Test("the tools record every call they answer with its typed result, under the producer and its trace")
