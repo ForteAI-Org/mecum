@@ -24,7 +24,9 @@ struct AgentCallContractTests {
         ("apps query", .apps(query: "com.apple")),
         ("open_session", .openSession(app: "Calculator", window: nil)),
         ("open_session window", .openSession(app: "Mail", window: "Inbox – 3")),
-        ("observe", .observe),
+        ("open_session untitled", .openSession(app: "TextEdit", window: "")),
+        ("observe", .observe(full: false)),
+        ("observe full", .observe(full: true)),
         ("act click", .act(target: "Send", verb: .click, value: nil, section: nil)),
         ("act double", .act(target: "row 3", verb: .doubleClick, value: nil, section: "Sidebar")),
         ("act triple", .act(target: "Body", verb: .tripleClick, value: nil, section: nil)),
@@ -44,6 +46,8 @@ struct AgentCallContractTests {
         ("drag offset", .drag(from: "Slider", to: .offset(dx: -0.0, dy: 12.5), section: "Panel")),
         ("context_menu", .contextMenu(target: "Paragraph", item: "Copia", section: nil)),
         ("batch", .batch),
+        ("menu", .menu(path: "File > Save As...")),
+        ("press", .press(button: "Don’t Save")),
         ("close_session", .closeSession),
     ]
 
@@ -168,7 +172,7 @@ struct AgentCallContractTests {
             MemoryEventRecord(eventID: "e", source: .app, streamID: "w", sessionID: session, kind: kind, occurredAtMS: 1)
         }
         #expect(throws: AgentCallError.invalidRequest(.notAnAction)) {
-            _ = try AgentCallRecord(event: event(session: "s", kind: .input), request: .observe)
+            _ = try AgentCallRecord(event: event(session: "s", kind: .input), request: .observe(full: false))
         }
         for tool in AgentTool.allCases where tool.takesSession {
             let request = Self.requests.first { $0.1.tool == tool }!.1

@@ -30,6 +30,8 @@ struct AgentCallResultTests {
     private static let apps = AgentCallResult.listing(ListingResult(kind: .apps, applications: [
         ListedApplication(name: "Pro Tools", bundleID: "com.avid.ProTools", version: "26.4.1.179", isRunning: false),
         ListedApplication(name: "Pro Tools", bundleID: "com.example.ProTools", version: nil, isRunning: true, location: "~/Applications"),
+        ListedApplication(name: "Safari", bundleID: "com.apple.Safari", version: "26.0", isRunning: true, isDefaultBrowser: true),
+        ListedApplication(name: "Firefox", bundleID: "org.mozilla.firefox", isRunning: false, isDefaultBrowser: false),
     ], hiddenCount: 59))
 
     /// A completed call of `tool` with `result`, planned, started and concluded.
@@ -75,13 +77,14 @@ struct AgentCallResultTests {
         let apps = try #require(try await memory.calls.call("a")?.progress.result)
         #expect(apps.isExactly(Self.apps))
         if case .listing(let listing) = apps {
-            #expect(listing.hiddenCount == 59 && listing.applications.map(\.location) == [nil, "~/Applications"])
+            #expect(listing.hiddenCount == 59 && listing.applications.map(\.location) == [nil, "~/Applications", nil, nil])
+            #expect(listing.applications.map(\.isDefaultBrowser) == [nil, nil, true, false])
         } else { Issue.record("not a listing") }
         #expect(try await memory.calls.call("none")?.progress.result == nil, "a listing the producer could not record stays an explicit gap")
         #expect(try await memory.calls.call("none")?.durationMS == 1)
         let traced = try await memory.calls.calls(inTrace: "trace-1", after: nil, limit: 10)
         #expect(traced.map(\.event.eventID) == ["s", "w", "a", "none"])
-        #expect(try await memory.count("SELECT count(*) FROM memory_agent_action_applications") == 4)
+        #expect(try await memory.count("SELECT count(*) FROM memory_agent_action_applications") == 6)
         #expect(try await memory.count("SELECT count(*) FROM memory_agent_action_windows") == 3)
         await memory.store.close()
     }
@@ -91,7 +94,7 @@ struct AgentCallResultTests {
         let url = try temporaryDatabase()
         var memory = try await F.open(at: url)
         // observe: the sample is the call's own.
-        _ = try await memory.calls.record(try F.call("o", .observe))
+        _ = try await memory.calls.record(try F.call("o", .observe(full: false)))
         _ = try await memory.calls.advance([AgentCallTransition("o", .started(atMS: F.t0 + 1))])
         let own = try await Self.sample(memory, eventID: "o", revision: 2)
         let observation = AgentCallResult.observation(ObservationResult(sessionID: F.session, sessionRevision: 2, observedAtMS: F.t0 + 2, sample: own))
@@ -107,7 +110,7 @@ struct AgentCallResultTests {
         let opening = AgentCallResult.observation(ObservationResult(sessionID: F.session, sessionRevision: 1, observedAtMS: F.t0 + 4, sample: first))
         _ = try await memory.calls.advance([AgentCallTransition("open", AgentCallProgress(.completed, result: opening, endedAtMS: F.t0 + 4, durationMS: 2))])
         // A result pointing at a sample the store does not hold is refused, with the call left as it was.
-        _ = try await memory.calls.record(try F.call("nowhere", .observe))
+        _ = try await memory.calls.record(try F.call("nowhere", .observe(full: false)))
         _ = try await memory.calls.advance([AgentCallTransition("nowhere", .started(atMS: F.t0 + 5))])
         let missing = AgentCallResult.observation(ObservationResult(sessionID: F.session, sessionRevision: 3, observedAtMS: F.t0 + 6,
                                                                     sample: CaptureSampleKey(eventID: "nowhere", phase: .current)))
@@ -154,7 +157,7 @@ struct AgentCallResultTests {
         }
         #expect(await callError { _ = try await memory.calls.call("planted") } == .malformedCall(eventID: "planted", malformation: .resultShape("status row")))
         #expect(await callError { _ = try await memory.calls.call("gap") } == .malformedCall(eventID: "gap", malformation: .resultShape("window positions of application 0")))
-        #expect(try await memory.calls.record(try F.call("after", .observe)) == .committed, "the store goes on")
+        #expect(try await memory.calls.record(try F.call("after", .observe(full: false))) == .committed, "the store goes on")
         await memory.store.close()
     }
 }

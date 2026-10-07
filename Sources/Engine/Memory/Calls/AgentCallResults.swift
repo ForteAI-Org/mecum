@@ -137,8 +137,9 @@ public struct ListedWindow: Sendable, Equatable {
 }
 
 /// ListedApplication is one application a listing answered. `windows` lists a running application
-/// with its pid and its windows in order; `apps` lists a candidate with whether it runs, its version
-/// and the folder that tells two of one name apart, each nil when the producer did not know it.
+/// with its pid and its windows in order; `apps` lists a candidate with whether it runs, its version,
+/// the folder that tells two of one name apart and whether it is the default browser, each nil when
+/// the producer did not know it.
 public struct ListedApplication: Sendable, Equatable {
 
     public let name: String
@@ -147,23 +148,26 @@ public struct ListedApplication: Sendable, Equatable {
     public let version: String?
     public let isRunning: Bool?
     public let location: String?
+    public let isDefaultBrowser: Bool?
     public let windows: [ListedWindow]
 
     public init(name: String, bundleID: String, pid: Int64? = nil, version: String? = nil, isRunning: Bool? = nil,
-                location: String? = nil, windows: [ListedWindow] = []) {
+                location: String? = nil, isDefaultBrowser: Bool? = nil, windows: [ListedWindow] = []) {
         self.name      = name
         self.bundleID  = bundleID
         self.pid       = pid
         self.version   = version
         self.isRunning = isRunning
         self.location  = location
+        self.isDefaultBrowser = isDefaultBrowser
         self.windows   = windows
     }
 
     public func isExactly(_ other: ListedApplication) -> Bool {
         name.utf8.elementsEqual(other.name.utf8) && bundleID.utf8.elementsEqual(other.bundleID.utf8) && pid == other.pid
             && CanonicalText.same(version, other.version) && isRunning == other.isRunning
-            && CanonicalText.same(location, other.location) && windows.count == other.windows.count
+            && CanonicalText.same(location, other.location) && isDefaultBrowser == other.isDefaultBrowser
+            && windows.count == other.windows.count
             && zip(windows, other.windows).allSatisfy { $0.isExactly($1) }
     }
 }
@@ -196,7 +200,8 @@ public struct ListingResult: Sendable, Equatable {
             switch kind {
                 case .windows:
                     if application.pid == nil { return "application \(position) has no pid" }
-                    if application.isRunning != nil || application.version != nil || application.location != nil {
+                    if application.isRunning != nil || application.version != nil || application.location != nil
+                        || application.isDefaultBrowser != nil {
                         return "application \(position) carries apps fields"
                     }
                 case .apps:

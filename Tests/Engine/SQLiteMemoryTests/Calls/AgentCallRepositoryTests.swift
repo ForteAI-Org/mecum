@@ -23,7 +23,7 @@ struct AgentCallRepositoryTests {
     /// One request of every tool and the variants the tools decode, as `AgentCallContractTests` has them.
     private static let requests: [AgentCallRequest] = [
         .status, .windows(app: nil), .windows(app: "Mail"), .apps(query: nil), .apps(query: "com.apple"),
-        .openSession(app: "Calculator", window: nil), .openSession(app: "Mail", window: "Inbox – 3"), .observe,
+        .openSession(app: "Calculator", window: nil), .openSession(app: "Mail", window: "Inbox – 3"), .observe(full: false), .observe(full: true),
         .act(target: "Send", verb: .click, value: nil, section: nil), .act(target: "row 3", verb: .doubleClick, value: nil, section: "Sidebar"),
         .act(target: "Body", verb: .tripleClick, value: nil, section: nil), .act(target: "File", verb: .rightClick, value: nil, section: nil),
         .act(target: "Wi-Fi", verb: .setToggle, value: .on, section: nil), .act(target: "Wi-Fi", verb: .setToggle, value: .off, section: "Network"),
@@ -33,10 +33,12 @@ struct AgentCallRepositoryTests {
         .pressKey(key: .return, modifiers: [], count: 1), .pressKey(key: .character("n"), modifiers: [.shift, .cmd], count: 3),
         .scroll(direction: .down, lines: 3, target: nil, section: nil), .scroll(direction: .up, lines: 50, target: "List", section: "Main"),
         .drag(from: "A", to: .target("B"), section: nil), .drag(from: "Slider", to: .offset(dx: -0.0, dy: 12.5), section: "Panel"),
-        .contextMenu(target: "Paragraph", item: "Copia", section: nil), .closeSession,
+        .insertText(text: "Zoë ☕️ 東京", expectedValue: nil), .insertText(text: "\n", expectedValue: "Riga\n"),
+        .contextMenu(target: "Paragraph", item: "Copia", section: nil), .menu(path: "File > Save As..."),
+        .press(button: "Don’t Save"), .closeSession,
     ]
 
-    @Test("the fourteen signatures and their variants, and a batch of the seven step variants, are read back exactly after reopening, in local order, with typed rows only")
+    @Test("every signature and its variants, and a batch of every step variant, are read back exactly after reopening, in local order, with typed rows only")
     func signaturesRoundTrip() async throws {
         let memory = try await F.open()
         for (index, request) in Self.requests.enumerated() {
@@ -124,17 +126,17 @@ struct AgentCallRepositoryTests {
         #expect(try await memory.captures.record(sample) == .committed)
         var offered = event
         offered.captureStatus = .notApplicable
-        #expect(try await memory.calls.record(try AgentCallRecord(event: offered, request: .observe)) == .committed)
+        #expect(try await memory.calls.record(try AgentCallRecord(event: offered, request: .observe(full: false))) == .committed)
         let back = try #require(try await memory.calls.call("e1"))
         #expect(back.event.captureStatus == .unknown, "the summary its samples made is kept")
         #expect(try await memory.captures.sample(sample.key) == sample)
-        #expect(try await memory.calls.record(try AgentCallRecord(event: offered, request: .observe)) == .alreadyApplied)
+        #expect(try await memory.calls.record(try AgentCallRecord(event: offered, request: .observe(full: false))) == .alreadyApplied)
 
         var observation = F.event("o1")
         observation.kind = .observation
         #expect(try await memory.captures.record(observation) == .committed)
         let before = try await memory.ledger()
-        let error = await storeError { _ = try await memory.calls.record(try F.call("o1", .observe)) }
+        let error = await storeError { _ = try await memory.calls.record(try F.call("o1", .observe(full: false))) }
         guard case .identity? = error else {
             Issue.record("expected a conflict on the event's kind, got \(String(describing: error))")
             return
@@ -242,7 +244,7 @@ struct AgentCallRepositoryTests {
         misplaced[3] = try AgentCallRecord(event: F.event("b.3", parent: "b", position: 4), request: F.sevenSteps[3])
         await refused(misplaced, .stepParent(position: 3))
         var observing = steps
-        observing[0] = try AgentCallRecord(event: F.event("b.0", parent: "b", position: 0), request: .observe)
+        observing[0] = try AgentCallRecord(event: F.event("b.0", parent: "b", position: 0), request: .observe(full: false))
         await refused(observing, .notABatchStep(position: 0, tool: .observe))
         #expect(await callError { _ = try await memory.calls.record(batch) } == .invalidRequest(.batchOutsideBatchRecord))
         #expect(await callError { _ = try await memory.calls.record(steps[0]) } == .invalidRequest(.stepOutsideBatch))
@@ -328,7 +330,7 @@ struct AgentCallRepositoryTests {
         }
         #expect(await callError { _ = try await memory.calls.advance([AgentCallTransition("code", .started)]) } == nil,
                 "a move reads the call's row, not its arguments")
-        #expect(try await memory.calls.record(try F.call("after", .observe)) == .committed)
+        #expect(try await memory.calls.record(try F.call("after", .observe(full: false))) == .committed)
         #expect(try await memory.calls.call("after")?.progress.status == .planned)
         await memory.store.close()
     }

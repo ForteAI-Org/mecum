@@ -29,6 +29,8 @@ public enum AgentTool: String, Sendable, Equatable, Hashable, CaseIterable {
     case drag
     case contextMenu  = "context_menu"
     case batch
+    case menu
+    case press
     case closeSession = "close_session"
 
     /// Whether the tool requires the current session: every tool but the three read-only listings
@@ -89,7 +91,7 @@ public enum AgentCallRequest: Sendable {
     case windows(app: String?)
     case apps(query: String?)
     case openSession(app: String, window: String?)
-    case observe
+    case observe(full: Bool)
     case act(target: String, verb: ActionVerb, value: ControlState?, section: String?)
     case select(control: String, item: String)
     case typeText(target: String, text: String, section: String?, replace: Bool)
@@ -99,6 +101,8 @@ public enum AgentCallRequest: Sendable {
     case drag(from: String, to: AgentDragEnd, section: String?)
     case contextMenu(target: String, item: String, section: String?)
     case batch
+    case menu(path: String)
+    case press(button: String)
     case closeSession
 
     public var tool: AgentTool {
@@ -117,6 +121,8 @@ public enum AgentCallRequest: Sendable {
             case .drag        : .drag
             case .contextMenu : .contextMenu
             case .batch       : .batch
+            case .menu        : .menu
+            case .press       : .press
             case .closeSession: .closeSession
         }
     }
@@ -315,7 +321,7 @@ public struct AgentCallProgress: Sendable {
         let expected: ExpectedResult
         switch (status, tool) {
             case (.completed, .act), (.completed, .select), (.completed, .typeText), (.completed, .insertText),
-                 (.completed, .pressKey),
+                 (.completed, .pressKey), (.completed, .menu), (.completed, .press),
                  (.completed, .scroll), (.completed, .drag), (.completed, .contextMenu):
                 expected = .outcome
             case (.completed, .batch)       : expected = .batch

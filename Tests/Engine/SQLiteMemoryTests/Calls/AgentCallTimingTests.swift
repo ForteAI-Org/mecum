@@ -67,6 +67,7 @@ struct AgentCallTimingTests {
             ("gone", .elementsDisappeared(labels: [])),
             ("one", .menuOpened(labels: ["A|B", "C"])),
             ("two", .menuOpened(labels: ["A", "B|C"])),
+            ("selection", .textSelectionChanged),
         ]
         for (id, effect) in effects {
             _ = try await memory.calls.record(try F.call(id, .act(target: "Menu", verb: .click, value: nil, section: nil)))
@@ -109,7 +110,7 @@ struct AgentCallTimingTests {
                 == nil)
         #expect(refusal(.started(atMS: 5), .status) == nil)
         let memory = try await F.open()
-        _ = try await memory.calls.record(try F.call("plain", .observe))
+        _ = try await memory.calls.record(try F.call("plain", .observe(full: false)))
         // A producer that reports no start and no duration: the row keeps NULL and the call has none.
         _ = try await memory.calls.advance([AgentCallTransition("plain", .started)])
         _ = try await memory.calls.advance([AgentCallTransition("plain", F.ended(.completed))])
@@ -140,7 +141,7 @@ struct AgentCallTimingTests {
                 == .malformedCall(eventID: "gap", malformation: .positionsNotContiguous("effect labels")))
         #expect(await callError { _ = try await memory.calls.call("scalar") }
                 == .malformedCall(eventID: "scalar", malformation: .resultShape("observed_effect: state sideways")))
-        #expect(try await memory.calls.record(try F.call("after", .observe)) == .committed, "the store goes on")
+        #expect(try await memory.calls.record(try F.call("after", .observe(full: false))) == .committed, "the store goes on")
         await memory.store.close()
     }
 

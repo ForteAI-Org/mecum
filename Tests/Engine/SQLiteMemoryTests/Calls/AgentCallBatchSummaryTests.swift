@@ -88,7 +88,7 @@ struct AgentCallBatchSummaryTests {
         let error = await callError { _ = try await memory.calls.advance([summary(stopped, attempted, verified)]) }
         #expect(error == .batchNotSettled(eventID: "b"), Comment(rawValue: name))
         #expect(try await memory.calls.call("b")?.progress.status == .started, "the refused summary wrote nothing")
-        #expect(try await memory.calls.record(try F.call("after", .observe)) == .committed, "the store goes on")
+        #expect(try await memory.calls.record(try F.call("after", .observe(full: false))) == .committed, "the store goes on")
         await memory.store.close()
     }
 
@@ -124,7 +124,7 @@ struct AgentCallBatchSummaryTests {
             try transaction.execute("UPDATE memory_agent_actions SET verified_count = 0, result_kind = 'completed' WHERE event_id = 'b'")
         }
         #expect(await callError { _ = try await memory.calls.call("b") } == refusal)
-        #expect(try await memory.calls.record(try F.call("after", .observe)) == .committed, "the store goes on")
+        #expect(try await memory.calls.record(try F.call("after", .observe(full: false))) == .committed, "the store goes on")
         await memory.store.close()
     }
 

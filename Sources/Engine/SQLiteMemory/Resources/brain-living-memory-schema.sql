@@ -163,7 +163,7 @@ CREATE TABLE brain_scene_elements (
     cursor_affordance TEXT,
     anchor_id TEXT,
     label TEXT,
-    label_origin TEXT CHECK (label_origin IS NULL OR label_origin IN ('title', 'description', 'value', 'column', 'row_content')),
+    label_origin TEXT CHECK (label_origin IS NULL OR label_origin IN ('title', 'description', 'value', 'column', 'row_content', 'identifier')),
     role TEXT,
     kind TEXT,
     source TEXT,
@@ -296,7 +296,7 @@ CREATE TABLE brain_transition_menu_items (
 CREATE TABLE memory_events (
     local_order INTEGER PRIMARY KEY AUTOINCREMENT,
     event_id TEXT NOT NULL UNIQUE,
-    source TEXT NOT NULL CHECK (source IN ('app', 'cli', 'watcher', 'system')),
+    source TEXT NOT NULL CHECK (source IN ('app', 'cli', 'mcp', 'watcher', 'system')),
     source_stream_id TEXT NOT NULL,
     source_key TEXT,
     trace_id TEXT,
@@ -380,9 +380,11 @@ CREATE TABLE memory_agent_actions (
     -- The effect the engine attributed to a completed action or input, typed by family (S3-d
     -- correction): observed_effect_text is the title of windowTitleChanged, the two states belong to
     -- stateFlip, and the labels of the three list families are rows of
-    -- memory_agent_action_effect_labels, in order. No encoded text, no separators.
+    -- memory_agent_action_effect_labels, in order; textSelectionChanged is its family alone. No
+    -- encoded text, no separators.
     observed_effect_kind TEXT CHECK (observed_effect_kind IS NULL OR observed_effect_kind IN
-        ('windowTitleChanged', 'stateFlip', 'menuOpened', 'elementsAppeared', 'elementsDisappeared')),
+        ('windowTitleChanged', 'stateFlip', 'menuOpened', 'elementsAppeared', 'elementsDisappeared',
+         'textSelectionChanged')),
     observed_effect_text TEXT,
     observed_state_before TEXT CHECK (observed_state_before IS NULL OR observed_state_before IN ('on', 'off', 'mixed', 'unknown')),
     observed_state_after TEXT CHECK (observed_state_after IS NULL OR observed_state_after IN ('on', 'off', 'mixed', 'unknown')),
@@ -429,8 +431,9 @@ CREATE TABLE memory_agent_action_listings (
 ) STRICT;
 
 -- The applications a listing answered, in the order shown. A windows row carries the pid and no
--- apps field; an apps row carries is_running and no pid (trigger). NULL is a field the producer
--- did not know; the empty text is a text.
+-- apps field; an apps row carries is_running and no pid (trigger). is_default_browser is an apps
+-- field: whether the application opens web links by default. NULL is a field the producer did not
+-- know; the empty text is a text.
 CREATE TABLE memory_agent_action_applications (
     event_id TEXT NOT NULL REFERENCES memory_agent_action_listings(event_id),
     position INTEGER NOT NULL CHECK (position >= 0),
@@ -440,6 +443,7 @@ CREATE TABLE memory_agent_action_applications (
     app_version TEXT,
     is_running INTEGER CHECK (is_running IS NULL OR is_running IN (0, 1)),
     location TEXT,
+    is_default_browser INTEGER CHECK (is_default_browser IS NULL OR is_default_browser IN (0, 1)),
     PRIMARY KEY (event_id, position),
     CHECK (length(name) > 0 OR length(bundle_id) > 0)
 ) STRICT;
@@ -501,7 +505,7 @@ CREATE TABLE memory_event_observations (
     status TEXT NOT NULL,
     candidate_rank INTEGER,
     label TEXT,
-    label_origin TEXT CHECK (label_origin IS NULL OR label_origin IN ('title', 'description', 'value', 'column', 'row_content')),
+    label_origin TEXT CHECK (label_origin IS NULL OR label_origin IN ('title', 'description', 'value', 'column', 'row_content', 'identifier')),
     container_path TEXT,
     role TEXT,
     element_kind TEXT,
@@ -1119,7 +1123,7 @@ BEGIN
     WHERE NOT EXISTS (
         SELECT 1 FROM memory_agent_action_listings l WHERE l.event_id = NEW.event_id
             AND ((l.listing_kind = 'windows' AND NEW.pid IS NOT NULL AND NEW.is_running IS NULL
-                  AND NEW.app_version IS NULL AND NEW.location IS NULL)
+                  AND NEW.app_version IS NULL AND NEW.location IS NULL AND NEW.is_default_browser IS NULL)
               OR (l.listing_kind = 'apps' AND NEW.pid IS NULL AND NEW.is_running IS NOT NULL)));
 END;
 
@@ -1232,7 +1236,7 @@ BEGIN
                       WHERE event_id = NEW.watcher_event_id AND source = 'watcher' AND event_kind = 'input');
     SELECT RAISE(ABORT, 'agent_event_id must be an app or cli action event')
     WHERE NOT EXISTS (SELECT 1 FROM memory_events
-                      WHERE event_id = NEW.agent_event_id AND source IN ('app', 'cli') AND event_kind = 'action');
+                      WHERE event_id = NEW.agent_event_id AND source IN ('app', 'cli', 'mcp') AND event_kind = 'action');
 END;
 
 CREATE TRIGGER memory_action_correlations_roles_update BEFORE UPDATE OF
@@ -1244,7 +1248,7 @@ BEGIN
                       WHERE event_id = NEW.watcher_event_id AND source = 'watcher' AND event_kind = 'input');
     SELECT RAISE(ABORT, 'agent_event_id must be an app or cli action event')
     WHERE NOT EXISTS (SELECT 1 FROM memory_events
-                      WHERE event_id = NEW.agent_event_id AND source IN ('app', 'cli') AND event_kind = 'action');
+                      WHERE event_id = NEW.agent_event_id AND source IN ('app', 'cli', 'mcp') AND event_kind = 'action');
 END;
 
 -- No recursive call between Routes: A -> B -> A is refused at the insert of the step that closes the cycle.

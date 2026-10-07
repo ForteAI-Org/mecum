@@ -273,13 +273,14 @@ enum SQLiteAgentCallRows {
                     try transaction.execute(
                         """
                         INSERT INTO memory_agent_action_applications
-                            (event_id, position, name, bundle_id, pid, app_version, is_running, location)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                            (event_id, position, name, bundle_id, pid, app_version, is_running, location, is_default_browser)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         [.text(eventID), .integer(Int64(position)), .text(application.name), .text(application.bundleID),
                          application.pid.map(SQLiteValue.integer) ?? .null, application.version.map(SQLiteValue.text) ?? .null,
                          application.isRunning.map { .integer($0 ? 1 : 0) } ?? .null,
-                         application.location.map(SQLiteValue.text) ?? .null]
+                         application.location.map(SQLiteValue.text) ?? .null,
+                         application.isDefaultBrowser.map { .integer($0 ? 1 : 0) } ?? .null]
                     )
                     for (windowPosition, window) in application.windows.enumerated() {
                         try transaction.execute(
@@ -505,7 +506,8 @@ enum SQLiteAgentCallRows {
                 ) { (Int($0.integer(0) ?? -1), Int($0.integer(1) ?? -1), ListedWindow(number: $0.integer(2) ?? 0, title: try $0.text(3))) }
                 let applications = try handle.query(
                     """
-                    SELECT position, name, bundle_id, pid, app_version, is_running, location FROM memory_agent_action_applications
+                    SELECT position, name, bundle_id, pid, app_version, is_running, location, is_default_browser
+                    FROM memory_agent_action_applications
                     WHERE event_id = ? ORDER BY position
                     """,
                     [.text(eventID)]
@@ -517,7 +519,8 @@ enum SQLiteAgentCallRows {
                     }
                     return (position, ListedApplication(
                         name: try row.text(1) ?? "", bundleID: try row.text(2) ?? "", pid: row.integer(3), version: try row.text(4),
-                        isRunning: row.integer(5).map { $0 == 1 }, location: try row.text(6), windows: own.map(\.2)
+                        isRunning: row.integer(5).map { $0 == 1 }, location: try row.text(6),
+                        isDefaultBrowser: row.integer(7).map { $0 == 1 }, windows: own.map(\.2)
                     ))
                 }
                 guard applications.enumerated().allSatisfy({ $0.offset == $0.element.0 }) else {

@@ -24,7 +24,7 @@ struct TraceReadingTests {
         let traces = SQLiteTraceRepository(store: memory.store)
         #expect(try await traces.traces(before: nil, limit: 10).isEmpty, "a valid empty archive has no trace")
         // trace-1: a planned call and a batch of two steps; trace-2: an observation of its own, from the cli.
-        _ = try await memory.calls.record(try AgentCallFixtures.call("c1", .observe))
+        _ = try await memory.calls.record(try AgentCallFixtures.call("c1", .observe(full: false)))
         let (batch, steps) = try AgentCallFixtures.batch("b1", Array(AgentCallFixtures.sevenSteps.prefix(2)), at: AgentCallFixtures.t0 + 10)
         _ = try await memory.calls.record(batch: batch, steps: steps)
         let other = MemoryEventRecord(eventID: "o1", source: .cli, streamID: "mecum-cli-1", traceID: "trace-2", sessionID: "s",
@@ -49,7 +49,7 @@ struct TraceReadingTests {
                                        traceID: trace, sessionID: "S", kind: call ? .action : .observation,
                                        app: AgentCallFixtures.app, occurredAtMS: ms)
         if call {
-            _ = try await memory.calls.record(try AgentCallRecord(event: record, request: .observe))
+            _ = try await memory.calls.record(try AgentCallRecord(event: record, request: .observe(full: false)))
         } else {
             _ = try await memory.captures.record(record)
         }

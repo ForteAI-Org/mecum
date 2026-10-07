@@ -21,7 +21,7 @@ struct RouteRepositoryTests {
     private typealias F = ProcedureFixtures
 
     private static let literalRequests: [AgentCallRequest] = [
-        .status, .windows(app: "Mail"), .apps(query: "mail"), .openSession(app: "Mail", window: "Inbox – Zoë"), .observe,
+        .status, .windows(app: "Mail"), .apps(query: "mail"), .openSession(app: "Mail", window: "Inbox – Zoë"), .observe(full: false),
         .act(target: "Wi-Fi", verb: .setToggle, value: .off, section: "Rete"), .select(control: "Formato", item: "H.264"),
         .typeText(target: "To", text: "cafe\u{301}\u{0}|", section: nil, replace: true), .pressKey(key: .character("s"), modifiers: [.shift, .cmd], count: 2),
         .scroll(direction: .up, lines: 7, target: "List", section: nil), .drag(from: "A", to: .target("B"), section: nil),

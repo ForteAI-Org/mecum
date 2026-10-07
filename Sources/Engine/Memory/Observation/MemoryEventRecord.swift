@@ -7,10 +7,12 @@
 
 import PerceptionCore
 
-/// MemoryEventSource is who produced an event: the app's worker, the command line, the Watcher or
-/// the system itself. The raw values are the ones the living memory stores.
+/// MemoryEventSource is who produced an event: the app's worker, the command line, an external MCP
+/// client served by the app, the Watcher or the system itself. The raw values are the ones the
+/// living memory stores. An external client learns into the same archive as the app; its source
+/// keeps its calls apart from the workers'.
 public enum MemoryEventSource: String, Sendable, Equatable, Hashable, CaseIterable {
-    case app, cli, watcher, system
+    case app, cli, mcp, watcher, system
 }
 
 /// MemoryEventKind is what an event is a fact of: a tool invocation, an input the Watcher saw, an

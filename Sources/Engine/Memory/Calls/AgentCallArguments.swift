@@ -16,7 +16,8 @@ import PerceptionCore
 ///
 /// | Tool | Arguments |
 /// |---|---|
-/// | `status`, `observe`, `batch`, `close_session` | none (the session is the event's; a batch's steps are its child calls) |
+/// | `status`, `batch`, `close_session` | none (the session is the event's; a batch's steps are its child calls) |
+/// | `observe` | `full` (boolean, written even when it defaulted to false) |
 /// | `windows` | `app` (text, optional) |
 /// | `apps` | `query` (text, optional) |
 /// | `open_session` | `app` (text), `window` (text, optional) |
@@ -28,6 +29,8 @@ import PerceptionCore
 /// | `scroll` | `direction` (`up`/`down`), `lines` (integer ≥ 1, written even when it defaulted to 3), `target`, `section` (text, optional) |
 /// | `drag` | `from` (text), then either `to` (text) or both `dx` and `dy` (finite reals, a missing axis written as 0), `section` (text, optional) |
 /// | `context_menu` | `target`, `item` (text), `section` (text, optional) |
+/// | `menu` | `path` (text, the menu bar path as the call wrote it) |
+/// | `press` | `button` (text) |
 public enum AgentCallArguments {
 
     public enum Rows: Sendable, Equatable { case one, optional, list }
@@ -41,8 +44,10 @@ public enum AgentCallArguments {
     public static func specs(of tool: AgentTool) -> [Spec] {
         func text(_ name: String, _ rows: Rows = .one) -> Spec { Spec(name: name, kind: .text, rows: rows) }
         switch tool {
-            case .status, .observe, .batch, .closeSession:
+            case .status, .batch, .closeSession:
                 return []
+            case .observe:
+                return [Spec(name: "full", kind: .boolean, rows: .one)]
             case .windows:
                 return [text("app", .optional)]
             case .apps:
@@ -67,6 +72,10 @@ public enum AgentCallArguments {
                         Spec(name: "dy", kind: .real, rows: .optional), text("section", .optional)]
             case .contextMenu:
                 return [text("target"), text("item"), text("section", .optional)]
+            case .menu:
+                return [text("path")]
+            case .press:
+                return [text("button")]
         }
     }
 }
@@ -81,8 +90,10 @@ extension AgentCallRequest {
         }
         func text(_ value: String?) -> BrainArgument.Value? { value.map(BrainArgument.Value.text) }
         switch self {
-            case .status, .observe, .batch, .closeSession:
+            case .status, .batch, .closeSession:
                 break
+            case .observe(let full):
+                put("full", .boolean(full))
             case .windows(let app):
                 put("app", text(app))
             case .apps(let query):
@@ -129,6 +140,10 @@ extension AgentCallRequest {
                 put("target", text(target))
                 put("item", text(item))
                 put("section", text(section))
+            case .menu(let path):
+                put("path", text(path))
+            case .press(let button):
+                put("button", text(button))
         }
         let order = AgentCallArguments.specs(of: tool).map(\.name)
         return rows.enumerated().sorted { lhs, rhs in
@@ -202,7 +217,9 @@ extension AgentCallRequest {
         let request: AgentCallRequest
         switch tool {
             case .status      : request = .status
-            case .observe     : request = .observe
+            case .observe:
+                guard case .boolean(let full)? = byName["full"]?[0] else { throw refuse(.missingArgument("full")) }
+                request = .observe(full: full)
             case .batch       : request = .batch
             case .closeSession: request = .closeSession
             case .windows     : request = .windows(app: text("app"))
@@ -244,6 +261,10 @@ extension AgentCallRequest {
                 request = .drag(from: try required("from"), to: end, section: text("section"))
             case .contextMenu:
                 request = .contextMenu(target: try required("target"), item: try required("item"), section: text("section"))
+            case .menu:
+                request = .menu(path: try required("path"))
+            case .press:
+                request = .press(button: try required("button"))
         }
         do {
             try request.validate()

@@ -32,12 +32,13 @@ struct ProcedureContractTests {
     @Test("every literal signature is an operation the contract admits; a batch holds every step variant in order")
     func literalSignatures() throws {
         let requests: [AgentCallRequest] = [
-            .status, .windows(app: "Mail"), .apps(query: nil), .openSession(app: "Mail", window: "Inbox"), .observe,
+            .status, .windows(app: "Mail"), .apps(query: nil), .openSession(app: "Mail", window: "Inbox"), .observe(full: false),
             .act(target: "Wi-Fi", verb: .setToggle, value: .on, section: nil), .select(control: "Format", item: "H.264"),
             .typeText(target: "To", text: "Zoë", section: nil, replace: false),
             .insertText(text: "Zoë", expectedValue: "Zoë"), .pressKey(key: .return, modifiers: [.cmd], count: 1),
             .scroll(direction: .down, lines: 3, target: nil, section: nil), .drag(from: "A", to: .offset(dx: 0, dy: 4), section: nil),
-            .contextMenu(target: "P", item: "Copy", section: nil), .closeSession,
+            .contextMenu(target: "P", item: "Copy", section: nil), .menu(path: "File > Save"),
+            .press(button: "OK"), .closeSession,
         ]
         let operations = requests.enumerated().map { StepOperation(operationID: "o\($0.offset)", position: $0.offset, request: $0.element) }
         let children = requests.filter(\.tool.isBatchStep).enumerated().map { StepOperation(operationID: "b\($0.offset)", position: $0.offset, request: $0.element) }
@@ -107,10 +108,10 @@ struct ProcedureContractTests {
                 .notFinite(field: "expected_real"))
         refused(Self.route([ProcedureStep(stepID: "s1", position: 0, goalText: "Chiama", kind: .routeCall(calledRouteID: "r1", bindings: []))]), .selfCall(stepID: "s1"))
         refused(Self.route([ProcedureStep(stepID: "s1", position: 0, goalText: "Chiama", kind: .routeCall(calledRouteID: "r2", bindings: []),
-                                          operations: [StepOperation(operationID: "o1", position: 0, request: .observe)])]), .operationsOnRouteCall(stepID: "s1"))
+                                          operations: [StepOperation(operationID: "o1", position: 0, request: .observe(full: false))])]), .operationsOnRouteCall(stepID: "s1"))
         refused(Self.route([ProcedureStep(stepID: "s1", position: 0, goalText: "Fatto", checks: [Self.check()],
                                           operations: [StepOperation(operationID: "o1", position: 0, tool: .batch,
-                                                                     children: [StepOperation(operationID: "o2", position: 0, request: .observe)])])]),
+                                                                     children: [StepOperation(operationID: "o2", position: 0, request: .observe(full: false))])])]),
                 .batchChildren(operationID: "o2"))
         #expect(Self.route([]).publicationProblem == .noSteps)
         #expect(Self.route([ProcedureStep(stepID: "s1", position: 0, goalText: "Fatto")]).publicationProblem == .goalWithoutCheck(stepID: "s1"))

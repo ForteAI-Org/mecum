@@ -22,9 +22,10 @@ struct AgentCallResultContractTests {
         .menuOpened(labels: ["Desktop", "Mobile", "Web"]),
         .elementsAppeared(labels: ["Queue", "", "A|B"]),
         .elementsDisappeared(labels: []),
+        .textSelectionChanged,
     ]
 
-    @Test("the five effects become typed parts and are rebuilt exactly, labels in order, an empty label kept")
+    @Test("every effect becomes typed parts and are rebuilt exactly, labels in order, an empty label kept")
     func effectsRoundTrip() throws {
         for effect in Self.effects {
             let observed = ObservedEffect(effect)
@@ -66,6 +67,27 @@ struct AgentCallResultContractTests {
         refused("stateFlip", title: "x", before: "off", after: "on")
         refused("menuOpened", title: "x", labels: ["a"])
         refused("elementsAppeared", before: "off", after: "on")
+        refused("textSelectionChanged", title: "x")
+        refused("textSelectionChanged", before: "off", after: "on")
+        refused("textSelectionChanged", labels: ["a"])
+    }
+
+    @Test("the Brain keeps every effect family as columns and rebuilds the exact string; a selection change carries nothing else")
+    func brainEffectRecords() throws {
+        // A label holding the separator has no exact string; the Brain refuses it, as it always has.
+        for effect in Self.effects where SceneEffect(encoded: effect.encoded) == effect {
+            let record = try TransitionEffectRecord(effect: effect.encoded)
+            #expect(record.effect == effect.encoded, Comment(rawValue: effect.encoded))
+            let read = try TransitionEffectRecord(kind: record.kind, text: record.text, requiredState: record.requiredState?.rawValue,
+                                                  resultingState: record.resultingState?.rawValue, items: record.items)
+            #expect(read.sceneEffect == effect, Comment(rawValue: effect.encoded))
+        }
+        #expect(throws: BrainProjectionError.self) {
+            try TransitionEffectRecord(kind: "textSelectionChanged", text: nil, requiredState: nil, resultingState: nil, items: ["a"])
+        }
+        #expect(throws: BrainProjectionError.self) {
+            try TransitionEffectRecord(kind: "textSelectionChanged", text: "x", requiredState: nil, resultingState: nil, items: [])
+        }
     }
 
     @Test("a progress carries the duration only after a start and never below zero, and the result each tool represents")
