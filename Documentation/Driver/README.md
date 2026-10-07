@@ -375,6 +375,7 @@ operation threw is never ended and is left out. The phases, outermost first:
 | --- | --- |
 | `tool:<name>` | One MCP tool call (`AutomationTools.call`). |
 | `perception` | One scene (`SeatSceneProvider.currentScene`). |
+| `perception.reused` | A scene answered again because the window Still is byte-identical to the one the last scene was read from, timed from the start of `perception`; it is ended only then, so its count is the number of reuses ([ADR 0034](adr/Adr0034ObserveFromTheRunningWindowStream.md)). |
 | `capture.windowStill` | The window Still of a scene, which is `SeatTarget.observe()`. |
 | `target.observe`, `target.verify` | `SeatTarget.observe()` as a whole, and its window check before the seat is asked. |
 | `seat.observe` | One attempt of `AgentSeat.observe()`, inside `SeatTarget`'s retry loop. |

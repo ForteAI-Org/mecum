@@ -21,7 +21,7 @@ SUBSYSTEM = 'dev.forte.Mecum.phases'
 
 # The order the table prints in. A name not listed follows, alphabetically.
 ORDER = [
-    'tool', 'perception',
+    'tool', 'perception', 'perception.reused',
     'capture.windowStill', 'target.observe', 'target.verify', 'seat.observe',
     'seat.preCapture', 'seat.foldReading', 'seat.captureLoop', 'seat.captureSource',
     'capture.oneShotStill', 'capture.streamStill', 'capture.liveFrame', 'capture.stream.size', 'capture.stream.start',

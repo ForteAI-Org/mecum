@@ -65,6 +65,10 @@ final class ControlledObservationSource: ObservedSurfaceSourcing, @unchecked Sen
     /// True to answer a Frame whose geometry cannot carry a coordinate.
     var answersMalformedGeometry = false
 
+    /// Writes into the pixels of every window Frame before it is answered, so a test decides
+    /// whether two observations show the same bytes. A new surface is all zeros otherwise.
+    var paint: ((CVPixelBuffer) -> Void)?
+
     init(sensing: FakeSensing) {
         self.sensing = sensing
     }
@@ -151,6 +155,7 @@ final class ControlledObservationSource: ObservedSurfaceSourcing, @unchecked Sen
                 reason: "could not construct the controlled frame"
             )
         }
+        paint?(frame.pixelBuffer)
         return frame
     }
 }

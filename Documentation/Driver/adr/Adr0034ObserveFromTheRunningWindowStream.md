@@ -1,7 +1,7 @@
 # ADR 0034: Observe from the window stream that is already running
 
-Status: implemented, 2026-10-07. Offline tests only; no live run. Part 2 ("unchanged") is a
-design, not implemented. It builds on [ADR 0003](Adr0003KitOwnsSeatCapture.md): the kit still
+Status: implemented, 2026-10-07. Offline tests only; no live run. Part 2 ("unchanged") is
+implemented too, by the owner's decision of 7 October, with its trade-off below. It builds on [ADR 0003](Adr0003KitOwnsSeatCapture.md): the kit still
 owns every capture path, and the consumer only lends a stream it already runs.
 
 ## Evidence
@@ -124,35 +124,46 @@ rest cost stays above 1.5 ms a second, the options are a lower rate while nothin
 nobody watches, or stopping the stream when no layer is attached. Both move this ADR's bound: at
 10 fps a qualifying frame can be 100 ms away, and a stopped stream is a fallback on every Still.
 
-## Part 2: "unchanged" (design only)
+## Part 2: "unchanged" (implemented)
 
 macOS 27 sends no `idle` frames and puts dirty rectangles on every frame, so neither can say a
 window did not change. "Unchanged" already exists one layer up: `AutomationTools` keeps the
 scene each window was last read as (its baseline), and `SceneChanges.text` answers
 "Unchanged since revision N." when a new scene equals it. What costs time is the pipeline that
-builds the new scene. The design that would skip it:
+builds the new scene, and that is what is skipped:
 
-- The Driver compares two Frames for the consumer: the same source identity, the same pixel
-  size, the same rectangle, and equal bytes. Both Frames own their surfaces (a stream Still's
-  stream is stopped, a running stream's frame is detached), so an exact `memcmp` of 1 to 4 MB
-  should cost about a millisecond (an estimate, not measured) and, unlike a hash, has no
-  collision: a forced change of any pixel can never compare equal.
-- `SeatSceneProvider` keeps the Frame its last scene was built from with the `PerceivedWindow`.
-  When the new Frame compares equal, no pop-up is open (the display path never reuses) and the
-  window census gives the same window number and title, it returns the kept scene without running
-  the pipeline. The tool answer then says "Unchanged since revision N." through the existing
-  baseline, with no new field; `full: true` still sends the whole scene.
+- `SeatFrame.showsSameContent(as:)` (`SeatCapture`) compares two Frames: the same source
+  identity, the same pixel size, the same screen and content rectangles, the same scales, both
+  32BGRA, and equal bytes, row by row over each row's used bytes so a different padding does
+  not count. Times, display generation and geometry version are left out, since two
+  observations of one unchanged window differ in all three. It is an exact `memcmp`, never a
+  hash, so a forced change of any pixel can never compare equal. Any doubt answers "not the
+  same": another pixel format, a buffer that cannot be locked or has no base address. Both
+  Frames own their surfaces (a stream Still's stream is stopped, a running stream's frame is
+  detached). The cost of the comparison on a 1 to 4 MB window is not measured yet.
+- `SeatSceneProvider` keeps the Frame its last window scene was built from, with the
+  `ScenePipeline.Window` it was read as (bundle, name, census title, process, frame, window
+  number) and the scene. Only the latest is kept; replacing it releases the Frame. When a new
+  window Still compares equal and the window facts are equal, it returns the kept scene without
+  running the pipeline. The display path, taken while a pop-up is open, never compares and never
+  keeps. A different window, another title, a missing previous Frame, a comparison in doubt, or a
+  pipeline that threw (its scene is never kept) runs the pipeline as before.
+- The answer reaches the model through the existing baseline with no new field: the kept scene
+  is equal to the one sent last, so `SceneChanges.text` writes "Unchanged since revision N.";
+  `full: true` still sends the whole scene.
+- After an action: every scene, the post-action one included, still goes through
+  `SeatTarget.observe()`, so its Frame was taken after the Command's barrier. It is compared with
+  the Frame the last scene was read from; the scene is reused only when those post-action pixels
+  are byte-identical to it. A Command whose effect reached the pixels always runs the pipeline.
 
-It is not implemented here, because it is not a contained change and one rule is not the Driver's
-to set:
+The trade-off, accepted by the owner on 7 October: the scene is not made of pixels alone. The
+accessibility stage can report a change that draws nothing (a value, or focus moving to an
+element that is not drawn), and a reused scene does not show it until something on screen
+changes. Running the accessibility stage alone would have spent its 0.35 s budget, which defeats
+a fast "unchanged" answer.
 
-- `SeatSceneProvider` is the Integration joint of the Perception owner's pipeline; its change
-  needs that owner.
-- The scene is not made of pixels alone. The accessibility stage can report a change that draws
-  nothing (a value, or focus moving to an element that is not drawn). Reusing the scene on equal
-  pixels drops those; running the accessibility stage alone spends its 0.35 s budget, which
-  defeats a 100 ms "unchanged" answer. The owner has to accept the first or choose another rule.
-- A Driver comparison with no consumer would be speculative code, so none was added.
+With phases on, `perception.reused` times each scene answered again, from the start of
+`perception`; it is ended only on a reuse, so its count is the number of reuses.
 
 ## Consequences
 

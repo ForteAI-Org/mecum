@@ -26,12 +26,20 @@ import SeatSession
 /// frame is that union. Accessibility geometry is never mixed in; the augmenter's trust rule drops
 /// frames that do not intersect the captured rectangle, and on the Seat the application's own child
 /// frames still point at the window's old place.
+///
+/// A window still whose pixels are byte for byte those the last scene was read from, of the same
+/// window with the same census facts, answers that scene again without the pipeline (ADR 0034), so
+/// the layer above answers "Unchanged since revision N." through its own baseline. The trade-off,
+/// accepted by the owner: a change that draws nothing (an accessibility value or focus) is not seen.
+/// Every call still takes a fresh observation, so a reused scene is bound to pixels taken after the
+/// last Command. The display path never reuses.
 public struct SeatSceneProvider: SceneProviding {
 
     private let target: SeatTarget
     private let pipeline: ScenePipeline
     private let windows: any WindowListing
     private let identity: @Sendable (pid_t) -> ApplicationIdentity?
+    private let lastScene = LastScene()
 
     public init(
         target  : SeatTarget,
@@ -49,6 +57,8 @@ public struct SeatSceneProvider: SceneProviding {
         #if MECUM_PHASES
         let perception = PhaseInterval.begin("perception")
         defer { perception.end() }
+        // Ended only when the kept scene is answered, so the table counts and times the reuses alone.
+        let reusing = PhaseInterval.begin("perception.reused")
         #endif
         let application = identity(processID)
             ?? ApplicationIdentity(bundleID: "pid.\(processID)", name: "pid \(processID)")
@@ -59,6 +69,7 @@ public struct SeatSceneProvider: SceneProviding {
         let image: CGImage
         let frame: CGRect
         let observedWindow: AdoptedWindow
+        var comparable: SeatFrame?
         if popups.isEmpty {
             #if MECUM_PHASES
             let windowStill = PhaseInterval.begin("capture.windowStill")
@@ -76,6 +87,7 @@ public struct SeatSceneProvider: SceneProviding {
             #endif
             image = pixels
             frame = still.geometry.screenRect
+            comparable = still
             guard let captured = await target.lastCapturedWindow else { throw SeatDrivingFailure.frameUnusable }
             observedWindow = captured
         } else {
@@ -115,6 +127,15 @@ public struct SeatSceneProvider: SceneProviding {
             frame       : frame,
             windowNumber: observedWindow.id
         )
+        // ADR 0034: the same window and census over byte-identical pixels is the scene already read.
+        if let comparable, let kept = await lastScene.kept, kept.window == window,
+           kept.frame.showsSameContent(as: comparable) {
+            #if MECUM_PHASES
+            reusing.end()
+            #endif
+            await MainActor.run { target.lastSceneImage = image }
+            return PerceivedWindow(scene: kept.scene, frame: frame)
+        }
         #if MECUM_PHASES
         let perceiving = PhaseInterval.begin("pipeline")
         #endif
@@ -122,8 +143,26 @@ public struct SeatSceneProvider: SceneProviding {
         #if MECUM_PHASES
         perceiving.end()
         #endif
-        await MainActor.run { target.lastSceneImage = image }
+        await MainActor.run {
+            target.lastSceneImage = image
+            if let comparable { lastScene.kept = LastScene.Kept(frame: comparable, window: window, scene: scene) }
+        }
         return PerceivedWindow(scene: scene, frame: frame)
+    }
+
+    /// LastScene keeps the window still the last scene was built from, with the window facts and the
+    /// scene, so the next still can be compared to it. Only the latest is kept, and replacing it
+    /// releases the Frame, which owns its surface (a stopped Still's, or a detached copy).
+    @MainActor
+    private final class LastScene {
+
+        struct Kept: Sendable {
+            let frame : SeatFrame
+            let window: ScenePipeline.Window
+            let scene : SceneSnapshot
+        }
+
+        var kept: Kept?
     }
 }
 
