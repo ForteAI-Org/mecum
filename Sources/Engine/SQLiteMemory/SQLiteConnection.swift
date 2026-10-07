@@ -49,11 +49,19 @@ final class SQLiteConnection {
     /// A directory that does not exist or cannot be written, and a missing file that may not be
     /// created, answer `SQLITE_CANTOPEN` here; a file that is not a database answers `SQLITE_NOTADB`
     /// at its first statement, not here.
-    init(path: String, readOnly: Bool = false, mayCreate: Bool = true) throws {
+    ///
+    /// `immutable` opens the file read only as one that nothing else changes: no lock, no journal, no
+    /// file made beside it. Only for a diagnosis of a file no connection holds, whose journal is gone.
+    init(path: String, readOnly: Bool = false, mayCreate: Bool = true, immutable: Bool = false) throws {
         var handle: OpaquePointer?
-        let flags  = readOnly ? SQLITE_OPEN_READONLY
+        var flags  = readOnly || immutable ? SQLITE_OPEN_READONLY
             : (mayCreate ? SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE : SQLITE_OPEN_READWRITE)
-        let status = sqlite3_open_v2(path, &handle, flags, nil)
+        var name   = path
+        if immutable {
+            flags |= SQLITE_OPEN_URI
+            name   = URL(fileURLWithPath: path).absoluteString + "?mode=ro&immutable=1"
+        }
+        let status = sqlite3_open_v2(name, &handle, flags, nil)
         guard status == SQLITE_OK, let opened = handle else {
             let failure = Failure(
                 primary : status & 0xFF,

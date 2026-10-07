@@ -18,6 +18,10 @@ import SQLiteMemory
 enum MemoryCommand {
 
     static func run(_ invocation: Invocation) async throws {
+        if invocation.flags.contains("status") {
+            printStatus(of: Runtime.knowledgeDirectory(invocation).appendingPathComponent("memory.sqlite"))
+            return
+        }
         let runtime = Runtime(invocation: invocation)
         if let source = invocation.options["import-json"] {
             try await importJSON(from: URL(fileURLWithPath: (source as NSString).expandingTildeInPath, isDirectory: true),
@@ -60,6 +64,33 @@ enum MemoryCommand {
         for opportunity in opportunities {
             print("  \(opportunity.anchor.anchorKey.prefix(8)) score \(opportunity.score): \(opportunity.context)")
         }
+    }
+
+    /// Prints what the archive file is, read only: this command opens no memory service, so it creates,
+    /// migrates, recovers and copies nothing, and it has no counters of another process's writes.
+    private static func printStatus(of url: URL) {
+        let report = SQLiteMemoryInspection.inspect(url)
+        print("archive: \(report.path)")
+        print("SQLite linked into this mecum: \(SQLiteLibrary.version) (\(SQLiteLibrary.sourceID))")
+        if let unmet = SQLiteLibrary.unmetRequirement() {
+            print("  below the memory's requirement: \(unmet.minimumVersion)")
+        }
+        switch report.shape {
+            case .missing:              print("state: no archive at this path")
+            case .empty:                print("state: a database with no schema yet")
+            case .matches:              print("state: schema \(report.schemaVersion ?? 0), exactly the shape this build creates")
+            case .differs(let objects): print("state: schema \(report.schemaVersion ?? 0), another shape; this build refuses it untouched: "
+                                              + objects.prefix(8).joined(separator: ", ") + (objects.count > 8 ? ", …" : ""))
+            case .unreadable(let why):  print("state: not readable as a database: \(why)")
+        }
+        if let bytes = report.bytes { print("size: \(bytes) bytes" + (report.journalBytes.map { ", journal \($0) bytes" } ?? "")) }
+        for table in SQLiteMemoryInspection.countedTables {
+            if let count = report.counts[table] { print("  \(table): \(count) rows") }
+        }
+        print("copies: " + (report.backups.isEmpty ? "none" : report.backups.joined(separator: ", ")))
+        if !report.quarantined.isEmpty { print("moved aside after a recovery: " + report.quarantined.joined(separator: ", ")) }
+        print("writes waiting, failed or dropped live in the memory of the process that offered them;")
+        print("this command has its own and shows none. The app shows its own on Settings > Brain.")
     }
 
     /// Copies the Brain of every application file in an earlier JSON Knowledge directory into the

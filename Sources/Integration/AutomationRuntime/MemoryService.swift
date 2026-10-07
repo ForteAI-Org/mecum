@@ -617,7 +617,8 @@ public actor MemoryService: BrainReading, BrainApplicationStoring {
 
     /// Where the memory stands, without opening it.
     public func status() async -> Status {
-        var version: String?, sourceID: String?
+        // The library linked into this process, the one the archive is or would be opened with.
+        var version: String? = SQLiteLibrary.version, sourceID: String? = SQLiteLibrary.sourceID
         if let store, state == .open, let diagnostics = try? await store.diagnostics() {
             version  = diagnostics.libraryVersion
             sourceID = diagnostics.librarySourceID

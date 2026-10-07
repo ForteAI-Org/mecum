@@ -8,14 +8,16 @@ typealias Runtime = EngineRuntime
 
 extension EngineRuntime {
     init(invocation: Invocation, seat: SeatTarget? = nil) {
-        let directory: URL
+        self.init(knowledgeDirectory: Self.knowledgeDirectory(invocation), seat: seat)
+    }
+
+    /// Where memory lives for this invocation: `--knowledge`, or the app's own Knowledge directory.
+    static func knowledgeDirectory(_ invocation: Invocation) -> URL {
         if let path = invocation.options["knowledge"] {
-            directory = URL(fileURLWithPath: (path as NSString).expandingTildeInPath, isDirectory: true)
-        } else {
-            directory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-                .appendingPathComponent("Mecum/Knowledge", isDirectory: true)
+            return URL(fileURLWithPath: (path as NSString).expandingTildeInPath, isDirectory: true)
         }
-        self.init(knowledgeDirectory: directory, seat: seat)
+        return FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("Mecum/Knowledge", isDirectory: true)
     }
 
     /// The recorder of one command line call: a `cli` producer, this process its stream and its trace,

@@ -24,6 +24,7 @@ enum Usage {
       mecum batch   <app> --window <title> --seat [options] -- <step> --then <step> ...
                                               run several steps in one Seat lifetime
       mecum memory  <app>                      what the brain remembers about the application
+      mecum memory  --status                   what the memory's archive file is, read only
       mecum memory  --import-json <dir>        copy the Brains of an earlier JSON Knowledge directory into
                                               the memory, for applications it holds nothing about yet
 
