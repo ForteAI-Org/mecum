@@ -879,7 +879,10 @@ final class UserFocusRecovery {
         }
         let identityDuration = now() &- identityStart
         let processIDs = Set(targets.map(\.processID)).union([destination.processID])
-        let snapshot = await sensing.prepareFocusRecoverySnapshot(for: processIDs)
+        let snapshot = await sensing.prepareFocusRecoverySnapshot(
+            for     : processIDs,
+            adopting: targets
+        )
 
         guard closure != nil, generation == preparationGeneration else {
             return refused("the closure transition ended during its reconciliation")
@@ -918,7 +921,10 @@ final class UserFocusRecovery {
         }
         let identityDuration = now() &- identityStart
         let processIDs = Set(targets.map(\.processID)).union([destination.processID])
-        let snapshot = await sensing.prepareFocusRecoverySnapshot(for: processIDs)
+        let snapshot = await sensing.prepareFocusRecoverySnapshot(
+            for     : processIDs,
+            adopting: targets
+        )
 
         // The same guards, one at a time instead of in one list. Nothing about
         // the decision changed. A list answers "not armed", and a diagnosis has

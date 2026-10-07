@@ -55,9 +55,11 @@ nonisolated public struct FocusRecoverySnapshot: Sendable {
     public let virtualBounds: CGRect
     public let physicalBounds: [CGRect]
     public let windows: [WindowReference]
-    /// Exact identities independently listed as off screen. They still belong
-    /// to the seat and remain owed their original geometry; their absence from
-    /// the on-screen list is not a containment failure or destruction proof.
+    /// Exact identities of the adopted windows that were missing from the
+    /// on-screen list and were independently listed as off screen, each asked
+    /// by its own Window ID. They still belong to the seat and remain owed their
+    /// original geometry; their absence from the on-screen list is not a
+    /// containment failure or destruction proof. No other off-screen window is read.
     public let nonVisibleWindows: Set<WindowIdentity>
     var environmentNanoseconds: UInt64 = 0
     var windowsNanoseconds: UInt64 = 0
@@ -88,9 +90,10 @@ nonisolated public struct FocusRecoverySnapshot: Sendable {
     @concurrent
     static func readingWindowsConcurrently(
         in environment    : Self,
-        ownedBy processIDs: Set<Int32>? = nil
+        ownedBy processIDs: Set<Int32>? = nil,
+        adopting targets  : [WindowReference] = []
     ) async -> Self {
-        readingWindows(in: environment, ownedBy: processIDs)
+        readingWindows(in: environment, ownedBy: processIDs, adopting: targets)
     }
 
     /// The live walk, and the third one in the kit. It runs once a second for as
@@ -101,20 +104,26 @@ nonisolated public struct FocusRecoverySnapshot: Sendable {
     /// per-row memo pays 40. The memo is a local of this call and dies with it,
     /// because a connection ID reused by a new process would otherwise name a
     /// live PID for a dead one.
+    ///
+    /// The off-screen list is not walked. Only an adopted window that the
+    /// on-screen list lacks is asked for, by its Window ID, so a machine with
+    /// hundreds of windows costs the beat one list instead of two.
     static func readingWindows(
         in environment    : Self,
-        ownedBy processIDs: Set<Int32>? = nil
+        ownedBy processIDs: Set<Int32>? = nil,
+        adopting targets  : [WindowReference] = []
     ) -> Self {
         let start = DispatchTime.now().uptimeNanoseconds
         let table = SymbolTable.shared
         let identityGate = FacilityGate.current(facility: .windowIdentity, table: table)
         var processes = WindowServerProbe.OwnerProcesses()
         var snapshot = readingWindows(
-            in     : environment,
-            ownedBy: processIDs,
-            entries: CGWindowListCopyWindowInfo(.optionOnScreenOnly, kCGNullWindowID) as? [[String: Any]],
-            nonVisibleEntries: CGWindowListCopyWindowInfo(.optionAll, kCGNullWindowID) as? [[String: Any]],
-            resolve: { processID, windowNumber, frame in
+            in      : environment,
+            ownedBy : processIDs,
+            adopting: targets,
+            entries : CGWindowListCopyWindowInfo(.optionOnScreenOnly, kCGNullWindowID) as? [[String: Any]],
+            nonVisibleEntries: { WindowServerProbe.descriptions(ofWindowIDs: $0) },
+            resolve : { processID, windowNumber, frame in
                 WindowServerProbe.reference(
                     processID   : processID,
                     windowNumber: windowNumber,
@@ -130,11 +139,14 @@ nonisolated public struct FocusRecoverySnapshot: Sendable {
     }
 
     /// Reads one WindowServer listing with an attestation function supplied by the adapter.
+    /// `nonVisibleEntries` is asked only when an adopted window is missing from
+    /// `entries`, and only for the Window IDs of those windows.
     static func readingWindows(
         in environment    : Self,
         ownedBy processIDs: Set<Int32>?,
+        adopting targets  : [WindowReference] = [],
         entries           : [[String: Any]]?,
-        nonVisibleEntries : [[String: Any]]? = nil,
+        nonVisibleEntries : ([CGWindowID]) -> [[String: Any]]? = { _ in nil },
         resolve           : (Int32, Int, CGRect) -> WindowReference?
     ) -> Self {
         let start = DispatchTime.now().uptimeNanoseconds
@@ -169,7 +181,10 @@ nonisolated public struct FocusRecoverySnapshot: Sendable {
         }
         var nonVisible: Set<WindowIdentity> = []
         let visibleNumbers = Set(windows.map(\.windowNumber))
-        let rows = nonVisibleEntries ?? []
+        let missing = Set(targets.map(\.windowNumber)).subtracting(visibleNumbers)
+        let rows = complete && !missing.isEmpty
+            ? nonVisibleEntries(missing.compactMap { CGWindowID(exactly: $0) }) ?? []
+            : []
         let counts = Dictionary(
             rows.compactMap { ($0[kCGWindowNumber as String] as? NSNumber)?.intValue }
                 .map { ($0, 1) },
@@ -186,7 +201,7 @@ nonisolated public struct FocusRecoverySnapshot: Sendable {
                   let pid = Int32(exactly: pidValue.int64Value), pid > 0,
                   processIDs?.contains(pid) ?? true,
                   let number = (row[kCGWindowNumber as String] as? NSNumber)?.intValue,
-                  counts[number] == 1, !visibleNumbers.contains(number),
+                  missing.contains(number), counts[number] == 1,
                   let bounds = row[kCGWindowBounds as String] as? NSDictionary,
                   let frame = CGRect(dictionaryRepresentation: bounds as CFDictionary),
                   let reference = resolve(pid, number, frame),

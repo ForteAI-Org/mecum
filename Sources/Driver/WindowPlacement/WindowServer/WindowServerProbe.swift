@@ -708,7 +708,7 @@ nonisolated public enum WindowServerProbe {
     /// would be read as a Window ID of its own address. They are widened to
     /// pointer size first, because a `UInt32` array has the wrong stride for the
     /// slots `CFArrayCreate` copies.
-    private static func descriptions(ofWindowIDs windowIDs: [CGWindowID]) -> [[String: Any]]? {
+    public static func descriptions(ofWindowIDs windowIDs: [CGWindowID]) -> [[String: Any]]? {
         var values = windowIDs.map { UnsafeRawPointer(bitPattern: UInt($0)) }
         guard let requested = values.withUnsafeMutableBufferPointer({ buffer in
             CFArrayCreate(kCFAllocatorDefault, buffer.baseAddress, buffer.count, nil)

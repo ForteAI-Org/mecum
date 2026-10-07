@@ -49,8 +49,9 @@ struct FocusRecoverySnapshotTests {
         let snapshot = FocusRecoverySnapshot.readingWindows(
             in: Self.environment,
             ownedBy: [Self.target.processID, Self.user.processID],
+            adopting: [Self.target, panel],
             entries: [Self.entry(panel), Self.entry(Self.user)],
-            nonVisibleEntries: variant == 3 ? [hidden, hidden] : [hidden],
+            nonVisibleEntries: { _ in variant == 3 ? [hidden, hidden] : [hidden] },
             resolve: { _, number, _ in
                 if number == Self.target.windowNumber, variant == 4 { return nil }
                 return [Self.target, panel, Self.user].first { $0.windowNumber == number }
@@ -60,6 +61,87 @@ struct FocusRecoverySnapshotTests {
         #expect(snapshot.containsOnlyVirtualWindows(of: Self.target.processID))
         #expect(snapshot.containsUserWindow(Self.user, excluding: [Self.target, panel]))
         #expect(snapshot.windows.allSatisfy { $0.windowNumber != Self.target.windowNumber })
+    }
+
+    private func hiddenSnapshot(
+        adopting targets: [WindowReference],
+        visible         : [WindowReference],
+        listed          : [[String: Any]],
+        scope           : Set<Int32>? = [FakeGeometry.targetPID, FakeGeometry.userPID],
+        onScreenIsNil   : Bool = false,
+        asked           : inout [[CGWindowID]]
+    ) -> FocusRecoverySnapshot {
+        var requests: [[CGWindowID]] = []
+        let known = [Self.target, Self.user] + visible
+        let snapshot = FocusRecoverySnapshot.readingWindows(
+            in      : Self.environment,
+            ownedBy : scope,
+            adopting: targets,
+            entries : onScreenIsNil ? nil : visible.map(Self.entry),
+            nonVisibleEntries: { numbers in
+                requests.append(numbers.sorted())
+                return listed
+            },
+            resolve : { _, number, _ in known.first { $0.windowNumber == number } }
+        )
+        asked = requests
+        return snapshot
+    }
+
+    @Test("the off-screen evidence is read only for adopted windows the on-screen list lacks")
+    func offScreenReadIsLazy() {
+        let panel = FakeGeometry.reference(
+            frame: Self.target.frame, processID: Self.target.processID, windowNumber: 47_900
+        )
+        var asked: [[CGWindowID]] = []
+
+        // Everything adopted is on screen: nothing is asked.
+        _ = hiddenSnapshot(
+            adopting: [Self.target, panel], visible: [Self.target, panel],
+            listed: [], asked: &asked
+        )
+        #expect(asked.isEmpty)
+
+        // One adopted window is missing: one request, for that Window ID only.
+        let missing = hiddenSnapshot(
+            adopting: [Self.target, panel], visible: [panel],
+            listed: [Self.entry(Self.target)], asked: &asked
+        )
+        #expect(asked == [[CGWindowID(Self.target.windowNumber)]])
+        #expect(missing.containsAdoptedWindows([Self.target, panel]))
+
+        // No adopted windows, or an on-screen listing that failed: nothing is asked.
+        _ = hiddenSnapshot(adopting: [], visible: [panel], listed: [], asked: &asked)
+        #expect(asked.isEmpty)
+        let failed = hiddenSnapshot(
+            adopting: [Self.target], visible: [], listed: [Self.entry(Self.target)],
+            onScreenIsNil: true, asked: &asked
+        )
+        #expect(asked.isEmpty)
+        #expect(!failed.containsAdoptedWindows([Self.target]))
+    }
+
+    @Test("an off-screen row that was not asked for is not evidence, and another process is ignored")
+    func unrequestedAndForeignRows() {
+        var asked: [[CGWindowID]] = []
+        let other = FakeGeometry.reference(
+            frame: Self.target.frame, processID: Self.target.processID, windowNumber: 47_901
+        )
+        let extra = hiddenSnapshot(
+            adopting: [Self.target], visible: [],
+            listed: [Self.entry(Self.target), Self.entry(other)], asked: &asked
+        )
+        #expect(extra.nonVisibleWindows.count == 1)
+        #expect(extra.containsAdoptedWindows([Self.target]))
+        #expect(!extra.containsAdoptedWindows([other]))
+
+        var foreign = Self.entry(Self.target)
+        foreign[kCGWindowOwnerPID as String] = NSNumber(value: 169)
+        let ignored = hiddenSnapshot(
+            adopting: [Self.target], visible: [], listed: [foreign], asked: &asked
+        )
+        #expect(ignored.nonVisibleWindows.isEmpty)
+        #expect(!ignored.containsAdoptedWindows([Self.target]))
     }
 
     /// The live failure this answers: with the Finder adopted, pid 487 owned the

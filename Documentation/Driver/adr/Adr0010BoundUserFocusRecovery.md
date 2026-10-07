@@ -579,3 +579,35 @@ transferred, with the gate closed throughout, and a recovered focus reopens
 none of the other causes of the gate. Every guard above it is the one that was
 already there. No live, Host or manual run was performed for any of this; it is
 pinned by the offline unit tier, and the Live matrix is still pending.
+
+## The beat reads off-screen evidence only for the windows it adopted (2026-10-07)
+
+Measured with the CLI, seat idle on Calculator, ten seconds of `sample`: 5.4 ms/s
+of CPU with one session against 0.01 ms/s with none, and about 10 ms/s with more
+windows on the system. Every active sample was the preparation heartbeat, and
+most of it was `CGWindowListCopyWindowInfo(.optionAll)` plus an identity
+resolution for each off-screen row, read only to fill `nonVisibleWindows`. Its
+one reader is `containsAdoptedWindows`, which asks whether an adopted window
+that the on-screen list lacks is listed off screen.
+
+The preparation now passes the adopted windows to the reading
+(`prepareFocusRecoverySnapshot(for:adopting:)`). The on-screen list is read as
+before. Only when an adopted window is missing from it is the off-screen
+evidence asked for, by those Window IDs alone, through
+`CGWindowListCreateDescriptionFromArray`, and identity is resolved for those
+rows alone. The rules are the ones that were there: a row with
+`kCGWindowIsOnscreen` absent or false, exactly one row per number, a positive
+identity, and the process filter. `nonVisibleWindows` therefore holds only
+missing adopted windows, and the answer of `containsAdoptedWindows` is unchanged.
+
+The preparation is not renewed without a read, the beat is not slower at rest and
+no event replaces it: a preparation still lives 1.25 s, so the safety net for an
+application that takes focus without a notification is as it was.
+
+Measured live in the app's test host (a Debug build), one idle Calculator session,
+10 s of `proc_pid_rusage` kept apart from `sample`: the heartbeat fell from 79 to 12
+samples and the session from 43.8 to 38.3 ms/s, with the same number of windows on
+the system. A restoration was still armed within 1 s of the person's application
+coming back to the front, three times out of three. The rest of the app's idle cost
+is the seat's persistent capture stream, which asks the window server for each
+frame's geometry, and belongs to the capture work, not to this beat.

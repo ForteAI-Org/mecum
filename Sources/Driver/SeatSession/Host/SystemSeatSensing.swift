@@ -174,11 +174,13 @@ nonisolated final class SystemSeatSensing: SeatSensing, @unchecked Sendable {
 
     @MainActor
     func prepareFocusRecoverySnapshot(
-        for processIDs: Set<Int32>
+        for processIDs  : Set<Int32>,
+        adopting targets: [WindowReference]
     ) async -> FocusRecoverySnapshot? {
         await FocusRecoverySnapshot.readingWindowsConcurrently(
-            in     : focusEnvironment(),
-            ownedBy: processIDs
+            in      : focusEnvironment(),
+            ownedBy : processIDs,
+            adopting: targets
         )
     }
 

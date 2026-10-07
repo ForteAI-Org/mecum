@@ -108,8 +108,11 @@ nonisolated public protocol SeatSensing: Sendable {
     /// Reads every on-screen window owned by the requested processes. The
     /// snapshot declares its coverage and refuses incomplete evidence. The
     /// default uses the existing full-list reader for custom implementations.
+    /// `targets` are the adopted windows: live sensing reads off-screen evidence
+    /// for those that the on-screen list lacks, and for no other window.
     @MainActor func prepareFocusRecoverySnapshot(
-        for processIDs: Set<Int32>
+        for processIDs  : Set<Int32>,
+        adopting targets: [WindowReference]
     ) async -> FocusRecoverySnapshot?
     var userMayBeSwitchingApplications: Bool { get }
     func windowIsVisibleOnPhysicalDisplay(_ window: WindowReference) -> Bool
@@ -167,7 +170,8 @@ extension SeatSensing {
         focusRecoverySnapshot
     }
     @MainActor public func prepareFocusRecoverySnapshot(
-        for processIDs: Set<Int32>
+        for processIDs  : Set<Int32>,
+        adopting targets: [WindowReference]
     ) async -> FocusRecoverySnapshot? {
         await prepareFocusRecoverySnapshot()
     }
