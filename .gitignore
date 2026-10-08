@@ -1,6 +1,6 @@
-# Swift Package Manager
-/.build/
-/.swiftpm/
+# Swift Package Manager, at any depth: tools under Tools/ are packages of their own.
+.build/
+.swiftpm/
 /Packages/
 Package.resolved.lock
 
