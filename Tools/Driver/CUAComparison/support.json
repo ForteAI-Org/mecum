@@ -1,0 +1,5239 @@
+{
+ "schema": "cuacomparison.support/1",
+ "generated": "2026-10-08",
+ "purpose": "What each driver's own documentation claims per framework, to set against the measured results.",
+ "cua": {
+  "checkout": "~/Forte_Projects/_bench/cua",
+  "commit": "c1c2b5fee428c3a39bebe5e77549c3d3525a608d",
+  "short": "c1c2b5f",
+  "version": "0.34.0",
+  "compared_against": "4f33cd6b119c50b11d96d82d023722fc2edf1bc0",
+  "compared_against_short": "4f33cd6",
+  "note": "The 6 Oct benchmark ran the binary built at 4f33cd6; the next run uses c1c2b5f."
+ },
+ "mecum": {
+  "worktree": "/Users/mac/Forte_Projects/mecum-benchmark-cua",
+  "branch": "elio/benchmark-cua",
+  "commit": "3c3398539906573a2a366d8b95164ba911f81353",
+  "note": "Paths are repo-relative to the worktree; no public URL."
+ },
+ "claim_values": [
+  "supported",
+  "partial",
+  "not supported",
+  "foreground only",
+  "not mentioned"
+ ],
+ "basis_values": {
+  "declaration": "stated as a support or refusal rule",
+  "qualification_result": "a recorded test or campaign outcome",
+  "inference": "applied by analogy from a named neighbouring surface",
+  "generic_contract": "a driver-wide rule not specific to the framework",
+  "gap": "no statement found"
+ },
+ "scope_values": {
+  "framework": "text is about the toolkit",
+  "app": "text is about the specific app of the benchmark",
+  "generic": "text is driver-wide"
+ },
+ "capabilities": [
+  "observe",
+  "click",
+  "type",
+  "key",
+  "hotkey",
+  "scroll",
+  "menu",
+  "background_no_activation",
+  "cursor_untouched"
+ ],
+ "frameworks": [
+  {
+   "id": "swiftui",
+   "framework": "SwiftUI",
+   "app": "Calculator"
+  },
+  {
+   "id": "appkit",
+   "framework": "AppKit",
+   "app": "TextEdit"
+  },
+  {
+   "id": "chromium",
+   "framework": "Chromium",
+   "app": "Google Chrome"
+  },
+  {
+   "id": "webkit",
+   "framework": "WebKit",
+   "app": "Safari"
+  },
+  {
+   "id": "electron",
+   "framework": "Electron",
+   "app": "Obsidian"
+  },
+  {
+   "id": "catalyst",
+   "framework": "Mac Catalyst",
+   "app": "Stocks"
+  },
+  {
+   "id": "glfw",
+   "framework": "OpenGL/GLFW",
+   "app": "kitty"
+  },
+  {
+   "id": "qt_gpu",
+   "framework": "Qt + GPU UI",
+   "app": "DaVinci Resolve"
+  },
+  {
+   "id": "qt6",
+   "framework": "Qt 6",
+   "app": "Prism Launcher"
+  },
+  {
+   "id": "adobe",
+   "framework": "Adobe proprietary toolkit (UXP)",
+   "app": "Photoshop"
+  }
+ ],
+ "measured_20261006_legend": {
+  "source": "Documentation/Driver/reports/CUADriverBenchmark20261006.md tables 'Driver-reported completions' and 'Failures and UI effects', counts re-derived from ~/Forte_Projects/_bench/results-20261006/all.jsonl (measured repetitions 1..8, warm-up excluded).",
+  "done_attempted": "reported-done calls over attempted calls; 'done' is the driver's own verdict and includes unverified effects",
+  "effect_verification": {
+   "independent_probe": "AX value read before and 250 ms after",
+   "ocr": "window capture plus Vision OCR",
+   "driver_verdict_only": "no independent oracle",
+   "none": "driver reported failure or the effect was checked and absent",
+   "probe_before_after": "frontmost app and cursor sampled around each call"
+  },
+  "status": {
+   "not_run": "the operation was not part of that app's scenario",
+   "session_refused": "Mecum could not open a session"
+  },
+  "cua_qt_note": "The published report omits Cua action values on Qt (outside declared background support); the counts here come from the raw rows."
+ },
+ "cells": [
+  {
+   "driver": "cua",
+   "framework": "swiftui",
+   "capability": "observe",
+   "claim": "supported",
+   "basis": "declaration",
+   "scope": "framework",
+   "sources": [
+    {
+     "id": "c_led_native",
+     "path": "libs/cua-driver/docs/action-support.md",
+     "section": "Native macOS",
+     "anchor": "native-macos",
+     "url": "https://github.com/trycua/cua/blob/c1c2b5fee428c3a39bebe5e77549c3d3525a608d/libs/cua-driver/docs/action-support.md#native-macos"
+    }
+   ],
+   "paraphrase": "Ledger SwiftUI row: AX tree and capture are proven.",
+   "measured_20261006": {
+    "done": 8,
+    "attempted": 8,
+    "ops": [
+     "observe"
+    ],
+    "effect_verification": "none",
+    "note": "read returned"
+   }
+  },
+  {
+   "driver": "mecum",
+   "framework": "swiftui",
+   "capability": "observe",
+   "claim": "supported",
+   "basis": "qualification_result",
+   "scope": "app",
+   "sources": [
+    {
+     "id": "m_exp",
+     "path": "Documentation/Driver/reports/ExpandedApplicationChecks.md",
+     "section": "Additional application matrix",
+     "anchor": "additional-application-matrix"
+    }
+   ],
+   "paraphrase": "Calculator: observations contain both arithmetic results and the final zero.",
+   "measured_20261006": {
+    "done": 8,
+    "attempted": 8,
+    "ops": [
+     "observe"
+    ],
+    "effect_verification": "none",
+    "note": "read returned"
+   }
+  },
+  {
+   "driver": "cua",
+   "framework": "swiftui",
+   "capability": "click",
+   "claim": "supported",
+   "basis": "declaration",
+   "scope": "framework",
+   "sources": [
+    {
+     "id": "c_led_native",
+     "path": "libs/cua-driver/docs/action-support.md",
+     "section": "Native macOS",
+     "anchor": "native-macos",
+     "url": "https://github.com/trycua/cua/blob/c1c2b5fee428c3a39bebe5e77549c3d3525a608d/libs/cua-driver/docs/action-support.md#native-macos"
+    }
+   ],
+   "paraphrase": "Ledger SwiftUI row: AX background left click is proven.",
+   "measured_20261006": {
+    "done": 8,
+    "attempted": 8,
+    "ops": [
+     "click"
+    ],
+    "effect_verification": "independent_probe",
+    "note": "display after 7 confirmed; one -25204 before measured run"
+   }
+  },
+  {
+   "driver": "mecum",
+   "framework": "swiftui",
+   "capability": "click",
+   "claim": "supported",
+   "basis": "qualification_result",
+   "scope": "app",
+   "sources": [
+    {
+     "id": "m_exp",
+     "path": "Documentation/Driver/reports/ExpandedApplicationChecks.md",
+     "section": "Additional application matrix",
+     "anchor": "additional-application-matrix"
+    },
+    {
+     "id": "m_stab",
+     "path": "Documentation/Driver/reports/StabilizationRounds.md",
+     "section": "Local release acceptance matrix",
+     "anchor": "local-release-acceptance-matrix"
+    }
+   ],
+   "paraphrase": "Calculator clicks give 15 and 54 then zero; one cycle needed recovery after geometryChanged.",
+   "note": "Mecum docs name Calculator as native/AppKit; SwiftUI is not named as a framework and is not in LaunchCompatibility's list.",
+   "measured_20261006": {
+    "done": 8,
+    "attempted": 8,
+    "ops": [
+     "click"
+    ],
+    "effect_verification": "independent_probe",
+    "note": "display after 7 confirmed"
+   }
+  },
+  {
+   "driver": "cua",
+   "framework": "swiftui",
+   "capability": "type",
+   "claim": "not mentioned",
+   "basis": "gap",
+   "scope": "framework",
+   "sources": [
+    {
+     "id": "c_led_native",
+     "path": "libs/cua-driver/docs/action-support.md",
+     "section": "Native macOS",
+     "anchor": "native-macos",
+     "url": "https://github.com/trycua/cua/blob/c1c2b5fee428c3a39bebe5e77549c3d3525a608d/libs/cua-driver/docs/action-support.md#native-macos"
+    }
+   ],
+   "paraphrase": "Ledger proves AX set value only; other native pointer and keyboard combinations are listed as unproven.",
+   "measured_20261006": {
+    "status": "not_run"
+   }
+  },
+  {
+   "driver": "mecum",
+   "framework": "swiftui",
+   "capability": "type",
+   "claim": "not mentioned",
+   "basis": "gap",
+   "scope": "framework",
+   "sources": [
+    {
+     "id": "m_exp",
+     "path": "Documentation/Driver/reports/ExpandedApplicationChecks.md",
+     "section": "Additional application matrix",
+     "anchor": "additional-application-matrix"
+    }
+   ],
+   "paraphrase": "Not documented for Calculator.",
+   "measured_20261006": {
+    "status": "not_run"
+   }
+  },
+  {
+   "driver": "cua",
+   "framework": "swiftui",
+   "capability": "key",
+   "claim": "not mentioned",
+   "basis": "gap",
+   "scope": "framework",
+   "sources": [
+    {
+     "id": "c_led_native",
+     "path": "libs/cua-driver/docs/action-support.md",
+     "section": "Native macOS",
+     "anchor": "native-macos",
+     "url": "https://github.com/trycua/cua/blob/c1c2b5fee428c3a39bebe5e77549c3d3525a608d/libs/cua-driver/docs/action-support.md#native-macos"
+    }
+   ],
+   "paraphrase": "Listed as unproven in the SwiftUI row; no refusal declared.",
+   "measured_20261006": {
+    "done": 8,
+    "attempted": 8,
+    "ops": [
+     "key"
+    ],
+    "effect_verification": "independent_probe",
+    "note": "Escape clear confirmed"
+   }
+  },
+  {
+   "driver": "mecum",
+   "framework": "swiftui",
+   "capability": "key",
+   "claim": "not mentioned",
+   "basis": "gap",
+   "scope": "framework",
+   "sources": [
+    {
+     "id": "m_exp",
+     "path": "Documentation/Driver/reports/ExpandedApplicationChecks.md",
+     "section": "Additional application matrix",
+     "anchor": "additional-application-matrix"
+    }
+   ],
+   "paraphrase": "Not documented for Calculator.",
+   "measured_20261006": {
+    "done": 8,
+    "attempted": 8,
+    "ops": [
+     "key"
+    ],
+    "effect_verification": "independent_probe",
+    "note": "Escape clear confirmed"
+   }
+  },
+  {
+   "driver": "cua",
+   "framework": "swiftui",
+   "capability": "hotkey",
+   "claim": "not mentioned",
+   "basis": "gap",
+   "scope": "framework",
+   "sources": [
+    {
+     "id": "c_led_native",
+     "path": "libs/cua-driver/docs/action-support.md",
+     "section": "Native macOS",
+     "anchor": "native-macos",
+     "url": "https://github.com/trycua/cua/blob/c1c2b5fee428c3a39bebe5e77549c3d3525a608d/libs/cua-driver/docs/action-support.md#native-macos"
+    }
+   ],
+   "paraphrase": "Listed as unproven in the SwiftUI row; no refusal declared.",
+   "measured_20261006": {
+    "status": "not_run"
+   }
+  },
+  {
+   "driver": "mecum",
+   "framework": "swiftui",
+   "capability": "hotkey",
+   "claim": "not mentioned",
+   "basis": "gap",
+   "scope": "framework",
+   "sources": [
+    {
+     "id": "m_exp",
+     "path": "Documentation/Driver/reports/ExpandedApplicationChecks.md",
+     "section": "Additional application matrix",
+     "anchor": "additional-application-matrix"
+    }
+   ],
+   "paraphrase": "Not documented for Calculator.",
+   "measured_20261006": {
+    "status": "not_run"
+   }
+  },
+  {
+   "driver": "cua",
+   "framework": "swiftui",
+   "capability": "scroll",
+   "claim": "not mentioned",
+   "basis": "gap",
+   "scope": "framework",
+   "sources": [
+    {
+     "id": "c_led_native",
+     "path": "libs/cua-driver/docs/action-support.md",
+     "section": "Native macOS",
+     "anchor": "native-macos",
+     "url": "https://github.com/trycua/cua/blob/c1c2b5fee428c3a39bebe5e77549c3d3525a608d/libs/cua-driver/docs/action-support.md#native-macos"
+    }
+   ],
+   "paraphrase": "Not in the SwiftUI row.",
+   "measured_20261006": {
+    "status": "not_run"
+   }
+  },
+  {
+   "driver": "mecum",
+   "framework": "swiftui",
+   "capability": "scroll",
+   "claim": "not mentioned",
+   "basis": "gap",
+   "scope": "framework",
+   "sources": [
+    {
+     "id": "m_exp",
+     "path": "Documentation/Driver/reports/ExpandedApplicationChecks.md",
+     "section": "Additional application matrix",
+     "anchor": "additional-application-matrix"
+    }
+   ],
+   "paraphrase": "Not documented for Calculator.",
+   "measured_20261006": {
+    "status": "not_run"
+   }
+  },
+  {
+   "driver": "cua",
+   "framework": "swiftui",
+   "capability": "menu",
+   "claim": "partial",
+   "basis": "declaration",
+   "scope": "generic",
+   "sources": [
+    {
+     "id": "c_menu",
+     "path": "libs/cua-driver/rust/Skills/cua-driver/MACOS.md",
+     "section": "Navigating native menu bars (AXMenuBar)",
+     "anchor": "navigating-native-menu-bars-axmenubar",
+     "url": "https://github.com/trycua/cua/blob/c1c2b5fee428c3a39bebe5e77549c3d3525a608d/libs/cua-driver/rust/Skills/cua-driver/MACOS.md#navigating-native-menu-bars-axmenubar"
+    }
+   ],
+   "paraphrase": "invoke_menu works from a known app-menu path but temporarily activates the exact window and restores the prior app best-effort.",
+   "note": "Not a no-activation route by its own description.",
+   "measured_20261006": {
+    "done": 8,
+    "attempted": 8,
+    "ops": [
+     "menu"
+    ],
+    "effect_verification": "driver_verdict_only",
+    "note": ""
+   }
+  },
+  {
+   "driver": "mecum",
+   "framework": "swiftui",
+   "capability": "menu",
+   "claim": "not mentioned",
+   "basis": "gap",
+   "scope": "framework",
+   "sources": [
+    {
+     "id": "m_exp",
+     "path": "Documentation/Driver/reports/ExpandedApplicationChecks.md",
+     "section": "Additional application matrix",
+     "anchor": "additional-application-matrix"
+    }
+   ],
+   "paraphrase": "Not documented for Calculator.",
+   "measured_20261006": {
+    "done": 8,
+    "attempted": 8,
+    "ops": [
+     "menu"
+    ],
+    "effect_verification": "driver_verdict_only",
+    "note": ""
+   }
+  },
+  {
+   "driver": "cua",
+   "framework": "swiftui",
+   "capability": "background_no_activation",
+   "claim": "supported",
+   "basis": "declaration",
+   "scope": "framework",
+   "sources": [
+    {
+     "id": "c_led_native",
+     "path": "libs/cua-driver/docs/action-support.md",
+     "section": "Native macOS",
+     "anchor": "native-macos",
+     "url": "https://github.com/trycua/cua/blob/c1c2b5fee428c3a39bebe5e77549c3d3525a608d/libs/cua-driver/docs/action-support.md#native-macos"
+    },
+    {
+     "id": "c_plat",
+     "path": "docs/content/docs/cua-driver/concepts/platform-support.mdx",
+     "section": "Operating systems; Browser routes; Boundaries and remaining work",
+     "anchor": "",
+     "url": "https://github.com/trycua/cua/blob/c1c2b5fee428c3a39bebe5e77549c3d3525a608d/docs/content/docs/cua-driver/concepts/platform-support.mdx"
+    }
+   ],
+   "paraphrase": "AX background click and set value are proven; the only stated boundary is that off-Space SwiftUI windows lose their tree.",
+   "measured_20261006": {
+    "done": 24,
+    "attempted": 24,
+    "ops": [
+     "all action calls"
+    ],
+    "effect_verification": "probe_before_after",
+    "note": "frontmost app unchanged after 24/24 action calls. Probe samples frontmost app and cursor before and after each call; a transient activation inside a call is not visible. Cua invoke_menu raises the window and restores focus (source report)."
+   }
+  },
+  {
+   "driver": "mecum",
+   "framework": "swiftui",
+   "capability": "background_no_activation",
+   "claim": "supported",
+   "basis": "generic_contract",
+   "scope": "generic",
+   "sources": [
+    {
+     "id": "m_readme",
+     "path": "Documentation/Driver/README.md",
+     "section": "AgentSeatKit (introduction)",
+     "anchor": "agentseatkit"
+    }
+   ],
+   "paraphrase": "The seat delivers background input to windows moved onto a virtual display and never posts a global event or falls back onto the desktop.",
+   "measured_20261006": {
+    "done": 24,
+    "attempted": 24,
+    "ops": [
+     "all action calls"
+    ],
+    "effect_verification": "probe_before_after",
+    "note": "frontmost app unchanged after 24/24 action calls. Probe samples frontmost app and cursor before and after each call; a transient activation inside a call is not visible."
+   }
+  },
+  {
+   "driver": "cua",
+   "framework": "swiftui",
+   "capability": "cursor_untouched",
+   "claim": "supported",
+   "basis": "generic_contract",
+   "scope": "generic",
+   "sources": [
+    {
+     "id": "c_nofg",
+     "path": "libs/cua-driver/rust/Skills/cua-driver/MACOS.md",
+     "section": "The no-foreground contract",
+     "anchor": "the-no-foreground-contract",
+     "url": "https://github.com/trycua/cua/blob/c1c2b5fee428c3a39bebe5e77549c3d3525a608d/libs/cua-driver/rust/Skills/cua-driver/MACOS.md#the-no-foreground-contract"
+    },
+    {
+     "id": "c_click",
+     "path": "docs/content/docs/cua-driver/reference/mcp-tools/click.mdx",
+     "section": "click (element_token moves no cursor or focus)",
+     "anchor": "",
+     "url": "https://github.com/trycua/cua/blob/c1c2b5fee428c3a39bebe5e77549c3d3525a608d/docs/content/docs/cua-driver/reference/mcp-tools/click.mdx"
+    }
+   ],
+   "paraphrase": "Per-pid background delivery and element_token actions move no real cursor; only foreground pixel clicks move the pointer.",
+   "measured_20261006": {
+    "done": 24,
+    "attempted": 24,
+    "ops": [
+     "all action calls"
+    ],
+    "effect_verification": "probe_before_after",
+    "note": "cursor unchanged after 24/24 action calls; the source report attributes the 0 recorded movements to the person using the Mac, in bursts that included read-only calls."
+   }
+  },
+  {
+   "driver": "mecum",
+   "framework": "swiftui",
+   "capability": "cursor_untouched",
+   "claim": "supported",
+   "basis": "generic_contract",
+   "scope": "generic",
+   "sources": [
+    {
+     "id": "m_readme",
+     "path": "Documentation/Driver/README.md",
+     "section": "AgentSeatKit (introduction)",
+     "anchor": "agentseatkit"
+    },
+    {
+     "id": "m_fence",
+     "path": "Documentation/Driver/README.md",
+     "section": "The fence is alive only while somebody holds it",
+     "anchor": "the-fence-is-alive-only-while-somebody-holds-it"
+    }
+   ],
+   "paraphrase": "An HID event tap fence keeps the person's cursor out while the host is up; Live rows assert zero physical events.",
+   "measured_20261006": {
+    "done": 24,
+    "attempted": 24,
+    "ops": [
+     "all action calls"
+    ],
+    "effect_verification": "probe_before_after",
+    "note": "cursor unchanged after 24/24 action calls; the source report attributes the 0 recorded movements to the person using the Mac, in bursts that included read-only calls."
+   }
+  },
+  {
+   "driver": "cua",
+   "framework": "appkit",
+   "capability": "observe",
+   "claim": "supported",
+   "basis": "declaration",
+   "scope": "framework",
+   "sources": [
+    {
+     "id": "c_led_native",
+     "path": "libs/cua-driver/docs/action-support.md",
+     "section": "Native macOS",
+     "anchor": "native-macos",
+     "url": "https://github.com/trycua/cua/blob/c1c2b5fee428c3a39bebe5e77549c3d3525a608d/libs/cua-driver/docs/action-support.md#native-macos"
+    }
+   ],
+   "paraphrase": "Ledger AppKit row: AX tree and capture proven.",
+   "measured_20261006": {
+    "done": 8,
+    "attempted": 8,
+    "ops": [
+     "observe"
+    ],
+    "effect_verification": "none",
+    "note": "read returned"
+   }
+  },
+  {
+   "driver": "mecum",
+   "framework": "appkit",
+   "capability": "observe",
+   "claim": "supported",
+   "basis": "qualification_result",
+   "scope": "app",
+   "sources": [
+    {
+     "id": "m_flow",
+     "path": "Documentation/Driver/reports/ApplicationFlowChecks.md",
+     "section": "Observed effects and failures",
+     "anchor": "observed-effects-and-failures"
+    }
+   ],
+   "paraphrase": "TextEdit: exact three-line text confirmed in a fresh observation and an independent AX read.",
+   "measured_20261006": {
+    "done": 8,
+    "attempted": 8,
+    "ops": [
+     "observe"
+    ],
+    "effect_verification": "none",
+    "note": "read returned"
+   }
+  },
+  {
+   "driver": "cua",
+   "framework": "appkit",
+   "capability": "click",
+   "claim": "supported",
+   "basis": "declaration",
+   "scope": "framework",
+   "sources": [
+    {
+     "id": "c_led_native",
+     "path": "libs/cua-driver/docs/action-support.md",
+     "section": "Native macOS",
+     "anchor": "native-macos",
+     "url": "https://github.com/trycua/cua/blob/c1c2b5fee428c3a39bebe5e77549c3d3525a608d/libs/cua-driver/docs/action-support.md#native-macos"
+    }
+   ],
+   "paraphrase": "AX background left click and pixel background left, right and double click are proven; AX-addressed right and double click are unproven.",
+   "measured_20261006": {
+    "done": 8,
+    "attempted": 8,
+    "ops": [
+     "click"
+    ],
+    "effect_verification": "driver_verdict_only",
+    "note": ""
+   }
+  },
+  {
+   "driver": "mecum",
+   "framework": "appkit",
+   "capability": "click",
+   "claim": "partial",
+   "basis": "qualification_result",
+   "scope": "app",
+   "sources": [
+    {
+     "id": "m_flow",
+     "path": "Documentation/Driver/reports/ApplicationFlowChecks.md",
+     "section": "Observed effects and failures",
+     "anchor": "observed-effects-and-failures"
+    }
+   ],
+   "paraphrase": "Open panel withdrawn through AX Cancel; an ordinary Cancel click returned subtreeUnreadable.",
+   "measured_20261006": {
+    "done": 8,
+    "attempted": 8,
+    "ops": [
+     "click"
+    ],
+    "effect_verification": "driver_verdict_only",
+    "note": "caret click by window pixels"
+   }
+  },
+  {
+   "driver": "cua",
+   "framework": "appkit",
+   "capability": "type",
+   "claim": "supported",
+   "basis": "declaration",
+   "scope": "framework",
+   "sources": [
+    {
+     "id": "c_led_native",
+     "path": "libs/cua-driver/docs/action-support.md",
+     "section": "Native macOS",
+     "anchor": "native-macos",
+     "url": "https://github.com/trycua/cua/blob/c1c2b5fee428c3a39bebe5e77549c3d3525a608d/libs/cua-driver/docs/action-support.md#native-macos"
+    }
+   ],
+   "paraphrase": "AX background type text and set value are proven.",
+   "measured_20261006": {
+    "done": 8,
+    "attempted": 8,
+    "ops": [
+     "type"
+    ],
+    "effect_verification": "independent_probe",
+    "note": "document text confirmed"
+   }
+  },
+  {
+   "driver": "mecum",
+   "framework": "appkit",
+   "capability": "type",
+   "claim": "supported",
+   "basis": "qualification_result",
+   "scope": "app",
+   "sources": [
+    {
+     "id": "m_flow",
+     "path": "Documentation/Driver/reports/ApplicationFlowChecks.md",
+     "section": "Observed effects and failures",
+     "anchor": "observed-effects-and-failures"
+    },
+    {
+     "id": "m_adr29",
+     "path": "Documentation/Driver/adr/Adr0029PrepareTextEditMenuCommands.md",
+     "section": "Decision",
+     "anchor": "decision"
+    }
+   ],
+   "paraphrase": "Exact Unicode replacement incl. accented and emoji text confirmed in TextEdit.",
+   "measured_20261006": {
+    "done": 8,
+    "attempted": 8,
+    "ops": [
+     "type"
+    ],
+    "effect_verification": "independent_probe",
+    "note": "document text confirmed"
+   }
+  },
+  {
+   "driver": "cua",
+   "framework": "appkit",
+   "capability": "key",
+   "claim": "not mentioned",
+   "basis": "gap",
+   "scope": "framework",
+   "sources": [
+    {
+     "id": "c_led_native",
+     "path": "libs/cua-driver/docs/action-support.md",
+     "section": "Native macOS",
+     "anchor": "native-macos",
+     "url": "https://github.com/trycua/cua/blob/c1c2b5fee428c3a39bebe5e77549c3d3525a608d/libs/cua-driver/docs/action-support.md#native-macos"
+    }
+   ],
+   "paraphrase": "Native press key is listed as unproven in the AppKit row.",
+   "measured_20261006": {
+    "done": 8,
+    "attempted": 8,
+    "ops": [
+     "key"
+    ],
+    "effect_verification": "driver_verdict_only",
+    "note": ""
+   }
+  },
+  {
+   "driver": "mecum",
+   "framework": "appkit",
+   "capability": "key",
+   "claim": "partial",
+   "basis": "qualification_result",
+   "scope": "app",
+   "sources": [
+    {
+     "id": "m_flow",
+     "path": "Documentation/Driver/reports/ApplicationFlowChecks.md",
+     "section": "Observed effects and failures",
+     "anchor": "observed-effects-and-failures"
+    }
+   ],
+   "paraphrase": "Navigation effect seen by an independent AX range; Mecum cannot verify the keys itself.",
+   "measured_20261006": {
+    "done": 8,
+    "attempted": 8,
+    "ops": [
+     "key"
+    ],
+    "effect_verification": "driver_verdict_only",
+    "note": "Tab move"
+   }
+  },
+  {
+   "driver": "cua",
+   "framework": "appkit",
+   "capability": "hotkey",
+   "claim": "not mentioned",
+   "basis": "gap",
+   "scope": "framework",
+   "sources": [
+    {
+     "id": "c_led_native",
+     "path": "libs/cua-driver/docs/action-support.md",
+     "section": "Native macOS",
+     "anchor": "native-macos",
+     "url": "https://github.com/trycua/cua/blob/c1c2b5fee428c3a39bebe5e77549c3d3525a608d/libs/cua-driver/docs/action-support.md#native-macos"
+    }
+   ],
+   "paraphrase": "Native hotkey is listed as unproven in the AppKit row.",
+   "measured_20261006": {
+    "done": 8,
+    "attempted": 8,
+    "ops": [
+     "hotkey"
+    ],
+    "effect_verification": "driver_verdict_only",
+    "note": ""
+   }
+  },
+  {
+   "driver": "mecum",
+   "framework": "appkit",
+   "capability": "hotkey",
+   "claim": "not mentioned",
+   "basis": "gap",
+   "scope": "framework",
+   "sources": [
+    {
+     "id": "m_adr29",
+     "path": "Documentation/Driver/adr/Adr0029PrepareTextEditMenuCommands.md",
+     "section": "Decision",
+     "anchor": "decision"
+    }
+   ],
+   "paraphrase": "Menu commands (Undo, Redo) are documented; chords as such are not.",
+   "measured_20261006": {
+    "done": 8,
+    "attempted": 8,
+    "ops": [
+     "hotkey"
+    ],
+    "effect_verification": "driver_verdict_only",
+    "note": ""
+   }
+  },
+  {
+   "driver": "cua",
+   "framework": "appkit",
+   "capability": "scroll",
+   "claim": "supported",
+   "basis": "declaration",
+   "scope": "framework",
+   "sources": [
+    {
+     "id": "c_led_native",
+     "path": "libs/cua-driver/docs/action-support.md",
+     "section": "Native macOS",
+     "anchor": "native-macos",
+     "url": "https://github.com/trycua/cua/blob/c1c2b5fee428c3a39bebe5e77549c3d3525a608d/libs/cua-driver/docs/action-support.md#native-macos"
+    }
+   ],
+   "paraphrase": "AX scroll is proven in foreground and background.",
+   "measured_20261006": {
+    "done": 16,
+    "attempted": 16,
+    "ops": [
+     "scroll_down",
+     "scroll_up"
+    ],
+    "effect_verification": "driver_verdict_only",
+    "note": ""
+   }
+  },
+  {
+   "driver": "mecum",
+   "framework": "appkit",
+   "capability": "scroll",
+   "claim": "not mentioned",
+   "basis": "gap",
+   "scope": "framework",
+   "sources": [
+    {
+     "id": "m_exp",
+     "path": "Documentation/Driver/reports/ExpandedApplicationChecks.md",
+     "section": "Additional application matrix",
+     "anchor": "additional-application-matrix"
+    }
+   ],
+   "paraphrase": "Scroll on TextEdit is not documented (Preview scroll was not executed).",
+   "measured_20261006": {
+    "done": 16,
+    "attempted": 16,
+    "ops": [
+     "scroll_down",
+     "scroll_up"
+    ],
+    "effect_verification": "driver_verdict_only",
+    "note": ""
+   }
+  },
+  {
+   "driver": "cua",
+   "framework": "appkit",
+   "capability": "menu",
+   "claim": "partial",
+   "basis": "declaration",
+   "scope": "generic",
+   "sources": [
+    {
+     "id": "c_menu",
+     "path": "libs/cua-driver/rust/Skills/cua-driver/MACOS.md",
+     "section": "Navigating native menu bars (AXMenuBar)",
+     "anchor": "navigating-native-menu-bars-axmenubar",
+     "url": "https://github.com/trycua/cua/blob/c1c2b5fee428c3a39bebe5e77549c3d3525a608d/libs/cua-driver/rust/Skills/cua-driver/MACOS.md#navigating-native-menu-bars-axmenubar"
+    }
+   ],
+   "paraphrase": "invoke_menu works from a known app-menu path but temporarily activates the exact window and restores the prior app best-effort.",
+   "note": "Not a no-activation route by its own description.",
+   "measured_20261006": {
+    "done": 8,
+    "attempted": 8,
+    "ops": [
+     "menu"
+    ],
+    "effect_verification": "driver_verdict_only",
+    "note": "invoke_menu raises window then restores focus"
+   }
+  },
+  {
+   "driver": "mecum",
+   "framework": "appkit",
+   "capability": "menu",
+   "claim": "partial",
+   "basis": "qualification_result",
+   "scope": "app",
+   "sources": [
+    {
+     "id": "m_adr29",
+     "path": "Documentation/Driver/adr/Adr0029PrepareTextEditMenuCommands.md",
+     "section": "Decision",
+     "anchor": "decision"
+    }
+   ],
+   "paraphrase": "TextEdit menu commands use a bounded brief activation with verified handback; Undo and Redo qualified, other AppKit hosts keep the old path.",
+   "note": "Select All and similar items read disabled in background (the benchmark saw 0/8).",
+   "measured_20261006": {
+    "done": 0,
+    "attempted": 8,
+    "ops": [
+     "menu"
+    ],
+    "effect_verification": "none",
+    "note": "Edit > Select All refused: disabled in background"
+   }
+  },
+  {
+   "driver": "cua",
+   "framework": "appkit",
+   "capability": "background_no_activation",
+   "claim": "supported",
+   "basis": "declaration",
+   "scope": "framework",
+   "sources": [
+    {
+     "id": "c_led_native",
+     "path": "libs/cua-driver/docs/action-support.md",
+     "section": "Native macOS",
+     "anchor": "native-macos",
+     "url": "https://github.com/trycua/cua/blob/c1c2b5fee428c3a39bebe5e77549c3d3525a608d/libs/cua-driver/docs/action-support.md#native-macos"
+    }
+   ],
+   "paraphrase": "AX and pixel background routes are proven; background slider drag returns background_unavailable.",
+   "measured_20261006": {
+    "done": 56,
+    "attempted": 56,
+    "ops": [
+     "all action calls"
+    ],
+    "effect_verification": "probe_before_after",
+    "note": "frontmost app unchanged after 56/56 action calls. Probe samples frontmost app and cursor before and after each call; a transient activation inside a call is not visible. Cua invoke_menu raises the window and restores focus (source report)."
+   }
+  },
+  {
+   "driver": "mecum",
+   "framework": "appkit",
+   "capability": "background_no_activation",
+   "claim": "partial",
+   "basis": "qualification_result",
+   "scope": "app",
+   "sources": [
+    {
+     "id": "m_adr29",
+     "path": "Documentation/Driver/adr/Adr0029PrepareTextEditMenuCommands.md",
+     "section": "Decision",
+     "anchor": "decision"
+    },
+    {
+     "id": "m_adr13",
+     "path": "Documentation/Driver/adr/Adr0013BriefActivationForStaleMenus.md",
+     "section": "The decision",
+     "anchor": "the-decision"
+    }
+   ],
+   "paraphrase": "Text and keys stay in the background; menu commands for TextEdit and Adobe use a brief foreground scope.",
+   "measured_20261006": {
+    "done": 56,
+    "attempted": 56,
+    "ops": [
+     "all action calls"
+    ],
+    "effect_verification": "probe_before_after",
+    "note": "frontmost app unchanged after 56/56 action calls. Probe samples frontmost app and cursor before and after each call; a transient activation inside a call is not visible."
+   }
+  },
+  {
+   "driver": "cua",
+   "framework": "appkit",
+   "capability": "cursor_untouched",
+   "claim": "supported",
+   "basis": "generic_contract",
+   "scope": "generic",
+   "sources": [
+    {
+     "id": "c_nofg",
+     "path": "libs/cua-driver/rust/Skills/cua-driver/MACOS.md",
+     "section": "The no-foreground contract",
+     "anchor": "the-no-foreground-contract",
+     "url": "https://github.com/trycua/cua/blob/c1c2b5fee428c3a39bebe5e77549c3d3525a608d/libs/cua-driver/rust/Skills/cua-driver/MACOS.md#the-no-foreground-contract"
+    },
+    {
+     "id": "c_click",
+     "path": "docs/content/docs/cua-driver/reference/mcp-tools/click.mdx",
+     "section": "click (element_token moves no cursor or focus)",
+     "anchor": "",
+     "url": "https://github.com/trycua/cua/blob/c1c2b5fee428c3a39bebe5e77549c3d3525a608d/docs/content/docs/cua-driver/reference/mcp-tools/click.mdx"
+    }
+   ],
+   "paraphrase": "Per-pid background delivery and element_token actions move no real cursor; only foreground pixel clicks move the pointer.",
+   "measured_20261006": {
+    "done": 56,
+    "attempted": 56,
+    "ops": [
+     "all action calls"
+    ],
+    "effect_verification": "probe_before_after",
+    "note": "cursor unchanged after 56/56 action calls; the source report attributes the 0 recorded movements to the person using the Mac, in bursts that included read-only calls."
+   }
+  },
+  {
+   "driver": "mecum",
+   "framework": "appkit",
+   "capability": "cursor_untouched",
+   "claim": "supported",
+   "basis": "generic_contract",
+   "scope": "generic",
+   "sources": [
+    {
+     "id": "m_readme",
+     "path": "Documentation/Driver/README.md",
+     "section": "AgentSeatKit (introduction)",
+     "anchor": "agentseatkit"
+    },
+    {
+     "id": "m_fence",
+     "path": "Documentation/Driver/README.md",
+     "section": "The fence is alive only while somebody holds it",
+     "anchor": "the-fence-is-alive-only-while-somebody-holds-it"
+    }
+   ],
+   "paraphrase": "An HID event tap fence keeps the person's cursor out while the host is up; Live rows assert zero physical events.",
+   "measured_20261006": {
+    "done": 56,
+    "attempted": 56,
+    "ops": [
+     "all action calls"
+    ],
+    "effect_verification": "probe_before_after",
+    "note": "cursor unchanged after 56/56 action calls; the source report attributes the 0 recorded movements to the person using the Mac, in bursts that included read-only calls."
+   }
+  },
+  {
+   "driver": "cua",
+   "framework": "chromium",
+   "capability": "observe",
+   "claim": "supported",
+   "basis": "declaration",
+   "scope": "framework",
+   "sources": [
+    {
+     "id": "c_narrow",
+     "path": "libs/cua-driver/rust/Skills/cua-driver/MACOS.md",
+     "section": "The narrow carve-out (diagnosis bullets: empty tree, sparse Chromium tree)",
+     "anchor": "the-narrow-carve-out",
+     "url": "https://github.com/trycua/cua/blob/c1c2b5fee428c3a39bebe5e77549c3d3525a608d/libs/cua-driver/rust/Skills/cua-driver/MACOS.md#the-narrow-carve-out"
+    },
+    {
+     "id": "c_brow",
+     "path": "libs/cua-driver/rust/Skills/cua-driver/MACOS.md",
+     "section": "Browsers on macOS",
+     "anchor": "browsers-on-macos",
+     "url": "https://github.com/trycua/cua/blob/c1c2b5fee428c3a39bebe5e77549c3d3525a608d/libs/cua-driver/rust/Skills/cua-driver/MACOS.md#browsers-on-macos"
+    }
+   ],
+   "paraphrase": "get_window_state returns tree plus screenshot; a sparse Chromium tree populates on a second read.",
+   "note": "Browser snapshot route is the typed page API; no Chromium row in the native ledger.",
+   "measured_20261006": {
+    "done": 8,
+    "attempted": 8,
+    "ops": [
+     "observe"
+    ],
+    "effect_verification": "none",
+    "note": "read returned"
+   }
+  },
+  {
+   "driver": "mecum",
+   "framework": "chromium",
+   "capability": "observe",
+   "claim": "supported",
+   "basis": "qualification_result",
+   "scope": "framework",
+   "sources": [
+    {
+     "id": "m_chr_ready",
+     "path": "Documentation/Driver/platforms/Chromium.md",
+     "section": "App integration and readiness",
+     "anchor": "app-integration-and-readiness"
+    }
+   ],
+   "paraphrase": "Adoption requires a qualified window snapshot with an AXWebArea; a thin toolbar tree is not a ready page.",
+   "measured_20261006": {
+    "done": 8,
+    "attempted": 8,
+    "ops": [
+     "observe"
+    ],
+    "effect_verification": "none",
+    "note": "read returned"
+   }
+  },
+  {
+   "driver": "cua",
+   "framework": "chromium",
+   "capability": "click",
+   "claim": "partial",
+   "basis": "declaration",
+   "scope": "framework",
+   "sources": [
+    {
+     "id": "c_brow",
+     "path": "libs/cua-driver/rust/Skills/cua-driver/MACOS.md",
+     "section": "Browsers on macOS",
+     "anchor": "browsers-on-macos",
+     "url": "https://github.com/trycua/cua/blob/c1c2b5fee428c3a39bebe5e77549c3d3525a608d/libs/cua-driver/rust/Skills/cua-driver/MACOS.md#browsers-on-macos"
+    },
+    {
+     "id": "c_browser",
+     "path": "libs/cua-driver/rust/Skills/cua-driver/BROWSER.md",
+     "section": "Support boundaries",
+     "anchor": "support-boundaries",
+     "url": "https://github.com/trycua/cua/blob/c1c2b5fee428c3a39bebe5e77549c3d3525a608d/libs/cua-driver/rust/Skills/cua-driver/BROWSER.md#support-boundaries"
+    },
+    {
+     "id": "c_pixlim",
+     "path": "libs/cua-driver/rust/Skills/cua-driver/MACOS.md",
+     "section": "Known pixel-click limits",
+     "anchor": "known-pixel-click-limits",
+     "url": "https://github.com/trycua/cua/blob/c1c2b5fee428c3a39bebe5e77549c3d3525a608d/libs/cua-driver/rust/Skills/cua-driver/MACOS.md#known-pixel-click-limits"
+    }
+   ],
+   "paraphrase": "Trusted pointer click is refused (browser_input_trust_unavailable) to avoid activating Chrome; only an explicit DOM click or AX element click is background; pixel right-click becomes left-click.",
+   "note": "Platform-support lists Chrome on macOS as proven except trusted pointer input.",
+   "measured_20261006": {
+    "done": 8,
+    "attempted": 8,
+    "ops": [
+     "click"
+    ],
+    "effect_verification": "independent_probe",
+    "note": "page counter confirmed"
+   }
+  },
+  {
+   "driver": "mecum",
+   "framework": "chromium",
+   "capability": "click",
+   "claim": "supported",
+   "basis": "qualification_result",
+   "scope": "framework",
+   "sources": [
+    {
+     "id": "m_chr_tier",
+     "path": "Documentation/Driver/platforms/Chromium.md",
+     "section": "Repeatable local tier",
+     "anchor": "repeatable-local-tier"
+    }
+   ],
+   "paraphrase": "Page counter verifies click; owned-browser rows pass.",
+   "measured_20261006": {
+    "done": 8,
+    "attempted": 8,
+    "ops": [
+     "click"
+    ],
+    "effect_verification": "independent_probe",
+    "note": "page counter confirmed"
+   }
+  },
+  {
+   "driver": "cua",
+   "framework": "chromium",
+   "capability": "type",
+   "claim": "supported",
+   "basis": "declaration",
+   "scope": "framework",
+   "sources": [
+    {
+     "id": "c_browser",
+     "path": "libs/cua-driver/rust/Skills/cua-driver/BROWSER.md",
+     "section": "Support boundaries",
+     "anchor": "support-boundaries",
+     "url": "https://github.com/trycua/cua/blob/c1c2b5fee428c3a39bebe5e77549c3d3525a608d/libs/cua-driver/rust/Skills/cua-driver/BROWSER.md#support-boundaries"
+    },
+    {
+     "id": "c_plat",
+     "path": "docs/content/docs/cua-driver/concepts/platform-support.mdx",
+     "section": "Operating systems; Browser routes; Boundaries and remaining work",
+     "anchor": "",
+     "url": "https://github.com/trycua/cua/blob/c1c2b5fee428c3a39bebe5e77549c3d3525a608d/docs/content/docs/cua-driver/concepts/platform-support.mdx"
+    },
+    {
+     "id": "c_kbd",
+     "path": "docs/content/docs/cua-driver/reference/mcp-tools/keyboard.mdx",
+     "section": "type_text (web content paragraph; delivery_mode)",
+     "anchor": "",
+     "url": "https://github.com/trycua/cua/blob/c1c2b5fee428c3a39bebe5e77549c3d3525a608d/docs/content/docs/cua-driver/reference/mcp-tools/keyboard.mdx"
+    }
+   ],
+   "paraphrase": "Typed browser route supports exact-page typing; native AX text into web content is unverifiable and needs the px form.",
+   "note": "Since c1c2b5f a background newline into the omnibox is refused (browser_field_needs_keystrokes).",
+   "measured_20261006": {
+    "done": 8,
+    "attempted": 8,
+    "ops": [
+     "type"
+    ],
+    "effect_verification": "driver_verdict_only",
+    "note": ""
+   }
+  },
+  {
+   "driver": "mecum",
+   "framework": "chromium",
+   "capability": "type",
+   "claim": "supported",
+   "basis": "qualification_result",
+   "scope": "framework",
+   "sources": [
+    {
+     "id": "m_chr_tier",
+     "path": "Documentation/Driver/platforms/Chromium.md",
+     "section": "Repeatable local tier",
+     "anchor": "repeatable-local-tier"
+    },
+    {
+     "id": "m_flow",
+     "path": "Documentation/Driver/reports/ApplicationFlowChecks.md",
+     "section": "Observed effects and failures",
+     "anchor": "observed-effects-and-failures"
+    }
+   ],
+   "paraphrase": "Bulk insertion and exact Unicode and LF verified by page state; native composition only inside a bounded scope.",
+   "measured_20261006": {
+    "done": 8,
+    "attempted": 8,
+    "ops": [
+     "type"
+    ],
+    "effect_verification": "driver_verdict_only",
+    "note": ""
+   }
+  },
+  {
+   "driver": "cua",
+   "framework": "chromium",
+   "capability": "key",
+   "claim": "supported",
+   "basis": "declaration",
+   "scope": "framework",
+   "sources": [
+    {
+     "id": "c_pixlim",
+     "path": "libs/cua-driver/rust/Skills/cua-driver/MACOS.md",
+     "section": "Known pixel-click limits",
+     "anchor": "known-pixel-click-limits",
+     "url": "https://github.com/trycua/cua/blob/c1c2b5fee428c3a39bebe5e77549c3d3525a608d/libs/cua-driver/rust/Skills/cua-driver/MACOS.md#known-pixel-click-limits"
+    }
+   ],
+   "paraphrase": "press_key is the documented workaround for Chromium video (k or space) because keyboard uses a different auth envelope than a pixel click.",
+   "measured_20261006": {
+    "done": 8,
+    "attempted": 8,
+    "ops": [
+     "key"
+    ],
+    "effect_verification": "driver_verdict_only",
+    "note": ""
+   }
+  },
+  {
+   "driver": "mecum",
+   "framework": "chromium",
+   "capability": "key",
+   "claim": "supported",
+   "basis": "qualification_result",
+   "scope": "framework",
+   "sources": [
+    {
+     "id": "m_chr_tier",
+     "path": "Documentation/Driver/platforms/Chromium.md",
+     "section": "Repeatable local tier",
+     "anchor": "repeatable-local-tier"
+    }
+   ],
+   "paraphrase": "Key delivery is asserted by page counters.",
+   "measured_20261006": {
+    "done": 8,
+    "attempted": 8,
+    "ops": [
+     "key"
+    ],
+    "effect_verification": "driver_verdict_only",
+    "note": ""
+   }
+  },
+  {
+   "driver": "cua",
+   "framework": "chromium",
+   "capability": "hotkey",
+   "claim": "partial",
+   "basis": "declaration",
+   "scope": "framework",
+   "sources": [
+    {
+     "id": "c_nofg",
+     "path": "libs/cua-driver/rust/Skills/cua-driver/MACOS.md",
+     "section": "The no-foreground contract",
+     "anchor": "the-no-foreground-contract",
+     "url": "https://github.com/trycua/cua/blob/c1c2b5fee428c3a39bebe5e77549c3d3525a608d/libs/cua-driver/rust/Skills/cua-driver/MACOS.md#the-no-foreground-contract"
+    }
+   ],
+   "paraphrase": "Browser focus shortcuts such as cmd+L and tab-switching shortcuts are forbidden because the browser activates or visibly re-renders.",
+   "measured_20261006": {
+    "done": 8,
+    "attempted": 8,
+    "ops": [
+     "hotkey"
+    ],
+    "effect_verification": "driver_verdict_only",
+    "note": ""
+   }
+  },
+  {
+   "driver": "mecum",
+   "framework": "chromium",
+   "capability": "hotkey",
+   "claim": "partial",
+   "basis": "qualification_result",
+   "scope": "framework",
+   "sources": [
+    {
+     "id": "m_chr_tier",
+     "path": "Documentation/Driver/platforms/Chromium.md",
+     "section": "Repeatable local tier",
+     "anchor": "repeatable-local-tier"
+    }
+   ],
+   "paraphrase": "Copy, paste, select all, undo, redo and Save keystrokes are delivered but their menu-equivalent effect fails in background (six known issues).",
+   "measured_20261006": {
+    "done": 8,
+    "attempted": 8,
+    "ops": [
+     "hotkey"
+    ],
+    "effect_verification": "driver_verdict_only",
+    "note": ""
+   }
+  },
+  {
+   "driver": "cua",
+   "framework": "chromium",
+   "capability": "scroll",
+   "claim": "partial",
+   "basis": "declaration",
+   "scope": "framework",
+   "sources": [
+    {
+     "id": "c_scroll",
+     "path": "docs/content/docs/cua-driver/reference/mcp-tools/pointer.mdx",
+     "section": "scroll (Electron/Chromium AX reveal paragraph, new since 4f33cd6)",
+     "anchor": "",
+     "url": "https://github.com/trycua/cua/blob/c1c2b5fee428c3a39bebe5e77549c3d3525a608d/docs/content/docs/cua-driver/reference/mcp-tools/pointer.mdx"
+    }
+   ],
+   "paraphrase": "Electron/Chromium windows drop background wheel events; a background scroll now reveals content past the edge through AX, foreground is the fallback.",
+   "changed_since_20261006": true,
+   "measured_20261006": {
+    "done": 16,
+    "attempted": 16,
+    "ops": [
+     "scroll_down",
+     "scroll_up"
+    ],
+    "effect_verification": "driver_verdict_only",
+    "note": ""
+   }
+  },
+  {
+   "driver": "mecum",
+   "framework": "chromium",
+   "capability": "scroll",
+   "claim": "supported",
+   "basis": "qualification_result",
+   "scope": "framework",
+   "sources": [
+    {
+     "id": "m_chr_tier",
+     "path": "Documentation/Driver/platforms/Chromium.md",
+     "section": "Repeatable local tier",
+     "anchor": "repeatable-local-tier"
+    },
+    {
+     "id": "m_flow",
+     "path": "Documentation/Driver/reports/ApplicationFlowChecks.md",
+     "section": "Observed effects and failures",
+     "anchor": "observed-effects-and-failures"
+    }
+   ],
+   "paraphrase": "Wheel counter and scroll-region offset verified; one attempt moved the outer page instead.",
+   "measured_20261006": {
+    "done": 16,
+    "attempted": 16,
+    "ops": [
+     "scroll_down",
+     "scroll_up"
+    ],
+    "effect_verification": "driver_verdict_only",
+    "note": ""
+   }
+  },
+  {
+   "driver": "cua",
+   "framework": "chromium",
+   "capability": "menu",
+   "claim": "partial",
+   "basis": "declaration",
+   "scope": "generic",
+   "sources": [
+    {
+     "id": "c_menu",
+     "path": "libs/cua-driver/rust/Skills/cua-driver/MACOS.md",
+     "section": "Navigating native menu bars (AXMenuBar)",
+     "anchor": "navigating-native-menu-bars-axmenubar",
+     "url": "https://github.com/trycua/cua/blob/c1c2b5fee428c3a39bebe5e77549c3d3525a608d/libs/cua-driver/rust/Skills/cua-driver/MACOS.md#navigating-native-menu-bars-axmenubar"
+    }
+   ],
+   "paraphrase": "invoke_menu works from a known app-menu path but temporarily activates the exact window and restores the prior app best-effort.",
+   "note": "Not a no-activation route by its own description.",
+   "measured_20261006": {
+    "done": 8,
+    "attempted": 8,
+    "ops": [
+     "menu"
+    ],
+    "effect_verification": "driver_verdict_only",
+    "note": ""
+   }
+  },
+  {
+   "driver": "mecum",
+   "framework": "chromium",
+   "capability": "menu",
+   "claim": "partial",
+   "basis": "qualification_result",
+   "scope": "framework",
+   "sources": [
+    {
+     "id": "m_chr_tier",
+     "path": "Documentation/Driver/platforms/Chromium.md",
+     "section": "Repeatable local tier",
+     "anchor": "repeatable-local-tier"
+    }
+   ],
+   "paraphrase": "Context-menu route qualified (Select All, Undo, Redo, Print); menu-equivalent keyboard effects remain known failures.",
+   "measured_20261006": {
+    "done": 0,
+    "attempted": 8,
+    "ops": [
+     "menu"
+    ],
+    "effect_verification": "none",
+    "note": "View > Always Show Bookmarks Bar refused: disabled in background"
+   }
+  },
+  {
+   "driver": "cua",
+   "framework": "chromium",
+   "capability": "background_no_activation",
+   "claim": "partial",
+   "basis": "declaration",
+   "scope": "framework",
+   "sources": [
+    {
+     "id": "c_brow",
+     "path": "libs/cua-driver/rust/Skills/cua-driver/MACOS.md",
+     "section": "Browsers on macOS",
+     "anchor": "browsers-on-macos",
+     "url": "https://github.com/trycua/cua/blob/c1c2b5fee428c3a39bebe5e77549c3d3525a608d/libs/cua-driver/rust/Skills/cua-driver/MACOS.md#browsers-on-macos"
+    },
+    {
+     "id": "c_browser",
+     "path": "libs/cua-driver/rust/Skills/cua-driver/BROWSER.md",
+     "section": "Support boundaries",
+     "anchor": "support-boundaries",
+     "url": "https://github.com/trycua/cua/blob/c1c2b5fee428c3a39bebe5e77549c3d3525a608d/libs/cua-driver/rust/Skills/cua-driver/BROWSER.md#support-boundaries"
+    }
+   ],
+   "paraphrase": "Typed route and AX element actions stay background; the trusted CDP pointer route activates the window and is refused.",
+   "measured_20261006": {
+    "done": 56,
+    "attempted": 56,
+    "ops": [
+     "all action calls"
+    ],
+    "effect_verification": "probe_before_after",
+    "note": "frontmost app unchanged after 56/56 action calls. Probe samples frontmost app and cursor before and after each call; a transient activation inside a call is not visible. Cua invoke_menu raises the window and restores focus (source report)."
+   }
+  },
+  {
+   "driver": "mecum",
+   "framework": "chromium",
+   "capability": "background_no_activation",
+   "claim": "supported",
+   "basis": "qualification_result",
+   "scope": "framework",
+   "sources": [
+    {
+     "id": "m_chr_tier",
+     "path": "Documentation/Driver/platforms/Chromium.md",
+     "section": "Repeatable local tier",
+     "anchor": "repeatable-local-tier"
+    }
+   ],
+   "paraphrase": "Context-menu and picker rows require zero physical events and a foreground timeline with only the original app.",
+   "measured_20261006": {
+    "done": 56,
+    "attempted": 56,
+    "ops": [
+     "all action calls"
+    ],
+    "effect_verification": "probe_before_after",
+    "note": "frontmost app unchanged after 56/56 action calls. Probe samples frontmost app and cursor before and after each call; a transient activation inside a call is not visible."
+   }
+  },
+  {
+   "driver": "cua",
+   "framework": "chromium",
+   "capability": "cursor_untouched",
+   "claim": "supported",
+   "basis": "generic_contract",
+   "scope": "generic",
+   "sources": [
+    {
+     "id": "c_nofg",
+     "path": "libs/cua-driver/rust/Skills/cua-driver/MACOS.md",
+     "section": "The no-foreground contract",
+     "anchor": "the-no-foreground-contract",
+     "url": "https://github.com/trycua/cua/blob/c1c2b5fee428c3a39bebe5e77549c3d3525a608d/libs/cua-driver/rust/Skills/cua-driver/MACOS.md#the-no-foreground-contract"
+    },
+    {
+     "id": "c_click",
+     "path": "docs/content/docs/cua-driver/reference/mcp-tools/click.mdx",
+     "section": "click (element_token moves no cursor or focus)",
+     "anchor": "",
+     "url": "https://github.com/trycua/cua/blob/c1c2b5fee428c3a39bebe5e77549c3d3525a608d/docs/content/docs/cua-driver/reference/mcp-tools/click.mdx"
+    }
+   ],
+   "paraphrase": "Per-pid background delivery and element_token actions move no real cursor; only foreground pixel clicks move the pointer.",
+   "measured_20261006": {
+    "done": 56,
+    "attempted": 56,
+    "ops": [
+     "all action calls"
+    ],
+    "effect_verification": "probe_before_after",
+    "note": "cursor unchanged after 56/56 action calls; the source report attributes the 0 recorded movements to the person using the Mac, in bursts that included read-only calls."
+   }
+  },
+  {
+   "driver": "mecum",
+   "framework": "chromium",
+   "capability": "cursor_untouched",
+   "claim": "supported",
+   "basis": "qualification_result",
+   "scope": "framework",
+   "sources": [
+    {
+     "id": "m_chr_tier",
+     "path": "Documentation/Driver/platforms/Chromium.md",
+     "section": "Repeatable local tier",
+     "anchor": "repeatable-local-tier"
+    },
+    {
+     "id": "m_fence",
+     "path": "Documentation/Driver/README.md",
+     "section": "The fence is alive only while somebody holds it",
+     "anchor": "the-fence-is-alive-only-while-somebody-holds-it"
+    }
+   ],
+   "paraphrase": "Rows assert stable cursor and zero physical events.",
+   "measured_20261006": {
+    "done": 56,
+    "attempted": 56,
+    "ops": [
+     "all action calls"
+    ],
+    "effect_verification": "probe_before_after",
+    "note": "cursor unchanged after 56/56 action calls; the source report attributes the 0 recorded movements to the person using the Mac, in bursts that included read-only calls."
+   }
+  },
+  {
+   "driver": "cua",
+   "framework": "webkit",
+   "capability": "observe",
+   "claim": "supported",
+   "basis": "declaration",
+   "scope": "framework",
+   "sources": [
+    {
+     "id": "c_led_native",
+     "path": "libs/cua-driver/docs/action-support.md",
+     "section": "Native macOS",
+     "anchor": "native-macos",
+     "url": "https://github.com/trycua/cua/blob/c1c2b5fee428c3a39bebe5e77549c3d3525a608d/libs/cua-driver/docs/action-support.md#native-macos"
+    },
+    {
+     "id": "c_browser",
+     "path": "libs/cua-driver/rust/Skills/cua-driver/BROWSER.md",
+     "section": "Support boundaries",
+     "anchor": "support-boundaries",
+     "url": "https://github.com/trycua/cua/blob/c1c2b5fee428c3a39bebe5e77549c3d3525a608d/libs/cua-driver/rust/Skills/cua-driver/BROWSER.md#support-boundaries"
+    }
+   ],
+   "paraphrase": "WKWebView fixture passes the shared web catalog; for Safari the browser guide offers native window state only.",
+   "measured_20261006": {
+    "done": 8,
+    "attempted": 8,
+    "ops": [
+     "observe"
+    ],
+    "effect_verification": "none",
+    "note": "read returned"
+   }
+  },
+  {
+   "driver": "mecum",
+   "framework": "webkit",
+   "capability": "observe",
+   "claim": "partial",
+   "basis": "qualification_result",
+   "scope": "app",
+   "sources": [
+    {
+     "id": "m_adr14",
+     "path": "Documentation/Driver/adr/Adr0014WindowlessContentOfAnOrdinaryWindow.md",
+     "section": "The decision / What stays unproven",
+     "anchor": "the-decision"
+    },
+    {
+     "id": "m_exp",
+     "path": "Documentation/Driver/reports/ExpandedApplicationChecks.md",
+     "section": "Additional application matrix",
+     "anchor": "additional-application-matrix"
+    }
+   ],
+   "paraphrase": "Safari page content reads as subtreeUnreadable; a windowless-content route fixes a controlled field and button only; first open once returned another window.",
+   "measured_20261006": {
+    "done": 8,
+    "attempted": 8,
+    "ops": [
+     "observe"
+    ],
+    "effect_verification": "none",
+    "note": "read returned"
+   }
+  },
+  {
+   "driver": "cua",
+   "framework": "webkit",
+   "capability": "click",
+   "claim": "supported",
+   "basis": "declaration",
+   "scope": "framework",
+   "sources": [
+    {
+     "id": "c_led_native",
+     "path": "libs/cua-driver/docs/action-support.md",
+     "section": "Native macOS",
+     "anchor": "native-macos",
+     "url": "https://github.com/trycua/cua/blob/c1c2b5fee428c3a39bebe5e77549c3d3525a608d/libs/cua-driver/docs/action-support.md#native-macos"
+    }
+   ],
+   "paraphrase": "WKWebView fixture host: left, right and double click AX and PX are delivered in background.",
+   "app_claim": {
+    "claim": "partial",
+    "paraphrase": "Safari app: typed page mutation is not supported yet, so only the native AX/PX ladder applies.",
+    "sources": [
+     {
+      "id": "c_browser",
+      "path": "libs/cua-driver/rust/Skills/cua-driver/BROWSER.md",
+      "section": "Support boundaries",
+      "anchor": "support-boundaries",
+      "url": "https://github.com/trycua/cua/blob/c1c2b5fee428c3a39bebe5e77549c3d3525a608d/libs/cua-driver/rust/Skills/cua-driver/BROWSER.md#support-boundaries"
+     },
+     {
+      "id": "c_plat",
+      "path": "docs/content/docs/cua-driver/concepts/platform-support.mdx",
+      "section": "Operating systems; Browser routes; Boundaries and remaining work",
+      "anchor": "",
+      "url": "https://github.com/trycua/cua/blob/c1c2b5fee428c3a39bebe5e77549c3d3525a608d/docs/content/docs/cua-driver/concepts/platform-support.mdx"
+     }
+    ]
+   },
+   "measured_20261006": {
+    "done": 8,
+    "attempted": 8,
+    "ops": [
+     "click"
+    ],
+    "effect_verification": "driver_verdict_only",
+    "note": ""
+   }
+  },
+  {
+   "driver": "mecum",
+   "framework": "webkit",
+   "capability": "click",
+   "claim": "partial",
+   "basis": "qualification_result",
+   "scope": "app",
+   "sources": [
+    {
+     "id": "m_exp",
+     "path": "Documentation/Driver/reports/ExpandedApplicationChecks.md",
+     "section": "Additional application matrix",
+     "anchor": "additional-application-matrix"
+    },
+    {
+     "id": "m_stab",
+     "path": "Documentation/Driver/reports/StabilizationRounds.md",
+     "section": "Local release acceptance matrix",
+     "anchor": "local-release-acceptance-matrix"
+    }
+   ],
+   "paraphrase": "Counter click failed with subtreeUnreadable on 3 Oct; a later candidate passed field replace plus button click 3/3.",
+   "measured_20261006": {
+    "done": 8,
+    "attempted": 8,
+    "ops": [
+     "click"
+    ],
+    "effect_verification": "driver_verdict_only",
+    "note": ""
+   }
+  },
+  {
+   "driver": "cua",
+   "framework": "webkit",
+   "capability": "type",
+   "claim": "supported",
+   "basis": "declaration",
+   "scope": "framework",
+   "sources": [
+    {
+     "id": "c_led_native",
+     "path": "libs/cua-driver/docs/action-support.md",
+     "section": "Native macOS",
+     "anchor": "native-macos",
+     "url": "https://github.com/trycua/cua/blob/c1c2b5fee428c3a39bebe5e77549c3d3525a608d/libs/cua-driver/docs/action-support.md#native-macos"
+    }
+   ],
+   "paraphrase": "WKWebView fixture host: type text AX and PX delivered in background.",
+   "app_claim": {
+    "claim": "partial",
+    "paraphrase": "Safari app: native AX/PX ladder only.",
+    "sources": [
+     {
+      "id": "c_browser",
+      "path": "libs/cua-driver/rust/Skills/cua-driver/BROWSER.md",
+      "section": "Support boundaries",
+      "anchor": "support-boundaries",
+      "url": "https://github.com/trycua/cua/blob/c1c2b5fee428c3a39bebe5e77549c3d3525a608d/libs/cua-driver/rust/Skills/cua-driver/BROWSER.md#support-boundaries"
+     }
+    ]
+   },
+   "secondary_source": {
+    "id": "c_plan_lad",
+    "path": "libs/cua-driver/docs/macos-background-input-v1-plan.md",
+    "section": "3. Background routing ladder (status: Proposed)",
+    "anchor": "3-background-routing-ladder",
+    "url": "https://github.com/trycua/cua/blob/c1c2b5fee428c3a39bebe5e77549c3d3525a608d/libs/cua-driver/docs/macos-background-input-v1-plan.md#3-background-routing-ladder",
+    "note": "Proposed plan: keys on a multi-window same-process app refuse (matches same_pid_keyboard_ambiguity)."
+   },
+   "measured_20261006": {
+    "done": 0,
+    "attempted": 8,
+    "ops": [
+     "type"
+    ],
+    "effect_verification": "none",
+    "note": "same_pid_keyboard_ambiguity: second Safari window open"
+   }
+  },
+  {
+   "driver": "mecum",
+   "framework": "webkit",
+   "capability": "type",
+   "claim": "partial",
+   "basis": "qualification_result",
+   "scope": "app",
+   "sources": [
+    {
+     "id": "m_exp",
+     "path": "Documentation/Driver/reports/ExpandedApplicationChecks.md",
+     "section": "Additional application matrix",
+     "anchor": "additional-application-matrix"
+    },
+    {
+     "id": "m_stab",
+     "path": "Documentation/Driver/reports/StabilizationRounds.md",
+     "section": "Local release acceptance matrix",
+     "anchor": "local-release-acceptance-matrix"
+    }
+   ],
+   "paraphrase": "Text failed on 3 Oct; owned field replacement later passed 3/3.",
+   "measured_20261006": {
+    "done": 8,
+    "attempted": 8,
+    "ops": [
+     "type"
+    ],
+    "effect_verification": "driver_verdict_only",
+    "note": ""
+   }
+  },
+  {
+   "driver": "cua",
+   "framework": "webkit",
+   "capability": "key",
+   "claim": "supported",
+   "basis": "declaration",
+   "scope": "framework",
+   "sources": [
+    {
+     "id": "c_led_native",
+     "path": "libs/cua-driver/docs/action-support.md",
+     "section": "Native macOS",
+     "anchor": "native-macos",
+     "url": "https://github.com/trycua/cua/blob/c1c2b5fee428c3a39bebe5e77549c3d3525a608d/libs/cua-driver/docs/action-support.md#native-macos"
+    }
+   ],
+   "paraphrase": "WKWebView fixture host: press key AX and PX delivered in background.",
+   "app_claim": {
+    "claim": "partial",
+    "paraphrase": "Safari app: native ladder; plan says generic keys refuse on multi-window apps.",
+    "sources": [
+     {
+      "id": "c_browser",
+      "path": "libs/cua-driver/rust/Skills/cua-driver/BROWSER.md",
+      "section": "Support boundaries",
+      "anchor": "support-boundaries",
+      "url": "https://github.com/trycua/cua/blob/c1c2b5fee428c3a39bebe5e77549c3d3525a608d/libs/cua-driver/rust/Skills/cua-driver/BROWSER.md#support-boundaries"
+     },
+     {
+      "id": "c_plan_lad",
+      "path": "libs/cua-driver/docs/macos-background-input-v1-plan.md",
+      "section": "3. Background routing ladder (status: Proposed)",
+      "anchor": "3-background-routing-ladder",
+      "url": "https://github.com/trycua/cua/blob/c1c2b5fee428c3a39bebe5e77549c3d3525a608d/libs/cua-driver/docs/macos-background-input-v1-plan.md#3-background-routing-ladder"
+     }
+    ]
+   },
+   "measured_20261006": {
+    "done": 0,
+    "attempted": 8,
+    "ops": [
+     "key"
+    ],
+    "effect_verification": "none",
+    "note": "same_pid_keyboard_ambiguity"
+   }
+  },
+  {
+   "driver": "mecum",
+   "framework": "webkit",
+   "capability": "key",
+   "claim": "partial",
+   "basis": "qualification_result",
+   "scope": "app",
+   "sources": [
+    {
+     "id": "m_adr14",
+     "path": "Documentation/Driver/adr/Adr0014WindowlessContentOfAnOrdinaryWindow.md",
+     "section": "The decision / What stays unproven",
+     "anchor": "the-decision"
+    }
+   ],
+   "paraphrase": "Key route proved for a focused control with no window ID; beyond the owned field it is unproven.",
+   "measured_20261006": {
+    "done": 8,
+    "attempted": 8,
+    "ops": [
+     "key"
+    ],
+    "effect_verification": "driver_verdict_only",
+    "note": ""
+   }
+  },
+  {
+   "driver": "cua",
+   "framework": "webkit",
+   "capability": "hotkey",
+   "claim": "supported",
+   "basis": "declaration",
+   "scope": "framework",
+   "sources": [
+    {
+     "id": "c_led_native",
+     "path": "libs/cua-driver/docs/action-support.md",
+     "section": "Native macOS",
+     "anchor": "native-macos",
+     "url": "https://github.com/trycua/cua/blob/c1c2b5fee428c3a39bebe5e77549c3d3525a608d/libs/cua-driver/docs/action-support.md#native-macos"
+    }
+   ],
+   "paraphrase": "WKWebView fixture host: hotkey AX and PX delivered in background.",
+   "app_claim": {
+    "claim": "partial",
+    "paraphrase": "Safari app: native ladder; tab-switching shortcuts are disruptive and not advised.",
+    "sources": [
+     {
+      "id": "c_browser",
+      "path": "libs/cua-driver/rust/Skills/cua-driver/BROWSER.md",
+      "section": "Support boundaries",
+      "anchor": "support-boundaries",
+      "url": "https://github.com/trycua/cua/blob/c1c2b5fee428c3a39bebe5e77549c3d3525a608d/libs/cua-driver/rust/Skills/cua-driver/BROWSER.md#support-boundaries"
+     },
+     {
+      "id": "c_nofg",
+      "path": "libs/cua-driver/rust/Skills/cua-driver/MACOS.md",
+      "section": "The no-foreground contract",
+      "anchor": "the-no-foreground-contract",
+      "url": "https://github.com/trycua/cua/blob/c1c2b5fee428c3a39bebe5e77549c3d3525a608d/libs/cua-driver/rust/Skills/cua-driver/MACOS.md#the-no-foreground-contract"
+     }
+    ]
+   },
+   "measured_20261006": {
+    "done": 0,
+    "attempted": 8,
+    "ops": [
+     "hotkey"
+    ],
+    "effect_verification": "none",
+    "note": "same_pid_keyboard_ambiguity"
+   }
+  },
+  {
+   "driver": "mecum",
+   "framework": "webkit",
+   "capability": "hotkey",
+   "claim": "not mentioned",
+   "basis": "gap",
+   "scope": "framework",
+   "sources": [
+    {
+     "id": "m_adr14",
+     "path": "Documentation/Driver/adr/Adr0014WindowlessContentOfAnOrdinaryWindow.md",
+     "section": "The decision / What stays unproven",
+     "anchor": "the-decision"
+    }
+   ],
+   "paraphrase": "No Safari chord statement.",
+   "measured_20261006": {
+    "done": 8,
+    "attempted": 8,
+    "ops": [
+     "hotkey"
+    ],
+    "effect_verification": "driver_verdict_only",
+    "note": ""
+   }
+  },
+  {
+   "driver": "cua",
+   "framework": "webkit",
+   "capability": "scroll",
+   "claim": "supported",
+   "basis": "declaration",
+   "scope": "framework",
+   "sources": [
+    {
+     "id": "c_led_native",
+     "path": "libs/cua-driver/docs/action-support.md",
+     "section": "Native macOS",
+     "anchor": "native-macos",
+     "url": "https://github.com/trycua/cua/blob/c1c2b5fee428c3a39bebe5e77549c3d3525a608d/libs/cua-driver/docs/action-support.md#native-macos"
+    }
+   ],
+   "paraphrase": "WKWebView fixture host: scroll AX and PX delivered in background.",
+   "app_claim": {
+    "claim": "partial",
+    "paraphrase": "Safari app: native ladder only.",
+    "sources": [
+     {
+      "id": "c_browser",
+      "path": "libs/cua-driver/rust/Skills/cua-driver/BROWSER.md",
+      "section": "Support boundaries",
+      "anchor": "support-boundaries",
+      "url": "https://github.com/trycua/cua/blob/c1c2b5fee428c3a39bebe5e77549c3d3525a608d/libs/cua-driver/rust/Skills/cua-driver/BROWSER.md#support-boundaries"
+     }
+    ]
+   },
+   "measured_20261006": {
+    "done": 0,
+    "attempted": 16,
+    "ops": [
+     "scroll_down",
+     "scroll_up"
+    ],
+    "effect_verification": "none",
+    "note": "same_pid_keyboard_ambiguity"
+   }
+  },
+  {
+   "driver": "mecum",
+   "framework": "webkit",
+   "capability": "scroll",
+   "claim": "not supported",
+   "basis": "qualification_result",
+   "scope": "app",
+   "sources": [
+    {
+     "id": "m_exp",
+     "path": "Documentation/Driver/reports/ExpandedApplicationChecks.md",
+     "section": "Additional application matrix",
+     "anchor": "additional-application-matrix"
+    }
+   ],
+   "paraphrase": "Scroll failed with subtreeUnreadable in the 3 Oct campaign and was not retested.",
+   "note": "Documented failure, not a design declaration.",
+   "measured_20261006": {
+    "done": 16,
+    "attempted": 16,
+    "ops": [
+     "scroll_down",
+     "scroll_up"
+    ],
+    "effect_verification": "driver_verdict_only",
+    "note": ""
+   }
+  },
+  {
+   "driver": "cua",
+   "framework": "webkit",
+   "capability": "menu",
+   "claim": "partial",
+   "basis": "declaration",
+   "scope": "generic",
+   "sources": [
+    {
+     "id": "c_menu",
+     "path": "libs/cua-driver/rust/Skills/cua-driver/MACOS.md",
+     "section": "Navigating native menu bars (AXMenuBar)",
+     "anchor": "navigating-native-menu-bars-axmenubar",
+     "url": "https://github.com/trycua/cua/blob/c1c2b5fee428c3a39bebe5e77549c3d3525a608d/libs/cua-driver/rust/Skills/cua-driver/MACOS.md#navigating-native-menu-bars-axmenubar"
+    }
+   ],
+   "paraphrase": "invoke_menu works from a known app-menu path but temporarily activates the exact window and restores the prior app best-effort.",
+   "note": "Not a no-activation route by its own description.",
+   "measured_20261006": {
+    "done": 16,
+    "attempted": 16,
+    "ops": [
+     "menu",
+     "menu_back"
+    ],
+    "effect_verification": "driver_verdict_only",
+    "note": ""
+   }
+  },
+  {
+   "driver": "mecum",
+   "framework": "webkit",
+   "capability": "menu",
+   "claim": "not mentioned",
+   "basis": "gap",
+   "scope": "framework",
+   "sources": [],
+   "paraphrase": "No Safari menu-bar statement.",
+   "measured_20261006": {
+    "done": 0,
+    "attempted": 16,
+    "ops": [
+     "menu",
+     "menu_back"
+    ],
+    "effect_verification": "none",
+    "note": "View > Zoom In / Actual Size refused: disabled in background"
+   }
+  },
+  {
+   "driver": "cua",
+   "framework": "webkit",
+   "capability": "background_no_activation",
+   "claim": "supported",
+   "basis": "declaration",
+   "scope": "framework",
+   "sources": [
+    {
+     "id": "c_led_native",
+     "path": "libs/cua-driver/docs/action-support.md",
+     "section": "Native macOS",
+     "anchor": "native-macos",
+     "url": "https://github.com/trycua/cua/blob/c1c2b5fee428c3a39bebe5e77549c3d3525a608d/libs/cua-driver/docs/action-support.md#native-macos"
+    }
+   ],
+   "paraphrase": "Shared rows require focus, z-order and no-leaked-input oracles; only background slider drag refuses.",
+   "measured_20261006": {
+    "done": 64,
+    "attempted": 64,
+    "ops": [
+     "all action calls"
+    ],
+    "effect_verification": "probe_before_after",
+    "note": "frontmost app unchanged after 64/64 action calls. Probe samples frontmost app and cursor before and after each call; a transient activation inside a call is not visible. Cua invoke_menu raises the window and restores focus (source report)."
+   }
+  },
+  {
+   "driver": "mecum",
+   "framework": "webkit",
+   "capability": "background_no_activation",
+   "claim": "supported",
+   "basis": "generic_contract",
+   "scope": "generic",
+   "sources": [
+    {
+     "id": "m_readme",
+     "path": "Documentation/Driver/README.md",
+     "section": "AgentSeatKit (introduction)",
+     "anchor": "agentseatkit"
+    }
+   ],
+   "paraphrase": "The seat delivers background input to windows moved onto a virtual display and never posts a global event or falls back onto the desktop.",
+   "measured_20261006": {
+    "done": 64,
+    "attempted": 64,
+    "ops": [
+     "all action calls"
+    ],
+    "effect_verification": "probe_before_after",
+    "note": "frontmost app unchanged after 64/64 action calls. Probe samples frontmost app and cursor before and after each call; a transient activation inside a call is not visible. Mecum moved the person's second Safari window to its virtual display."
+   }
+  },
+  {
+   "driver": "cua",
+   "framework": "webkit",
+   "capability": "cursor_untouched",
+   "claim": "supported",
+   "basis": "declaration",
+   "scope": "framework",
+   "sources": [
+    {
+     "id": "c_led_shared",
+     "path": "libs/cua-driver/docs/action-support.md",
+     "section": "Shared web harnesses",
+     "anchor": "shared-web-harnesses",
+     "url": "https://github.com/trycua/cua/blob/c1c2b5fee428c3a39bebe5e77549c3d3525a608d/libs/cua-driver/docs/action-support.md#shared-web-harnesses"
+    }
+   ],
+   "paraphrase": "Shared background rows on macOS also require cursor preservation.",
+   "measured_20261006": {
+    "done": 63,
+    "attempted": 64,
+    "ops": [
+     "all action calls"
+    ],
+    "effect_verification": "probe_before_after",
+    "note": "cursor unchanged after 63/64 action calls; the source report attributes the 1 recorded movements to the person using the Mac, in bursts that included read-only calls."
+   }
+  },
+  {
+   "driver": "mecum",
+   "framework": "webkit",
+   "capability": "cursor_untouched",
+   "claim": "supported",
+   "basis": "generic_contract",
+   "scope": "generic",
+   "sources": [
+    {
+     "id": "m_readme",
+     "path": "Documentation/Driver/README.md",
+     "section": "AgentSeatKit (introduction)",
+     "anchor": "agentseatkit"
+    },
+    {
+     "id": "m_fence",
+     "path": "Documentation/Driver/README.md",
+     "section": "The fence is alive only while somebody holds it",
+     "anchor": "the-fence-is-alive-only-while-somebody-holds-it"
+    }
+   ],
+   "paraphrase": "An HID event tap fence keeps the person's cursor out while the host is up; Live rows assert zero physical events.",
+   "measured_20261006": {
+    "done": 63,
+    "attempted": 64,
+    "ops": [
+     "all action calls"
+    ],
+    "effect_verification": "probe_before_after",
+    "note": "cursor unchanged after 63/64 action calls; the source report attributes the 1 recorded movements to the person using the Mac, in bursts that included read-only calls."
+   }
+  },
+  {
+   "driver": "cua",
+   "framework": "electron",
+   "capability": "observe",
+   "claim": "supported",
+   "basis": "declaration",
+   "scope": "framework",
+   "sources": [
+    {
+     "id": "c_led_shared",
+     "path": "libs/cua-driver/docs/action-support.md",
+     "section": "Shared web harnesses",
+     "anchor": "shared-web-harnesses",
+     "url": "https://github.com/trycua/cua/blob/c1c2b5fee428c3a39bebe5e77549c3d3525a608d/libs/cua-driver/docs/action-support.md#shared-web-harnesses"
+    },
+    {
+     "id": "c_textlim",
+     "path": "libs/cua-driver/rust/Skills/cua-driver/MACOS.md",
+     "section": "Known text-input limits (Catalyst + Electron)",
+     "anchor": "known-text-input-limits-catalyst--electron",
+     "url": "https://github.com/trycua/cua/blob/c1c2b5fee428c3a39bebe5e77549c3d3525a608d/libs/cua-driver/rust/Skills/cua-driver/MACOS.md#known-text-input-limits-catalyst--electron"
+    }
+   ],
+   "paraphrase": "Shared Electron host proves tree and child-window reads; AX value of web content can echo writes and is not trusted.",
+   "measured_20261006": {
+    "done": 8,
+    "attempted": 8,
+    "ops": [
+     "observe"
+    ],
+    "effect_verification": "none",
+    "note": "read returned"
+   }
+  },
+  {
+   "driver": "mecum",
+   "framework": "electron",
+   "capability": "observe",
+   "claim": "supported",
+   "basis": "qualification_result",
+   "scope": "framework",
+   "sources": [
+    {
+     "id": "m_spi",
+     "path": "Documentation/Driver/SpiLedger.md",
+     "section": "AXManualAccessibility row (Electron/Chromium accessibility tree)",
+     "anchor": ""
+    },
+    {
+     "id": "m_flow",
+     "path": "Documentation/Driver/reports/ApplicationFlowChecks.md",
+     "section": "Observed effects and failures",
+     "anchor": "observed-effects-and-failures"
+    }
+   ],
+   "paraphrase": "AXManualAccessibility yields hundreds of nodes on background Electron windows (Slack, GitHub Desktop).",
+   "measured_20261006": {
+    "done": 8,
+    "attempted": 8,
+    "ops": [
+     "observe"
+    ],
+    "effect_verification": "none",
+    "note": "read returned"
+   }
+  },
+  {
+   "driver": "cua",
+   "framework": "electron",
+   "capability": "click",
+   "claim": "supported",
+   "basis": "declaration",
+   "scope": "framework",
+   "sources": [
+    {
+     "id": "c_led_shared",
+     "path": "libs/cua-driver/docs/action-support.md",
+     "section": "Shared web harnesses",
+     "anchor": "shared-web-harnesses",
+     "url": "https://github.com/trycua/cua/blob/c1c2b5fee428c3a39bebe5e77549c3d3525a608d/libs/cua-driver/docs/action-support.md#shared-web-harnesses"
+    }
+   ],
+   "paraphrase": "Left, right and double click AX and PX are delivered in background.",
+   "measured_20261006": {
+    "done": 8,
+    "attempted": 8,
+    "ops": [
+     "click"
+    ],
+    "effect_verification": "driver_verdict_only",
+    "note": ""
+   }
+  },
+  {
+   "driver": "mecum",
+   "framework": "electron",
+   "capability": "click",
+   "claim": "partial",
+   "basis": "qualification_result",
+   "scope": "app",
+   "sources": [
+    {
+     "id": "m_flow",
+     "path": "Documentation/Driver/reports/ApplicationFlowChecks.md",
+     "section": "Observed effects and failures",
+     "anchor": "observed-effects-and-failures"
+    }
+   ],
+   "paraphrase": "GitHub Desktop checkbox and Cancel worked; a Git Ignore dropdown returned contextMenuNeverOpened.",
+   "measured_20261006": {
+    "done": 8,
+    "attempted": 8,
+    "ops": [
+     "click"
+    ],
+    "effect_verification": "driver_verdict_only",
+    "note": "quick switcher"
+   }
+  },
+  {
+   "driver": "cua",
+   "framework": "electron",
+   "capability": "type",
+   "claim": "supported",
+   "basis": "declaration",
+   "scope": "framework",
+   "sources": [
+    {
+     "id": "c_led_shared",
+     "path": "libs/cua-driver/docs/action-support.md",
+     "section": "Shared web harnesses",
+     "anchor": "shared-web-harnesses",
+     "url": "https://github.com/trycua/cua/blob/c1c2b5fee428c3a39bebe5e77549c3d3525a608d/libs/cua-driver/docs/action-support.md#shared-web-harnesses"
+    },
+    {
+     "id": "c_textlim",
+     "path": "libs/cua-driver/rust/Skills/cua-driver/MACOS.md",
+     "section": "Known text-input limits (Catalyst + Electron)",
+     "anchor": "known-text-input-limits-catalyst--electron",
+     "url": "https://github.com/trycua/cua/blob/c1c2b5fee428c3a39bebe5e77549c3d3525a608d/libs/cua-driver/rust/Skills/cua-driver/MACOS.md#known-text-input-limits-catalyst--electron"
+    }
+   ],
+   "paraphrase": "Type text AX and PX delivered in the shared host; AX writes on Electron are reported unverifiable, the px form is the advised route.",
+   "measured_20261006": {
+    "done": 8,
+    "attempted": 8,
+    "ops": [
+     "type"
+    ],
+    "effect_verification": "driver_verdict_only",
+    "note": ""
+   }
+  },
+  {
+   "driver": "mecum",
+   "framework": "electron",
+   "capability": "type",
+   "claim": "supported",
+   "basis": "qualification_result",
+   "scope": "app",
+   "sources": [
+    {
+     "id": "m_flow",
+     "path": "Documentation/Driver/reports/ApplicationFlowChecks.md",
+     "section": "Observed effects and failures",
+     "anchor": "observed-effects-and-failures"
+    }
+   ],
+   "paraphrase": "Exact repository name and Unicode description verified in GitHub Desktop.",
+   "measured_20261006": {
+    "done": 8,
+    "attempted": 8,
+    "ops": [
+     "type"
+    ],
+    "effect_verification": "driver_verdict_only",
+    "note": ""
+   }
+  },
+  {
+   "driver": "cua",
+   "framework": "electron",
+   "capability": "key",
+   "claim": "supported",
+   "basis": "declaration",
+   "scope": "framework",
+   "sources": [
+    {
+     "id": "c_led_shared",
+     "path": "libs/cua-driver/docs/action-support.md",
+     "section": "Shared web harnesses",
+     "anchor": "shared-web-harnesses",
+     "url": "https://github.com/trycua/cua/blob/c1c2b5fee428c3a39bebe5e77549c3d3525a608d/libs/cua-driver/docs/action-support.md#shared-web-harnesses"
+    }
+   ],
+   "paraphrase": "Press key AX and PX delivered in background.",
+   "measured_20261006": {
+    "done": 16,
+    "attempted": 16,
+    "ops": [
+     "key",
+     "key_close"
+    ],
+    "effect_verification": "driver_verdict_only",
+    "note": ""
+   }
+  },
+  {
+   "driver": "mecum",
+   "framework": "electron",
+   "capability": "key",
+   "claim": "partial",
+   "basis": "inference",
+   "scope": "framework",
+   "sources": [
+    {
+     "id": "m_chr_head",
+     "path": "Documentation/Driver/platforms/Chromium.md",
+     "section": "Chromium qualification (introduction: Electron and CEF reuse ChromiumPlatform)",
+     "anchor": "chromium-qualification"
+    }
+   ],
+   "paraphrase": "Electron reuses the ChromiumPlatform policy; evidence is on named targets only.",
+   "measured_20261006": {
+    "done": 16,
+    "attempted": 16,
+    "ops": [
+     "key",
+     "key_close"
+    ],
+    "effect_verification": "driver_verdict_only",
+    "note": ""
+   }
+  },
+  {
+   "driver": "cua",
+   "framework": "electron",
+   "capability": "hotkey",
+   "claim": "supported",
+   "basis": "declaration",
+   "scope": "framework",
+   "sources": [
+    {
+     "id": "c_led_shared",
+     "path": "libs/cua-driver/docs/action-support.md",
+     "section": "Shared web harnesses",
+     "anchor": "shared-web-harnesses",
+     "url": "https://github.com/trycua/cua/blob/c1c2b5fee428c3a39bebe5e77549c3d3525a608d/libs/cua-driver/docs/action-support.md#shared-web-harnesses"
+    }
+   ],
+   "paraphrase": "Hotkey AX and PX delivered in background.",
+   "measured_20261006": {
+    "done": 8,
+    "attempted": 8,
+    "ops": [
+     "hotkey"
+    ],
+    "effect_verification": "driver_verdict_only",
+    "note": ""
+   }
+  },
+  {
+   "driver": "mecum",
+   "framework": "electron",
+   "capability": "hotkey",
+   "claim": "not mentioned",
+   "basis": "gap",
+   "scope": "framework",
+   "sources": [
+    {
+     "id": "m_chr_head",
+     "path": "Documentation/Driver/platforms/Chromium.md",
+     "section": "Chromium qualification (introduction: Electron and CEF reuse ChromiumPlatform)",
+     "anchor": "chromium-qualification"
+    }
+   ],
+   "paraphrase": "Not documented for Electron.",
+   "measured_20261006": {
+    "done": 8,
+    "attempted": 8,
+    "ops": [
+     "hotkey"
+    ],
+    "effect_verification": "driver_verdict_only",
+    "note": ""
+   }
+  },
+  {
+   "driver": "cua",
+   "framework": "electron",
+   "capability": "scroll",
+   "claim": "not supported",
+   "basis": "declaration",
+   "scope": "framework",
+   "sources": [
+    {
+     "id": "c_led_shared",
+     "path": "libs/cua-driver/docs/action-support.md",
+     "section": "Shared web harnesses",
+     "anchor": "shared-web-harnesses",
+     "url": "https://github.com/trycua/cua/blob/c1c2b5fee428c3a39bebe5e77549c3d3525a608d/libs/cua-driver/docs/action-support.md#shared-web-harnesses"
+    }
+   ],
+   "paraphrase": "Ledger: scroll AX and PX in background return background_unavailable on macOS Electron.",
+   "changed_since_20261006": true,
+   "conflict_note": "pointer.mdx at c1c2b5f says a background scroll on Electron/Chromium now reveals content through AX; the ledger row is unchanged since 4f33cd6.",
+   "conflicting_source": {
+    "id": "c_scroll",
+    "path": "docs/content/docs/cua-driver/reference/mcp-tools/pointer.mdx",
+    "section": "scroll (Electron/Chromium AX reveal paragraph, new since 4f33cd6)",
+    "anchor": "",
+    "url": "https://github.com/trycua/cua/blob/c1c2b5fee428c3a39bebe5e77549c3d3525a608d/docs/content/docs/cua-driver/reference/mcp-tools/pointer.mdx"
+   },
+   "measured_20261006": {
+    "status": "not_run"
+   }
+  },
+  {
+   "driver": "mecum",
+   "framework": "electron",
+   "capability": "scroll",
+   "claim": "not mentioned",
+   "basis": "gap",
+   "scope": "framework",
+   "sources": [
+    {
+     "id": "m_chr_head",
+     "path": "Documentation/Driver/platforms/Chromium.md",
+     "section": "Chromium qualification (introduction: Electron and CEF reuse ChromiumPlatform)",
+     "anchor": "chromium-qualification"
+    }
+   ],
+   "paraphrase": "Not documented for Electron.",
+   "measured_20261006": {
+    "status": "not_run"
+   }
+  },
+  {
+   "driver": "cua",
+   "framework": "electron",
+   "capability": "menu",
+   "claim": "partial",
+   "basis": "declaration",
+   "scope": "generic",
+   "sources": [
+    {
+     "id": "c_menu",
+     "path": "libs/cua-driver/rust/Skills/cua-driver/MACOS.md",
+     "section": "Navigating native menu bars (AXMenuBar)",
+     "anchor": "navigating-native-menu-bars-axmenubar",
+     "url": "https://github.com/trycua/cua/blob/c1c2b5fee428c3a39bebe5e77549c3d3525a608d/libs/cua-driver/rust/Skills/cua-driver/MACOS.md#navigating-native-menu-bars-axmenubar"
+    }
+   ],
+   "paraphrase": "invoke_menu works from a known app-menu path but temporarily activates the exact window and restores the prior app best-effort.",
+   "note": "Not a no-activation route by its own description.",
+   "measured_20261006": {
+    "status": "not_run"
+   }
+  },
+  {
+   "driver": "mecum",
+   "framework": "electron",
+   "capability": "menu",
+   "claim": "not mentioned",
+   "basis": "gap",
+   "scope": "framework",
+   "sources": [
+    {
+     "id": "m_flow",
+     "path": "Documentation/Driver/reports/ApplicationFlowChecks.md",
+     "section": "Observed effects and failures",
+     "anchor": "observed-effects-and-failures"
+    }
+   ],
+   "paraphrase": "Only a failing dropdown is documented; no menu-bar statement.",
+   "measured_20261006": {
+    "status": "not_run"
+   }
+  },
+  {
+   "driver": "cua",
+   "framework": "electron",
+   "capability": "background_no_activation",
+   "claim": "supported",
+   "basis": "declaration",
+   "scope": "framework",
+   "sources": [
+    {
+     "id": "c_led_shared",
+     "path": "libs/cua-driver/docs/action-support.md",
+     "section": "Shared web harnesses",
+     "anchor": "shared-web-harnesses",
+     "url": "https://github.com/trycua/cua/blob/c1c2b5fee428c3a39bebe5e77549c3d3525a608d/libs/cua-driver/docs/action-support.md#shared-web-harnesses"
+    }
+   ],
+   "paraphrase": "Shared rows require fixture state, focus, z-order and no-leaked-input evidence; scroll and drag are the stated refusals.",
+   "measured_20261006": {
+    "done": 40,
+    "attempted": 40,
+    "ops": [
+     "all action calls"
+    ],
+    "effect_verification": "probe_before_after",
+    "note": "frontmost app unchanged after 40/40 action calls. Probe samples frontmost app and cursor before and after each call; a transient activation inside a call is not visible. Cua invoke_menu raises the window and restores focus (source report)."
+   }
+  },
+  {
+   "driver": "mecum",
+   "framework": "electron",
+   "capability": "background_no_activation",
+   "claim": "supported",
+   "basis": "generic_contract",
+   "scope": "generic",
+   "sources": [
+    {
+     "id": "m_readme",
+     "path": "Documentation/Driver/README.md",
+     "section": "AgentSeatKit (introduction)",
+     "anchor": "agentseatkit"
+    }
+   ],
+   "paraphrase": "The seat delivers background input to windows moved onto a virtual display and never posts a global event or falls back onto the desktop.",
+   "measured_20261006": {
+    "done": 40,
+    "attempted": 40,
+    "ops": [
+     "all action calls"
+    ],
+    "effect_verification": "probe_before_after",
+    "note": "frontmost app unchanged after 40/40 action calls. Probe samples frontmost app and cursor before and after each call; a transient activation inside a call is not visible."
+   }
+  },
+  {
+   "driver": "cua",
+   "framework": "electron",
+   "capability": "cursor_untouched",
+   "claim": "supported",
+   "basis": "declaration",
+   "scope": "framework",
+   "sources": [
+    {
+     "id": "c_led_shared",
+     "path": "libs/cua-driver/docs/action-support.md",
+     "section": "Shared web harnesses",
+     "anchor": "shared-web-harnesses",
+     "url": "https://github.com/trycua/cua/blob/c1c2b5fee428c3a39bebe5e77549c3d3525a608d/libs/cua-driver/docs/action-support.md#shared-web-harnesses"
+    }
+   ],
+   "paraphrase": "Shared background rows on macOS also require cursor preservation.",
+   "measured_20261006": {
+    "done": 34,
+    "attempted": 40,
+    "ops": [
+     "all action calls"
+    ],
+    "effect_verification": "probe_before_after",
+    "note": "cursor unchanged after 34/40 action calls; the source report attributes the 6 recorded movements to the person using the Mac, in bursts that included read-only calls."
+   }
+  },
+  {
+   "driver": "mecum",
+   "framework": "electron",
+   "capability": "cursor_untouched",
+   "claim": "supported",
+   "basis": "generic_contract",
+   "scope": "generic",
+   "sources": [
+    {
+     "id": "m_readme",
+     "path": "Documentation/Driver/README.md",
+     "section": "AgentSeatKit (introduction)",
+     "anchor": "agentseatkit"
+    },
+    {
+     "id": "m_fence",
+     "path": "Documentation/Driver/README.md",
+     "section": "The fence is alive only while somebody holds it",
+     "anchor": "the-fence-is-alive-only-while-somebody-holds-it"
+    }
+   ],
+   "paraphrase": "An HID event tap fence keeps the person's cursor out while the host is up; Live rows assert zero physical events.",
+   "measured_20261006": {
+    "done": 40,
+    "attempted": 40,
+    "ops": [
+     "all action calls"
+    ],
+    "effect_verification": "probe_before_after",
+    "note": "cursor unchanged after 40/40 action calls; the source report attributes the 0 recorded movements to the person using the Mac, in bursts that included read-only calls."
+   }
+  },
+  {
+   "driver": "cua",
+   "framework": "catalyst",
+   "capability": "observe",
+   "claim": "partial",
+   "basis": "declaration",
+   "scope": "framework",
+   "sources": [
+    {
+     "id": "c_textlim",
+     "path": "libs/cua-driver/rust/Skills/cua-driver/MACOS.md",
+     "section": "Known text-input limits (Catalyst + Electron)",
+     "anchor": "known-text-input-limits-catalyst--electron",
+     "url": "https://github.com/trycua/cua/blob/c1c2b5fee428c3a39bebe5e77549c3d3525a608d/libs/cua-driver/rust/Skills/cua-driver/MACOS.md#known-text-input-limits-catalyst--electron"
+    },
+    {
+     "id": "c_verify",
+     "path": "libs/cua-driver/rust/Skills/cua-driver/MACOS.md",
+     "section": "Verifying actions: cross-check the tree against the pixels",
+     "anchor": "verifying-actions-cross-check-the-tree-against-the-pixels-you-already-have",
+     "url": "https://github.com/trycua/cua/blob/c1c2b5fee428c3a39bebe5e77549c3d3525a608d/libs/cua-driver/rust/Skills/cua-driver/MACOS.md#verifying-actions-cross-check-the-tree-against-the-pixels-you-already-have"
+    }
+   ],
+   "paraphrase": "On Catalyst the AX value can lag the pixels or report a placeholder, so the screenshot is the truth.",
+   "measured_20261006": {
+    "done": 8,
+    "attempted": 8,
+    "ops": [
+     "observe"
+    ],
+    "effect_verification": "none",
+    "note": ""
+   }
+  },
+  {
+   "driver": "mecum",
+   "framework": "catalyst",
+   "capability": "observe",
+   "claim": "not mentioned",
+   "basis": "gap",
+   "scope": "framework",
+   "sources": [
+    {
+     "id": "m_compat",
+     "path": "Documentation/LaunchCompatibility.md",
+     "section": "Compatibility and limitations",
+     "anchor": "compatibility-and-limitations"
+    }
+   ],
+   "paraphrase": "Catalyst and Stocks are not mentioned in Mecum docs and Catalyst is not in the supported-framework list.",
+   "measured_20261006": {
+    "status": "session_refused",
+    "note": "open_session failed twice with placementNotConfirmed (second Untitled window)"
+   }
+  },
+  {
+   "driver": "cua",
+   "framework": "catalyst",
+   "capability": "click",
+   "claim": "partial",
+   "basis": "inference",
+   "scope": "framework",
+   "sources": [
+    {
+     "id": "c_plan",
+     "path": "libs/cua-driver/docs/macos-background-input-v1-plan.md",
+     "section": "Compatibility expectations (status: Proposed, 2026-08-04)",
+     "anchor": "compatibility-expectations",
+     "url": "https://github.com/trycua/cua/blob/c1c2b5fee428c3a39bebe5e77549c3d3525a608d/libs/cua-driver/docs/macos-background-input-v1-plan.md#compatibility-expectations"
+    }
+   ],
+   "paraphrase": "Proposed plan: semantic AX or verified pointer only, a source-supported candidate with no runtime row.",
+   "note": "Not in the accepted ledger.",
+   "measured_20261006": {
+    "status": "not_run"
+   }
+  },
+  {
+   "driver": "mecum",
+   "framework": "catalyst",
+   "capability": "click",
+   "claim": "not mentioned",
+   "basis": "gap",
+   "scope": "framework",
+   "sources": [
+    {
+     "id": "m_compat",
+     "path": "Documentation/LaunchCompatibility.md",
+     "section": "Compatibility and limitations",
+     "anchor": "compatibility-and-limitations"
+    }
+   ],
+   "paraphrase": "Catalyst and Stocks are not mentioned in Mecum docs and Catalyst is not in the supported-framework list.",
+   "measured_20261006": {
+    "status": "not_run",
+    "note": "session refused"
+   }
+  },
+  {
+   "driver": "cua",
+   "framework": "catalyst",
+   "capability": "type",
+   "claim": "partial",
+   "basis": "declaration",
+   "scope": "framework",
+   "sources": [
+    {
+     "id": "c_textlim",
+     "path": "libs/cua-driver/rust/Skills/cua-driver/MACOS.md",
+     "section": "Known text-input limits (Catalyst + Electron)",
+     "anchor": "known-text-input-limits-catalyst--electron",
+     "url": "https://github.com/trycua/cua/blob/c1c2b5fee428c3a39bebe5e77549c3d3525a608d/libs/cua-driver/rust/Skills/cua-driver/MACOS.md#known-text-input-limits-catalyst--electron"
+    },
+    {
+     "id": "c_kbd",
+     "path": "docs/content/docs/cua-driver/reference/mcp-tools/keyboard.mdx",
+     "section": "type_text (web content paragraph; delivery_mode)",
+     "anchor": "",
+     "url": "https://github.com/trycua/cua/blob/c1c2b5fee428c3a39bebe5e77549c3d3525a608d/docs/content/docs/cua-driver/reference/mcp-tools/keyboard.mdx"
+    }
+   ],
+   "paraphrase": "AX type_text cannot reach the rendered view; use the px form, and foreground is the last resort where background keys do not land (Catalyst).",
+   "measured_20261006": {
+    "status": "not_run"
+   }
+  },
+  {
+   "driver": "mecum",
+   "framework": "catalyst",
+   "capability": "type",
+   "claim": "not mentioned",
+   "basis": "gap",
+   "scope": "framework",
+   "sources": [
+    {
+     "id": "m_compat",
+     "path": "Documentation/LaunchCompatibility.md",
+     "section": "Compatibility and limitations",
+     "anchor": "compatibility-and-limitations"
+    }
+   ],
+   "paraphrase": "Catalyst and Stocks are not mentioned in Mecum docs and Catalyst is not in the supported-framework list.",
+   "measured_20261006": {
+    "status": "not_run",
+    "note": "session refused"
+   }
+  },
+  {
+   "driver": "cua",
+   "framework": "catalyst",
+   "capability": "key",
+   "claim": "partial",
+   "basis": "inference",
+   "scope": "framework",
+   "sources": [
+    {
+     "id": "c_plan",
+     "path": "libs/cua-driver/docs/macos-background-input-v1-plan.md",
+     "section": "Compatibility expectations (status: Proposed, 2026-08-04)",
+     "anchor": "compatibility-expectations",
+     "url": "https://github.com/trycua/cua/blob/c1c2b5fee428c3a39bebe5e77549c3d3525a608d/libs/cua-driver/docs/macos-background-input-v1-plan.md#compatibility-expectations"
+    },
+    {
+     "id": "c_kbd",
+     "path": "docs/content/docs/cua-driver/reference/mcp-tools/keyboard.mdx",
+     "section": "type_text (web content paragraph; delivery_mode)",
+     "anchor": "",
+     "url": "https://github.com/trycua/cua/blob/c1c2b5fee428c3a39bebe5e77549c3d3525a608d/docs/content/docs/cua-driver/reference/mcp-tools/keyboard.mdx"
+    }
+   ],
+   "paraphrase": "Plan keeps raw keyboard gated on Catalyst; type_text docs name Catalyst as a surface where background keys may not land.",
+   "measured_20261006": {
+    "done": 8,
+    "attempted": 8,
+    "ops": [
+     "key"
+    ],
+    "effect_verification": "driver_verdict_only",
+    "note": ""
+   }
+  },
+  {
+   "driver": "mecum",
+   "framework": "catalyst",
+   "capability": "key",
+   "claim": "not mentioned",
+   "basis": "gap",
+   "scope": "framework",
+   "sources": [
+    {
+     "id": "m_compat",
+     "path": "Documentation/LaunchCompatibility.md",
+     "section": "Compatibility and limitations",
+     "anchor": "compatibility-and-limitations"
+    }
+   ],
+   "paraphrase": "Catalyst and Stocks are not mentioned in Mecum docs and Catalyst is not in the supported-framework list.",
+   "measured_20261006": {
+    "status": "not_run",
+    "note": "session refused"
+   }
+  },
+  {
+   "driver": "cua",
+   "framework": "catalyst",
+   "capability": "hotkey",
+   "claim": "partial",
+   "basis": "inference",
+   "scope": "framework",
+   "sources": [
+    {
+     "id": "c_plan",
+     "path": "libs/cua-driver/docs/macos-background-input-v1-plan.md",
+     "section": "Compatibility expectations (status: Proposed, 2026-08-04)",
+     "anchor": "compatibility-expectations",
+     "url": "https://github.com/trycua/cua/blob/c1c2b5fee428c3a39bebe5e77549c3d3525a608d/libs/cua-driver/docs/macos-background-input-v1-plan.md#compatibility-expectations"
+    }
+   ],
+   "paraphrase": "Same gating as keys in the proposed plan.",
+   "measured_20261006": {
+    "status": "not_run"
+   }
+  },
+  {
+   "driver": "mecum",
+   "framework": "catalyst",
+   "capability": "hotkey",
+   "claim": "not mentioned",
+   "basis": "gap",
+   "scope": "framework",
+   "sources": [
+    {
+     "id": "m_compat",
+     "path": "Documentation/LaunchCompatibility.md",
+     "section": "Compatibility and limitations",
+     "anchor": "compatibility-and-limitations"
+    }
+   ],
+   "paraphrase": "Catalyst and Stocks are not mentioned in Mecum docs and Catalyst is not in the supported-framework list.",
+   "measured_20261006": {
+    "status": "not_run",
+    "note": "session refused"
+   }
+  },
+  {
+   "driver": "cua",
+   "framework": "catalyst",
+   "capability": "scroll",
+   "claim": "not mentioned",
+   "basis": "gap",
+   "scope": "framework",
+   "sources": [
+    {
+     "id": "c_textlim",
+     "path": "libs/cua-driver/rust/Skills/cua-driver/MACOS.md",
+     "section": "Known text-input limits (Catalyst + Electron)",
+     "anchor": "known-text-input-limits-catalyst--electron",
+     "url": "https://github.com/trycua/cua/blob/c1c2b5fee428c3a39bebe5e77549c3d3525a608d/libs/cua-driver/rust/Skills/cua-driver/MACOS.md#known-text-input-limits-catalyst--electron"
+    }
+   ],
+   "paraphrase": "No Catalyst scroll statement.",
+   "measured_20261006": {
+    "done": 16,
+    "attempted": 16,
+    "ops": [
+     "scroll_down",
+     "scroll_up"
+    ],
+    "effect_verification": "driver_verdict_only",
+    "note": ""
+   }
+  },
+  {
+   "driver": "mecum",
+   "framework": "catalyst",
+   "capability": "scroll",
+   "claim": "not mentioned",
+   "basis": "gap",
+   "scope": "framework",
+   "sources": [
+    {
+     "id": "m_compat",
+     "path": "Documentation/LaunchCompatibility.md",
+     "section": "Compatibility and limitations",
+     "anchor": "compatibility-and-limitations"
+    }
+   ],
+   "paraphrase": "Catalyst and Stocks are not mentioned in Mecum docs and Catalyst is not in the supported-framework list.",
+   "measured_20261006": {
+    "status": "not_run",
+    "note": "session refused"
+   }
+  },
+  {
+   "driver": "cua",
+   "framework": "catalyst",
+   "capability": "menu",
+   "claim": "partial",
+   "basis": "declaration",
+   "scope": "generic",
+   "sources": [
+    {
+     "id": "c_menu",
+     "path": "libs/cua-driver/rust/Skills/cua-driver/MACOS.md",
+     "section": "Navigating native menu bars (AXMenuBar)",
+     "anchor": "navigating-native-menu-bars-axmenubar",
+     "url": "https://github.com/trycua/cua/blob/c1c2b5fee428c3a39bebe5e77549c3d3525a608d/libs/cua-driver/rust/Skills/cua-driver/MACOS.md#navigating-native-menu-bars-axmenubar"
+    }
+   ],
+   "paraphrase": "invoke_menu works from a known app-menu path but temporarily activates the exact window and restores the prior app best-effort.",
+   "note": "Not a no-activation route by its own description.",
+   "measured_20261006": {
+    "status": "not_run"
+   }
+  },
+  {
+   "driver": "mecum",
+   "framework": "catalyst",
+   "capability": "menu",
+   "claim": "not mentioned",
+   "basis": "gap",
+   "scope": "framework",
+   "sources": [
+    {
+     "id": "m_compat",
+     "path": "Documentation/LaunchCompatibility.md",
+     "section": "Compatibility and limitations",
+     "anchor": "compatibility-and-limitations"
+    }
+   ],
+   "paraphrase": "Catalyst and Stocks are not mentioned in Mecum docs and Catalyst is not in the supported-framework list.",
+   "measured_20261006": {
+    "status": "not_run",
+    "note": "session refused"
+   }
+  },
+  {
+   "driver": "cua",
+   "framework": "catalyst",
+   "capability": "background_no_activation",
+   "claim": "partial",
+   "basis": "inference",
+   "scope": "framework",
+   "sources": [
+    {
+     "id": "c_plan",
+     "path": "libs/cua-driver/docs/macos-background-input-v1-plan.md",
+     "section": "Compatibility expectations (status: Proposed, 2026-08-04)",
+     "anchor": "compatibility-expectations",
+     "url": "https://github.com/trycua/cua/blob/c1c2b5fee428c3a39bebe5e77549c3d3525a608d/libs/cua-driver/docs/macos-background-input-v1-plan.md#compatibility-expectations"
+    },
+    {
+     "id": "c_textlim",
+     "path": "libs/cua-driver/rust/Skills/cua-driver/MACOS.md",
+     "section": "Known text-input limits (Catalyst + Electron)",
+     "anchor": "known-text-input-limits-catalyst--electron",
+     "url": "https://github.com/trycua/cua/blob/c1c2b5fee428c3a39bebe5e77549c3d3525a608d/libs/cua-driver/rust/Skills/cua-driver/MACOS.md#known-text-input-limits-catalyst--electron"
+    }
+   ],
+   "paraphrase": "Semantic AX and verified pointer routes are background; typing may need foreground.",
+   "measured_20261006": {
+    "done": 24,
+    "attempted": 24,
+    "ops": [
+     "all action calls"
+    ],
+    "effect_verification": "probe_before_after",
+    "note": "frontmost app unchanged after 24/24 action calls. Probe samples frontmost app and cursor before and after each call; a transient activation inside a call is not visible. Cua invoke_menu raises the window and restores focus (source report)."
+   }
+  },
+  {
+   "driver": "mecum",
+   "framework": "catalyst",
+   "capability": "background_no_activation",
+   "claim": "supported",
+   "basis": "generic_contract",
+   "scope": "generic",
+   "sources": [
+    {
+     "id": "m_readme",
+     "path": "Documentation/Driver/README.md",
+     "section": "AgentSeatKit (introduction)",
+     "anchor": "agentseatkit"
+    }
+   ],
+   "paraphrase": "The seat delivers background input to windows moved onto a virtual display and never posts a global event or falls back onto the desktop.",
+   "measured_20261006": {
+    "status": "not_run",
+    "note": "session refused"
+   }
+  },
+  {
+   "driver": "cua",
+   "framework": "catalyst",
+   "capability": "cursor_untouched",
+   "claim": "supported",
+   "basis": "generic_contract",
+   "scope": "generic",
+   "sources": [
+    {
+     "id": "c_nofg",
+     "path": "libs/cua-driver/rust/Skills/cua-driver/MACOS.md",
+     "section": "The no-foreground contract",
+     "anchor": "the-no-foreground-contract",
+     "url": "https://github.com/trycua/cua/blob/c1c2b5fee428c3a39bebe5e77549c3d3525a608d/libs/cua-driver/rust/Skills/cua-driver/MACOS.md#the-no-foreground-contract"
+    },
+    {
+     "id": "c_click",
+     "path": "docs/content/docs/cua-driver/reference/mcp-tools/click.mdx",
+     "section": "click (element_token moves no cursor or focus)",
+     "anchor": "",
+     "url": "https://github.com/trycua/cua/blob/c1c2b5fee428c3a39bebe5e77549c3d3525a608d/docs/content/docs/cua-driver/reference/mcp-tools/click.mdx"
+    }
+   ],
+   "paraphrase": "Per-pid background delivery and element_token actions move no real cursor; only foreground pixel clicks move the pointer.",
+   "measured_20261006": {
+    "done": 23,
+    "attempted": 24,
+    "ops": [
+     "all action calls"
+    ],
+    "effect_verification": "probe_before_after",
+    "note": "cursor unchanged after 23/24 action calls; the source report attributes the 1 recorded movements to the person using the Mac, in bursts that included read-only calls."
+   }
+  },
+  {
+   "driver": "mecum",
+   "framework": "catalyst",
+   "capability": "cursor_untouched",
+   "claim": "supported",
+   "basis": "generic_contract",
+   "scope": "generic",
+   "sources": [
+    {
+     "id": "m_readme",
+     "path": "Documentation/Driver/README.md",
+     "section": "AgentSeatKit (introduction)",
+     "anchor": "agentseatkit"
+    },
+    {
+     "id": "m_fence",
+     "path": "Documentation/Driver/README.md",
+     "section": "The fence is alive only while somebody holds it",
+     "anchor": "the-fence-is-alive-only-while-somebody-holds-it"
+    }
+   ],
+   "paraphrase": "An HID event tap fence keeps the person's cursor out while the host is up; Live rows assert zero physical events.",
+   "measured_20261006": {
+    "status": "not_run",
+    "note": "session refused"
+   }
+  },
+  {
+   "driver": "cua",
+   "framework": "glfw",
+   "capability": "observe",
+   "claim": "partial",
+   "basis": "declaration",
+   "scope": "framework",
+   "sources": [
+    {
+     "id": "c_canvas",
+     "path": "libs/cua-driver/rust/Skills/cua-driver/MACOS.md",
+     "section": "Canvases, viewports, games (Blender, Unity, GHOST, Qt, wxWidgets)",
+     "anchor": "canvases-viewports-games-blender-unity-ghost-qt-wxwidgets",
+     "url": "https://github.com/trycua/cua/blob/c1c2b5fee428c3a39bebe5e77549c3d3525a608d/libs/cua-driver/rust/Skills/cua-driver/MACOS.md#canvases-viewports-games-blender-unity-ghost-qt-wxwidgets"
+    },
+    {
+     "id": "c_narrow",
+     "path": "libs/cua-driver/rust/Skills/cua-driver/MACOS.md",
+     "section": "The narrow carve-out (diagnosis bullets: empty tree, sparse Chromium tree)",
+     "anchor": "the-narrow-carve-out",
+     "url": "https://github.com/trycua/cua/blob/c1c2b5fee428c3a39bebe5e77549c3d3525a608d/libs/cua-driver/rust/Skills/cua-driver/MACOS.md#the-narrow-carve-out"
+    }
+   ],
+   "paraphrase": "OpenGL viewports expose no useful AX tree: the read is degraded and the screenshot is the only evidence.",
+   "measured_20261006": {
+    "done": 8,
+    "attempted": 8,
+    "ops": [
+     "observe"
+    ],
+    "effect_verification": "none",
+    "note": "read returned"
+   }
+  },
+  {
+   "driver": "mecum",
+   "framework": "glfw",
+   "capability": "observe",
+   "claim": "not mentioned",
+   "basis": "gap",
+   "scope": "framework",
+   "sources": [
+    {
+     "id": "m_t13",
+     "path": "Documentation/Driver/compatibility/T13Campaign26A428.md",
+     "section": "Defects and findings, 1 (Stage Manager thumbnails; only mention of kitty)",
+     "anchor": ""
+    }
+   ],
+   "paraphrase": "OpenGL, GLFW and kitty are not covered by any Mecum guide; kitty appears only as a Stage Manager thumbnail.",
+   "measured_20261006": {
+    "done": 8,
+    "attempted": 8,
+    "ops": [
+     "observe"
+    ],
+    "effect_verification": "none",
+    "note": "read returned"
+   }
+  },
+  {
+   "driver": "cua",
+   "framework": "glfw",
+   "capability": "click",
+   "claim": "foreground only",
+   "basis": "inference",
+   "scope": "framework",
+   "sources": [
+    {
+     "id": "c_canvas",
+     "path": "libs/cua-driver/rust/Skills/cua-driver/MACOS.md",
+     "section": "Canvases, viewports, games (Blender, Unity, GHOST, Qt, wxWidgets)",
+     "anchor": "canvases-viewports-games-blender-unity-ghost-qt-wxwidgets",
+     "url": "https://github.com/trycua/cua/blob/c1c2b5fee428c3a39bebe5e77549c3d3525a608d/libs/cua-driver/rust/Skills/cua-driver/MACOS.md#canvases-viewports-games-blender-unity-ghost-qt-wxwidgets"
+    },
+    {
+     "id": "c_trouble",
+     "path": "docs/content/docs/cua-driver/guides/troubleshoot.mdx",
+     "section": "Known limits",
+     "anchor": "",
+     "url": "https://github.com/trycua/cua/blob/c1c2b5fee428c3a39bebe5e77549c3d3525a608d/docs/content/docs/cua-driver/guides/troubleshoot.mdx"
+    }
+   ],
+   "paraphrase": "OpenGL/game surfaces filter per-pid events; retry the action with delivery_mode foreground.",
+   "note": "GLFW and kitty are not named; OpenGL viewport and game rules are applied by inference.",
+   "measured_20261006": {
+    "status": "not_run"
+   }
+  },
+  {
+   "driver": "mecum",
+   "framework": "glfw",
+   "capability": "click",
+   "claim": "not mentioned",
+   "basis": "gap",
+   "scope": "framework",
+   "sources": [
+    {
+     "id": "m_t13",
+     "path": "Documentation/Driver/compatibility/T13Campaign26A428.md",
+     "section": "Defects and findings, 1 (Stage Manager thumbnails; only mention of kitty)",
+     "anchor": ""
+    }
+   ],
+   "paraphrase": "OpenGL, GLFW and kitty are not covered by any Mecum guide; kitty appears only as a Stage Manager thumbnail.",
+   "measured_20261006": {
+    "status": "not_run"
+   }
+  },
+  {
+   "driver": "cua",
+   "framework": "glfw",
+   "capability": "type",
+   "claim": "foreground only",
+   "basis": "inference",
+   "scope": "framework",
+   "sources": [
+    {
+     "id": "c_canvas",
+     "path": "libs/cua-driver/rust/Skills/cua-driver/MACOS.md",
+     "section": "Canvases, viewports, games (Blender, Unity, GHOST, Qt, wxWidgets)",
+     "anchor": "canvases-viewports-games-blender-unity-ghost-qt-wxwidgets",
+     "url": "https://github.com/trycua/cua/blob/c1c2b5fee428c3a39bebe5e77549c3d3525a608d/libs/cua-driver/rust/Skills/cua-driver/MACOS.md#canvases-viewports-games-blender-unity-ghost-qt-wxwidgets"
+    }
+   ],
+   "paraphrase": "Same viewport rule: per-pid keyboard events are dropped on OpenGL surfaces.",
+   "measured_20261006": {
+    "done": 0,
+    "attempted": 8,
+    "ops": [
+     "type"
+    ],
+    "effect_verification": "none",
+    "note": "type_text incomplete: delivered 0 of 10 characters via CGEvent"
+   }
+  },
+  {
+   "driver": "mecum",
+   "framework": "glfw",
+   "capability": "type",
+   "claim": "not mentioned",
+   "basis": "gap",
+   "scope": "framework",
+   "sources": [
+    {
+     "id": "m_t13",
+     "path": "Documentation/Driver/compatibility/T13Campaign26A428.md",
+     "section": "Defects and findings, 1 (Stage Manager thumbnails; only mention of kitty)",
+     "anchor": ""
+    }
+   ],
+   "paraphrase": "OpenGL, GLFW and kitty are not covered by any Mecum guide; kitty appears only as a Stage Manager thumbnail.",
+   "measured_20261006": {
+    "done": 8,
+    "attempted": 8,
+    "ops": [
+     "type"
+    ],
+    "effect_verification": "ocr",
+    "note": "OCR of window capture confirmed inserted text 8/8"
+   }
+  },
+  {
+   "driver": "cua",
+   "framework": "glfw",
+   "capability": "key",
+   "claim": "foreground only",
+   "basis": "inference",
+   "scope": "framework",
+   "sources": [
+    {
+     "id": "c_canvas",
+     "path": "libs/cua-driver/rust/Skills/cua-driver/MACOS.md",
+     "section": "Canvases, viewports, games (Blender, Unity, GHOST, Qt, wxWidgets)",
+     "anchor": "canvases-viewports-games-blender-unity-ghost-qt-wxwidgets",
+     "url": "https://github.com/trycua/cua/blob/c1c2b5fee428c3a39bebe5e77549c3d3525a608d/libs/cua-driver/rust/Skills/cua-driver/MACOS.md#canvases-viewports-games-blender-unity-ghost-qt-wxwidgets"
+    }
+   ],
+   "paraphrase": "Same viewport rule.",
+   "measured_20261006": {
+    "done": 8,
+    "attempted": 8,
+    "ops": [
+     "key"
+    ],
+    "effect_verification": "driver_verdict_only",
+    "note": ""
+   }
+  },
+  {
+   "driver": "mecum",
+   "framework": "glfw",
+   "capability": "key",
+   "claim": "not mentioned",
+   "basis": "gap",
+   "scope": "framework",
+   "sources": [
+    {
+     "id": "m_t13",
+     "path": "Documentation/Driver/compatibility/T13Campaign26A428.md",
+     "section": "Defects and findings, 1 (Stage Manager thumbnails; only mention of kitty)",
+     "anchor": ""
+    }
+   ],
+   "paraphrase": "OpenGL, GLFW and kitty are not covered by any Mecum guide; kitty appears only as a Stage Manager thumbnail.",
+   "measured_20261006": {
+    "done": 8,
+    "attempted": 8,
+    "ops": [
+     "key"
+    ],
+    "effect_verification": "driver_verdict_only",
+    "note": ""
+   }
+  },
+  {
+   "driver": "cua",
+   "framework": "glfw",
+   "capability": "hotkey",
+   "claim": "foreground only",
+   "basis": "inference",
+   "scope": "framework",
+   "sources": [
+    {
+     "id": "c_canvas",
+     "path": "libs/cua-driver/rust/Skills/cua-driver/MACOS.md",
+     "section": "Canvases, viewports, games (Blender, Unity, GHOST, Qt, wxWidgets)",
+     "anchor": "canvases-viewports-games-blender-unity-ghost-qt-wxwidgets",
+     "url": "https://github.com/trycua/cua/blob/c1c2b5fee428c3a39bebe5e77549c3d3525a608d/libs/cua-driver/rust/Skills/cua-driver/MACOS.md#canvases-viewports-games-blender-unity-ghost-qt-wxwidgets"
+    }
+   ],
+   "paraphrase": "Same viewport rule.",
+   "measured_20261006": {
+    "done": 8,
+    "attempted": 8,
+    "ops": [
+     "hotkey"
+    ],
+    "effect_verification": "none",
+    "note": "Ctrl chords had no confirmed effect; unverified"
+   }
+  },
+  {
+   "driver": "mecum",
+   "framework": "glfw",
+   "capability": "hotkey",
+   "claim": "not mentioned",
+   "basis": "gap",
+   "scope": "framework",
+   "sources": [
+    {
+     "id": "m_t13",
+     "path": "Documentation/Driver/compatibility/T13Campaign26A428.md",
+     "section": "Defects and findings, 1 (Stage Manager thumbnails; only mention of kitty)",
+     "anchor": ""
+    }
+   ],
+   "paraphrase": "OpenGL, GLFW and kitty are not covered by any Mecum guide; kitty appears only as a Stage Manager thumbnail.",
+   "measured_20261006": {
+    "done": 8,
+    "attempted": 8,
+    "ops": [
+     "hotkey"
+    ],
+    "effect_verification": "none",
+    "note": "Ctrl+U / Ctrl+A did not clear the line; unverified"
+   }
+  },
+  {
+   "driver": "cua",
+   "framework": "glfw",
+   "capability": "scroll",
+   "claim": "foreground only",
+   "basis": "inference",
+   "scope": "framework",
+   "sources": [
+    {
+     "id": "c_canvas",
+     "path": "libs/cua-driver/rust/Skills/cua-driver/MACOS.md",
+     "section": "Canvases, viewports, games (Blender, Unity, GHOST, Qt, wxWidgets)",
+     "anchor": "canvases-viewports-games-blender-unity-ghost-qt-wxwidgets",
+     "url": "https://github.com/trycua/cua/blob/c1c2b5fee428c3a39bebe5e77549c3d3525a608d/libs/cua-driver/rust/Skills/cua-driver/MACOS.md#canvases-viewports-games-blender-unity-ghost-qt-wxwidgets"
+    }
+   ],
+   "paraphrase": "Same viewport rule.",
+   "measured_20261006": {
+    "done": 16,
+    "attempted": 16,
+    "ops": [
+     "scroll_down",
+     "scroll_up"
+    ],
+    "effect_verification": "driver_verdict_only",
+    "note": ""
+   }
+  },
+  {
+   "driver": "mecum",
+   "framework": "glfw",
+   "capability": "scroll",
+   "claim": "not mentioned",
+   "basis": "gap",
+   "scope": "framework",
+   "sources": [
+    {
+     "id": "m_t13",
+     "path": "Documentation/Driver/compatibility/T13Campaign26A428.md",
+     "section": "Defects and findings, 1 (Stage Manager thumbnails; only mention of kitty)",
+     "anchor": ""
+    }
+   ],
+   "paraphrase": "OpenGL, GLFW and kitty are not covered by any Mecum guide; kitty appears only as a Stage Manager thumbnail.",
+   "measured_20261006": {
+    "done": 16,
+    "attempted": 16,
+    "ops": [
+     "scroll_down",
+     "scroll_up"
+    ],
+    "effect_verification": "driver_verdict_only",
+    "note": ""
+   }
+  },
+  {
+   "driver": "cua",
+   "framework": "glfw",
+   "capability": "menu",
+   "claim": "partial",
+   "basis": "declaration",
+   "scope": "generic",
+   "sources": [
+    {
+     "id": "c_menu",
+     "path": "libs/cua-driver/rust/Skills/cua-driver/MACOS.md",
+     "section": "Navigating native menu bars (AXMenuBar)",
+     "anchor": "navigating-native-menu-bars-axmenubar",
+     "url": "https://github.com/trycua/cua/blob/c1c2b5fee428c3a39bebe5e77549c3d3525a608d/libs/cua-driver/rust/Skills/cua-driver/MACOS.md#navigating-native-menu-bars-axmenubar"
+    }
+   ],
+   "paraphrase": "invoke_menu works from a known app-menu path but temporarily activates the exact window and restores the prior app best-effort.",
+   "note": "Not a no-activation route by its own description.",
+   "measured_20261006": {
+    "status": "not_run"
+   }
+  },
+  {
+   "driver": "mecum",
+   "framework": "glfw",
+   "capability": "menu",
+   "claim": "not mentioned",
+   "basis": "gap",
+   "scope": "framework",
+   "sources": [
+    {
+     "id": "m_t13",
+     "path": "Documentation/Driver/compatibility/T13Campaign26A428.md",
+     "section": "Defects and findings, 1 (Stage Manager thumbnails; only mention of kitty)",
+     "anchor": ""
+    }
+   ],
+   "paraphrase": "OpenGL, GLFW and kitty are not covered by any Mecum guide; kitty appears only as a Stage Manager thumbnail.",
+   "measured_20261006": {
+    "status": "not_run"
+   }
+  },
+  {
+   "driver": "cua",
+   "framework": "glfw",
+   "capability": "background_no_activation",
+   "claim": "not supported",
+   "basis": "declaration",
+   "scope": "framework",
+   "sources": [
+    {
+     "id": "c_canvas",
+     "path": "libs/cua-driver/rust/Skills/cua-driver/MACOS.md",
+     "section": "Canvases, viewports, games (Blender, Unity, GHOST, Qt, wxWidgets)",
+     "anchor": "canvases-viewports-games-blender-unity-ghost-qt-wxwidgets",
+     "url": "https://github.com/trycua/cua/blob/c1c2b5fee428c3a39bebe5e77549c3d3525a608d/libs/cua-driver/rust/Skills/cua-driver/MACOS.md#canvases-viewports-games-blender-unity-ghost-qt-wxwidgets"
+    }
+   ],
+   "paraphrase": "No backgrounded path reaches OpenGL/Metal/Qt viewports today; per-pid events are dropped, so only the foreground rung is left.",
+   "measured_20261006": {
+    "done": 40,
+    "attempted": 40,
+    "ops": [
+     "all action calls"
+    ],
+    "effect_verification": "probe_before_after",
+    "note": "frontmost app unchanged after 40/40 action calls. Probe samples frontmost app and cursor before and after each call; a transient activation inside a call is not visible. Cua invoke_menu raises the window and restores focus (source report)."
+   }
+  },
+  {
+   "driver": "mecum",
+   "framework": "glfw",
+   "capability": "background_no_activation",
+   "claim": "supported",
+   "basis": "generic_contract",
+   "scope": "generic",
+   "sources": [
+    {
+     "id": "m_readme",
+     "path": "Documentation/Driver/README.md",
+     "section": "AgentSeatKit (introduction)",
+     "anchor": "agentseatkit"
+    }
+   ],
+   "paraphrase": "The seat delivers background input to windows moved onto a virtual display and never posts a global event or falls back onto the desktop.",
+   "measured_20261006": {
+    "done": 40,
+    "attempted": 40,
+    "ops": [
+     "all action calls"
+    ],
+    "effect_verification": "probe_before_after",
+    "note": "frontmost app unchanged after 40/40 action calls. Probe samples frontmost app and cursor before and after each call; a transient activation inside a call is not visible."
+   }
+  },
+  {
+   "driver": "cua",
+   "framework": "glfw",
+   "capability": "cursor_untouched",
+   "claim": "not supported",
+   "basis": "inference",
+   "scope": "framework",
+   "sources": [
+    {
+     "id": "c_canvas",
+     "path": "libs/cua-driver/rust/Skills/cua-driver/MACOS.md",
+     "section": "Canvases, viewports, games (Blender, Unity, GHOST, Qt, wxWidgets)",
+     "anchor": "canvases-viewports-games-blender-unity-ghost-qt-wxwidgets",
+     "url": "https://github.com/trycua/cua/blob/c1c2b5fee428c3a39bebe5e77549c3d3525a608d/libs/cua-driver/rust/Skills/cua-driver/MACOS.md#canvases-viewports-games-blender-unity-ghost-qt-wxwidgets"
+    },
+    {
+     "id": "c_deliv",
+     "path": "libs/cua-driver/rust/Skills/cua-driver/MACOS.md",
+     "section": "delivery_mode on the pointer family (macOS)",
+     "anchor": "delivery_mode-on-the-pointer-family-macos",
+     "url": "https://github.com/trycua/cua/blob/c1c2b5fee428c3a39bebe5e77549c3d3525a608d/libs/cua-driver/rust/Skills/cua-driver/MACOS.md#delivery_mode-on-the-pointer-family-macos"
+    }
+   ],
+   "paraphrase": "The only route is delivery_mode foreground, whose pixel click moves the hardware pointer and leaves it at the target.",
+   "note": "Foreground keyboard delivery is not stated to move the pointer; claim covers pointer-bearing actions.",
+   "measured_20261006": {
+    "done": 40,
+    "attempted": 40,
+    "ops": [
+     "all action calls"
+    ],
+    "effect_verification": "probe_before_after",
+    "note": "cursor unchanged after 40/40 action calls; the source report attributes the 0 recorded movements to the person using the Mac, in bursts that included read-only calls."
+   }
+  },
+  {
+   "driver": "mecum",
+   "framework": "glfw",
+   "capability": "cursor_untouched",
+   "claim": "supported",
+   "basis": "generic_contract",
+   "scope": "generic",
+   "sources": [
+    {
+     "id": "m_readme",
+     "path": "Documentation/Driver/README.md",
+     "section": "AgentSeatKit (introduction)",
+     "anchor": "agentseatkit"
+    },
+    {
+     "id": "m_fence",
+     "path": "Documentation/Driver/README.md",
+     "section": "The fence is alive only while somebody holds it",
+     "anchor": "the-fence-is-alive-only-while-somebody-holds-it"
+    }
+   ],
+   "paraphrase": "An HID event tap fence keeps the person's cursor out while the host is up; Live rows assert zero physical events.",
+   "measured_20261006": {
+    "done": 40,
+    "attempted": 40,
+    "ops": [
+     "all action calls"
+    ],
+    "effect_verification": "probe_before_after",
+    "note": "cursor unchanged after 40/40 action calls; the source report attributes the 0 recorded movements to the person using the Mac, in bursts that included read-only calls."
+   }
+  },
+  {
+   "driver": "cua",
+   "framework": "qt_gpu",
+   "capability": "observe",
+   "claim": "partial",
+   "basis": "declaration",
+   "scope": "framework",
+   "sources": [
+    {
+     "id": "c_canvas",
+     "path": "libs/cua-driver/rust/Skills/cua-driver/MACOS.md",
+     "section": "Canvases, viewports, games (Blender, Unity, GHOST, Qt, wxWidgets)",
+     "anchor": "canvases-viewports-games-blender-unity-ghost-qt-wxwidgets",
+     "url": "https://github.com/trycua/cua/blob/c1c2b5fee428c3a39bebe5e77549c3d3525a608d/libs/cua-driver/rust/Skills/cua-driver/MACOS.md#canvases-viewports-games-blender-unity-ghost-qt-wxwidgets"
+    },
+    {
+     "id": "c_plan",
+     "path": "libs/cua-driver/docs/macos-background-input-v1-plan.md",
+     "section": "Compatibility expectations (status: Proposed, 2026-08-04)",
+     "anchor": "compatibility-expectations",
+     "url": "https://github.com/trycua/cua/blob/c1c2b5fee428c3a39bebe5e77549c3d3525a608d/libs/cua-driver/docs/macos-background-input-v1-plan.md#compatibility-expectations"
+    }
+   ],
+   "paraphrase": "Qt/GPU viewports expose one opaque AXGroup or AXWindow; the plan says to use exposed AX semantics where present.",
+   "note": "Resolve's GPU editing canvas matches the rule most directly; Qt is absent from the native ledger.",
+   "measured_20261006": {
+    "done": 8,
+    "attempted": 8,
+    "ops": [
+     "observe"
+    ],
+    "effect_verification": "none",
+    "note": "read returned"
+   }
+  },
+  {
+   "driver": "mecum",
+   "framework": "qt_gpu",
+   "capability": "observe",
+   "claim": "supported",
+   "basis": "qualification_result",
+   "scope": "app",
+   "sources": [
+    {
+     "id": "m_qt_matrix",
+     "path": "Documentation/Driver/platforms/Qt.md",
+     "section": "Function matrix",
+     "anchor": "function-matrix"
+    }
+   ],
+   "paraphrase": "Qualified frame and reference for Resolve's staged Project Manager window.",
+   "measured_20261006": {
+    "done": 8,
+    "attempted": 8,
+    "ops": [
+     "observe"
+    ],
+    "effect_verification": "none",
+    "note": "read returned"
+   }
+  },
+  {
+   "driver": "cua",
+   "framework": "qt_gpu",
+   "capability": "click",
+   "claim": "foreground only",
+   "basis": "declaration",
+   "scope": "framework",
+   "sources": [
+    {
+     "id": "c_canvas",
+     "path": "libs/cua-driver/rust/Skills/cua-driver/MACOS.md",
+     "section": "Canvases, viewports, games (Blender, Unity, GHOST, Qt, wxWidgets)",
+     "anchor": "canvases-viewports-games-blender-unity-ghost-qt-wxwidgets",
+     "url": "https://github.com/trycua/cua/blob/c1c2b5fee428c3a39bebe5e77549c3d3525a608d/libs/cua-driver/rust/Skills/cua-driver/MACOS.md#canvases-viewports-games-blender-unity-ghost-qt-wxwidgets"
+    }
+   ],
+   "paraphrase": "Qt is named in the canvas rule: per-pid events are dropped, foreground is the retry.",
+   "note": "Resolve's GPU editing canvas matches the rule most directly; Qt is absent from the native ledger.",
+   "measured_20261006": {
+    "done": 16,
+    "attempted": 16,
+    "ops": [
+     "click",
+     "click_back"
+    ],
+    "effect_verification": "none",
+    "note": "driver reported done; report omits Cua Qt action values (outside declared support); counts from raw rows"
+   }
+  },
+  {
+   "driver": "mecum",
+   "framework": "qt_gpu",
+   "capability": "click",
+   "claim": "supported",
+   "basis": "qualification_result",
+   "scope": "app",
+   "sources": [
+    {
+     "id": "m_qt_matrix",
+     "path": "Documentation/Driver/platforms/Qt.md",
+     "section": "Function matrix",
+     "anchor": "function-matrix"
+    },
+    {
+     "id": "m_qt_snap",
+     "path": "Documentation/Driver/platforms/Qt.md",
+     "section": "Current repeatable snapshot",
+     "anchor": "current-repeatable-snapshot"
+    }
+   ],
+   "paraphrase": "Search toggle, New Project and Cancel, and Cut/Edit page buttons changed AX values.",
+   "measured_20261006": {
+    "done": 16,
+    "attempted": 16,
+    "ops": [
+     "click",
+     "click_back"
+    ],
+    "effect_verification": "none",
+    "note": "Project Manager view buttons; no oracle"
+   }
+  },
+  {
+   "driver": "cua",
+   "framework": "qt_gpu",
+   "capability": "type",
+   "claim": "foreground only",
+   "basis": "declaration",
+   "scope": "framework",
+   "sources": [
+    {
+     "id": "c_canvas",
+     "path": "libs/cua-driver/rust/Skills/cua-driver/MACOS.md",
+     "section": "Canvases, viewports, games (Blender, Unity, GHOST, Qt, wxWidgets)",
+     "anchor": "canvases-viewports-games-blender-unity-ghost-qt-wxwidgets",
+     "url": "https://github.com/trycua/cua/blob/c1c2b5fee428c3a39bebe5e77549c3d3525a608d/libs/cua-driver/rust/Skills/cua-driver/MACOS.md#canvases-viewports-games-blender-unity-ghost-qt-wxwidgets"
+    }
+   ],
+   "paraphrase": "Same canvas rule for Qt.",
+   "measured_20261006": {
+    "status": "not_run"
+   }
+  },
+  {
+   "driver": "mecum",
+   "framework": "qt_gpu",
+   "capability": "type",
+   "claim": "supported",
+   "basis": "qualification_result",
+   "scope": "app",
+   "sources": [
+    {
+     "id": "m_qt_matrix",
+     "path": "Documentation/Driver/platforms/Qt.md",
+     "section": "Function matrix",
+     "anchor": "function-matrix"
+    },
+    {
+     "id": "m_qt_flow",
+     "path": "Documentation/Driver/platforms/Qt.md",
+     "section": "Mecum application flow",
+     "anchor": "mecum-application-flow"
+    }
+   ],
+   "paraphrase": "Typed and inserted text reached Search; the exact Unicode value needed an Engine fix and then passed.",
+   "measured_20261006": {
+    "status": "not_run"
+   }
+  },
+  {
+   "driver": "cua",
+   "framework": "qt_gpu",
+   "capability": "key",
+   "claim": "foreground only",
+   "basis": "declaration",
+   "scope": "framework",
+   "sources": [
+    {
+     "id": "c_canvas",
+     "path": "libs/cua-driver/rust/Skills/cua-driver/MACOS.md",
+     "section": "Canvases, viewports, games (Blender, Unity, GHOST, Qt, wxWidgets)",
+     "anchor": "canvases-viewports-games-blender-unity-ghost-qt-wxwidgets",
+     "url": "https://github.com/trycua/cua/blob/c1c2b5fee428c3a39bebe5e77549c3d3525a608d/libs/cua-driver/rust/Skills/cua-driver/MACOS.md#canvases-viewports-games-blender-unity-ghost-qt-wxwidgets"
+    }
+   ],
+   "paraphrase": "Same canvas rule for Qt.",
+   "measured_20261006": {
+    "status": "not_run"
+   }
+  },
+  {
+   "driver": "mecum",
+   "framework": "qt_gpu",
+   "capability": "key",
+   "claim": "partial",
+   "basis": "qualification_result",
+   "scope": "app",
+   "sources": [
+    {
+     "id": "m_qt_matrix",
+     "path": "Documentation/Driver/platforms/Qt.md",
+     "section": "Function matrix",
+     "anchor": "function-matrix"
+    }
+   ],
+   "paraphrase": "Backspace and arrow keys worked; other virtual keys need their own oracles.",
+   "measured_20261006": {
+    "status": "not_run"
+   }
+  },
+  {
+   "driver": "cua",
+   "framework": "qt_gpu",
+   "capability": "hotkey",
+   "claim": "foreground only",
+   "basis": "declaration",
+   "scope": "framework",
+   "sources": [
+    {
+     "id": "c_canvas",
+     "path": "libs/cua-driver/rust/Skills/cua-driver/MACOS.md",
+     "section": "Canvases, viewports, games (Blender, Unity, GHOST, Qt, wxWidgets)",
+     "anchor": "canvases-viewports-games-blender-unity-ghost-qt-wxwidgets",
+     "url": "https://github.com/trycua/cua/blob/c1c2b5fee428c3a39bebe5e77549c3d3525a608d/libs/cua-driver/rust/Skills/cua-driver/MACOS.md#canvases-viewports-games-blender-unity-ghost-qt-wxwidgets"
+    }
+   ],
+   "paraphrase": "Same canvas rule for Qt.",
+   "measured_20261006": {
+    "status": "not_run"
+   }
+  },
+  {
+   "driver": "mecum",
+   "framework": "qt_gpu",
+   "capability": "hotkey",
+   "claim": "partial",
+   "basis": "qualification_result",
+   "scope": "app",
+   "sources": [
+    {
+     "id": "m_qt_matrix",
+     "path": "Documentation/Driver/platforms/Qt.md",
+     "section": "Function matrix",
+     "anchor": "function-matrix"
+    }
+   ],
+   "paraphrase": "Layout-resolved cmd+A selected all Search text; other modifiers and shortcut destinations pending.",
+   "measured_20261006": {
+    "status": "not_run"
+   }
+  },
+  {
+   "driver": "cua",
+   "framework": "qt_gpu",
+   "capability": "scroll",
+   "claim": "foreground only",
+   "basis": "declaration",
+   "scope": "framework",
+   "sources": [
+    {
+     "id": "c_canvas",
+     "path": "libs/cua-driver/rust/Skills/cua-driver/MACOS.md",
+     "section": "Canvases, viewports, games (Blender, Unity, GHOST, Qt, wxWidgets)",
+     "anchor": "canvases-viewports-games-blender-unity-ghost-qt-wxwidgets",
+     "url": "https://github.com/trycua/cua/blob/c1c2b5fee428c3a39bebe5e77549c3d3525a608d/libs/cua-driver/rust/Skills/cua-driver/MACOS.md#canvases-viewports-games-blender-unity-ghost-qt-wxwidgets"
+    }
+   ],
+   "paraphrase": "Same canvas rule for Qt.",
+   "measured_20261006": {
+    "done": 16,
+    "attempted": 16,
+    "ops": [
+     "scroll_down",
+     "scroll_up"
+    ],
+    "effect_verification": "none",
+    "note": "counts from raw rows"
+   }
+  },
+  {
+   "driver": "mecum",
+   "framework": "qt_gpu",
+   "capability": "scroll",
+   "claim": "partial",
+   "basis": "qualification_result",
+   "scope": "app",
+   "sources": [
+    {
+     "id": "m_qt_matrix",
+     "path": "Documentation/Driver/platforms/Qt.md",
+     "section": "Function matrix",
+     "anchor": "function-matrix"
+    }
+   ],
+   "paraphrase": "Scroll passed on the Qt 6 fixture; Resolve's slider is not a scroll oracle.",
+   "measured_20261006": {
+    "done": 16,
+    "attempted": 16,
+    "ops": [
+     "scroll_down",
+     "scroll_up"
+    ],
+    "effect_verification": "none",
+    "note": ""
+   }
+  },
+  {
+   "driver": "cua",
+   "framework": "qt_gpu",
+   "capability": "menu",
+   "claim": "partial",
+   "basis": "declaration",
+   "scope": "generic",
+   "sources": [
+    {
+     "id": "c_menu",
+     "path": "libs/cua-driver/rust/Skills/cua-driver/MACOS.md",
+     "section": "Navigating native menu bars (AXMenuBar)",
+     "anchor": "navigating-native-menu-bars-axmenubar",
+     "url": "https://github.com/trycua/cua/blob/c1c2b5fee428c3a39bebe5e77549c3d3525a608d/libs/cua-driver/rust/Skills/cua-driver/MACOS.md#navigating-native-menu-bars-axmenubar"
+    }
+   ],
+   "paraphrase": "invoke_menu works from a known app-menu path but temporarily activates the exact window and restores the prior app best-effort.",
+   "note": "Not a no-activation route by its own description.",
+   "measured_20261006": {
+    "status": "not_run"
+   }
+  },
+  {
+   "driver": "mecum",
+   "framework": "qt_gpu",
+   "capability": "menu",
+   "claim": "partial",
+   "basis": "qualification_result",
+   "scope": "app",
+   "sources": [
+    {
+     "id": "m_qt_matrix",
+     "path": "Documentation/Driver/platforms/Qt.md",
+     "section": "Function matrix",
+     "anchor": "function-matrix"
+    },
+    {
+     "id": "m_qt_flow",
+     "path": "Documentation/Driver/platforms/Qt.md",
+     "section": "Mecum application flow",
+     "anchor": "mecum-application-flow"
+    }
+   ],
+   "paraphrase": "Context-menu Select All on Search passed; menu-bar commands are not documented.",
+   "measured_20261006": {
+    "status": "not_run"
+   }
+  },
+  {
+   "driver": "cua",
+   "framework": "qt_gpu",
+   "capability": "background_no_activation",
+   "claim": "not supported",
+   "basis": "declaration",
+   "scope": "framework",
+   "sources": [
+    {
+     "id": "c_canvas",
+     "path": "libs/cua-driver/rust/Skills/cua-driver/MACOS.md",
+     "section": "Canvases, viewports, games (Blender, Unity, GHOST, Qt, wxWidgets)",
+     "anchor": "canvases-viewports-games-blender-unity-ghost-qt-wxwidgets",
+     "url": "https://github.com/trycua/cua/blob/c1c2b5fee428c3a39bebe5e77549c3d3525a608d/libs/cua-driver/rust/Skills/cua-driver/MACOS.md#canvases-viewports-games-blender-unity-ghost-qt-wxwidgets"
+    }
+   ],
+   "paraphrase": "No backgrounded path reaches OpenGL/Metal/Qt viewports today; per-pid events are dropped, so only the foreground rung is left.",
+   "measured_20261006": {
+    "done": 32,
+    "attempted": 32,
+    "ops": [
+     "all action calls"
+    ],
+    "effect_verification": "probe_before_after",
+    "note": "frontmost app unchanged after 32/32 action calls. Probe samples frontmost app and cursor before and after each call; a transient activation inside a call is not visible. Cua invoke_menu raises the window and restores focus (source report)."
+   }
+  },
+  {
+   "driver": "mecum",
+   "framework": "qt_gpu",
+   "capability": "background_no_activation",
+   "claim": "partial",
+   "basis": "qualification_result",
+   "scope": "app",
+   "sources": [
+    {
+     "id": "m_qt_matrix",
+     "path": "Documentation/Driver/platforms/Qt.md",
+     "section": "Function matrix",
+     "anchor": "function-matrix"
+    }
+   ],
+   "paraphrase": "Native Import panel first appears on the physical display before containment, so strict invisible background is not met.",
+   "measured_20261006": {
+    "done": 32,
+    "attempted": 32,
+    "ops": [
+     "all action calls"
+    ],
+    "effect_verification": "probe_before_after",
+    "note": "frontmost app unchanged after 32/32 action calls. Probe samples frontmost app and cursor before and after each call; a transient activation inside a call is not visible."
+   }
+  },
+  {
+   "driver": "cua",
+   "framework": "qt_gpu",
+   "capability": "cursor_untouched",
+   "claim": "not supported",
+   "basis": "inference",
+   "scope": "framework",
+   "sources": [
+    {
+     "id": "c_canvas",
+     "path": "libs/cua-driver/rust/Skills/cua-driver/MACOS.md",
+     "section": "Canvases, viewports, games (Blender, Unity, GHOST, Qt, wxWidgets)",
+     "anchor": "canvases-viewports-games-blender-unity-ghost-qt-wxwidgets",
+     "url": "https://github.com/trycua/cua/blob/c1c2b5fee428c3a39bebe5e77549c3d3525a608d/libs/cua-driver/rust/Skills/cua-driver/MACOS.md#canvases-viewports-games-blender-unity-ghost-qt-wxwidgets"
+    },
+    {
+     "id": "c_deliv",
+     "path": "libs/cua-driver/rust/Skills/cua-driver/MACOS.md",
+     "section": "delivery_mode on the pointer family (macOS)",
+     "anchor": "delivery_mode-on-the-pointer-family-macos",
+     "url": "https://github.com/trycua/cua/blob/c1c2b5fee428c3a39bebe5e77549c3d3525a608d/libs/cua-driver/rust/Skills/cua-driver/MACOS.md#delivery_mode-on-the-pointer-family-macos"
+    }
+   ],
+   "paraphrase": "The only route is delivery_mode foreground, whose pixel click moves the hardware pointer and leaves it at the target.",
+   "note": "Foreground keyboard delivery is not stated to move the pointer; claim covers pointer-bearing actions.",
+   "measured_20261006": {
+    "done": 30,
+    "attempted": 32,
+    "ops": [
+     "all action calls"
+    ],
+    "effect_verification": "probe_before_after",
+    "note": "cursor unchanged after 30/32 action calls; the source report attributes the 2 recorded movements to the person using the Mac, in bursts that included read-only calls."
+   }
+  },
+  {
+   "driver": "mecum",
+   "framework": "qt_gpu",
+   "capability": "cursor_untouched",
+   "claim": "supported",
+   "basis": "qualification_result",
+   "scope": "app",
+   "sources": [
+    {
+     "id": "m_qt_snap",
+     "path": "Documentation/Driver/platforms/Qt.md",
+     "section": "Current repeatable snapshot",
+     "anchor": "current-repeatable-snapshot"
+    },
+    {
+     "id": "m_qt_matrix",
+     "path": "Documentation/Driver/platforms/Qt.md",
+     "section": "Function matrix",
+     "anchor": "function-matrix"
+    }
+   ],
+   "paraphrase": "Input rows recorded zero physical events and an unchanged User Seat.",
+   "measured_20261006": {
+    "done": 29,
+    "attempted": 32,
+    "ops": [
+     "all action calls"
+    ],
+    "effect_verification": "probe_before_after",
+    "note": "cursor unchanged after 29/32 action calls; the source report attributes the 3 recorded movements to the person using the Mac, in bursts that included read-only calls."
+   }
+  },
+  {
+   "driver": "cua",
+   "framework": "qt6",
+   "capability": "observe",
+   "claim": "partial",
+   "basis": "declaration",
+   "scope": "framework",
+   "sources": [
+    {
+     "id": "c_canvas",
+     "path": "libs/cua-driver/rust/Skills/cua-driver/MACOS.md",
+     "section": "Canvases, viewports, games (Blender, Unity, GHOST, Qt, wxWidgets)",
+     "anchor": "canvases-viewports-games-blender-unity-ghost-qt-wxwidgets",
+     "url": "https://github.com/trycua/cua/blob/c1c2b5fee428c3a39bebe5e77549c3d3525a608d/libs/cua-driver/rust/Skills/cua-driver/MACOS.md#canvases-viewports-games-blender-unity-ghost-qt-wxwidgets"
+    },
+    {
+     "id": "c_plan",
+     "path": "libs/cua-driver/docs/macos-background-input-v1-plan.md",
+     "section": "Compatibility expectations (status: Proposed, 2026-08-04)",
+     "anchor": "compatibility-expectations",
+     "url": "https://github.com/trycua/cua/blob/c1c2b5fee428c3a39bebe5e77549c3d3525a608d/libs/cua-driver/docs/macos-background-input-v1-plan.md#compatibility-expectations"
+    }
+   ],
+   "paraphrase": "Qt/GPU viewports expose one opaque AXGroup or AXWindow; the plan says to use exposed AX semantics where present.",
+   "note": "Qt widgets may expose AX (plan: use exposed exact AX semantics) but no Qt row exists in the ledger.",
+   "measured_20261006": {
+    "done": 8,
+    "attempted": 8,
+    "ops": [
+     "observe"
+    ],
+    "effect_verification": "none",
+    "note": "read returned"
+   }
+  },
+  {
+   "driver": "mecum",
+   "framework": "qt6",
+   "capability": "observe",
+   "claim": "supported",
+   "basis": "qualification_result",
+   "scope": "framework",
+   "sources": [
+    {
+     "id": "m_qt_matrix",
+     "path": "Documentation/Driver/platforms/Qt.md",
+     "section": "Function matrix",
+     "anchor": "function-matrix"
+    }
+   ],
+   "paraphrase": "Fixture and installed Qt 6 windows are captured and observed.",
+   "measured_20261006": {
+    "done": 8,
+    "attempted": 8,
+    "ops": [
+     "observe"
+    ],
+    "effect_verification": "none",
+    "note": "read returned"
+   }
+  },
+  {
+   "driver": "cua",
+   "framework": "qt6",
+   "capability": "click",
+   "claim": "foreground only",
+   "basis": "declaration",
+   "scope": "framework",
+   "sources": [
+    {
+     "id": "c_canvas",
+     "path": "libs/cua-driver/rust/Skills/cua-driver/MACOS.md",
+     "section": "Canvases, viewports, games (Blender, Unity, GHOST, Qt, wxWidgets)",
+     "anchor": "canvases-viewports-games-blender-unity-ghost-qt-wxwidgets",
+     "url": "https://github.com/trycua/cua/blob/c1c2b5fee428c3a39bebe5e77549c3d3525a608d/libs/cua-driver/rust/Skills/cua-driver/MACOS.md#canvases-viewports-games-blender-unity-ghost-qt-wxwidgets"
+    }
+   ],
+   "paraphrase": "Qt is named in the canvas rule: per-pid events are dropped, foreground is the retry.",
+   "note": "Qt widgets may expose AX (plan: use exposed exact AX semantics) but no Qt row exists in the ledger.",
+   "measured_20261006": {
+    "done": 8,
+    "attempted": 8,
+    "ops": [
+     "click"
+    ],
+    "effect_verification": "independent_probe",
+    "note": "Meow toggle state confirmed (declared Qt: not supported, yet it worked); counts from raw rows"
+   }
+  },
+  {
+   "driver": "mecum",
+   "framework": "qt6",
+   "capability": "click",
+   "claim": "supported",
+   "basis": "qualification_result",
+   "scope": "app",
+   "sources": [
+    {
+     "id": "m_exp",
+     "path": "Documentation/Driver/reports/ExpandedApplicationChecks.md",
+     "section": "Additional application matrix",
+     "anchor": "additional-application-matrix"
+    },
+    {
+     "id": "m_stab",
+     "path": "Documentation/Driver/reports/StabilizationRounds.md",
+     "section": "Local release acceptance matrix",
+     "anchor": "local-release-acceptance-matrix"
+    },
+    {
+     "id": "m_qt_matrix",
+     "path": "Documentation/Driver/platforms/Qt.md",
+     "section": "Function matrix",
+     "anchor": "function-matrix"
+    }
+   ],
+   "paraphrase": "Prism Add Instance round trip passed 3/3 with toggles; Qt 6 fixture click counters increment.",
+   "measured_20261006": {
+    "done": 8,
+    "attempted": 8,
+    "ops": [
+     "click"
+    ],
+    "effect_verification": "independent_probe",
+    "note": "Meow toggle state confirmed"
+   }
+  },
+  {
+   "driver": "cua",
+   "framework": "qt6",
+   "capability": "type",
+   "claim": "foreground only",
+   "basis": "declaration",
+   "scope": "framework",
+   "sources": [
+    {
+     "id": "c_canvas",
+     "path": "libs/cua-driver/rust/Skills/cua-driver/MACOS.md",
+     "section": "Canvases, viewports, games (Blender, Unity, GHOST, Qt, wxWidgets)",
+     "anchor": "canvases-viewports-games-blender-unity-ghost-qt-wxwidgets",
+     "url": "https://github.com/trycua/cua/blob/c1c2b5fee428c3a39bebe5e77549c3d3525a608d/libs/cua-driver/rust/Skills/cua-driver/MACOS.md#canvases-viewports-games-blender-unity-ghost-qt-wxwidgets"
+    }
+   ],
+   "paraphrase": "Same canvas rule for Qt.",
+   "measured_20261006": {
+    "status": "not_run"
+   }
+  },
+  {
+   "driver": "mecum",
+   "framework": "qt6",
+   "capability": "type",
+   "claim": "supported",
+   "basis": "qualification_result",
+   "scope": "app",
+   "sources": [
+    {
+     "id": "m_stab",
+     "path": "Documentation/Driver/reports/StabilizationRounds.md",
+     "section": "Local release acceptance matrix",
+     "anchor": "local-release-acceptance-matrix"
+    },
+    {
+     "id": "m_qt_matrix",
+     "path": "Documentation/Driver/platforms/Qt.md",
+     "section": "Function matrix",
+     "anchor": "function-matrix"
+    }
+   ],
+   "paraphrase": "Prism exact values Qt1/Qt2/Qt3 with accented and emoji text passed 3/3 using the native field ID.",
+   "measured_20261006": {
+    "status": "not_run"
+   }
+  },
+  {
+   "driver": "cua",
+   "framework": "qt6",
+   "capability": "key",
+   "claim": "foreground only",
+   "basis": "declaration",
+   "scope": "framework",
+   "sources": [
+    {
+     "id": "c_canvas",
+     "path": "libs/cua-driver/rust/Skills/cua-driver/MACOS.md",
+     "section": "Canvases, viewports, games (Blender, Unity, GHOST, Qt, wxWidgets)",
+     "anchor": "canvases-viewports-games-blender-unity-ghost-qt-wxwidgets",
+     "url": "https://github.com/trycua/cua/blob/c1c2b5fee428c3a39bebe5e77549c3d3525a608d/libs/cua-driver/rust/Skills/cua-driver/MACOS.md#canvases-viewports-games-blender-unity-ghost-qt-wxwidgets"
+    }
+   ],
+   "paraphrase": "Same canvas rule for Qt.",
+   "measured_20261006": {
+    "done": 8,
+    "attempted": 8,
+    "ops": [
+     "key"
+    ],
+    "effect_verification": "driver_verdict_only",
+    "note": "counts from raw rows"
+   }
+  },
+  {
+   "driver": "mecum",
+   "framework": "qt6",
+   "capability": "key",
+   "claim": "partial",
+   "basis": "qualification_result",
+   "scope": "framework",
+   "sources": [
+    {
+     "id": "m_qt_matrix",
+     "path": "Documentation/Driver/platforms/Qt.md",
+     "section": "Function matrix",
+     "anchor": "function-matrix"
+    }
+   ],
+   "paraphrase": "Key down, repeat and up counters verified on the fixture; other keys pending.",
+   "measured_20261006": {
+    "done": 8,
+    "attempted": 8,
+    "ops": [
+     "key"
+    ],
+    "effect_verification": "driver_verdict_only",
+    "note": ""
+   }
+  },
+  {
+   "driver": "cua",
+   "framework": "qt6",
+   "capability": "hotkey",
+   "claim": "foreground only",
+   "basis": "declaration",
+   "scope": "framework",
+   "sources": [
+    {
+     "id": "c_canvas",
+     "path": "libs/cua-driver/rust/Skills/cua-driver/MACOS.md",
+     "section": "Canvases, viewports, games (Blender, Unity, GHOST, Qt, wxWidgets)",
+     "anchor": "canvases-viewports-games-blender-unity-ghost-qt-wxwidgets",
+     "url": "https://github.com/trycua/cua/blob/c1c2b5fee428c3a39bebe5e77549c3d3525a608d/libs/cua-driver/rust/Skills/cua-driver/MACOS.md#canvases-viewports-games-blender-unity-ghost-qt-wxwidgets"
+    }
+   ],
+   "paraphrase": "Same canvas rule for Qt.",
+   "measured_20261006": {
+    "status": "not_run"
+   }
+  },
+  {
+   "driver": "mecum",
+   "framework": "qt6",
+   "capability": "hotkey",
+   "claim": "partial",
+   "basis": "qualification_result",
+   "scope": "framework",
+   "sources": [
+    {
+     "id": "m_qt_matrix",
+     "path": "Documentation/Driver/platforms/Qt.md",
+     "section": "Function matrix",
+     "anchor": "function-matrix"
+    }
+   ],
+   "paraphrase": "Modifier combinations need separate oracles.",
+   "measured_20261006": {
+    "status": "not_run"
+   }
+  },
+  {
+   "driver": "cua",
+   "framework": "qt6",
+   "capability": "scroll",
+   "claim": "foreground only",
+   "basis": "declaration",
+   "scope": "framework",
+   "sources": [
+    {
+     "id": "c_canvas",
+     "path": "libs/cua-driver/rust/Skills/cua-driver/MACOS.md",
+     "section": "Canvases, viewports, games (Blender, Unity, GHOST, Qt, wxWidgets)",
+     "anchor": "canvases-viewports-games-blender-unity-ghost-qt-wxwidgets",
+     "url": "https://github.com/trycua/cua/blob/c1c2b5fee428c3a39bebe5e77549c3d3525a608d/libs/cua-driver/rust/Skills/cua-driver/MACOS.md#canvases-viewports-games-blender-unity-ghost-qt-wxwidgets"
+    }
+   ],
+   "paraphrase": "Same canvas rule for Qt.",
+   "measured_20261006": {
+    "status": "not_run"
+   }
+  },
+  {
+   "driver": "mecum",
+   "framework": "qt6",
+   "capability": "scroll",
+   "claim": "supported",
+   "basis": "qualification_result",
+   "scope": "framework",
+   "sources": [
+    {
+     "id": "m_qt_matrix",
+     "path": "Documentation/Driver/platforms/Qt.md",
+     "section": "Function matrix",
+     "anchor": "function-matrix"
+    }
+   ],
+   "paraphrase": "Fixture scroll area offset 0 to 60 after one wheel event; Prism itself not tested.",
+   "measured_20261006": {
+    "status": "not_run"
+   }
+  },
+  {
+   "driver": "cua",
+   "framework": "qt6",
+   "capability": "menu",
+   "claim": "partial",
+   "basis": "declaration",
+   "scope": "generic",
+   "sources": [
+    {
+     "id": "c_menu",
+     "path": "libs/cua-driver/rust/Skills/cua-driver/MACOS.md",
+     "section": "Navigating native menu bars (AXMenuBar)",
+     "anchor": "navigating-native-menu-bars-axmenubar",
+     "url": "https://github.com/trycua/cua/blob/c1c2b5fee428c3a39bebe5e77549c3d3525a608d/libs/cua-driver/rust/Skills/cua-driver/MACOS.md#navigating-native-menu-bars-axmenubar"
+    }
+   ],
+   "paraphrase": "invoke_menu works from a known app-menu path but temporarily activates the exact window and restores the prior app best-effort.",
+   "note": "Not a no-activation route by its own description.",
+   "measured_20261006": {
+    "status": "not_run"
+   }
+  },
+  {
+   "driver": "mecum",
+   "framework": "qt6",
+   "capability": "menu",
+   "claim": "partial",
+   "basis": "qualification_result",
+   "scope": "framework",
+   "sources": [
+    {
+     "id": "m_qt_matrix",
+     "path": "Documentation/Driver/platforms/Qt.md",
+     "section": "Function matrix",
+     "anchor": "function-matrix"
+    }
+   ],
+   "paraphrase": "Fixture context menu and combo popup passed; Prism menu bar not documented.",
+   "measured_20261006": {
+    "status": "not_run"
+   }
+  },
+  {
+   "driver": "cua",
+   "framework": "qt6",
+   "capability": "background_no_activation",
+   "claim": "not supported",
+   "basis": "declaration",
+   "scope": "framework",
+   "sources": [
+    {
+     "id": "c_canvas",
+     "path": "libs/cua-driver/rust/Skills/cua-driver/MACOS.md",
+     "section": "Canvases, viewports, games (Blender, Unity, GHOST, Qt, wxWidgets)",
+     "anchor": "canvases-viewports-games-blender-unity-ghost-qt-wxwidgets",
+     "url": "https://github.com/trycua/cua/blob/c1c2b5fee428c3a39bebe5e77549c3d3525a608d/libs/cua-driver/rust/Skills/cua-driver/MACOS.md#canvases-viewports-games-blender-unity-ghost-qt-wxwidgets"
+    }
+   ],
+   "paraphrase": "No backgrounded path reaches OpenGL/Metal/Qt viewports today; per-pid events are dropped, so only the foreground rung is left.",
+   "measured_20261006": {
+    "done": 16,
+    "attempted": 16,
+    "ops": [
+     "all action calls"
+    ],
+    "effect_verification": "probe_before_after",
+    "note": "frontmost app unchanged after 16/16 action calls. Probe samples frontmost app and cursor before and after each call; a transient activation inside a call is not visible. Cua invoke_menu raises the window and restores focus (source report)."
+   }
+  },
+  {
+   "driver": "mecum",
+   "framework": "qt6",
+   "capability": "background_no_activation",
+   "claim": "partial",
+   "basis": "qualification_result",
+   "scope": "framework",
+   "sources": [
+    {
+     "id": "m_qt_matrix",
+     "path": "Documentation/Driver/platforms/Qt.md",
+     "section": "Function matrix",
+     "anchor": "function-matrix"
+    }
+   ],
+   "paraphrase": "Native file dialogs first appear on the physical display before containment.",
+   "measured_20261006": {
+    "done": 16,
+    "attempted": 16,
+    "ops": [
+     "all action calls"
+    ],
+    "effect_verification": "probe_before_after",
+    "note": "frontmost app unchanged after 16/16 action calls. Probe samples frontmost app and cursor before and after each call; a transient activation inside a call is not visible."
+   }
+  },
+  {
+   "driver": "cua",
+   "framework": "qt6",
+   "capability": "cursor_untouched",
+   "claim": "not supported",
+   "basis": "inference",
+   "scope": "framework",
+   "sources": [
+    {
+     "id": "c_canvas",
+     "path": "libs/cua-driver/rust/Skills/cua-driver/MACOS.md",
+     "section": "Canvases, viewports, games (Blender, Unity, GHOST, Qt, wxWidgets)",
+     "anchor": "canvases-viewports-games-blender-unity-ghost-qt-wxwidgets",
+     "url": "https://github.com/trycua/cua/blob/c1c2b5fee428c3a39bebe5e77549c3d3525a608d/libs/cua-driver/rust/Skills/cua-driver/MACOS.md#canvases-viewports-games-blender-unity-ghost-qt-wxwidgets"
+    },
+    {
+     "id": "c_deliv",
+     "path": "libs/cua-driver/rust/Skills/cua-driver/MACOS.md",
+     "section": "delivery_mode on the pointer family (macOS)",
+     "anchor": "delivery_mode-on-the-pointer-family-macos",
+     "url": "https://github.com/trycua/cua/blob/c1c2b5fee428c3a39bebe5e77549c3d3525a608d/libs/cua-driver/rust/Skills/cua-driver/MACOS.md#delivery_mode-on-the-pointer-family-macos"
+    }
+   ],
+   "paraphrase": "The only route is delivery_mode foreground, whose pixel click moves the hardware pointer and leaves it at the target.",
+   "note": "Foreground keyboard delivery is not stated to move the pointer; claim covers pointer-bearing actions.",
+   "measured_20261006": {
+    "done": 16,
+    "attempted": 16,
+    "ops": [
+     "all action calls"
+    ],
+    "effect_verification": "probe_before_after",
+    "note": "cursor unchanged after 16/16 action calls; the source report attributes the 0 recorded movements to the person using the Mac, in bursts that included read-only calls."
+   }
+  },
+  {
+   "driver": "mecum",
+   "framework": "qt6",
+   "capability": "cursor_untouched",
+   "claim": "supported",
+   "basis": "qualification_result",
+   "scope": "framework",
+   "sources": [
+    {
+     "id": "m_qt_snap",
+     "path": "Documentation/Driver/platforms/Qt.md",
+     "section": "Current repeatable snapshot",
+     "anchor": "current-repeatable-snapshot"
+    }
+   ],
+   "paraphrase": "Isolation rows recorded zero physical events and a preserved User Seat.",
+   "measured_20261006": {
+    "done": 16,
+    "attempted": 16,
+    "ops": [
+     "all action calls"
+    ],
+    "effect_verification": "probe_before_after",
+    "note": "cursor unchanged after 16/16 action calls; the source report attributes the 0 recorded movements to the person using the Mac, in bursts that included read-only calls."
+   }
+  },
+  {
+   "driver": "cua",
+   "framework": "adobe",
+   "capability": "observe",
+   "claim": "not mentioned",
+   "basis": "gap",
+   "scope": "framework",
+   "sources": [],
+   "paraphrase": "Adobe, Photoshop and UXP are not named anywhere in libs/cua-driver docs or the docs site.",
+   "measured_20261006": {
+    "status": "not_run",
+    "note": "Photoshop was not part of the 6 Oct run"
+   }
+  },
+  {
+   "driver": "mecum",
+   "framework": "adobe",
+   "capability": "observe",
+   "claim": "supported",
+   "basis": "qualification_result",
+   "scope": "app",
+   "sources": [
+    {
+     "id": "m_uxp_mx",
+     "path": "Documentation/Driver/platforms/UXP.md",
+     "section": "Repeatable matrix",
+     "anchor": "repeatable-matrix"
+    }
+   ],
+   "paraphrase": "Rows require adoption, virtual containment and a fresh captured frame for the selected window.",
+   "measured_20261006": {
+    "status": "not_run",
+    "note": "Photoshop was not part of the 6 Oct run"
+   }
+  },
+  {
+   "driver": "cua",
+   "framework": "adobe",
+   "capability": "click",
+   "claim": "not mentioned",
+   "basis": "gap",
+   "scope": "framework",
+   "sources": [],
+   "paraphrase": "Adobe, Photoshop and UXP are not named anywhere in libs/cua-driver docs or the docs site.",
+   "measured_20261006": {
+    "status": "not_run",
+    "note": "Photoshop was not part of the 6 Oct run"
+   }
+  },
+  {
+   "driver": "mecum",
+   "framework": "adobe",
+   "capability": "click",
+   "claim": "partial",
+   "basis": "qualification_result",
+   "scope": "app",
+   "sources": [
+    {
+     "id": "m_uxp_app",
+     "path": "Documentation/Driver/platforms/UXP.md",
+     "section": "Mecum app integration",
+     "anchor": "mecum-app-integration"
+    },
+    {
+     "id": "m_uxp_mx",
+     "path": "Documentation/Driver/platforms/UXP.md",
+     "section": "Repeatable matrix",
+     "anchor": "repeatable-matrix"
+    }
+   ],
+   "paraphrase": "Single left click is prepared and measured; double click, scrollbar drag and others use ordinary policy or fail.",
+   "measured_20261006": {
+    "status": "not_run",
+    "note": "Photoshop was not part of the 6 Oct run"
+   }
+  },
+  {
+   "driver": "cua",
+   "framework": "adobe",
+   "capability": "type",
+   "claim": "not mentioned",
+   "basis": "gap",
+   "scope": "framework",
+   "sources": [],
+   "paraphrase": "Adobe, Photoshop and UXP are not named anywhere in libs/cua-driver docs or the docs site.",
+   "measured_20261006": {
+    "status": "not_run",
+    "note": "Photoshop was not part of the 6 Oct run"
+   }
+  },
+  {
+   "driver": "mecum",
+   "framework": "adobe",
+   "capability": "type",
+   "claim": "partial",
+   "basis": "qualification_result",
+   "scope": "app",
+   "sources": [
+    {
+     "id": "m_uxp_mx",
+     "path": "Documentation/Driver/platforms/UXP.md",
+     "section": "Repeatable matrix",
+     "anchor": "repeatable-matrix"
+    },
+    {
+     "id": "m_flow",
+     "path": "Documentation/Driver/reports/ApplicationFlowChecks.md",
+     "section": "Observed effects and failures",
+     "anchor": "observed-effects-and-failures"
+    }
+   ],
+   "paraphrase": "Bulk insertion and typed Unicode verified in dialogs; one name replacement kept an old prefix and supplementary Unicode is unqualified.",
+   "measured_20261006": {
+    "status": "not_run",
+    "note": "Photoshop was not part of the 6 Oct run"
+   }
+  },
+  {
+   "driver": "cua",
+   "framework": "adobe",
+   "capability": "key",
+   "claim": "not mentioned",
+   "basis": "gap",
+   "scope": "framework",
+   "sources": [],
+   "paraphrase": "Adobe, Photoshop and UXP are not named anywhere in libs/cua-driver docs or the docs site.",
+   "measured_20261006": {
+    "status": "not_run",
+    "note": "Photoshop was not part of the 6 Oct run"
+   }
+  },
+  {
+   "driver": "mecum",
+   "framework": "adobe",
+   "capability": "key",
+   "claim": "supported",
+   "basis": "qualification_result",
+   "scope": "app",
+   "sources": [
+    {
+     "id": "m_uxp_mx",
+     "path": "Documentation/Driver/platforms/UXP.md",
+     "section": "Repeatable matrix",
+     "anchor": "repeatable-matrix"
+    }
+   ],
+   "paraphrase": "Return and Escape verified on modals and dialogs.",
+   "measured_20261006": {
+    "status": "not_run",
+    "note": "Photoshop was not part of the 6 Oct run"
+   }
+  },
+  {
+   "driver": "cua",
+   "framework": "adobe",
+   "capability": "hotkey",
+   "claim": "not mentioned",
+   "basis": "gap",
+   "scope": "framework",
+   "sources": [],
+   "paraphrase": "Adobe, Photoshop and UXP are not named anywhere in libs/cua-driver docs or the docs site.",
+   "measured_20261006": {
+    "status": "not_run",
+    "note": "Photoshop was not part of the 6 Oct run"
+   }
+  },
+  {
+   "driver": "mecum",
+   "framework": "adobe",
+   "capability": "hotkey",
+   "claim": "partial",
+   "basis": "qualification_result",
+   "scope": "app",
+   "sources": [
+    {
+     "id": "m_uxp_mx",
+     "path": "Documentation/Driver/platforms/UXP.md",
+     "section": "Repeatable matrix",
+     "anchor": "repeatable-matrix"
+    },
+    {
+     "id": "m_stab",
+     "path": "Documentation/Driver/reports/StabilizationRounds.md",
+     "section": "Local release acceptance matrix",
+     "anchor": "local-release-acceptance-matrix"
+    }
+   ],
+   "paraphrase": "Select All, Deselect, Invert, Undo, Redo, Close measured; New Layer shortcut had no observed effect in three cycles.",
+   "measured_20261006": {
+    "status": "not_run",
+    "note": "Photoshop was not part of the 6 Oct run"
+   }
+  },
+  {
+   "driver": "cua",
+   "framework": "adobe",
+   "capability": "scroll",
+   "claim": "not mentioned",
+   "basis": "gap",
+   "scope": "framework",
+   "sources": [],
+   "paraphrase": "Adobe, Photoshop and UXP are not named anywhere in libs/cua-driver docs or the docs site.",
+   "measured_20261006": {
+    "status": "not_run",
+    "note": "Photoshop was not part of the 6 Oct run"
+   }
+  },
+  {
+   "driver": "mecum",
+   "framework": "adobe",
+   "capability": "scroll",
+   "claim": "partial",
+   "basis": "qualification_result",
+   "scope": "app",
+   "sources": [
+    {
+     "id": "m_uxp_mx",
+     "path": "Documentation/Driver/platforms/UXP.md",
+     "section": "Repeatable matrix",
+     "anchor": "repeatable-matrix"
+    }
+   ],
+   "paraphrase": "Wheel changes the scrollbar value; scrollbar drag is a mandatory row currently failing.",
+   "measured_20261006": {
+    "status": "not_run",
+    "note": "Photoshop was not part of the 6 Oct run"
+   }
+  },
+  {
+   "driver": "cua",
+   "framework": "adobe",
+   "capability": "menu",
+   "claim": "partial",
+   "basis": "declaration",
+   "scope": "generic",
+   "sources": [
+    {
+     "id": "c_menu",
+     "path": "libs/cua-driver/rust/Skills/cua-driver/MACOS.md",
+     "section": "Navigating native menu bars (AXMenuBar)",
+     "anchor": "navigating-native-menu-bars-axmenubar",
+     "url": "https://github.com/trycua/cua/blob/c1c2b5fee428c3a39bebe5e77549c3d3525a608d/libs/cua-driver/rust/Skills/cua-driver/MACOS.md#navigating-native-menu-bars-axmenubar"
+    }
+   ],
+   "paraphrase": "invoke_menu works from a known app-menu path but temporarily activates the exact window and restores the prior app best-effort.",
+   "note": "Not a no-activation route by its own description.",
+   "measured_20261006": {
+    "status": "not_run",
+    "note": "Photoshop was not part of the 6 Oct run"
+   }
+  },
+  {
+   "driver": "mecum",
+   "framework": "adobe",
+   "capability": "menu",
+   "claim": "partial",
+   "basis": "qualification_result",
+   "scope": "app",
+   "sources": [
+    {
+     "id": "m_adr13",
+     "path": "Documentation/Driver/adr/Adr0013BriefActivationForStaleMenus.md",
+     "section": "The decision",
+     "anchor": "the-decision"
+    },
+    {
+     "id": "m_adr20",
+     "path": "Documentation/Driver/adr/Adr0020PrepareEnabledAdobeMenuCommands.md",
+     "section": "Decision",
+     "anchor": "decision"
+    },
+    {
+     "id": "m_stab",
+     "path": "Documentation/Driver/reports/StabilizationRounds.md",
+     "section": "Local release acceptance matrix",
+     "anchor": "local-release-acceptance-matrix"
+    }
+   ],
+   "paraphrase": "Menu items are disabled in background; a brief activation with verified handback is required and File > New had no observed effect.",
+   "measured_20261006": {
+    "status": "not_run",
+    "note": "Photoshop was not part of the 6 Oct run"
+   }
+  },
+  {
+   "driver": "cua",
+   "framework": "adobe",
+   "capability": "background_no_activation",
+   "claim": "supported",
+   "basis": "generic_contract",
+   "scope": "generic",
+   "sources": [
+    {
+     "id": "c_nofg",
+     "path": "libs/cua-driver/rust/Skills/cua-driver/MACOS.md",
+     "section": "The no-foreground contract",
+     "anchor": "the-no-foreground-contract",
+     "url": "https://github.com/trycua/cua/blob/c1c2b5fee428c3a39bebe5e77549c3d3525a608d/libs/cua-driver/rust/Skills/cua-driver/MACOS.md#the-no-foreground-contract"
+    },
+    {
+     "id": "c_pixdisp",
+     "path": "libs/cua-driver/rust/Skills/cua-driver/MACOS.md",
+     "section": "Pixel-click dispatch (macOS)",
+     "anchor": "pixel-click-dispatch-macos",
+     "url": "https://github.com/trycua/cua/blob/c1c2b5fee428c3a39bebe5e77549c3d3525a608d/libs/cua-driver/rust/Skills/cua-driver/MACOS.md#pixel-click-dispatch-macos"
+    }
+   ],
+   "paraphrase": "Background actions must keep the user's frontmost app; the per-pid SkyLight click raises no window and follows no Space.",
+   "note": "Generic contract only; the canvas rule might apply by inference but nothing says so.",
+   "measured_20261006": {
+    "status": "not_run",
+    "note": "Photoshop was not part of the 6 Oct run"
+   }
+  },
+  {
+   "driver": "mecum",
+   "framework": "adobe",
+   "capability": "background_no_activation",
+   "claim": "partial",
+   "basis": "qualification_result",
+   "scope": "app",
+   "sources": [
+    {
+     "id": "m_adr13",
+     "path": "Documentation/Driver/adr/Adr0013BriefActivationForStaleMenus.md",
+     "section": "The decision",
+     "anchor": "the-decision"
+    },
+    {
+     "id": "m_uxp_mx",
+     "path": "Documentation/Driver/platforms/UXP.md",
+     "section": "Repeatable matrix",
+     "anchor": "repeatable-matrix"
+    }
+   ],
+   "paraphrase": "Document and modal input stays background; menu commands use a brief foreground scope.",
+   "measured_20261006": {
+    "status": "not_run",
+    "note": "Photoshop was not part of the 6 Oct run"
+   }
+  },
+  {
+   "driver": "cua",
+   "framework": "adobe",
+   "capability": "cursor_untouched",
+   "claim": "supported",
+   "basis": "generic_contract",
+   "scope": "generic",
+   "sources": [
+    {
+     "id": "c_nofg",
+     "path": "libs/cua-driver/rust/Skills/cua-driver/MACOS.md",
+     "section": "The no-foreground contract",
+     "anchor": "the-no-foreground-contract",
+     "url": "https://github.com/trycua/cua/blob/c1c2b5fee428c3a39bebe5e77549c3d3525a608d/libs/cua-driver/rust/Skills/cua-driver/MACOS.md#the-no-foreground-contract"
+    },
+    {
+     "id": "c_click",
+     "path": "docs/content/docs/cua-driver/reference/mcp-tools/click.mdx",
+     "section": "click (element_token moves no cursor or focus)",
+     "anchor": "",
+     "url": "https://github.com/trycua/cua/blob/c1c2b5fee428c3a39bebe5e77549c3d3525a608d/docs/content/docs/cua-driver/reference/mcp-tools/click.mdx"
+    }
+   ],
+   "paraphrase": "Per-pid background delivery and element_token actions move no real cursor; only foreground pixel clicks move the pointer.",
+   "measured_20261006": {
+    "status": "not_run",
+    "note": "Photoshop was not part of the 6 Oct run"
+   }
+  },
+  {
+   "driver": "mecum",
+   "framework": "adobe",
+   "capability": "cursor_untouched",
+   "claim": "supported",
+   "basis": "qualification_result",
+   "scope": "app",
+   "sources": [
+    {
+     "id": "m_uxp_mx",
+     "path": "Documentation/Driver/platforms/UXP.md",
+     "section": "Repeatable matrix",
+     "anchor": "repeatable-matrix"
+    },
+    {
+     "id": "m_uxp_app",
+     "path": "Documentation/Driver/platforms/UXP.md",
+     "section": "Mecum app integration",
+     "anchor": "mecum-app-integration"
+    }
+   ],
+   "paraphrase": "Rows record zero physical events with foreground and cursor preserved.",
+   "measured_20261006": {
+    "status": "not_run",
+    "note": "Photoshop was not part of the 6 Oct run"
+   }
+  }
+ ],
+ "cua_changes_since_20261006": [
+  {
+   "kind": "doc",
+   "files": [
+    "libs/cua-driver/docs/action-support.md",
+    "docs/content/docs/cua-driver/concepts/platform-support.mdx",
+    "libs/cua-driver/rust/Skills/cua-driver/BROWSER.md",
+    "libs/cua-driver/docs/macos-background-input-v1-plan.md",
+    "libs/cua-driver/README.md"
+   ],
+   "summary": "Unchanged between 4f33cd6 and c1c2b5f: the native macOS ledger, the shared web ledger, the browser support table, the canvas/Qt/OpenGL rule and the Catalyst/Electron text-input limits. The declared support per framework is therefore the same as on 6 Oct."
+  },
+  {
+   "kind": "doc",
+   "files": [
+    "libs/cua-driver/rust/Skills/cua-driver/MACOS.md"
+   ],
+   "summary": "Adds a launch_app urls row, the 250-node get_window_state cap with since diffs and tree_format, since:latest with include_screenshot:false, collapsed menus in reads, and invoke_menu in the Finder example. No change to any framework statement."
+  },
+  {
+   "kind": "doc",
+   "files": [
+    "libs/cua-driver/rust/Skills/cua-driver/SKILL.md",
+    "libs/cua-driver/rust/Skills/cua-driver/WORKFLOW.md"
+   ],
+   "summary": "New efficient loop: targeted query reads, run_actions with observe:true as the default way to act, and foreground_fallback for steps refused because the app ignores background input (Electron, LibreOffice)."
+  },
+  {
+   "kind": "doc",
+   "files": [
+    "docs/content/docs/cua-driver/reference/mcp-tools/pointer.mdx"
+   ],
+   "summary": "Documents that on Electron/Chromium windows a background scroll now reveals content through AX instead of posting wheel events, with foreground as fallback. This contradicts the unchanged ledger row that lists Electron scroll as background_unavailable.",
+   "frameworks": [
+    "electron",
+    "chromium"
+   ]
+  },
+  {
+   "kind": "code",
+   "commits": [
+    "ea32762"
+   ],
+   "frameworks": [
+    "electron",
+    "chromium"
+   ],
+   "summary": "Scroll Electron/Chromium windows in the background through AXScrollToVisible; nothing posted or fronted."
+  },
+  {
+   "kind": "code",
+   "commits": [
+    "144ec6a"
+   ],
+   "frameworks": [
+    "webkit",
+    "chromium",
+    "appkit"
+   ],
+   "summary": "Same-pid keyboard ambiguity check ignores off-screen or zero-size sibling windows and every sibling when AX proves the target is the app's key window; typed newline and tab become real Return and Tab keys. May change the Safari two-window refusal seen on 6 Oct only when the second window is hidden or the target is the key window.",
+   "note": "Needs a live check; not verified here."
+  },
+  {
+   "kind": "code",
+   "commits": [
+    "3532ba5",
+    "c90e946"
+   ],
+   "frameworks": [
+    "chromium"
+   ],
+   "summary": "Background type_text with a line break into a Chromium native field (omnibox) is refused with browser_field_needs_keystrokes; foreground typing into browsers now fully activates the window, waits 250 ms and restores the field focus."
+  },
+  {
+   "kind": "code",
+   "commits": [
+    "0b90b6f"
+   ],
+   "frameworks": [
+    "appkit",
+    "swiftui"
+   ],
+   "summary": "Background right click is posted once instead of twice on macOS."
+  },
+  {
+   "kind": "code",
+   "commits": [
+    "49e924c",
+    "0188a55"
+   ],
+   "frameworks": [],
+   "summary": "LibreOffice and Tk-style pointer-reading toolkits refuse background pixel clicks; run_actions gains foreground_fallback. No listed benchmark framework is affected directly."
+  },
+  {
+   "kind": "code",
+   "commits": [
+    "4c2403f"
+   ],
+   "frameworks": [
+    "appkit",
+    "chromium",
+    "webkit",
+    "swiftui"
+   ],
+   "summary": "Menu-bar item tokens run as invoke_menu inside run_actions."
+  },
+  {
+   "kind": "code",
+   "commits": [
+    "45775a9",
+    "a03d05b",
+    "b869593",
+    "c1c2b5f"
+   ],
+   "frameworks": [],
+   "summary": "get_window_state is slimmed (250-node cap, one tree form, menus collapsed, metadata dropped) and batching is the default path, so the 6 Oct Cua full-read token and byte figures no longer describe the c1c2b5f binary."
+  },
+  {
+   "kind": "none",
+   "frameworks": [
+    "catalyst",
+    "glfw",
+    "qt_gpu",
+    "qt6",
+    "adobe"
+   ],
+   "summary": "No doc or code change found that adds or removes declared support for Catalyst, OpenGL/GLFW, Qt or Adobe."
+  }
+ ],
+ "claims_not_found": [
+  {
+   "driver": "cua",
+   "item": "Any statement naming Photoshop, Adobe or UXP in libs/cua-driver docs, skills or the docs site (only unrelated blog and sample files match).",
+   "frameworks": [
+    "adobe"
+   ]
+  },
+  {
+   "driver": "cua",
+   "item": "A Mac Catalyst row in the accepted native macOS ledger; only the text-input limits and a Proposed plan row (source-supported candidate, runtime row required).",
+   "frameworks": [
+    "catalyst"
+   ]
+  },
+  {
+   "driver": "cua",
+   "item": "kitty or GLFW by name; OpenGL viewports are named in the canvas rule, so the foreground-only claims are inferred.",
+   "frameworks": [
+    "glfw"
+   ]
+  },
+  {
+   "driver": "cua",
+   "item": "Qt in the accepted ledger (absent); the only Qt statements are the canvas rule and a Proposed plan row.",
+   "frameworks": [
+    "qt_gpu",
+    "qt6"
+   ]
+  },
+  {
+   "driver": "cua",
+   "item": "Obsidian, Stocks, Calculator, TextEdit, Chrome and Safari by name; claims are framework-level (shared Electron host, AppKit, SwiftUI and WKWebView fixtures, Catalyst text-input limits).",
+   "frameworks": [
+    "electron",
+    "catalyst",
+    "swiftui",
+    "appkit",
+    "chromium",
+    "webkit"
+   ]
+  },
+  {
+   "driver": "cua",
+   "item": "Native press key and hotkey for AppKit, SwiftUI, and scroll for SwiftUI: the ledger lists them as unproven gaps, neither supported nor refused.",
+   "frameworks": [
+    "appkit",
+    "swiftui"
+   ]
+  },
+  {
+   "driver": "cua",
+   "item": "A Chromium row in the native ledger; Chromium claims come from MACOS.md, BROWSER.md and platform-support.mdx.",
+   "frameworks": [
+    "chromium"
+   ]
+  },
+  {
+   "driver": "mecum",
+   "item": "Mac Catalyst, Stocks, OpenGL, GLFW, kitty and Obsidian in any Driver guide, ADR or report (kitty appears only as a Stage Manager thumbnail in the T13 campaign).",
+   "frameworks": [
+    "catalyst",
+    "glfw",
+    "electron"
+   ]
+  },
+  {
+   "driver": "mecum",
+   "item": "SwiftUI as a named framework: Calculator is documented as native or AppKit, and LaunchCompatibility lists only AppKit, Chromium, Electron and Qt.",
+   "frameworks": [
+    "swiftui"
+   ]
+  },
+  {
+   "driver": "mecum",
+   "item": "WebKit in LaunchCompatibility's supported list; Safari evidence is workflow-specific (field replace and button click).",
+   "frameworks": [
+    "webkit"
+   ]
+  },
+  {
+   "driver": "mecum",
+   "item": "Resolve GPU editing-canvas input and any Resolve menu-bar command; only Project Manager, Import panel and editor page buttons are documented.",
+   "frameworks": [
+    "qt_gpu"
+   ]
+  },
+  {
+   "driver": "mecum",
+   "item": "Hotkey, scroll and menu-bar claims for Calculator, Obsidian and Safari; Prism Launcher key, hotkey, scroll and menu (only fixture rows).",
+   "frameworks": [
+    "swiftui",
+    "electron",
+    "webkit",
+    "qt6"
+   ]
+  }
+ ]
+}

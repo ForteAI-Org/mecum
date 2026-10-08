@@ -1,0 +1,20 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Bench Form</title>
+<style>body{font:15px -apple-system;margin:24px} p{margin:12px 0}</style></head><body>
+<h1>Bench Form</h1>
+<p><label for="name">Name</label> <input id="name" aria-label="Name" value=""></p>
+<p><label for="color">Color</label> <select id="color" aria-label="Color"><option>Red</option><option>Green</option><option>Blue</option></select></p>
+<p><button id="press">Press me</button> Presses: <b id="count">0</b></p>
+<script>
+// The server keeps the last state per run: the check reads it there, not from the page.
+const run = new URLSearchParams(location.search).get("run") || "";
+document.title = "Bench Form " + run;
+let presses = 0;
+const name = document.getElementById("name"), color = document.getElementById("color");
+function report() {
+  fetch("/state", {method: "POST", keepalive: true,
+    body: JSON.stringify({run, name: name.value, color: color.value, presses})});
+}
+document.getElementById("press").onclick = () => { document.getElementById("count").textContent = ++presses; report(); };
+name.oninput = report; color.onchange = report;
+report();
+</script></body></html>

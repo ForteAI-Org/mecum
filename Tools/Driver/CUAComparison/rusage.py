@@ -33,6 +33,24 @@ def sample(pid):
             "footprint": buf.phys_footprint, "peak_footprint": buf.lifetime_max_phys_footprint,
             "wakeups": buf.pkg_idle_wkups + buf.interrupt_wkups}
 
+class _Point(ctypes.Structure):
+    _fields_ = [("x", ctypes.c_double), ("y", ctypes.c_double)]
+
+_quartz = ctypes.CDLL("/System/Library/Frameworks/ApplicationServices.framework/ApplicationServices")
+_quartz.CGEventCreate.restype = ctypes.c_void_p
+_quartz.CGEventCreate.argtypes = [ctypes.c_void_p]
+_quartz.CGEventGetLocation.restype = _Point
+_quartz.CGEventGetLocation.argtypes = [ctypes.c_void_p]
+_cf = ctypes.CDLL("/System/Library/Frameworks/CoreFoundation.framework/CoreFoundation")
+_cf.CFRelease.argtypes = [ctypes.c_void_p]
+
+def cursor():
+    """The physical cursor in global points, read in process (no event is posted)."""
+    event = _quartz.CGEventCreate(None)
+    point = _quartz.CGEventGetLocation(event)
+    _cf.CFRelease(event)
+    return (point.x, point.y)
+
 def ps_cpu_ns(pid):
     """CPU time from ps, 10 ms resolution, for processes proc_pid_rusage cannot read."""
     out = subprocess.run(["ps", "-o", "time=", "-p", str(pid)], capture_output=True, text=True).stdout.strip()
@@ -46,5 +64,6 @@ if __name__ == "__main__":
     import os
     me = sample(os.getpid()); assert me and me["cpu_ns"] > 0 and me["footprint"] > 0, me
     ws = int(subprocess.run(["pgrep", "-x", "WindowServer"], capture_output=True, text=True).stdout.split()[0])
+    assert len(cursor()) == 2
     print("self ok", round(me["cpu_ns"]/1e6,1), "ms cpu", me["footprint"]>>20, "MB; WindowServer rusage:",
           sample(ws) is not None, "ps:", ps_cpu_ns(ws))

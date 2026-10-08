@@ -1,0 +1,70 @@
+{
+ "model": "claude-sonnet-5-5",
+ "effort": "medium",
+ "max_turns": 30,
+ "system_prompt": "You operate macOS applications through the tools you are given. Finish the task, then stop.",
+ "preamble": "Do this task with the tools available to you, then reply with one short sentence saying what you did. Do not touch any application other than the one named.\n\nTask: ",
+ "tasks": [
+  {
+   "id": "calculator",
+   "process": "Calculator",
+   "est_s": 45,
+   "timeout_s": 180,
+   "prompt": "In the Calculator app, clear the display, then calculate {a} x 7 + 5 and leave the result on the display."
+  },
+  {
+   "id": "textedit",
+   "process": "TextEdit",
+   "est_s": 90,
+   "timeout_s": 240,
+   "prompt": "In TextEdit, the document named {file} is open. Add a new last line to it with exactly this text: {line}. Then make that line bold. Do not save."
+  },
+  {
+   "id": "chrome-form",
+   "process": "Google Chrome",
+   "est_s": 80,
+   "timeout_s": 240,
+   "prompt": "In Google Chrome, a tab titled \"Bench Form {run}\" is open. In it type \"{name}\" into the Name field, choose {color} in the Color menu, and press the Press me button 3 times."
+  },
+  {
+   "id": "safari-form",
+   "process": "Safari",
+   "est_s": 80,
+   "timeout_s": 240,
+   "prompt": "In Safari, a tab titled \"Bench Form {run}\" is open. In it type \"{name}\" into the Name field, choose {color} in the Color menu, and press the Press me button 3 times."
+  },
+  {
+   "id": "obsidian",
+   "process": "Obsidian",
+   "est_s": 70,
+   "timeout_s": 240,
+   "prompt": "In Obsidian, create a new note titled \"{title}\". Leave Obsidian open."
+  },
+  {
+   "id": "kitty",
+   "process": "kitty",
+   "est_s": 50,
+   "timeout_s": 180,
+   "prompt": "In kitty, run exactly this command in the shell and press Return: {command}"
+  },
+  {
+   "id": "photoshop",
+   "process": "Adobe Photoshop 2026",
+   "est_s": 130,
+   "timeout_s": 360,
+   "prompt": "In Adobe Photoshop, create a new document 800 pixels wide and 600 pixels high, add a new empty layer to it, then close the document without saving it."
+  },
+  {
+   "id": "prism-toggle",
+   "process": "prismlauncher",
+   "est_s": 50,
+   "timeout_s": 180,
+   "outside_declared_support": [
+    "cua",
+    "cua-overlay"
+   ],
+   "prompt": "In Prism Launcher, find the checkbox labeled Meow and click it once to toggle it.",
+   "app": "Prism Launcher"
+  }
+ ]
+}
