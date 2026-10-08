@@ -116,43 +116,32 @@ enum MemoryCommand {
     }
 
     /// Copies the Brain of every application file in an earlier JSON Knowledge directory into the
-    /// memory, as that application's projection, when the memory holds no Brain of it yet. The JSON
-    /// files are only read, never changed. An imported Brain has no evidence in the memory: the
-    /// counts it carries are the file's, and what the agent learns from now on adds to them.
+    /// memory, as that application's projection, when the memory holds no Brain of it yet
+    /// (`JSONBrainImport`). The JSON files are only read, never changed. An archive this command creates
+    /// first imports the JSON Brains beside it on its own, as every opener of a new archive does, and the
+    /// command says so before its own lines.
     private static func importJSON(from source: URL, into runtime: Runtime) async throws {
-        let files = ((try? FileManager.default.contentsOfDirectory(
-            at: source, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles]
-        )) ?? []).filter { file in
-            // The allowlist and a quarantined file are the store's own, not an application's.
-            let name = file.deletingPathExtension().lastPathComponent
-            return file.pathExtension == "json" && name != "allowlist" && !name.contains(".corrupt-")
-        }.sorted { $0.path < $1.path }
-        let decoder = KnowledgeCoding.makeDecoder()
-        let knowledge = files.compactMap { file -> AppKnowledge? in
-            guard let data = try? Data(contentsOf: file) else { return nil }
-            return try? decoder.decode(AppKnowledge.self, from: data)
-        }
+        let knowledge = JSONBrainImport.applications(in: source)
         guard !knowledge.isEmpty else {
             print("no application files in \(source.path)")
             return
         }
         let repositories = try await runtime.service.ready()
-        var imported = 0
-        for app in knowledge {
-            let brain = app.brain
-            do {
-                if try await repositories.brains.importProjection(brain, into: app.bundleID, now: Date()) {
-                    imported += 1
-                    print("imported \(app.bundleID): \(brain.objects.count) anchors, \(brain.groups.count) groups, "
-                          + "\(brain.transitions.count) transitions")
-                } else {
-                    print("kept \(app.bundleID): the memory already holds its Brain")
-                }
-            } catch {
-                print("could not import \(app.bundleID): \(MemoryService.describe(error))")
+        let created = await runtime.service.status().lastImport
+        if let created { print(created) }
+        let report = await JSONBrainImport.run(knowledge, into: repositories.brains, now: Date())
+        for entry in report.entries {
+            switch entry.outcome {
+                case .imported(let anchors, let groups, let transitions):
+                    print("imported \(entry.bundleID): \(anchors) anchors, \(groups) groups, \(transitions) transitions")
+                case .kept:
+                    print("kept \(entry.bundleID): the memory already holds its Brain")
+                case .failed(let why):
+                    print("could not import \(entry.bundleID): \(why)")
             }
         }
         await runtime.finish()
-        print("\(imported) of \(knowledge.count) applications imported into \(runtime.service.url.path)")
+        print("\(report.imported) of \(knowledge.count) applications imported into \(runtime.service.url.path)"
+              + (created == nil ? "" : " by this command, after the archive's creation imported those beside it"))
     }
 }

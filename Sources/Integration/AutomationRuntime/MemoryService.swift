@@ -108,6 +108,10 @@ nonisolated public struct MemoryRepositories: Sendable {
 /// memory without bound. `flush(within:)` waits for what is queued, within a budget, for the few
 /// places that read what they just wrote, and for the end of the process.
 ///
+/// An open that creates the archive where none was imports, in the same open and before any queued write
+/// runs, the Brains of the JSON files main kept in the directory (`JSONBrainImport`); `status().lastImport`
+/// says what came in. An archive that already existed, or that a recovery left empty, is never imported into.
+///
 /// A memory that cannot be opened (a schema this build refuses, a library too old, a path that
 /// cannot be created) is `degraded`, with the reason, and an open is tried again only after
 /// `reopenInterval`: reads answer nothing and writes are gaps meanwhile. Nothing resets or replaces
@@ -211,6 +215,8 @@ public actor MemoryService: BrainReading, BrainApplicationStoring {
         public let lastBackup: Date?
         /// What the service did with an archive it found corrupt, when it found one.
         public let lastRecovery: String?
+        /// What the service imported from the JSON Brains beside an archive it created, when it created one.
+        public let lastImport: String?
         /// How the close went, once the service closed: how long it took, what it saved and what not.
         public let lastClose: String?
     }
@@ -264,6 +270,7 @@ public actor MemoryService: BrainReading, BrainApplicationStoring {
 
     private var lastBackup: Date?
     private var lastRecovery: String?
+    private var lastImport: String?
     private var backingUp: Task<Void, Never>?
     /// How the last copy ended: handed over, or abandoned with nothing published.
     private var lastCopyPublished: Bool?
@@ -425,12 +432,18 @@ public actor MemoryService: BrainReading, BrainApplicationStoring {
     private func performOpen() async throws -> MemoryRepositories {
         do {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-            let store = try await openRecovering()
+            let existed = FileManager.default.fileExists(atPath: url.path)
+            let (store, recovered) = try await openRecovering()
             guard state != .closed, !storeClosing else {
                 await store.close()
                 throw MemoryUnavailable("the memory is closed")
             }
             let repositories  = MemoryRepositories(store: store)
+            // An archive this open created where none was, not one a recovery left empty: the JSON Brains
+            // beside it come in now, before any write of the queue can learn into it.
+            if !existed, !recovered, (try? await store.diagnostics().bootstrappedNow) == true {
+                await importJSONBrains(into: repositories)
+            }
             self.store        = store
             self.repositories = repositories
             state             = .open
@@ -470,10 +483,11 @@ public actor MemoryService: BrainReading, BrainApplicationStoring {
 
     /// Opens the store; a file the library calls corrupt is moved aside and the newest copy restored
     /// first, then the store is opened once more.
-    private func openRecovering() async throws -> SQLiteMemoryStore {
+    /// The open store, and whether this open went through a recovery.
+    private func openRecovering() async throws -> (SQLiteMemoryStore, recovered: Bool) {
         let firstError: any Error
         do {
-            return try await SQLiteMemoryStore.open(at: url, configuration: configuration.store)
+            return (try await SQLiteMemoryStore.open(at: url, configuration: configuration.store), false)
         } catch {
             firstError = error
         }
@@ -500,7 +514,18 @@ public actor MemoryService: BrainReading, BrainApplicationStoring {
             lastRecovery = recovery
             Self.log.error("memory recovered: \(recovery, privacy: .public)")
         }
-        return try await SQLiteMemoryStore.open(at: url, configuration: configuration.store)
+        // Whatever the recovery did, this open went through one: it never counts as a new archive.
+        return (try await SQLiteMemoryStore.open(at: url, configuration: configuration.store), true)
+    }
+
+    /// Imports, once, the JSON Brains main left in the directory into the archive this open has just created
+    /// (`JSONBrainImport`), and says so in `status().lastImport`. A directory without them imports nothing.
+    private func importJSONBrains(into repositories: MemoryRepositories) async {
+        let applications = JSONBrainImport.applications(in: directory)
+        guard !applications.isEmpty else { return }
+        let report = await JSONBrainImport.run(applications, into: repositories.brains, now: Date())
+        lastImport = "the archive was created beside main's JSON Brains: " + report.summary
+        Self.log.info("memory \(self.lastImport ?? "", privacy: .public)")
     }
 
     /// Starts a copy of the archive when the newest one is older than `backupInterval`, unless one
@@ -720,7 +745,7 @@ public actor MemoryService: BrainReading, BrainApplicationStoring {
                       pending: queue.count, inFlight: running == nil ? 0 : 1, written: written, failed: failed,
                       partial: partial, dropped: dropped, unsettled: unsettled,
                       lastFailure: lastFailure, lastBackup: lastBackup ?? newestBackup()?.date,
-                      lastRecovery: lastRecovery, lastClose: lastClose)
+                      lastRecovery: lastRecovery, lastImport: lastImport, lastClose: lastClose)
     }
 
     /// The archive's applications and counts.

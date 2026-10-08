@@ -26,7 +26,8 @@ enum Usage {
       mecum memory  <app>                      what the brain remembers about the application
       mecum memory  --status                   what the memory's archive file is, read only
       mecum memory  --import-json <dir>        copy the Brains of an earlier JSON Knowledge directory into
-                                              the memory, for applications it holds nothing about yet
+                                              the memory, for applications it holds nothing about yet; a new
+                                              archive already took those beside it when it was created
 
     <app> is a bundle id (com.adobe.PremierePro) or an application name (Premiere); the match is
     case-insensitive and a name may be a prefix.

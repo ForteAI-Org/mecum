@@ -95,6 +95,7 @@ struct BrainSettings: View {
                      + (status.partial > 0 ? " \(status.partial) saved in part." : ""))
         if let copy = status.lastBackup { lines.append("Last copy: \(copy.formatted(date: .abbreviated, time: .shortened)).") }
         if let recovery = status.lastRecovery { lines.append(recovery) }
+        if let imported = status.lastImport { lines.append(imported.prefix(1).uppercased() + imported.dropFirst() + ".") }
         return lines.joined(separator: "\n")
     }
 }
