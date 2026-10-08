@@ -43,7 +43,7 @@ Decisions were taken by Tommaso Mazzarini on 7 October 2026.
 | # | Question | Decision |
 |---|---|---|
 | D1 | Merge or transplant | Transplant |
-| D2 | Earlier JSON Brains | Not imported automatically; `mecum memory --import-json <dir>` imports them by hand |
+| D2 | Earlier JSON Brains | First imported by hand only; changed on 8 October: imported once, automatically, when an open creates the archive beside them; `mecum memory --import-json <dir>` stays for any other directory |
 | D3 | External MCP clients | First one archive shared with the app's workers; reversed after the live checks (C07): each client keeps a private archive, as on main, source `mcp` |
 | D4 | Concurrent access | Common practice without needless complexity: one writer, an ordered queue, actions never wait |
 | D5 | Latency budget | 50 ms added per action at most, to be lowered later if needed |
@@ -56,13 +56,14 @@ Decisions were taken by Tommaso Mazzarini on 7 October 2026.
 
 ## Behaviour that changed on purpose
 
-- **The Brain is in SQLite.** Main's JSON Brains are neither read nor written at run time. A build of
-  this branch starts with an empty Brain unless the JSON files are imported (D2). Main's builds keep
-  reading the JSON files, which this branch never changes, so going back loses nothing older.
+- **The Brain is in SQLite.** Main's JSON Brains are neither read nor written at run time. The first
+  open of a Knowledge directory creates the archive and imports their Brains once, before anything is
+  learned into it (D2). Main's builds keep reading the JSON files, which this branch never changes, so
+  going back loses nothing older.
 - **External clients keep a Brain of their own, now in SQLite.** As on main, each client's directory is
   `MCP/Knowledge/<profile>`, and its archive is the `memory.sqlite` there, apart from the workers' and
-  the other clients' (D3, C07). Like the workers' Brain, a client's starts empty unless its JSON files
-  are imported: `mecum memory --import-json <dir> --knowledge <dir>` with the client's directory as both.
+  the other clients' (D3, C07). Like the workers', a client's archive takes the JSON Brains main left in
+  its directory when it is created.
 - **A memory failure no longer fails an observation.** Main's `observe` threw when the JSON store
   could not save. Writes are now queued, and a failed write is a counted gap (D4).
 - **The command line's `scene` reports the Brain's counts after its write.** It prints "not
@@ -226,7 +227,7 @@ Decisions taken by Tommaso Mazzarini on 8 October 2026:
 | Question | Decision |
 |---|---|
 | PM-01 | Left out of this merge. Condition: the target window must be on the desktop its display shows. Impact: otherwise Mecum lists no window and `open_session` waits, then refuses, as on main. Later work on main: say where the window is instead of "no window", then measure adoption across desktops. No regression: the discovery code is main's, unchanged, and main gives the same answer on the same state. |
-| PM-07 | No `memory-model` archive is converted: the memory starts from a new SQL archive, the JSON Brains imported by hand when wanted, every original kept. |
+| PM-07 | No `memory-model` archive is converted: the memory starts from a new SQL archive, which takes main's JSON Brains when it is created, every original kept. |
 | PM-05 | No behaviour change in this merge for the three rules; any change is a separate proposal on main. |
 | PF-01 perimeter | Live comparisons between main and the final candidate only; the first merge (`0c8c831`) is superseded by the fixes and is not marked as passed. |
 
@@ -239,12 +240,15 @@ The binary and the archive are compatible in different ways, and the two must no
 | main (`eff301c`) | the JSON Brains (`Knowledge/<bundle>.json`) | the JSON Brains | `memory.sqlite`, its copies, its lock and recovery record |
 | this branch | `memory.sqlite` only | `memory.sqlite` and its daily copies | the JSON Brains, which it never reads at run time and never changes |
 
-**Adopting.** The first open makes an empty `memory.sqlite` beside the JSON files. To start from what
-main learned, quit Mecum and every `mecum` process, then import by hand:
-`mecum memory --import-json <Knowledge dir> --knowledge <Knowledge dir>`. The import fills only the
-Brains the archive does not hold yet and keeps those it holds, so it can be repeated; it carries the
-projection, not main's routes, window states or menu commands, and no history. An external client's
-directory, `MCP/Knowledge/<profile>`, is imported the same way with that directory as both arguments.
+**Adopting.** Nothing to do by hand. The first open of a Knowledge directory, by the app or by `mecum`,
+creates `memory.sqlite` beside the JSON files and imports their Brains in the same open, before anything is
+learned into it; Settings > Brain says what came in. It carries the projection exactly, not main's routes,
+window states or menu commands, and no history; the JSON files are not changed. It happens once: an archive
+that already exists is never imported into, so a Brain learned in SQLite is never replaced. An external
+client's directory, `MCP/Knowledge/<profile>`, takes its own JSON Brains the same way. To import another
+directory, or what main learned after the switch for an application the archive does not hold yet:
+`mecum memory --import-json <dir> --knowledge <Knowledge dir>`. To start with an empty Brain, move the JSON
+files out of the directory before the first open.
 Archives made by `memory-model` builds are not converted: this build refuses them untouched, and none
 exists in the app's own folder (C06).
 
@@ -261,4 +265,7 @@ hold commits.
 Checked on a copy of a real Finder Brain (8 October, `.scratch/merge-memory/pm07`): this branch imported
 it (110 anchors) and read it from SQLite; main's binary read the same 110 anchors from the JSON file;
 the JSON file and `memory.sqlite` kept their hashes across both binaries, and the original in the app's
-folder was untouched.
+folder was untouched. On a copy of the app's whole Knowledge directory, six JSON Brains (398 anchors, 38
+groups), the first `mecum memory Finder` created the archive and imported all six; each Brain read back
+from SQLite equals its JSON file exactly, the files kept their hashes, and a second import kept all six
+(`.scratch/merge-memory/verify-import`).

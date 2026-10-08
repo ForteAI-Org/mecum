@@ -50,7 +50,7 @@ and is never a reason to send the gesture again.
 | `SeatDriving` (`Sources/Integration`) | the Driver's seat filling the Engine's roles: `SeatTarget` owns the host, the seat and the adopted window; `SeatSceneProvider` is `SceneProviding` over the seat's stills; `SeatActuator` is `Actuating` over routed Commands inside a Turn, answering every receipt with what the engine saw; `SeatControls` is `ControlPressing` without the geometric read |
 | `AutomationRuntime` (`Sources/Integration`) | the composition root: `EngineRuntime` wires the foreground adapters or the Seat's, the expectations from `BrainMemory` over the directory's `MemoryService`, and the call's `CallRecorder` as the engine's observer. `MemoryService` is the one living memory of a Knowledge directory in the process (`shared(for:)`): `memory.sqlite`, opened on first use, written through one ordered queue no action waits for, read with a Brain cache, copied once a day; `CallRecorder` records one call (its request, start and end, its samples and what it taught the Brain); `ActionContext` is who acts under which trace; `MemoryClock` keeps the facts' calendar, the Brain's clock and durations apart. `AutomationSession` is the foreground application session, `AutomationSessionOperating` the role the tools drive |
 | `AutomationMCP` (`Sources/Integration`) | `AutomationTools`, the seventeen tools over `AutomationSessionOperating`; each call it answers is recorded under its `CallProducer` (the app's worker, an external MCP client, the CLI chat) when the session names a memory, and a memory that cannot be written never stops a tool |
-| `mecum` (tool, `Tools/Engine/mecum`) | the command line: `windows`, `scene`, `act`, `select`, `batch`, `memory` (an application's Brain, or `--import-json <dir>` to copy earlier JSON Brains into the archive); the composition root that wires the foreground adapters, or the Seat's with `--seat` |
+| `mecum` (tool, `Tools/Engine/mecum`) | the command line: `windows`, `scene`, `act`, `select`, `batch`, `memory` (an application's Brain, `--status`, or `--import-json <dir>` to copy earlier JSON Brains into the archive by hand); the composition root that wires the foreground adapters, or the Seat's with `--seat` |
 
 Before the first SeatDriving observation reaches the Engine, `SeatTarget`
 requires the full attested identity of the adopted window, including its process
@@ -357,8 +357,9 @@ Driver offers is not yet turned on here.
   deleted. Production mutates it only through `BrainApplicationStoring`, where one key (an
   observation's sample, an action's event) is one application: a retry answers the stored outcome,
   another command under the key is a conflict, and the application's clock never runs backwards.
-  The one other writer is `mecum memory --import-json`, which writes a whole Brain only for an
-  application the archive holds none of.
+  The one other writer is `JSONBrainImport`, which writes a whole Brain only for an application the
+  archive holds none of: once when an open creates the archive beside main's JSON files, and by hand
+  through `mecum memory --import-json`.
 - A recorded call is a fact, not a success (`AgentCallStoring`): `completed` means the call
   concluded, its outcome keeps its own meaning, a skipped batch step is never shown as run, and the
   arguments are the ones the tool decoded, with its defaults written once. `AutomationTools`

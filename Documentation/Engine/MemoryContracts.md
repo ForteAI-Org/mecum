@@ -7,8 +7,9 @@ promises, and links the section that proves each one. Status on 2026-10-07, bran
 
 The resource is schema version 1 (`user_version` 1), 48 tables, 48 triggers and 31 explicit indexes, in
 `Sources/Engine/SQLiteMemory/Resources/brain-living-memory-schema.sql`. An archive opens only at that exact
-shape. Old JSON knowledge is never read at run time and never imported on its own; `mecum memory --import-json
-<dir>` imports it by hand.
+shape. Old JSON knowledge is never read at run time. Its Brains are imported once, when an open creates the
+archive beside them, before anything is learned into it; `mecum memory --import-json <dir>` imports any other
+directory by hand. Both go through `JSONBrainImport` and fill only Brains the archive does not hold.
 
 ## Entry points
 
@@ -62,7 +63,7 @@ each client has an archive of its own and none reads what the workers or the oth
 | `CallRecorder`, as the engine's observer and the session's observation | `CaptureStoring.record(sample)` for the `current`, `before`, `menu` and `after` samples; `record(event)` for the event of a call that wrote none (the command line, a session's own call) and for a session's own observation, with `origin_event_id` | `memory_event_observations`; `memory_events` (kinds `action` and `observation`); `brain_apps`, `brain_app_contexts` | tests |
 | `CallRecorder` | `SceneStoring.associate` for every sample but `menu` | `brain_scenes`, `brain_scene_elements`, `brain_scene_roles`, `brain_scene_labels`, `memory_event_scenes` | structure-v3 inside the next association; tests |
 | `CallRecorder` | `BrainApplicationStoring.apply`, once per observed sample and once per action with an effect | `brain_applications` with its arguments, the projection (`brain_app_window_epochs`, `brain_anchors` and its aliases and states, `brain_groups` and members, `brain_transitions` and menu items), `brain_evidence` | `BrainMemory.expectedEffect` and `.enrich` (`BrainReading`) during the next calls; the app's Brain page (`BrainLibrary`, through `overview()` and `brain(of:)`); `mecum memory <app>` |
-| `mecum memory --import-json <dir>` | `SQLiteBrainRepository.importProjection` | the projection tables only: no application, no evidence | the same readers |
+| `MemoryService`, once, when its open created the archive beside JSON Brains; `mecum memory --import-json <dir>` by hand (`JSONBrainImport`) | `SQLiteBrainRepository.importProjection` | the projection tables only: no application, no evidence | the same readers |
 
 No producer in this checkout writes the menu commands, the Watcher's inputs and correlations, verifications,
 task occurrences and labels, Routes, step occurrences, experiences or the general graph's arcs and anchor
@@ -70,11 +71,14 @@ links: their repositories, fixtures and readers exist (`SQLiteMemoryTests`), and
 production leaves them empty. The ported `Route`, `RouteEarning` and `Recall` types of the `Memory` module work
 over `AppKnowledge` and are called by tests only.
 
-The first open of a directory creates `memory.sqlite` empty, at schema 1. The JSON files the earlier build kept
-in the same directory (`FileKnowledge`, one per application) are left where they are and never read at run
-time; a build of this branch starts with an empty Brain unless they are imported. `mecum memory --import-json
-<dir>` reads every application file of a directory, skips `allowlist` and quarantined files, and imports a
-Brain only for an application with no anchor, group or transition in the archive; the files are not changed.
+The first open of a directory creates `memory.sqlite` at schema 1 and, in the same open, before any write of
+the queue runs, imports the Brains of the JSON files the earlier build kept there (`FileKnowledge`, one per
+application); `status().lastImport` and the Brain page say what came in. The files are left where they are,
+unchanged, and never read at run time. Only an open that created the archive where none was imports: not an
+archive that already existed, and not one a recovery left empty. `mecum memory --import-json <dir>` does the
+same by hand for any directory. Both read every application file, skip `allowlist`, quarantined files and the
+copies under `.backup`, and import a Brain only for an application with no anchor, group or transition in the
+archive.
 An imported Brain has no `brain_applications` and no evidence rows: its counts are the file's, and its rows
 are stamped at the Brain's own last instant. No source imports `FileKnowledge` any more (the `MecumEngine`
 library still vends it). A file of schema 1 bootstrapped by an earlier development form, `memory-model`'s
