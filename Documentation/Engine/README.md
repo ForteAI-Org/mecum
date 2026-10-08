@@ -320,7 +320,11 @@ Driver offers is not yet turned on here.
 - The `windows` tool reads window candidates through `AutomationSessionOperating`.
   The broker uses its adoption discovery policy, including qualified nonminimized
   standard AX windows kept offscreen by Stage Manager. Listing opens no Seat and
-  grants no input authority; adoption still reattests the candidate.
+  grants no input authority; adoption still reattests the candidate. A window on
+  another desktop (Space) of its display than the one the display shows is not
+  found, by the app or the command line: it is not in the window server's
+  on-screen list, and the AX fallback covers fullscreen and Stage Manager only.
+  Bring it to the visible desktop first. A clearer answer is later work on main.
 - A pop-up is a window of its own. A target inside an open pop-up is chosen with the keyboard from
   `PopupRowPick`'s plan over the scene's rows (the highlight starts on the control's value, the arrows
   wrap, Return chooses), verified by reading the control's value back. An item of an open native menu

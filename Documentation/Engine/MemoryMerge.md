@@ -212,14 +212,23 @@ nothing new to integrate.
 
 | Point | Status | What |
 |---|---|---|
-| PM-01 Windows not found | cause found, pre-existing, decision needed | Mecum looks for an application's windows in the window server's on-screen list, the command line and the app alike; the app's fallback adds fullscreen windows and those Stage Manager hides, nothing else. A window on another desktop (Space) of its display than the one it shows is in neither, so Mecum lists no window. Reproduced without touching the desktop: a Finder window on the built-in display, in Space 1376 while the display showed Space 253, gave `no interaction window among 0 rows` from this branch's binary and from main's alike. The merge changes none of this code. Fixing it changes window discovery, so it is a proposal, not a fix here. |
+| PM-01 Windows not found | cause found, pre-existing, left out of this merge (decided) | Mecum looks for an application's windows in the window server's on-screen list, the command line and the app alike; the app's fallback adds fullscreen windows and those Stage Manager hides, nothing else. A window on another desktop (Space) of its display than the one it shows is in neither, so Mecum lists no window. Reproduced without touching the desktop: a Finder window on the built-in display, in Space 1376 while the display showed Space 253, gave `no interaction window among 0 rows` from this branch's binary and from main's alike. The merge changes none of this code. Fixing it changes window discovery, so it is a proposal, not a fix here. |
 | PM-02 Two app tests | fixed as tests | `/model` read the installed Claude Code's catalogue (here `claude-opus-5-5`, `claude-fable-5-1`, `claude-sonnet-5`, `claude-haiku-4-5`); it now uses the composer tests' fixed catalogue. The bridge test closed the bridge's input before its answer: closed at once, 0 bytes, exit 0; kept open, the 64-byte answer. It now reads the answer first, and a second test checks the early close ends the bridge cleanly. Both fail on main and pass with the fixed tests on main's code and here. |
 | PM-03 Contract passages | fixed | Codex's five corrections, checked against the code and applied. |
 | PM-04 Calculator compared with main | open, blocked | The paired live run needs consent to send the Calculator's synthetic data to the provider, and the desktop. Not run here. |
-| PM-05 Uncertain input | covered, one fix | Deterministic tests over a simulated calculator and the engine's doubles; all pass against the current behaviour. One recording gap fixed: a cancelled batch's unrun steps. Three rules are behaviour, not fixes, and wait for a decision: the batch does not pin its window, the next call is not forced to observe after an uncertain one, and nothing compares a task's goal. |
+| PM-05 Uncertain input | covered, one fix | Deterministic tests over a simulated calculator and the engine's doubles; all pass against the current behaviour. One recording gap fixed: a cancelled batch's unrun steps. Three rules stay main's behaviour, as decided: the batch does not pin its window, the next call is not forced to observe after an uncertain one, and nothing compares a task's goal. |
 | PM-06 Revalidation | see the handoff | The candidate's checks and which earlier evidence still applies. |
-| PM-07 Earlier SQLite and rollback | decision needed | No SQLite archive in the app's folder; `memory-model` archives exist only as test fixtures. Rollback checked on a fixture, below. |
+| PM-07 Earlier SQLite and rollback | decided: a new archive | No SQLite archive in the app's folder; `memory-model` archives exist only as test fixtures, kept as they are and not converted. Rollback checked on a fixture, below. |
 | PM-08 Delivery | this document and the handoff | |
+
+Decisions taken by Tommaso Mazzarini on 8 October 2026:
+
+| Question | Decision |
+|---|---|
+| PM-01 | Left out of this merge. Condition: the target window must be on the desktop its display shows. Impact: otherwise Mecum lists no window and `open_session` waits, then refuses, as on main. Later work on main: say where the window is instead of "no window", then measure adoption across desktops. No regression: the discovery code is main's, unchanged, and main gives the same answer on the same state. |
+| PM-07 | No `memory-model` archive is converted: the memory starts from a new SQL archive, the JSON Brains imported by hand when wanted, every original kept. |
+| PM-05 | No behaviour change in this merge for the three rules; any change is a separate proposal on main. |
+| PF-01 perimeter | Live comparisons between main and the final candidate only; the first merge (`0c8c831`) is superseded by the fixes and is not marked as passed. |
 
 ## Adoption and rollback
 
