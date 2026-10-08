@@ -1,0 +1,102 @@
+{
+ "source": "TicketBenchmarkCua20261007.md (7 Oct 2026) and ADR 0036",
+ "note": "Each entry is shown by report.py only when its `detect` rule finds the weakness in the run's summary. `ticket` names the branch or ADR from the source list, or says none; `status` is the state in the source at 7 Oct.",
+ "tickets": [
+  {
+   "id": "catalyst-session",
+   "detect": "catalyst_session_refused",
+   "weakness": "Stocks (Mac Catalyst): sessione rifiutata con una finestra secondaria",
+   "ticket": "elio/catalyst-window-fix",
+   "status": "fase 1 misura live, poi STOP; per ultimo",
+   "expected": "open, observe, press_key e scroll riescono su Stocks e a fine sessione ogni finestra torna al suo frame originale"
+  },
+  {
+   "id": "terminal-ctrl-keys",
+   "detect": "terminal_ctrl_keys",
+   "weakness": "kitty (GLFW): Ctrl+U e Ctrl+A senza effetto",
+   "ticket": "elio/terminal-ctrl-keys-fix",
+   "status": "indagine, poi STOP; P3, per ultimo",
+   "expected": "Ctrl+U e Ctrl+A con effetto su kitty (modificatori come transizioni o caratteri di controllo), oppure limite documentato con verdetto onesto"
+  },
+  {
+   "id": "safari-keys",
+   "detect": "safari_keys",
+   "weakness": "Safari: tasti e testo sul contenuto web rifiutati (subtreeUnreadable)",
+   "ticket": "elio/safari-keys-fix",
+   "status": "fase 1 misura live, poi STOP",
+   "expected": "Tab, Shift-Tab e type_text nel campo Name consegnati e verificati su Safari, 5/5"
+  },
+  {
+   "id": "scene-labels",
+   "detect": "scene_labels",
+   "weakness": "Etichette della scena da OCR (bersaglio testuale non risolto, modelli OCR assenti)",
+   "ticket": "elio/scene-labels-fix",
+   "status": "fase 1 misura live, poi STOP; codice di Ron",
+   "expected": "Obsidian con i nomi delle cartelle, Chrome \"Press me\" risolto 20/20 su sessioni nuove, TextEdit \"Line two.\" 8/8; token della scena +20% al massimo"
+  },
+  {
+   "id": "photoshop-start-bar",
+   "detect": "photoshop_start_bar",
+   "weakness": "Photoshop: la Start Bar blocca il trasferimento (moveRefused, placementNotConfirmed)",
+   "ticket": "da scrivere (elenco \"ticket nuovi emersi il 7/10\", nessun branch)",
+   "status": "da scrivere per bene",
+   "expected": "capire perché lo spostamento è rifiutato e se una finestra così va adottata; il follow pass non resta occupato circa 3 s"
+  },
+  {
+   "id": "file-panel",
+   "detect": "file_panel",
+   "weakness": "Photoshop: il pannello file aperto da menu nasce fuori dal Seat",
+   "ticket": "elio/file-panel-seat-fix",
+   "status": "fase 1 misura live, poi STOP",
+   "expected": "Place Embedded via menu x3: pannello adottato nel seat, observe ne restituisce la scena, la finestra della persona torna in primo piano"
+  },
+  {
+   "id": "resolve-escape",
+   "detect": "resolve_escape",
+   "weakness": "Resolve: Escape inviato dal seat ne provoca l'uscita",
+   "ticket": "da scrivere (elenco \"ticket nuovi emersi il 7/10\", nessun branch)",
+   "status": "da scrivere per bene",
+   "expected": "capire quale finestra e perché; un tasto innocuo non deve avere un effetto distruttivo"
+  },
+  {
+   "id": "idle-cpu",
+   "detect": "idle_cpu",
+   "weakness": "CPU a riposo sopra l'obiettivo con una sessione aperta",
+   "ticket": "ADR 0036 (stream a riposo: 1 fps dopo 2,5 s senza uso) e elio/idle-cpu-fix (battito)",
+   "status": "ADR 0036 implementato il 7/10, solo test offline, nessuna misura live; idle-cpu-fix pronto",
+   "expected": "sessione aperta a riposo nell'app a 1,5 ms/s o meno (il 7/10 misurati 20 ms/s con le cache; obiettivo non raggiunto)"
+  },
+  {
+   "id": "background-menus",
+   "detect": "background_menus",
+   "weakness": "Menu in background rifiutati come disabilitati",
+   "ticket": "nessun ticket nell'elenco del 7/10",
+   "status": "-",
+   "expected": "-"
+  },
+  {
+   "id": "step-time",
+   "detect": "step_time",
+   "weakness": "Passo più lento di Cua in alcune app (pause fisse dopo l'input)",
+   "ticket": "elio/capture-speed-fix, fase 3d (pausa adattiva e type_text)",
+   "status": "3d dopo 3c; tocca codice di Ron",
+   "expected": "mediana del passo giù di almeno il 30% su almeno sei app del benchmark, verdetti invariati"
+  },
+  {
+   "id": "footprint",
+   "detect": "footprint",
+   "weakness": "RAM del driver più alta di Cua",
+   "ticket": "nessun ticket nell'elenco del 7/10",
+   "status": "-",
+   "expected": "-"
+  },
+  {
+   "id": "action-cpu",
+   "detect": "action_cpu",
+   "weakness": "CPU del driver per azione più alta di Cua (OCR e due percezioni attorno all'azione)",
+   "ticket": "nessun ticket nell'elenco del 7/10 (la fase 3d tocca le pause, non la CPU)",
+   "status": "-",
+   "expected": "-"
+  }
+ ]
+}

@@ -198,3 +198,49 @@ to `<out>.phases.txt` and the raw signposts to `<out>.signposts.ndjson`.
 - WindowServer CPU is read through `ps` at 10 ms resolution: per-call values are coarse, idle windows are fine.
 - The probe sees AX values, not pixels: kitty, Obsidian and Photoshop pixel effects stay unverified.
 - The physical cursor moves when the person uses the Mac; idle and baseline rows carry the same check as a control.
+
+## One command: `bench.sh`
+
+`./bench.sh [--apps ...] [--reps 8] [--quick] [--phases]` runs the whole benchmark in order and writes the two
+reports. `bench.sh` only starts `bench.py`; `./bench.sh --help` lists every option, `--dry-run` prints the
+estimate and each command and runs nothing.
+
+| Step | What it does |
+| --- | --- |
+| Preflight | `prepare.py`; any blocker other than an unbuilt binary (Stage Manager on, another Mecum running) aborts before anything runs |
+| Builds | `swift build -c release`, `probe`, `ocr` and `axread` when their source is newer, `cargo build --release -p cua-driver` when the Cua checkout is there, the phases build with `--phases` |
+| Per-call run | `compare.py --mode ops` over `--apps`; apps are opened in the background by `prepare.py` |
+| Chain | `--mode chain`, pauses `--pauses 0,1,3,5`, only `--chain-apps` (default Calculator, TextEdit, Chrome: the full set takes about three times as long) |
+| Soak | `--mode soak`, 200 steps, TextEdit |
+| Phases | Only with `--phases`: Mecum alone from a `MECUM_PHASES` build, Calculator |
+| Model tasks | `tasks.py` for the tasks of the chosen apps, 3 reps, capped at 60 minutes (`--skip-tasks`, `--task-reps`, `--task-max-minutes`); skipped when the Claude CLI is missing |
+| Summaries and report | `summarize.py` (`summary.json`, `tables.md`), `tasks.py --summary`, then `report.py` |
+
+`--quick` is a smoke test: 2 reps, chain pauses 0 and 3 s on the first chain app, soak 20 steps, one task rep, one
+5 s idle window, 5 s cooldown. A time estimate is printed before anything starts and the elapsed time at the end.
+
+Everything of one run lives in `~/Forte_Projects/_bench/runs/<YYYYMMDD-HHMM>/` (`--run-dir` overrides): `ops.jsonl`,
+`chain.jsonl`, `soak.jsonl`, optional `phases.jsonl`, `tasks.jsonl`, `summary.json`, `tasks-summary.json`, `tables.md`,
+`run.json` (start, finish, steps and their exit codes), `meta.json`, `fixtures.json` and `logs/<step>.log`. Every
+child process gets `MECUM_APP_SUPPORT_DIR` set to that directory. At the end the script ends only the apps
+`prepare.py` launched (`already_running: false` in `fixtures.json`), by PID, after checking the PID still belongs to that
+app. Nothing here changes Stage Manager or any other setting; it still needs the Mac free and the shared live lock.
+
+### `report.py` and `tickets.json`
+
+`report.py --summary summary.json [--tasks tasks-summary.json] [--baseline base.json] [--run run.json]` writes two
+files to `~/Downloads/` (`--out-dir`), never into the repository:
+
+- `MecumVsCua-Team-<YYYYMMDD>.md`: Italian, short. Every table is a `###` title, 2-4 lines of context, the table and one
+  `**Conclusione:**` line. Markers: 🟢 Mecum better, 🔴 worse, ⚪ even (within 10% or overlapping 95% intervals), `vs 6/10`
+  with ▲ / ▼ / = for Mecum's own change, and "Cua cambiato versione" for Cua's, never counted as a Mecum gain.
+- `MecumVsCua-Report-<YYYYMMDD>.md`: English, full technical report (method, component parity, p50/p90/p99 with
+  intervals, per-operation tables, support matrix with source links, deltas against 6 October, limits, reproduction).
+
+Inputs are the run's `summary.json`, the tasks summary, `support.json`, `tickets.json` and the 6 October summary (by
+default computed from `~/Forte_Projects/_bench/results-20261006/all.jsonl`). A section with no data says so in one line.
+
+`tickets.json` maps a weakness to its next ticket and expected effect (source: the 7 October ticket list and ADR 0036).
+Each entry names a `detect` rule implemented in `report.py`; the "Prossimi ticket" table lists only the weaknesses the run
+actually shows, so a weakness that does not appear in the data is not listed. Add a ticket by adding an entry and, for a new
+kind of weakness, a rule in `detect()`.
