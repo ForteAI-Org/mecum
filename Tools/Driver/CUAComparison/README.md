@@ -13,6 +13,7 @@ titles). `summarize.py` turns the rows into tables and a `summary.json`. Method 
 | `prepare.py` | Preflight (Stage Manager, other Mecum, power, Low Power, thermal, displays), fixtures, the meta row |
 | `compare.py`, `mcpclient.py`, `rusage.py` | Scenarios, runner (ops, chain, soak, phases) and MCP client |
 | `probe.swift`, `ocr.swift` | Independent observers, built to `.build/probe` and `.build/ocr` |
+| `desk.swift` | `desk permissions` (Accessibility and Screen Recording of the terminal chain) and `desk press <pid> <menu> <item>` (AXPress on a menu bar item, no activation); built to `.build/desk` |
 | `summarize.py`, `headline.py` | Tables and `summary.json` (`headline.py` still knows only `mecum` and `cua`) |
 | `fixtures/` | `bench.html` (Chrome/Safari "Bench Page"), `bench.txt` (TextEdit) |
 
@@ -53,13 +54,17 @@ python3 summarize.py "$S/results.jsonl" --json "$S/summary.json"
 ```
 
 `prepare.py` reports (never fixes, never kills) its findings under `blockers` (Stage Manager on,
-another Mecum running, a binary missing) and `warnings` (battery, Low Power mode, thermal state),
-opens the requested apps in the background (`open -g`) on their fixtures (TextEdit on a fresh copy
-of `bench.txt`, Chrome in its own profile and Safari on `bench.html` in a "Bench Page" window) and
-writes `fixtures.json` (pid and window title per app, read by `compare.py`) and `meta.json` into the
-scratch directory. Resolve, Obsidian, Prism Launcher, kitty, Stocks and Photoshop are as on 6 October:
-`prepare.py` only reports whether they run (open them with `--open`, except Resolve and Photoshop,
-which need a project or a document state). `compare.py` writes the same preflight, the Mac model,
+another Mecum running, Accessibility or Screen Recording missing, a binary missing) and `warnings`
+(battery, Low Power mode, thermal state). With `--open` it opens each requested app in the background
+(`open -g`) on its fixture and waits until the app has a usable window (`--plan` prints this and opens
+nothing): Calculator, Stocks, kitty and Prism Launcher as they are; TextEdit on a fresh copy of
+`bench.txt`; Chrome in its own profile and Safari on `bench.html` in a window whose title ends with
+"Bench Page" (a running Safari first gets a new window through AXPress on File > New Window, which
+does not activate it); Obsidian on the vault it has open (the one the 6 October run used, from
+`obsidian.json`; a scratch vault in the run folder only when none is registered); DaVinci Resolve on its
+Project Manager and Photoshop on its Home screen, with no document (it cannot save), both given up to
+7 minutes. `fixtures.json` (pid, window title, `launched`, `note`, seconds waited, read by
+`compare.py`) and `meta.json` go into the scratch directory. `compare.py` writes the same preflight, the Mac model,
 chip, RAM, macOS build and both driver commits and versions into a `kind: "meta"` first row.
 Always set `MECUM_APP_SUPPORT_DIR` for Mecum. Mecum runs with its research opt-in for an unvalidated
 macOS build (`MECUM_BENCH_UNVALIDATED=1`, set by the harness). Never run `sample` or another profiler
@@ -201,30 +206,52 @@ to `<out>.phases.txt` and the raw signposts to `<out>.signposts.ndjson`.
 
 ## One command: `bench.sh`
 
-`./bench.sh [--apps ...] [--reps 8] [--quick] [--phases]` runs the whole benchmark in order and writes the two
-reports. `bench.sh` only starts `bench.py`; `./bench.sh --help` lists every option, `--dry-run` prints the
-estimate and each command and runs nothing.
+`./bench.sh [--apps ...] [--reps 8] [--quick] [--phases]` brings the Mac into the state the run needs, runs the
+whole benchmark in order and writes the two reports. `bench.sh` only starts `bench.py`; `./bench.sh --help` lists
+every option, `--dry-run` prints the estimate, the open and wait plan and each command and runs nothing. The default
+app list is every app of `compare.py`: Calculator, TextEdit, Chrome, Safari, Obsidian, Stocks, kitty, DaVinci Resolve,
+Prism Launcher and Photoshop.
+
+**What it asks.** Before any long step it checks what only a person can change and lists it all at once, in Italian,
+with the exact fix: Stage Manager on (turn it off in Control Center), another Mecum running (quit it: it holds the virtual
+display), Accessibility or Screen Recording missing for the terminal that runs `bench.sh` (the probe, Mecum and Cua
+inherit it), the `claude` CLI missing or not logged in (skipped with `--skip-tasks`). It rechecks every 5 s and goes on by
+itself as soon as the list is empty. On battery it only asks "Continuare a batteria? [s/N]" (no answer is N). It changes no
+setting and ends no process. Then it prints the estimated end time and nothing else needs a person: a window that does
+not appear is recorded as a note in `fixtures.json` and the run goes on.
+
+**What it opens** (all with `open -g`, never activating on purpose, each waited for until it has a usable window):
+the ten apps above on their fixtures, as described under Run. It records which it launched and at the end ends only
+those, by PID, after checking the PID is still that app; an app that was already running is left as it is. The model
+task phase needs nothing by hand: `tasks.py` starts its own local form server and writes and opens its per-run
+documents itself.
 
 | Step | What it does |
 | --- | --- |
-| Preflight | `prepare.py`; any blocker other than an unbuilt binary (Stage Manager on, another Mecum running) aborts before anything runs |
-| Builds | `swift build -c release`, `probe`, `ocr` and `axread` when their source is newer, `cargo build --release -p cua-driver` when the Cua checkout is there, the phases build with `--phases` |
-| Per-call run | `compare.py --mode ops` over `--apps`; apps are opened in the background by `prepare.py` |
+| Helpers | Builds `probe`, `ocr`, `desk` and `axread` when their source is newer (seconds) |
+| Gate | The blockers above, then the end-time line |
+| Preflight | `prepare.py`; a blocker that appears after the gate (another Mecum started meanwhile) aborts before anything runs |
+| Builds | `swift build -c release`, `cargo build --release -p cua-driver` when the Cua checkout is there, the phases build with `--phases` |
+| Opening | `prepare.py --open` all selected apps and waits for their windows (about 5 min, mostly Resolve and Photoshop) |
+| Per-call run | `compare.py --mode ops` over `--apps` |
 | Chain | `--mode chain`, pauses `--pauses 0,1,3,5`, only `--chain-apps` (default Calculator, TextEdit, Chrome: the full set takes about three times as long) |
 | Soak | `--mode soak`, 200 steps, TextEdit |
 | Phases | Only with `--phases`: Mecum alone from a `MECUM_PHASES` build, Calculator |
-| Model tasks | `tasks.py` for the tasks of the chosen apps, 3 reps, capped at 60 minutes (`--skip-tasks`, `--task-reps`, `--task-max-minutes`); skipped when the Claude CLI is missing |
+| Model tasks | `tasks.py` for the tasks of the chosen apps, 3 reps, capped at 60 minutes (`--skip-tasks`, `--task-reps`, `--task-max-minutes`) |
 | Summaries and report | `summarize.py` (`summary.json`, `tables.md`), `tasks.py --summary`, then `report.py` |
 
-`--quick` is a smoke test: 2 reps, chain pauses 0 and 3 s on the first chain app, soak 20 steps, one task rep, one
-5 s idle window, 5 s cooldown. A time estimate is printed before anything starts and the elapsed time at the end.
+**How long.** The estimate is printed first: about 3.5 hours for the default run (per-call run 1.5 h, chain 0.5 h, soak
+0.25 h, tasks up to 1 h, opening 5 min). `--quick` is a smoke test of about 80 minutes: 2 reps, chain pauses 0 and 3 s on
+the first chain app, soak 20 steps, one task rep, one 5 s idle window, 5 s cooldown. The elapsed time is printed at the end.
+
+**At the end** it prints the two Markdown files (`~/Downloads/MecumVsCua-Team-<date>.md`, Italian, and
+`~/Downloads/MecumVsCua-Report-<date>.md`, English) and the run folder.
 
 Everything of one run lives in `~/Forte_Projects/_bench/runs/<YYYYMMDD-HHMM>/` (`--run-dir` overrides): `ops.jsonl`,
 `chain.jsonl`, `soak.jsonl`, optional `phases.jsonl`, `tasks.jsonl`, `summary.json`, `tasks-summary.json`, `tables.md`,
 `run.json` (start, finish, steps and their exit codes), `meta.json`, `fixtures.json` and `logs/<step>.log`. Every
-child process gets `MECUM_APP_SUPPORT_DIR` set to that directory. At the end the script ends only the apps
-`prepare.py` launched (`already_running: false` in `fixtures.json`), by PID, after checking the PID still belongs to that
-app. Nothing here changes Stage Manager or any other setting; it still needs the Mac free and the shared live lock.
+child process gets `MECUM_APP_SUPPORT_DIR` set to that directory. Nothing here changes Stage Manager or any other
+setting; it still needs the Mac free and the shared live lock.
 
 ### `report.py` and `tickets.json`
 
@@ -232,8 +259,10 @@ app. Nothing here changes Stage Manager or any other setting; it still needs the
 files to `~/Downloads/` (`--out-dir`), never into the repository:
 
 - `MecumVsCua-Team-<YYYYMMDD>.md`: Italian, short. Every table is a `###` title, 2-4 lines of context, the table and one
-  `**Conclusione:**` line. Markers: 🟢 Mecum better, 🔴 worse, ⚪ even (within 10% or overlapping 95% intervals), `vs 6/10`
-  with ▲ / ▼ / = for Mecum's own change, and "Cua cambiato versione" for Cua's, never counted as a Mecum gain.
+  `**Conclusione:**` line. Every compared value carries its own marker: 🟢 the best, 🔴 the worst, 🟡 even with the best
+  (within 10% or overlapping 95% intervals; all even: all 🟡); a metric with one value has none, and a value no row
+  recorded (a probe verdict missing from the 6 October rows) is `n/d`. `vs 6/10` with ▲ / ▼ / = is Mecum's own change,
+  and "Cua cambiato versione" Cua's, never counted as a Mecum gain.
 - `MecumVsCua-Report-<YYYYMMDD>.md`: English, full technical report (method, component parity, p50/p90/p99 with
   intervals, per-operation tables, support matrix with source links, deltas against 6 October, limits, reproduction).
 

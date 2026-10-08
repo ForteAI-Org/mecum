@@ -1,31 +1,37 @@
 """One command for the whole Mecum vs Cua Driver benchmark (see `./bench.sh --help`).
 
-Order: preflight (abort on blockers), build both drivers, per-call run, chain, soak, optional phases, model
-tasks, summaries, then report.py. Everything of one run lives in ~/Forte_Projects/_bench/runs/<YYYYMMDD-HHMM>/.
-The only processes this script ends are the apps prepare.py launched, by PID.
+Order: small helper builds, then the blockers only a person can clear (listed at once in Italian, rechecked every
+5 s until gone), then nothing needs a person: preflight, build both drivers, open every selected app in the
+background and wait for its window, per-call run, chain, soak, optional phases, model tasks, summaries, then
+report.py. Everything of one run lives in ~/Forte_Projects/_bench/runs/<YYYYMMDD-HHMM>/. The only processes this
+script ends are the apps prepare.py launched, by PID.
 """
 import argparse, json, os, re, signal, subprocess, sys, time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+import prepare  # noqa: E402
 PY = sys.executable
 SWIFT = "/usr/bin/swift"
 SWIFTC = "/usr/bin/swiftc"
 RUNS = os.path.expanduser("~/Forte_Projects/_bench/runs")
 PHASES_BUILD = os.path.expanduser("~/Forte_Projects/_bench/phases-build")
-FALLBACK_APPS = ("Calculator,TextEdit,Google Chrome,Safari,Obsidian,Stocks,kitty,DaVinci Resolve,Prism Launcher")
+FALLBACK_APPS = ",".join(prepare.TARGETS)
+HELPERS = (("probe", "probe.swift", ".build/probe"), ("ocr", "ocr.swift", ".build/ocr"), ("desk", "desk.swift", ".build/desk"),
+           ("axread", "tasks/axread.swift", ".build/axread"))
+# Seconds the open-and-wait step typically takes beyond a few seconds per app, for the estimate.
+OPEN_EXTRA_S = {"DaVinci Resolve": 120, "Photoshop": 90, "Obsidian": 15}
 CHAIN_APPS = "Calculator,TextEdit,Google Chrome"
 TASK_OF_APP = {"Calculator": "calculator", "TextEdit": "textedit", "Google Chrome": "chrome-form", "Safari": "safari-form",
                "Obsidian": "obsidian", "kitty": "kitty", "Photoshop": "photoshop", "Prism Launcher": "prism-toggle"}
 # Process name that `ps` shows for an app prepare.py launched, to check a PID is still that app before ending it.
-PROCESS_OF = {"Calculator": "Calculator", "TextEdit": "TextEdit", "Google Chrome": "Google Chrome", "Safari": "Safari",
-              "Stocks": "Stocks", "Obsidian": "Obsidian", "kitty": "kitty", "Prism Launcher": "prismlauncher"}
+PROCESS_OF = {app: t["process"] for app, t in prepare.TARGETS.items()}
 
 
 def default_apps():
     try:
-        sys.path.insert(0, HERE)
         from compare import SCENARIOS
-        return ",".join(a for a in SCENARIOS if a != "Photoshop")
+        return ",".join(SCENARIOS)
     except Exception:
         return FALLBACK_APPS
 
@@ -34,8 +40,10 @@ class Run:
     def __init__(self, options):
         self.o, self.failed, self.steps = options, [], []
         self.started = time.time()
+        self.date = time.strftime("%Y%m%d")
         self.dir = os.path.expanduser(options.run_dir) if options.run_dir else os.path.join(RUNS, time.strftime("%Y%m%d-%H%M"))
-        self.env = dict(os.environ, MECUM_APP_SUPPORT_DIR=self.dir)
+        # The task phase opens its Chrome pages in the profile prepare.py launched, never in the person's own Chrome.
+        self.env = dict(os.environ, MECUM_APP_SUPPORT_DIR=self.dir, BENCH_CHROME_PROFILE=os.path.join(self.dir, "chrome-profile"))
 
     def path(self, name):
         return os.path.join(self.dir, name)
@@ -66,7 +74,8 @@ def estimate(o, run, apps, tasks):
     chain = len(chain_apps) * drivers * (sum(o.chain_steps * (1.4 + p) + o.group_rest for p in pauses) + o.cooldown) / 60
     soak = drivers * (o.soak_steps * 1.4 + o.cooldown) / 60
     phases = 4 if o.phases else 0
-    parts = {"preflight and builds": 3, "per-call run": ops, "chain": chain, "soak": soak, "phases": phases}
+    opening = sum(8 + OPEN_EXTRA_S.get(a, 0) for a in apps) / 60
+    parts = {"preflight and builds": 3, "opening apps": opening, "per-call run": ops, "chain": chain, "soak": soak, "phases": phases}
     if tasks:
         line = subprocess.run([PY, "tasks.py", "--dry-run", "--tasks", ",".join(tasks), "--reps", str(o.task_reps), "--drivers", o.drivers,
                                "--max-minutes", str(o.task_max_minutes)], cwd=HERE, capture_output=True, text=True).stdout
@@ -82,22 +91,58 @@ def blockers_of(run):
         return ["meta.json missing"]
 
 
-def prepare(run, apps, open_apps):
+def run_prepare(run, apps, open_apps):
     argv = [PY, "prepare.py", "--scratch", run.dir, "--apps", ",".join(apps)]
     if open_apps:
-        argv += ["--open", ",".join(a for a in apps if a in PROCESS_OF)]
+        argv += ["--open", ",".join(apps)]
     code = run.sh("prepare-open" if open_apps else "prepare-preflight", argv, check=True)
     return code, [] if run.o.dry_run else blockers_of(run)
+
+
+def build_helpers(run):
+    """The small Swift observers, first: the permission check of the gate needs `desk`."""
+    for name, source, out in HELPERS:
+        src, dst = os.path.join(HERE, source), os.path.join(HERE, out)
+        if not os.path.exists(dst) or os.path.getmtime(src) > os.path.getmtime(dst):
+            run.sh(f"build-{name}", [SWIFTC, "-O", source, "-o", out], check=True)
+
+
+def gate(o):
+    """Lists every blocker only a person can clear at once, in Italian with the exact fix, then rechecks every 5 s and
+    goes on by itself when none is left. Battery only asks. Changes nothing and ends nothing."""
+    shown = None
+    while True:
+        items = prepare.human_blockers(need_claude=not o.skip_tasks)
+        if not items:
+            break
+        texts = [t for _, t in items]
+        if texts != shown:
+            print("\nPrima di partire serve questo (non cambio nessuna impostazione e non chiudo nulla):", flush=True)
+            for i, text in enumerate(texts, 1):
+                print(f"  {i}. {text}", flush=True)
+            shown = texts
+            print("Ricontrollo ogni 5 s e parto da solo appena è tutto a posto (Ctrl-C per annullare).", flush=True)
+        if o.dry_run:
+            print("(dry run: non aspetto)", flush=True)
+            return
+        time.sleep(5)
+    if shown:
+        print("Blocchi risolti.", flush=True)
+    if prepare.on_battery():
+        if o.dry_run:
+            print("Il Mac è a batteria: a una corsa vera chiederei «Continuare a batteria? [s/N]».", flush=True)
+            return
+        try:
+            answer = input("Il Mac è a batteria. Continuare a batteria? [s/N] ").strip().lower()
+        except EOFError:
+            answer = ""
+        if answer not in ("s", "si", "sì", "y", "yes"):
+            sys.exit("Annullato: collega l'alimentatore e rilancia.")
 
 
 def build(run):
     o = run.o
     run.sh("build-mecum", [SWIFT, "build", "-c", "release"], check=True)
-    for name, source, out in (("probe", "probe.swift", ".build/probe"), ("ocr", "ocr.swift", ".build/ocr"),
-                              ("axread", "tasks/axread.swift", ".build/axread")):
-        src, dst = os.path.join(HERE, source), os.path.join(HERE, out)
-        if not os.path.exists(dst) or os.path.getmtime(src) > os.path.getmtime(dst):
-            run.sh(f"build-{name}", [SWIFTC, "-O", source, "-o", out], check=True)
     cua = os.environ.get("CUA_DRIVER", os.path.expanduser("~/Forte_Projects/_bench/cua/libs/cua-driver/rust/target/release/cua-driver"))
     root = os.path.abspath(os.path.join(os.path.dirname(cua), "../.."))  # libs/cua-driver/rust
     if os.path.exists(os.path.join(root, "Cargo.toml")):
@@ -125,12 +170,14 @@ def end_launched(run):
         return
     for app, info in fixtures.items():
         pid = info.get("pid")
-        if not pid or info.get("already_running"):
+        if not pid or not info.get("launched"):
             continue
         name = subprocess.run(["ps", "-p", str(pid), "-o", "comm="], capture_output=True, text=True).stdout.strip()
         if os.path.basename(name) == PROCESS_OF.get(app, app) or os.path.basename(name).startswith(PROCESS_OF.get(app, app)):
-            os.kill(pid, signal.SIGTERM)
-            print(f"    ended {app} (pid {pid}), launched by prepare.py", flush=True)
+            os.kill(pid, signal.SIGTERM)  # never SIGKILL: an app that stays is left and said so
+            time.sleep(2)
+            alive = subprocess.run(["ps", "-p", str(pid)], capture_output=True).returncode == 0
+            print(f"    {'still running after SIGTERM, close it yourself' if alive else 'ended'}: {app} (pid {pid}), launched by prepare.py", flush=True)
         else:
             print(f"    left {app} (pid {pid}): the pid is now {name or 'gone'}", flush=True)
 
@@ -138,7 +185,7 @@ def end_launched(run):
 def main():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter,
                                 usage="bench.sh [--apps A,B,...] [--reps 8] [--quick] [--phases] [options]")
-    p.add_argument("--apps", help="apps to measure (default: every app of compare.py except Photoshop)")
+    p.add_argument("--apps", help="apps to measure (default: every app of compare.py, Photoshop included)")
     p.add_argument("--reps", type=int, default=8, help="measured repetitions per driver and operation")
     p.add_argument("--quick", action="store_true", help="smoke test: 2 reps, chain pauses 0 and 3 s, soak 20 steps, one task rep, short idle and cooldown")
     p.add_argument("--phases", action="store_true", help="also the Mecum phase breakdown (builds a MECUM_PHASES binary)")
@@ -166,6 +213,9 @@ def main():
         o.chain_steps = min(o.chain_steps, 5)
         o.chain_apps = o.chain_apps.split(",")[0]
     apps = (o.apps or default_apps()).split(",")
+    unknown = [a for a in apps if a not in prepare.TARGETS]
+    if unknown:
+        sys.exit(f"unknown app(s): {', '.join(unknown)}; known: {', '.join(prepare.TARGETS)}")
     run = Run(o)
     chain_apps = [a for a in o.chain_apps.split(",") if a in apps]
     o.chain_apps = ",".join(chain_apps)
@@ -176,15 +226,24 @@ def main():
           + "; ".join(f"{k} {v:.0f}" for k, v in parts.items()), flush=True)
     if not o.dry_run:
         os.makedirs(run.dir, exist_ok=True)
+    if o.dry_run:
+        print("Open and wait plan (nothing is opened):\n  " + "\n  ".join(prepare.plan(apps, run.dir)), flush=True)
+    build_helpers(run)
+    gate(o)
+    end = time.time() + sum(parts.values()) * 60
+    print(f"Da qui in poi non serve nessuno. Fine stimata: {time.strftime('%H:%M', time.localtime(end))}"
+          + ("" if time.strftime("%d", time.localtime(end)) == time.strftime("%d") else " (domani)")
+          + f", tra circa {sum(parts.values()):.0f} min.", flush=True)
     try:
-        code, blockers = prepare(run, apps, False)
+        code, blockers = run_prepare(run, apps, False)
         hard = [b for b in blockers if "is not built at" not in b]
         if hard:
             sys.exit("preflight blockers, nothing was run:\n  " + "\n  ".join(hard))
         build(run)
-        code, blockers = prepare(run, apps, True)
+        code, blockers = run_prepare(run, apps, True)
         if blockers:
             sys.exit("preflight blockers, nothing was run:\n  " + "\n  ".join(blockers))
+        report_notes(run)
         shared = ["--idle-windows", str(o.idle_windows), "--idle-seconds", str(o.idle_seconds)]
         compare(run, "ops", ",".join(apps), ["--mode", "ops", "--reps", str(o.reps), "--sessions", str(o.sessions)] + shared, "ops.jsonl")
         if chain_apps:
@@ -198,7 +257,7 @@ def main():
             run.sh("phases", [PY, "compare.py", "--phases", "--drivers", "mecum", "--apps", "Calculator", "--reps", "4", "--cooldown", str(o.cooldown),
                               "--out", run.path("phases.jsonl"), "--scratch", run.dir], env=env)
         if tasks:
-            claude = os.environ.get("CLAUDE_CLI", "/Users/mac/.local/bin/claude")
+            claude = prepare.CLAUDE
             if o.dry_run or os.path.exists(claude):
                 os.makedirs(run.path("tasks"), exist_ok=True) if not o.dry_run else None
                 run.sh("tasks", [PY, "tasks.py", "--out", run.path("tasks.jsonl"), "--scratch", run.path("tasks"), "--tasks", ",".join(tasks),
@@ -210,7 +269,30 @@ def main():
         if not o.dry_run:
             end_launched(run)
         print(f"Elapsed: {(time.time() - run.started) / 60:.1f} min" + (f"; phases that failed: {', '.join(run.failed)}" if run.failed else ""), flush=True)
+        where(run)
     sys.exit(1 if run.failed else 0)
+
+
+def where(run):
+    """The last lines of a run: the two reports and the run folder."""
+    out = os.path.expanduser(run.o.out_dir)
+    files = [os.path.join(out, f"MecumVsCua-{kind}-{run.date}.md") for kind in ("Team", "Report")]
+    if run.o.dry_run:
+        print("A fine corsa stamperei dove sono i due report e la cartella della corsa:", flush=True)
+    for path in files:
+        print(f"  {path}" + ("" if run.o.dry_run or os.path.exists(path) else "  (non generato)"), flush=True)
+    print(f"  Cartella della corsa: {run.dir}", flush=True)
+
+
+def report_notes(run):
+    """What the opening step could not get right, from fixtures.json; the run goes on and those apps record the failure."""
+    try:
+        fixtures = json.load(open(run.path("fixtures.json")))
+    except Exception:
+        return
+    for app, info in fixtures.items():
+        if info.get("note"):
+            print(f"    {app}: {info['note']}", flush=True)
 
 
 def finish(run, apps):
@@ -233,7 +315,7 @@ def finish(run, apps):
                 elapsed_s=round(time.time() - run.started), argv=sys.argv[1:], apps=apps, steps=run.steps, failed=run.failed)
     if not o.dry_run:
         json.dump(info, open(run.path("run.json"), "w"), indent=1)
-    argv = [PY, "report.py", "--summary", summary, "--run", run.path("run.json"), "--out-dir", o.out_dir]
+    argv = [PY, "report.py", "--summary", summary, "--run", run.path("run.json"), "--out-dir", o.out_dir, "--date", run.date]
     if tasks_summary and (present("tasks-summary.json") or o.dry_run):
         argv += ["--tasks", tasks_summary]
     if present("phases.jsonl.phases.txt"):

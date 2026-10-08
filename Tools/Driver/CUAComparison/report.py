@@ -66,13 +66,42 @@ def overlap(a, b):
     return bool(a and b and a[0] <= b[1] and b[0] <= a[1])
 
 
+def even(a, b, ci_a=None, ci_b=None):
+    return overlap(ci_a, ci_b) or abs(a - b) <= 0.10 * max(abs(a), abs(b))
+
+
 def verdict(m, o, low=True, ci_m=None, ci_o=None):
-    """Mecum value m against another driver's o: 🟢 better, 🔴 worse, ⚪ even (within 10% or intervals overlap)."""
+    """Mecum value m against another driver's o: 🟢 better, 🔴 worse, 🟡 even (within 10% or intervals overlap)."""
     if m is None or o is None:
         return ""
-    if overlap(ci_m, ci_o) or abs(m - o) <= 0.10 * max(abs(m), abs(o)):
-        return "⚪"
+    if even(m, o, ci_m, ci_o):
+        return "🟡"
     return "🟢" if (m < o) == low else "🔴"
+
+
+def markers(vals, low=True, ci=None):
+    """{key: marker} for compared values: the best 🟢, a value even with the best 🟡, the others 🔴; all even: all 🟡.
+    A key whose value is None gets "", and fewer than two values give no marker at all."""
+    live = {k: v for k, v in vals.items() if v is not None}
+    out = {k: "" for k in vals}
+    if len(live) < 2:
+        return out
+    ci = ci or {}
+    best = (min if low else max)(live.values())
+    top = next(k for k, v in live.items() if v == best)
+    near = {k: even(best, v, ci.get(top), ci.get(k)) for k, v in live.items()}
+    for k, v in live.items():
+        out[k] = "🟡" if all(near.values()) else "🟢" if v == best else "🟡" if near[k] else "🔴"
+    return out
+
+
+def with_mark(text, mark):
+    return f"{text} {mark}".strip()
+
+
+def no_probe(confirmed, checkable, n, ok):
+    """True when no row carried a probe verdict: nothing confirmed and every checkable call is just a failed one."""
+    return not confirmed and checkable <= n - ok
 
 
 def rate_verdict(k1, n1, k2, n2, low=False):
@@ -96,7 +125,7 @@ def arrow(cur, base, low=True):
 
 
 def tally(marks):
-    return f"🟢 {marks.count('🟢')}, 🔴 {marks.count('🔴')}, ⚪ {marks.count('⚪')}"
+    return f"🟢 {marks.count('🟢')}, 🔴 {marks.count('🔴')}, 🟡 {marks.count('🟡')}"
 
 
 def last_window(idle):
@@ -211,10 +240,11 @@ class Team:
         self.out.append(text + "\n".join(intro) + "\n\n" + table(header, rows) + f"\n\n**Conclusione:** {conclusion}\n")
 
     def metric(self, rows, area, label, vals, fmt, low=True, own=None, cua_base=None, with_cua=False, ci=None, loss=True):
-        """One row: Mecum, Cua, Cua overlay (marker = Mecum against that variant), own change, optional Cua note."""
+        """One row: Mecum, Cua, Cua overlay (each value with its own marker), own change, optional Cua note."""
         c, ci = self.c, ci or {}
         m = vals.get("mecum")
-        cells = [fmt(m) if m is not None else "n/d"]
+        mk = markers({d: vals.get(d) for d in DRV if d in c.drivers}, low, ci)
+        cells = [with_mark(fmt(m), mk.get("mecum", "")) if m is not None else "n/d"]
         for d in ("cua", "cua-overlay"):
             v = vals.get(d)
             if d not in c.drivers or v is None:
@@ -225,7 +255,7 @@ class Team:
             if mark == "🔴" and loss:
                 c.losses.append(dict(area=area, metric=label, mecum=fmt(m), other=fmt(v), against=LABEL[d],
                                      delta=change(m, v) if m > 0 and v > 0 else None))
-            cells.append(f"{fmt(v)} {mark}")
+            cells.append(with_mark(fmt(v), mk.get(d, "")))
         row = [label] + cells + [arrow(*own, low) if own else "n/d"]
         if with_cua:
             ch = change(*cua_base) if cua_base else None
@@ -296,13 +326,17 @@ def t_headline(t):
                    sum(g(c.app(c.S, d, a), "actions", den_key, default=0) for a in used)) for d in c.drivers}
         if not used or not all(n for _, n in cnt.values()):
             continue
+        # A probe verdict that no row recorded (6 Oct rows) is n/d, never 0%.
+        gone = {d: den_key == "n_checkable" and no_probe(cnt[d][0], cnt[d][1], sum(g(c.app(c.S, d, a), "actions", "n", default=0) for a in used),
+                                                          sum(g(c.app(c.S, d, a), "actions", "n_ok", default=0) for a in used)) for d in c.drivers}
+        mk = markers({d: None if gone[d] else cnt[d][0] / cnt[d][1] for d in c.drivers}, low,
+                     {d: wilson(*cnt[d]) for d in c.drivers})
         row = [label]
         for d in c.drivers:
             k, n = cnt[d]
-            mark = "" if d == "mecum" else rate_verdict(*cnt["mecum"], k, n, low)
             if d != "mecum":
-                c.marks.append(mark)
-            row.append(f"{k}/{n} ({pct_text(k / n)}) {mark}".strip())
+                c.marks.append("" if gone[d] or gone["mecum"] else rate_verdict(*cnt["mecum"], k, n, low))
+            row.append("n/d" if gone[d] else with_mark(f"{k}/{n} ({pct_text(k / n)})", mk[d]))
         row += ["n/d"] * (4 - len(row)) + [arrow(*c.own(lambda a, k=num_key, n=den_key: (g(a, "actions", k) / g(a, "actions", n)) if g(a, "actions", n) else None), False), "n/d"]
         rows.append(row)
     for label, key in (("Primo piano cambiato (azioni)", "frontmost_changed"), ("Cursore spostato durante la chiamata", "cursor_moved_during_call"),
@@ -311,31 +345,33 @@ def t_headline(t):
                    sum(g(c.app(c.S, d, a), "intrusion", "calls", default=0) for a in c.apps())) for d in c.drivers}
         if not all(n for _, n in cnt.values()):
             continue
+        mk = markers({d: k / n for d, (k, n) in cnt.items()}, True, {d: wilson(*cnt[d]) for d in c.drivers})
         row = [label]
         for d in c.drivers:
             k, n = cnt[d]
-            mark = "" if d == "mecum" else rate_verdict(*cnt["mecum"], k, n, True)
             if d != "mecum":
+                mark = rate_verdict(*cnt["mecum"], k, n, True)
                 c.marks.append(mark)
                 if mark == "🔴":
                     c.losses.append(dict(area="Intrusione", metric=label, mecum=f"{cnt['mecum'][0]}/{cnt['mecum'][1]}",
                                          other=f"{k}/{n}", against=LABEL[d], delta=None))
-            row.append(f"{k}/{n} {mark}".strip())
+            row.append(with_mark(f"{k}/{n}", mk[d]))
         rows.append(row + ["n/d", "n/d"])
     marks = [m for m in c.marks if m]
     t.section("Sintesi", ["Le metriche principali, ognuna sulle app dove tutti i driver hanno dati.",
-                          "Il marcatore accanto al valore di Cua dice come sta Mecum rispetto a quella variante.",
+                          "Ogni valore ha il suo marcatore: 🟢 il migliore, 🔴 il peggiore, 🟡 pari.",
                           "Passo equivalente: l'azione con la scena che la segue (Mecum una chiamata, Cua `run_actions` con `observe`)."],
               HEAD_CUA, rows, f"sul totale dei confronti {tally(marks)}; i dettagli sono nelle tabelle sotto.")
 
 
 def t_steps(t):
-    c, rows, marks, reds = t.c, [], [], {}
+    c, rows, marks, reds, wins_of = t.c, [], [], {}, []
     for a in c.apps():
         ops = c.matched_ops(c.S, a, c.drivers)
         if not ops:
             continue
         vals = {d: c.pooled_step(c.S, d, {a: ops})[0] for d in c.drivers}
+        wins_of.append(verdict(vals.get("mecum"), vals.get("cua")) == "🟢")
         n_ops = len(ops)
         own_ops = c.own_ops(a)
         own = (c.pooled_step(c.S, "mecum", {a: own_ops})[0], c.pooled_step(c.B, "mecum", {a: own_ops})[0]) if own_ops else None
@@ -349,7 +385,7 @@ def t_steps(t):
         m, k = c.pooled_step(c.S, "mecum", apps)[0], c.pooled_step(c.S, d, apps)[0]
         c.losses.append(dict(area="Passo", metric=f"Passo equivalente, app più lente ({', '.join(apps)})", mecum=ms(m), other=ms(k),
                              against=LABEL[d], delta=change(m, k)))
-    wins = sum(1 for r in rows if r[2].endswith("🟢"))
+    wins = sum(1 for a in wins_of if a)
     both = sum(1 for r in rows if r[1] != "n/d")
     t.section("Tempo del passo per app", [
         "Mediana del passo equivalente su operazioni che tutti i driver hanno completato (stesso mix di operazioni).",
@@ -471,6 +507,7 @@ def t_robust(t):
         if not any(x.get("n") for x in acts.values()) and not any(refused.values()):
             continue
         row, m = [f"{a} ({c.fw(a)})"], acts.get("mecum", {})
+        mk = markers({d: x["ok_rate"] for d, x in acts.items() if x.get("n")}, False, {d: x["ok_wilson95"] for d, x in acts.items() if x.get("n")})
         for d in DRV:
             x = acts.get(d)
             if x is None:
@@ -481,8 +518,8 @@ def t_robust(t):
                     c.losses.append(dict(area="Robustezza", metric=f"{a}: apertura della sessione", mecum="rifiutata", other="ok", against="Cua", delta=None))
             else:
                 w = x["ok_wilson95"]
-                s = f"{x['n_ok']}/{x['n']} [{w[0]:.2f}-{w[1]:.2f}]" + (f"; conf. {x['n_confirmed']}/{x['n_checkable']}" if x.get("n_checkable") else "")
-                mark = ""
+                conf = ("n/d" if no_probe(x["n_confirmed"], x["n_checkable"], x["n"], x["n_ok"]) else f"{x['n_confirmed']}/{x['n_checkable']}") if x.get("n_checkable") else ""
+                s = f"{x['n_ok']}/{x['n']} [{w[0]:.2f}-{w[1]:.2f}]" + (f"; conf. {conf}" if conf else "")
                 if d != "mecum" and m.get("n"):
                     mark = verdict(m["ok_rate"], x["ok_rate"], False, m["ok_wilson95"], w)
                     marks.append(mark)
@@ -490,7 +527,7 @@ def t_robust(t):
                     if mark == "🔴":
                         c.losses.append(dict(area="Robustezza", metric=f"{a}: azioni riuscite", mecum=f"{m['n_ok']}/{m['n']}", other=f"{x['n_ok']}/{x['n']}",
                                              against=LABEL[d], delta=None))
-                row.append(f"{s} {mark}".strip())
+                row.append(with_mark(s, mk.get(d, "")))
         row.append(arrow(m.get("ok_rate"), (c.app(c.B, "mecum", a).get("actions") or {}).get("ok_rate"), False))
         rows.append(row)
     t.section("Robustezza", [
@@ -541,21 +578,23 @@ def t_support(t):
             for cl in i["claims"].values():
                 counts[cl] = counts.get(cl, 0) + 1
             declared = ", ".join(f"{k} {v}" for k, v in sorted(counts.items(), key=lambda x: -x[1])) or "n/d"
-            measured = f"{i['ok']}/{i['n']}" + (f", conf. {i['conf']}/{i['chk']}" if i["chk"] else "") if i["n"] else "n/d"
+            conf = "n/d" if no_probe(i["conf"], i["chk"], i["n"], i["ok"]) else f"{i['conf']}/{i['chk']}"
+            measured = f"{i['ok']}/{i['n']}" + (f", conf. {conf}" if i["chk"] else "") if i["n"] else "n/d"
             cells += [declared, measured]
         flags = [f"{LABEL[d]} {x}" for d in ("mecum", "cua") for x in info[d]["flags"]]
         mi, ci_ = info["mecum"], info["cua"]
-        mark = rate_verdict(mi["ok"], mi["n"], ci_["ok"], ci_["n"]) if mi["n"] and ci_["n"] else ""
-        marks.append(mark)
-        cells.append(mark)
+        marks.append(rate_verdict(mi["ok"], mi["n"], ci_["ok"], ci_["n"]) if mi["n"] and ci_["n"] else "")
+        mk = markers({d: info[d]["ok"] / info[d]["n"] for d in ("mecum", "cua") if info[d]["n"]}, False,
+                     {d: wilson(info[d]["ok"], info[d]["n"]) for d in ("mecum", "cua") if info[d]["n"]})
+        cells[2], cells[4] = with_mark(cells[2], mk.get("mecum", "")), with_mark(cells[4], mk.get("cua", ""))
         cells.append("; ".join(flags) or "-")
         rows.append(cells)
     flagged = sum(1 for r in rows if r[-1] != "-")
     t.section("Supporto per framework", [
         "Cosa dichiara ciascun driver nella propria documentazione (a c1c2b5f per Cua) e cosa si è misurato in questa corsa, sulle capacità misurate.",
-        "Dichiarato: conteggio delle capacità per tipo; misurato: azioni ok su tentate (e confermate dalla sonda). Il marcatore confronta Mecum con Cua.",
+        "Dichiarato: conteggio delle capacità per tipo; misurato: azioni ok su tentate (e confermate dalla sonda). Il marcatore di ogni valore misurato confronta Mecum con Cua.",
         "Segnalazioni: dichiarato non supportato ma funziona, dichiarato supportato ma fallisce (per Cua la variante senza overlay)."],
-              ["Framework (app)", "Mecum dichiarato", "Mecum misurato", "Cua dichiarato", "Cua misurato", "Mecum vs Cua", "Segnalazioni"],
+              ["Framework (app)", "Mecum dichiarato", "Mecum misurato", "Cua dichiarato", "Cua misurato", "Segnalazioni"],
               rows, f"{flagged} framework su {len(rows)} con almeno una incoerenza tra dichiarato e misurato; {tally(marks)}.",
               "support.json assente o nessuna app misurata")
 
@@ -565,6 +604,16 @@ def task_cells(cell):
     return (f"{s['count']}/{s['of']} · {num(g(cell, 'wall_s', 'median'))} s · {num(g(cell, 'billed_tokens', 'median'))} tok · "
             f"${num(g(cell, 'cost_usd', 'median'), 2)} · {num(g(cell, 'tool_calls', 'median'))} chiam. · "
             f"pensiero {num((g(cell, 'think_ms', 'median') or 0) / 1000 if g(cell, 'think_ms', 'median') is not None else None, 1)} s")
+
+
+def task_markers(cells):
+    """Markers of the drivers' task cells: by success rate, and by median time when the success rates are all even."""
+    live = {d: x for d, x in cells.items() if x and x["runs"] and x["success"]["of"]}
+    ok = markers({d: x["success"]["count"] / x["success"]["of"] for d, x in live.items()}, False,
+                 {d: wilson(x["success"]["count"], x["success"]["of"]) for d, x in live.items()})
+    if live and all(m == "🟡" for m in ok.values()):
+        return markers({d: g(x, "wall_s", "median") for d, x in live.items()}, True)
+    return ok
 
 
 def t_tasks(t):
@@ -577,22 +626,22 @@ def t_tasks(t):
     for k in tasks + ["ALL(supported)"]:
         row = [k]
         cm = g(T, "mecum", "tasks", k) if k != "ALL(supported)" else g(T, "mecum", "within_declared_support")
+        mk = task_markers({d: (T.get(d) or {}).get("tasks", {}).get(k) if k != "ALL(supported)" else (T.get(d) or {}).get("within_declared_support") for d in DRV})
         for d in DRV:
             cell = (T.get(d) or {}).get("tasks", {}).get(k) if k != "ALL(supported)" else (T.get(d) or {}).get("within_declared_support")
             if not cell or not cell["runs"]:
                 row.append("n/d")
                 continue
             s = task_cells(cell) + (" (fuori dal supporto dichiarato)" if cell.get("outside_declared_support") and k != "ALL(supported)" else "")
-            mark = ""
             if d != "mecum" and cm and cm["runs"]:
                 a, b = cm["success"], cell["success"]
                 mark = rate_verdict(a["count"], a["of"], b["count"], b["of"]) if a["of"] and b["of"] else ""
-                if mark == "⚪":
+                if mark == "🟡":
                     mark = verdict(g(cm, "wall_s", "median"), g(cell, "wall_s", "median"))
                 marks.append(mark)
                 if mark == "🔴" and k != "ALL(supported)":
                     c.losses.append(dict(area="Compiti", metric=f"compito {k}", mecum=task_cells(cm), other=task_cells(cell), against=LABEL[d], delta=None))
-            row.append(f"{s} {mark}".strip())
+            row.append(with_mark(s, mk.get(d, "")))
         rows.append(row)
     model = ""
     if T:
@@ -602,7 +651,7 @@ def t_tasks(t):
         "Lo stesso compito, lo stesso prompt e lo stesso modello, guidati da Claude Code attraverso il server MCP di ciascun driver.",
         "Cella: riuscite/decise · tempo · token fatturati · costo · chiamate · tempo di pensiero medio per chiamata; successo deciso da un controllo indipendente."
         + model,
-        "Il marcatore confronta il successo e, a parità, il tempo. `ALL(supported)` esclude i compiti fuori dal supporto dichiarato di Cua."],
+        "Il marcatore di ogni cella confronta il successo e, a parità, il tempo. `ALL(supported)` esclude i compiti fuori dal supporto dichiarato di Cua."],
               ["Compito"] + [LABEL[d] for d in DRV], rows,
               f"{tally([m for m in marks if m])} sui confronti; poche ripetizioni per compito: gli intervalli sono larghi.", "fase compiti non eseguita")
 
@@ -787,8 +836,7 @@ def team(c):
     t_tickets(t)
     tickets = t.out
     date = time.strftime("%d/%m/%Y", time.strptime(c.when, "%Y-%m-%d"))
-    legend = ("**Legenda.** 🟢 Mecum meglio, 🔴 Mecum peggio, ⚪ pari (differenza entro ±10% oppure intervalli al 95% sovrapposti). "
-              "Il marcatore sta accanto al valore di Cua e dice come sta Mecum rispetto a quella variante. "
+    legend = ("**Legenda.** Ogni valore confrontato ha il suo marcatore: 🟢 il migliore, 🔴 il peggiore, 🟡 pari (differenza entro ±10% oppure intervalli al 95% sovrapposti). "
               "Colonna `vs 6/10`: variazione di Mecum rispetto alla propria corsa del 6 ottobre (▲ meglio, ▼ peggio, = entro ±5%). "
               "Cua è cambiato versione dal 6/10: le sue variazioni non sono un nostro guadagno. "
               "`Cua` è la variante senza overlay, `Cua overlay` quella con l'overlay del cursore.")
@@ -1150,8 +1198,8 @@ failed count as failures; an operation the probe cannot see stays unverified and
 `run_actions` call with `observe:true` for Cua and the action call alone for Mecum (its reply already has the scene); a menu adds a diff read
 for Cua. The pooled step medians use the operations every driver completed, weighted by their repetitions. **Tokens**: text is characters / 4,
 images are width x height / 750 after resizing; they estimate context, not billed tokens (the task phase has billed tokens). **Intervals**:
-Wilson 95% for proportions; the mean of a latency has a normal 95% interval from its standard deviation. A marker is "even" when the
-difference is within 10% or the intervals overlap."""
+Wilson 95% for proportions; the mean of a latency has a normal 95% interval from its standard deviation. A marker is 🟡 ("even") when the
+difference is within 10% or the intervals overlap; otherwise the best value is 🟢 and the others 🔴."""
 
 LIMITS = """- One machine on one day, a small operation set and few repetitions per operation: small differences are not distinguishable.
 - The probe sees AX values, not pixels: kitty, Obsidian and Photoshop pixel effects, scrolls and menu commands stay unverified.
@@ -1194,7 +1242,7 @@ def report(c, phases_text=None):
            "**Summary**\n\n" + "\n".join(summary) + "\n",
            sec(1, "Method", methodology(c) + "\n" + METHOD_TEXT),
            sec(2, "Parity of the components", r_parity(c)),
-           sec(3, "Headline metrics", "Medians over the apps every driver has data for; the marker beside a Cua value is Mecum against that variant.\n\n" + r_headline(c)),
+           sec(3, "Headline metrics", "Medians over the apps every driver has data for; each compared value carries its own marker (🟢 best, 🔴 worst, 🟡 even).\n\n" + r_headline(c)),
            sec(4, "Equivalent step per application", "Pooled over the operations every driver completed (weighted median of the per-operation percentiles).\n\n" + r_step(c)),
            sec(5, "Delay between steps", r_chain(c)),
            sec(6, "Reads", r_reads(c)),
@@ -1223,7 +1271,23 @@ def load(path, default=None):
     return default
 
 
+def selftest():
+    assert markers({"a": 10, "b": 20}) == {"a": "🟢", "b": "🔴"}
+    assert markers({"a": 10, "b": 10.5}) == {"a": "🟡", "b": "🟡"}
+    assert markers({"a": 0.9, "b": 0.5}, low=False) == {"a": "🟢", "b": "🔴"}
+    assert markers({"a": 10, "b": 50}, ci={"a": [8, 30], "b": [20, 60]}) == {"a": "🟡", "b": "🟡"}
+    assert markers({"a": 10, "b": 10.8, "c": 40}) == {"a": "🟢", "b": "🟡", "c": "🔴"}
+    assert markers({"a": 10, "b": 10.4, "c": 10.9}) == {"a": "🟡", "b": "🟡", "c": "🟡"}
+    assert markers({"a": 10, "b": 25, "c": 40}) == {"a": "🟢", "b": "🔴", "c": "🔴"}
+    assert markers({"a": 10, "b": None}) == {"a": "", "b": ""} and markers({"a": 10}) == {"a": ""}
+    assert markers({"a": 10, "b": None, "c": 30}) == {"a": "🟢", "b": "", "c": "🔴"}
+    assert no_probe(0, 32, 328, 296) and not no_probe(0, 40, 328, 296) and not no_probe(5, 32, 328, 296)
+    print("selftest ok")
+
+
 def main():
+    if "--selftest" in sys.argv:
+        return selftest()
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--summary", required=True, help="summary.json of the current run (summarize.py --json)")
     p.add_argument("--tasks", help="tasks.py --summary output")

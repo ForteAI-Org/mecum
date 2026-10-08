@@ -170,7 +170,13 @@ def check_textedit(c):
 def prep_form(c):
     c.vars = dict(run=c.id, name=f"Bench{c.rep}", color=["Blue", "Green", "Blue"][c.rep % 3])
     url = f"http://127.0.0.1:{c.server.server_port}/form.html?run={c.id}"
-    subprocess.run(["open", "-g", "-a", c.task["app"], url], check=False)
+    profile = os.environ.get("BENCH_CHROME_PROFILE")
+    if c.task["app"] == "Google Chrome" and profile:
+        # Chrome hands a URL to the running instance of that profile, so the page lands in the benchmark's Chrome.
+        argv = ["open", "-g", "-n", "-a", "Google Chrome", "--args", f"--user-data-dir={profile}", url]
+    else:
+        argv = ["open", "-g", "-a", c.task["app"], url]
+    subprocess.run(argv, check=False)
     if not wait_for(lambda: c.id in STATE):
         c.skip = "form page did not load"
 
