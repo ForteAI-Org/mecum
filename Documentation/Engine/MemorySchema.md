@@ -1561,7 +1561,7 @@ keeps it off a `windows` row. No table, index or trigger was added or removed:
 | Change | Producer → column → reader | Why | Proof |
 |---|---|---|---|
 | `label_origin` admits `identifier`, on `memory_event_observations` and `brain_scene_elements` | `AccessibilityAugmentation.harvest` → `label_origin` → `CaptureElement.labelOrigin` | main's harvest names a text area that has no title by its accessibility identifier | 1 SQL check |
-| `memory_events.source` admits `mcp`; the two triggers of `memory_action_correlations` accept an `app`, `cli` or `mcp` action | `AutomationTools` under an external client's `CallProducer` → `source` → `MemoryEventRecord.source` | the app's external MCP clients write into the workers' archive under a source of their own | 2 SQL checks |
+| `memory_events.source` admits `mcp`; the two triggers of `memory_action_correlations` accept an `app`, `cli` or `mcp` action | `AutomationTools` under an external client's `CallProducer` → `source` → `MemoryEventRecord.source` | the original transplant used the workers' archive; the current candidate retains source `mcp` in a private archive per profile, as on main | 2 SQL checks |
 | `memory_agent_actions.observed_effect_kind` admits `textSelectionChanged`, a family with no title, state or label | the engine's `SceneEffect` → `ObservedEffect` → the columns → `ObservedEffect.sceneEffect` | main's perception reports a selection change in a text field | 4 SQL checks |
 | `memory_agent_action_applications.is_default_browser INTEGER` (0, 1 or NULL), and the insert guard keeps it off a `windows` row | the `apps` tool's candidates → `ListedApplication.isDefaultBrowser` → the column → `AgentCallStoring.call` | main's `apps` listing says which application opens web links | 3 SQL checks |
 

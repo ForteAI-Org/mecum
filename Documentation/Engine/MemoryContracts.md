@@ -222,7 +222,9 @@ Readers never write: a read leaves the ledger and the commit count unchanged.
 - The queue is in memory: a crash loses what it held, and a failed or dropped write leaves no row saying so.
 - A store that went `failed` after a rollback it could not complete is not reopened by the service: its writes
   are counted failures until the process ends.
-- The restore of a corrupt archive does not check whether another process holds the file.
+- Recovery requires an exclusive presence lease and refuses to replace an archive another cooperating
+  process holds open. Processes that ignore the lease and loss of power are outside this guarantee; see
+  [Recovery](MemorySchema.md#copies-and-recovery).
 - The 2.17 GB corpus measured on `memory-model` is agent calls with their samples over synthetic applications,
   not Watcher events; nothing here promises the volume of a continuous Watcher.
 - The Watcher (`InteractionListener`, `mecum watch`) is not connected to the memory.
@@ -246,9 +248,11 @@ transplant, not merge: the data layer was cherry-picked and the wiring written a
 
 Adapted rather than carried: the producers write through one queue no action waits for, where `memory-model`
 awaited its writes under per-owner finalization budgets; one service per directory per process, never closed by
-a session, where `memory-model`'s owners each opened and closed theirs; external MCP clients write into the
-app's archive as `mcp`, where main gave each client a Knowledge directory of its own; the command line records
-events, samples and Brain learning but no call rows.
+a session, where `memory-model`'s owners each opened and closed theirs. The original transplant shared the
+app's archive with external MCP clients. That choice was reversed: the current candidate gives each client
+a private `MCP/Knowledge/<profile>` archive, as on main, with source `mcp`. Direct `scene` and `act` commands
+record events, samples and Brain learning without call rows; terminal chat records calls through
+`AutomationTools`, as described in [What production writes today](#what-production-writes-today).
 
 Stayed on `memory-model`: its shared agent turn (`AgentTurn`, `AgentTurnHost`, `ModelToolLoop`) and the chat
 through the broker (`ChatHost`); the command line's recorded calls and stops (`CLICall`, `StepRunner`,
@@ -287,8 +291,10 @@ either writes its own.
 - The indexes measured on copies on `memory-model` (`brain_evidence(app_id)`, `memory_events(origin_event_id)`)
   are left to later work on performance: schema 1 is unchanged for them. A trace page can read every event
   below its cursor.
-- `MemoryService.status()` carries the linked library's version, the counts of gaps and the last recovery, and
-  no screen or command shows them. Older macOS releases and their SQLite libraries were not checked.
+- Settings → Brain shows the app process's memory status and counters. `mecum memory --status` reports
+  the linked SQLite version, archive and schema compatibility in its own process without opening the
+  writing service; its counters must not be presented as the app's. Older macOS releases and their
+  SQLite libraries were not checked.
 - Before Action Memory and Action Recall write anything of their own, four contracts need one shared answer, so the
   two do not produce incompatible formats: how a stored argument names the slot or the earlier output it came from
   (binding and provenance; see [Shared fixtures](#shared-fixtures)); what a verification proves and who may write

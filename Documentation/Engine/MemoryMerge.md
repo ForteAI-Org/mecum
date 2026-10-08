@@ -92,7 +92,7 @@ Status: **resolved** (done and verified), **limit** (documented, not needed by t
 |---|---|---|
 | 4 Shared service | resolved | One `MemoryService` per Knowledge directory per process. No session closes it; the process closes all at its end. External clients write as `mcp`. |
 | 5 Versions and data | resolved | A file at version 1 must match the shipped DDL exactly (`differentShape` otherwise), untouched. JSON import tested on copies of six real Brains: counts equal, originals unchanged. |
-| 11 SQLite library | open | The store refuses a library below its requirements. On this Mac: 3.54.0. The version and source ID are in `MemoryService.status()` but no screen shows them, and older macOS releases were not checked. |
+| 11 SQLite library | open | The store refuses a library below its requirements. On this Mac: 3.54.0. The current candidate exposes the linked version in Settings → Brain and through `mecum memory --status`; older macOS releases remain untested. The original no-UI limitation has been corrected. |
 | 28 Writers | resolved | Every production write goes through the repositories, in the queue; the import goes through the Brain repository, never raw SQL. Foreign keys are on for every connection. |
 | 29 Retention | limit | Nothing deletes history; decay retires projection rows. A policy is a later decision (D8). |
 | 30 Copies and restore | resolved | A verified copy a day, three kept; a corrupt archive moved aside and the newest copy restored, or an empty start. Tested. Restoring the whole app (workspace, conversations) is outside the memory. |
