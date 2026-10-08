@@ -25,6 +25,16 @@ import SeatSession
 /// at all it waits the whole cap, the engine's fixed pause: an action whose effect is a new window
 /// (a dialog, a sheet, a panel) leaves the target's pixels alone, so silence is not a verdict.
 ///
+/// ## The baseline
+///
+/// An application that redraws within a few milliseconds of the input has already drawn its effect
+/// in the first frame the wait sees, so comparing frames with each other alone reads "no change".
+/// `prepare`, which the engine calls right before it delivers a gesture, copies the newest frame
+/// of the target window out of the stream's pool. The first frame after the gesture is compared
+/// with that copy, so an effect drawn at once counts as the change it is. The copy is used only
+/// when it is of the window being settled, was displayed before it was taken, and is younger than
+/// `baselineLifetime`; otherwise the wait runs as if there were none. A baseline serves one wait.
+///
 /// ## When it cannot tell
 ///
 /// With no running stream (a target nobody streams, as on the command line), a stream pinned to
@@ -48,11 +58,23 @@ public struct SeatSettler: Settling {
     /// times come to 99.99 ms, so the figure is 90 ms rather than 100, or it would take four.
     package static let stabilityInterval: Duration = .milliseconds(90)
 
+    /// How long `prepare` waits for a frame to copy when the stream has shown none yet. A stream
+    /// that delivers about 30 frames a second always has a newest one, which answers at once.
+    package static let baselineBound: Duration = .milliseconds(50)
+
+    /// How old a baseline may be when the wait starts: it belongs to the gesture just delivered,
+    /// not to one whose wait never came (a refused or failed delivery, a contextual menu).
+    package static let baselineLifetime: Duration = .seconds(2)
+
     /// How a wait ended, which the phase build reports as the detail of `settle`.
     package enum Ending: Equatable, Sendable {
 
         /// Frames changed, then stayed identical for the stability interval.
         case stable
+
+        /// The first frame after the gesture already differed from the baseline taken before it,
+        /// then frames stayed identical for the stability interval.
+        case stableAgainstBaseline
 
         /// No frame changed, and the whole cap was waited.
         case quiet
@@ -64,8 +86,31 @@ public struct SeatSettler: Settling {
         case fallback(LiveFrameFallback)
     }
 
+    /// What `prepare` copied before a gesture: the window's frame, as displayed at `displayedAt`,
+    /// copied at `markedAt`, both uptime nanoseconds.
+    package struct Baseline: Sendable {
+        package let frame      : SeatFrame
+        package let identity   : WindowIdentity
+        package let displayedAt: UInt64
+        package let markedAt   : UInt64
+
+        package init(frame: SeatFrame, identity: WindowIdentity, displayedAt: UInt64, markedAt: UInt64) {
+            self.frame       = frame
+            self.identity    = identity
+            self.displayedAt = displayedAt
+            self.markedAt    = markedAt
+        }
+    }
+
+    /// Holds the baseline between `prepare` and the next wait, on the main actor the target is on.
+    @MainActor
+    private final class Mark {
+        var baseline: Baseline?
+    }
+
     private let target: SeatTarget
     private let sleep : @Sendable (Duration) async -> Void
+    private let mark  = Mark()
 
     public init(target: SeatTarget) {
         self.init(target: target, sleep: { try? await Task.sleep(for: $0) })
@@ -75,6 +120,40 @@ public struct SeatSettler: Settling {
     package init(target: SeatTarget, sleep: @escaping @Sendable (Duration) async -> Void) {
         self.target = target
         self.sleep  = sleep
+    }
+
+    /// Copies the target window's newest frame as the baseline of the wait that follows the gesture.
+    public func prepare(in processID: pid_t) async {
+        #if MECUM_PHASES
+        let phase = PhaseInterval.begin("settle.prepare")
+        defer { phase.end() }
+        #endif
+        await prepared()
+    }
+
+    /// Replaces the baseline with a copy of the newest frame of the target window, or with none
+    /// when there is no stream, no frame in `baselineBound`, or no copy to make.
+    @MainActor
+    package func prepared() async {
+        mark.baseline = nil
+        guard let liveFrames = target.liveFrames,
+              let identity = (try? target.currentWindow())?.reference.identity,
+              case .success(let frame) = await liveFrames.liveFrame(
+                  of            : identity,
+                  displayedAfter: 0,
+                  within        : Self.baselineBound
+              ),
+              let displayedAt = frame.displayTime.flatMap({
+                  MachAbsoluteContentClock().displayTimeNanoseconds(fromMachTicks: $0)
+              }),
+              let copy = frame.detachedCopy()
+        else { return }
+        mark.baseline = Baseline(
+            frame      : copy,
+            identity   : identity,
+            displayedAt: displayedAt,
+            markedAt   : DispatchTime.now().uptimeNanoseconds
+        )
     }
 
     /// `processID` is not read: the seat drives one window, the one it targets.
@@ -90,6 +169,8 @@ public struct SeatSettler: Settling {
 
     @MainActor
     package func settled(cap: Duration) async -> Ending {
+        let baseline = mark.baseline
+        mark.baseline = nil
         // A target with no window to name (stopped, not adopted) has nothing to watch: the fixed pause.
         guard let liveFrames = target.liveFrames,
               let identity = (try? target.currentWindow())?.reference.identity
@@ -100,6 +181,11 @@ public struct SeatSettler: Settling {
         let clock = MachAbsoluteContentClock()
         return await Self.wait(
             cap        : cap,
+            baseline   : Self.reference(
+                baseline,
+                for      : identity,
+                startedAt: DispatchTime.now().uptimeNanoseconds
+            ),
             next       : { after, bound in
                 await liveFrames.liveFrame(of: identity, displayedAfter: after, within: bound)
             },
@@ -109,7 +195,28 @@ public struct SeatSettler: Settling {
         )
     }
 
+    /// The frame of `baseline` to compare the first frame with, or nil when it may not be used: it
+    /// is of another window, was displayed after it was copied, or is older than the lifetime.
+    package static func reference(
+        _ baseline  : Baseline?,
+        for identity: WindowIdentity,
+        startedAt   : UInt64
+    ) -> SeatFrame? {
+        guard let baseline,
+              baseline.identity == identity,
+              case .window(let source) = baseline.frame.source, source == identity,
+              baseline.displayedAt <= baseline.markedAt,
+              startedAt >= baseline.markedAt,
+              startedAt - baseline.markedAt <= nanoseconds(baselineLifetime)
+        else { return nil }
+        return baseline.frame
+    }
+
     /// Waits for the frames `next` answers to settle, on the uptime clock `now` reads in nanoseconds.
+    ///
+    /// With a `baseline`, the first frame is compared with it as later ones are with their
+    /// predecessor, so a change already drawn in that frame counts and ends `stableAgainstBaseline`.
+    /// Without one the first frame is only the reference, as before.
     ///
     /// `next` answers the first frame displayed after an instant within a bound, as
     /// `LiveWindowFrameSourcing` does, and `displayedAt` places a frame on the same clock. A frame
@@ -118,6 +225,7 @@ public struct SeatSettler: Settling {
     @MainActor
     package static func wait(
         cap        : Duration,
+        baseline   : SeatFrame? = nil,
         next       : (_ displayedAfter: UInt64, _ within: Duration) async -> Result<SeatFrame, LiveFrameFallback>,
         displayedAt: (SeatFrame) -> UInt64?,
         now        : () -> UInt64,
@@ -130,7 +238,9 @@ public struct SeatSettler: Settling {
         var after     = start
         var runStart  = start
         var changed   = false
-        var previous  : SeatFrame?
+        var previous  : SeatFrame? = baseline
+        var hasFrames = false
+        var changeWasAgainstBaseline = false
 
         while true {
             let current = now()
@@ -144,16 +254,20 @@ public struct SeatSettler: Settling {
                 }
                 let waited = now()
                 if waited < deadline { await sleep(.nanoseconds(deadline - waited)) }
-                if reason == .noFrameInBound, previous != nil { return changed ? .cap : .quiet }
+                if reason == .noFrameInBound, hasFrames { return changed ? .cap : .quiet }
                 return .fallback(reason)
             }
             if let previous, !frame.showsSameContent(as: previous) {
+                if !changed { changeWasAgainstBaseline = !hasFrames }
                 runStart = displayed
                 changed  = true
             }
-            previous = frame
-            after    = displayed
-            if changed, displayed - runStart >= stability { return .stable }
+            previous  = frame
+            hasFrames = true
+            after     = displayed
+            if changed, displayed - runStart >= stability {
+                return changeWasAgainstBaseline ? .stableAgainstBaseline : .stable
+            }
         }
     }
 
@@ -169,10 +283,11 @@ extension SeatSettler.Ending {
     /// The detail the `settle` phase is named with.
     var detail: String {
         switch self {
-            case .stable              : "stable"
-            case .quiet               : "quiet"
-            case .cap                 : "cap"
-            case .fallback(let reason): "fallback.\(reason)"
+            case .stable               : "stable"
+            case .stableAgainstBaseline: "stable.baseline"
+            case .quiet                : "quiet"
+            case .cap                  : "cap"
+            case .fallback(let reason) : "fallback.\(reason)"
         }
     }
 }

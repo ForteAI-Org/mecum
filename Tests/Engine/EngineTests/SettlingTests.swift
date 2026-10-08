@@ -31,8 +31,13 @@ struct SettlingTests {
             var scenes   : Int
         }
         var waits: [Wait] = []
+        /// How many gestures had been delivered when each `prepare` ran.
+        var prepares: [Int] = []
         var scenes  : ScriptedScenes?
         var actuator: RecordingActuator?
+        func prepare(in processID: pid_t) async {
+            prepares.append(actuator?.gestures.count ?? 0)
+        }
         func settle(in processID: pid_t, cap: Duration) async {
             waits.append(Wait(
                 processID: processID,
@@ -109,6 +114,7 @@ struct SettlingTests {
         #expect(settling.waits == [.init(processID: pid, cap: cap, gestures: 1, scenes: 1)])
         #expect(scenes.calls == 2)
         #expect(pauses.slept.isEmpty, "the role replaces the fixed pause, it does not add to it")
+        #expect(settling.prepares == [0], "the reference is taken before the gesture goes out")
     }
 
     @Test("type_text settles once, after the click and the text, before the scene that judges it")
@@ -132,6 +138,8 @@ struct SettlingTests {
         #expect(settling.waits.first?.scenes == 1)
         #expect(settling.waits.first?.cap == ActionTiming.standard.clickSettle)
         #expect(pauses.slept.isEmpty)
+        #expect(actuator.gestures.count > 1)
+        #expect(settling.prepares == [0], "one reference, before the first gesture")
     }
 
     @Test("with no settling role the engine sleeps the click settle, as before the role existed")

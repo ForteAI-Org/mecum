@@ -427,6 +427,8 @@ public enum MenuBarCommand {
     ) async throws -> ActOutcome {
 
         let before = windowSignature(of: processID)
+        // A refresh brings the application forward first, which redraws it: no reference then.
+        if refresh == nil { await settling?.prepare(in: processID) }
         let (pressed, outcome, _) = await runPrepared(
             preparesEnabledItems: preparesEnabledItems,
             read: { resolve(path, processID: processID, allowsDestructive: allowsDestructive) },

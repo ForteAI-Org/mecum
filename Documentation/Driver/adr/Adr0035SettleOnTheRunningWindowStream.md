@@ -1,7 +1,8 @@
 # ADR 0035: Settle on the running window stream, and keep the observation between gestures
 
-Status: part 1 implemented, 2026-10-07; part 2 decided against changing. Offline tests only; no
-live run. It builds on [ADR 0034](Adr0034ObserveFromTheRunningWindowStream.md).
+Status: part 1 implemented, 2026-10-07; part 2 decided against changing; part 3 (the baseline taken
+before the input) implemented, 2026-10-08. Offline tests only for part 3; no live run. It builds on
+[ADR 0034](Adr0034ObserveFromTheRunningWindowStream.md).
 
 ## Evidence
 
@@ -49,8 +50,9 @@ It answers `stable` once frames have stayed identical for the stability interval
 change; `cap` at the cap with frames still changing; `quiet` at the cap with none changed. A
 source that declines (`notLive`, `recovering`, `pinnedToDisplay`, `otherWindow`) or any frame it
 cannot place answers `fallback` after waiting out the rest of the cap: the fixed pause exactly when the source
-declines at once. A resting stream is woken and its frames used (ADR 0036). No wait exceeds the cap. The first frame has nothing before it to compare with,
-so an effect already drawn in it reads as no change and costs the cap.
+declines at once. A resting stream is woken and its frames used (ADR 0036). No wait exceeds the cap. Part 1 took
+the reference from the first frame displayed after its own start, so an effect already drawn in
+it read as no change and cost the cap; part 3 corrects that.
 
 ### The contract
 
@@ -74,7 +76,7 @@ one. Each frame comparison runs on the main
 actor, one `memcmp` per row of a 1 to 4 MB window; its cost is not measured.
 
 With phases on, `settle` times each wait and is named by how it ended: `settle:stable`,
-`settle:quiet`, `settle:cap`, `settle:fallback.<reason>`. `PhaseInterval.end(_:)` carries that
+`settle:stable.baseline`, `settle:quiet`, `settle:cap`, `settle:fallback.<reason>`. `PhaseInterval.end(_:)` carries that
 detail and `phase-table.py` prefers it to the begin's.
 
 ## Part 2: `type_text` keeps its observation between the click and the text
@@ -107,8 +109,64 @@ recipient is resolved from the live accessibility focus when it is sent
 What the middle observation costs since ADR 0034 is one frame of the running stream, about 31 ms
 median, and no stream start. `type_text` therefore stays at three observations.
 
+## Part 3: the first frame is compared with a baseline taken before the input
+
+### Evidence
+
+Measured live on 7 and 8 October 2026 (final run counts of settle endings, stable / quiet):
+Calculator 14 / 18, Finder 0 / 32, Chrome 8 / 24, Notes 30 / 2. An application that redraws within
+a few milliseconds of the input (Calculator showing "8") has drawn its effect in the first frame
+the settler sees. That frame became the reference, every later frame was identical to it, and the
+wait ran to the whole cap as `quiet`.
+
+### The rule
+
+The reference is a frame displayed before the gesture was delivered, the baseline. The first frame
+after the input that differs from it counts as a change, and the wait then ends once frames have
+stayed identical for `stabilityInterval`, capped as before (`stable.baseline` in the phase table:
+the change was seen against the baseline, where `stable` is one seen between later frames). If no
+frame differs from the baseline before the cap, the whole cap is waited and the ending is `quiet`,
+as in part 1: an effect that opens a window of its own leaves the target's pixels unchanged, and
+that case keeps today's full wait. Every other rule stands: caps, fallbacks, the scene taken after
+the settle, byte-exact comparison.
+
+### The seam
+
+`Settling` gains `prepare(in:)`, with a default that does nothing. The engine calls it right before
+it delivers an input (before the click's or the toggle's gesture, and once before the first of the
+gestures `send` delivers), so the baseline is the newest frame before the action began and any
+effect of the whole input counts against it. `SeatSettler.prepare` asks the
+running stream for its newest frame (`displayedAfter: 0`, bound 50 ms, which a stream of about
+30 frames a second answers at once) and keeps a detached copy: holding the stream's own frame
+across the wait would hold two pool surfaces, which the one frame contract forbids. The copy costs
+one `memcpy` of the window and runs on the main actor; with phases on it is the `settle.prepare`
+interval.
+
+The alternative was the frame the pre-action scene was built from (`SeatSceneProvider` keeps it
+for ADR 0034). It is not used because it is not recent: the model's turn lies between that
+observation and the gesture, and any change in that time reads as the effect.
+
+A baseline serves one wait, and is used only when it is of the window being settled, was displayed
+before it was copied, and is at most `baselineLifetime` (2 s) old when the wait starts; otherwise,
+and when the stream has no frame or no copy could be made, the wait is exactly part 1. That
+lifetime bounds a baseline left by a gesture whose wait never came (a failed delivery, the
+contextual menu path, a refused menu press). `MenuBarCommand.perform` prepares before a press that
+asks no refresh. `performInFront`, and a press that refreshes, do not: activating the application
+redraws it before the press, so a baseline from before would read that redraw as the effect and
+end the wait before a window the press opens. Their wait is part 1's.
+
+### Risk
+
+A blinking caret, a clock, an animation or a page still loading can make the first frame differ
+from the baseline for a reason that is not the gesture, and end the wait about 90 ms after that
+frame, earlier than the effect. Part 1 had the same blind spot only after its first frame. The live
+check of this part watches the menu verdicts (`pressed ...: no window opened`) for it, and the
+endings per application.
+
 ## Consequences
 
+- With the baseline (part 3) an effect drawn in the first frame is no longer a full cap: it waits
+  from about 110 ms (one frame, then three identical intervals). Not measured live.
 - An action on a streamed seat window that changes the window waits from about 150 ms (the
   second frame changes, then three identical intervals) to its cap, instead of always the cap; one
   that changes nothing in it waits the cap. Not measured live; the live acceptance of this work

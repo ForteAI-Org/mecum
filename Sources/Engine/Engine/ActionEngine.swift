@@ -259,6 +259,7 @@ public struct ActionEngine: Sendable {
         // The census after activation on purpose: raising an application floats its own palettes.
         let censusBefore = await surfaces(pid).verdicts
         var openedByPress = false
+        await dependencies.settling?.prepare(in: pid)
         // In a remote file panel the seat's own route acts on the control instead.
         if request.verb == .click, !permissions.refusesMenuOpeningClicks, let controls = dependencies.controls {
             openedByPress = await controls.pressControl(labelled: element.label, in: pid)
@@ -345,6 +346,7 @@ public struct ActionEngine: Sendable {
         if request.isDryRun {
             return ActOutcome(.dryRun, "would click '\(element.label)' to set it \(desired.rawValue)")
         }
+        await dependencies.settling?.prepare(in: pid)
         do { try await dependencies.actuator.perform(.click(at: point), in: pid) }
         catch {
             await dependencies.actuator.confirm(.unknown, in: pid)
@@ -930,6 +932,8 @@ public struct ActionEngine: Sendable {
     /// A failure closes the delivery as unknown: what went out before it is never repeated.
     private func send(_ gestures: [Gesture], to processID: pid_t) async -> (any Error)? {
         do {
+            // One reference before the first gesture: any effect of the whole input then counts.
+            if !gestures.isEmpty { await dependencies.settling?.prepare(in: processID) }
             for gesture in gestures { try await dependencies.actuator.perform(gesture, in: processID) }
             return nil
         } catch {

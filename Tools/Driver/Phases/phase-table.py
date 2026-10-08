@@ -29,7 +29,7 @@ ORDER = [
     'capture.displayStill', 'capture.makeCGImage',
     'pipeline', 'pipeline.ocr', 'pipeline.segments', 'pipeline.ax', 'pipeline.compose',
     'pipeline.axWait', 'pipeline.merge', 'pipeline.controlState',
-    'delivery.prepare', 'delivery', 'delivery.confirm', 'pause', 'settle',
+    'delivery.prepare', 'delivery', 'delivery.confirm', 'pause', 'settle.prepare', 'settle',
     'render.scene', 'render.result',
 ]
 

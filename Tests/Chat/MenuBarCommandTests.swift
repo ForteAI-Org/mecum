@@ -274,9 +274,26 @@ struct MenuBarCommandTests {
     final class RecordingSettling: Settling, @unchecked Sendable {
         var waits: [(processID: pid_t, cap: Duration, observations: Int)] = []
         var observations = 0
+        var prepares: [pid_t] = []
+        func prepare(in processID: pid_t) async { prepares.append(processID) }
         func settle(in processID: pid_t, cap: Duration) async {
             waits.append((processID, cap, observations))
         }
+    }
+
+    @Test("A press notes the window before it, unless a refresh would bring the application forward first")
+    func aPressPreparesTheSettlingRole() async throws {
+        let settling = RecordingSettling()
+        let missing: pid_t = 999_999
+        _ = try await MenuBarCommand.perform(
+            "File > New...", processID: missing, allowsDestructive: false,
+            settling: settling, observe: { Self.scene }
+        )
+        _ = try await MenuBarCommand.perform(
+            "File > New...", processID: missing, allowsDestructive: false,
+            refresh: { .stillDisabled(reason: nil) }, settling: settling, observe: { Self.scene }
+        )
+        #expect(settling.prepares == [missing], "only the press with no refresh")
     }
 
     @Test("A press settles through the seat's role with the 400 ms as its cap, before the observation")
