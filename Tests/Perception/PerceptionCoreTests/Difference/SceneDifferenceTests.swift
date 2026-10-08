@@ -157,6 +157,61 @@ struct SceneDifferenceTests {
         #expect(SceneDifference.effect(before: before, after: otherDocument, targetID: nil) == nil)
     }
 
+    @Test("a text field's new value is an effect only when the caller counts it")
+    func valueChangeIsOptIn() {
+        var field = element("name", "First Text View")
+        field.role = "AXTextArea"
+        field.value = ""
+        var typed = field
+        typed.value = "a"
+        let before = scene([field]), after = scene([typed])
+        #expect(SceneDifference.effect(before: before, after: after, targetID: nil) == nil)
+        let effect = SceneDifference.effect(before: before, after: after, targetID: nil, countsValueChange: true)
+        #expect(effect == .valueChanged(label: "First Text View", value: "a"))
+        #expect(effect?.summary == "'First Text View' now reads 'a'")
+    }
+
+    @Test("a value needs a text field, one match each side and a readable value on both")
+    func valueChangeNeedsAReadableMatchedField() {
+        var field = element("name", "Name")
+        field.role = "AXTextField"
+        field.value = "x"
+        var changed = field
+        changed.value = "y"
+        func effect(_ old: [SceneElement], _ new: [SceneElement]) -> SceneEffect? {
+            SceneDifference.effect(before: scene(old), after: scene(new), targetID: nil, countsValueChange: true)
+        }
+        var unreadable = field
+        unreadable.value = nil
+        #expect(effect([unreadable], [changed]) == nil)
+        #expect(effect([field], [unreadable]) == nil)
+        #expect(effect([field, field], [changed, changed]) == nil)
+        var other = changed
+        other.id = "another"
+        #expect(effect([field], [other]) == nil)
+        var label = changed
+        label.role = "AXStaticText"
+        var staticOld = field
+        staticOld.role = "AXStaticText"
+        #expect(effect([staticOld], [label]) == nil)
+        // A caret move with the same value keeps its own effect.
+        var moved = field
+        moved.selectedRange = NSRange(location: 1, length: 0)
+        var start = field
+        start.selectedRange = NSRange(location: 0, length: 0)
+        #expect(effect([start], [moved]) == .textSelectionChanged)
+    }
+
+    @Test("a value change summary is shortened and survives the encoded round trip")
+    func valueChangeSummaryAndRoundTrip() {
+        let long = SceneEffect.valueChanged(label: "Notes", value: String(repeating: "x", count: 80))
+        #expect(long.summary == "'Notes' now reads '" + String(repeating: "x", count: 59) + "…'")
+        let effect = SceneEffect.valueChanged(label: "Name", value: "a|b>c:d")
+        #expect(effect.family == "valueChanged")
+        #expect(SceneEffect(encoded: effect.encoded) == effect)
+        #expect(SceneEffect(encoded: "valueChanged:no separator") == nil)
+    }
+
     @Test("family, summary and round trip through the encoded string")
     func familySummaryAndRoundTrip() {
         let flip = SceneEffect.stateFlip(from: .off, to: .on)

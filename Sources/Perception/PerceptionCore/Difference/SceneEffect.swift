@@ -5,6 +5,8 @@
 //  Created by Ronaldo Zefi on 15/09/2026.
 //
 
+import Foundation
+
 /// SceneEffect is what one input event did to a window, named from the scenes before and after it.
 ///
 /// Its `encoded` form is the stable string memory accumulates evidence under: sorted, deduplicated,
@@ -25,9 +27,11 @@ public enum SceneEffect: Sendable, Equatable, Hashable {
     case elementsDisappeared(labels: [String])
     /// A uniquely identified native text field changed its observed UTF-16 selection.
     case textSelectionChanged
+    /// A uniquely identified text field now reads another value, as the scene reports it.
+    case valueChanged(label: String, value: String)
 
     /// The effect family: `stateFlip`, `menuOpened`, `elementsAppeared`, `elementsDisappeared`,
-    /// `windowTitleChanged`, `textSelectionChanged`.
+    /// `windowTitleChanged`, `textSelectionChanged`, `valueChanged`.
     public var family: String {
         switch self {
             case .windowTitleChanged : "windowTitleChanged"
@@ -36,6 +40,7 @@ public enum SceneEffect: Sendable, Equatable, Hashable {
             case .elementsAppeared   : "elementsAppeared"
             case .elementsDisappeared: "elementsDisappeared"
             case .textSelectionChanged: "textSelectionChanged"
+            case .valueChanged       : "valueChanged"
         }
     }
 
@@ -48,6 +53,7 @@ public enum SceneEffect: Sendable, Equatable, Hashable {
             case .elementsAppeared(let labels)       : "elementsAppeared:\(labels.joined(separator: "|"))"
             case .elementsDisappeared(let labels)    : "elementsDisappeared:\(labels.joined(separator: "|"))"
             case .textSelectionChanged               : "textSelectionChanged:"
+            case .valueChanged(let label, let value) : "valueChanged:\(label)\(Self.valueSeparator)\(value)"
         }
     }
 
@@ -66,8 +72,14 @@ public enum SceneEffect: Sendable, Equatable, Hashable {
                 return "navigates to \(title)"
             case .textSelectionChanged:
                 return "changes text selection"
+            case .valueChanged(let label, let value):
+                let flat = value.replacingOccurrences(of: "\n", with: " ")
+                return "'\(label)' now reads '\(flat.count > 60 ? flat.prefix(59) + "…" : flat)'"
         }
     }
+
+    /// Splits a value change's label from its value in `encoded`; neither text contains it.
+    private static let valueSeparator = "\u{1F}"
 
     /// Decodes an evidence string produced by `encoded`, or nil for an unknown family or payload.
     public init?(encoded: String) {
@@ -89,6 +101,10 @@ public enum SceneEffect: Sendable, Equatable, Hashable {
             case "textSelectionChanged":
                 guard payload.isEmpty else { return nil }
                 self = .textSelectionChanged
+            case "valueChanged":
+                let parts = payload.components(separatedBy: Self.valueSeparator)
+                guard parts.count == 2 else { return nil }
+                self = .valueChanged(label: parts[0], value: parts[1])
             default                   : return nil
         }
     }

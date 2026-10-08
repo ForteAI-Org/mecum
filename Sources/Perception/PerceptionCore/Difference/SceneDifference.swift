@@ -15,8 +15,14 @@
 public enum SceneDifference {
 
     /// The attributable effect, or nil when nothing attributable changed. `targetID` is the element
-    /// the event hit in the before scene; it enables the state-flip reading.
-    public static func effect(before: SceneSnapshot, after: SceneSnapshot, targetID: String?) -> SceneEffect? {
+    /// the event hit in the before scene; it enables the state-flip reading. `countsValueChange` also
+    /// names a text field that reads another value; a key press has no target, so only it asks.
+    public static func effect(
+        before           : SceneSnapshot,
+        after            : SceneSnapshot,
+        targetID         : String?,
+        countsValueChange: Bool = false
+    ) -> SceneEffect? {
         if LabelText.letters(before.windowTitle) != LabelText.letters(after.windowTitle) {
             return .windowTitleChanged(title: String(after.windowTitle.prefix(40)))
         }
@@ -62,7 +68,27 @@ public enum SceneDifference {
             return !normalized.isEmpty && !afterLabels.contains(normalized)
         }
         if gone.count >= 3 { return .elementsDisappeared(labels: canonicalLabels(gone)) }
+        if countsValueChange, let changed = valueChanged(before: before, after: after) { return changed }
         if textSelectionChanged(before: before, after: after) { return .textSelectionChanged }
+        return nil
+    }
+
+    /// A text field present once in each scene with the same id, kind and role, whose value is
+    /// readable on both sides and differs. A caret move alone leaves the value, so it is no change.
+    private static func valueChanged(before: SceneSnapshot, after: SceneSnapshot) -> SceneEffect? {
+        guard before.bundleID == after.bundleID else { return nil }
+        for field in before.elements where field.kind == .control
+            && AccessibilityAugmentation.textEntryRoles.contains(field.role ?? "") {
+            let matches: (SceneElement) -> Bool = {
+                $0.id == field.id && $0.kind == field.kind && $0.role == field.role
+            }
+            guard before.elements.filter(matches).count == 1 else { continue }
+            let current = after.elements.filter(matches)
+            guard current.count == 1, let counterpart = current.first,
+                  let previous = field.value, let value = counterpart.value, previous != value
+            else { continue }
+            return .valueChanged(label: counterpart.label, value: value)
+        }
         return nil
     }
 

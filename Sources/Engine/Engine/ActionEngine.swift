@@ -691,7 +691,9 @@ public struct ActionEngine: Sendable {
             ghost: "If you expected an effect, the key likely reached a control that ignores it: click the "
                 + "control that should receive it first.\(note)",
             repaint: "A key's effect is often only a moved focus or caret, which the scene cannot attribute: "
-                + "observe before pressing again.\(note)"
+                + "observe before pressing again.\(note)",
+            // A typed key has no target; the field's new value is its effect.
+            countsValueChange: true
         )
     }
 
@@ -939,12 +941,13 @@ public struct ActionEngine: Sendable {
     /// An input with no reading of its own is judged by the two scenes alone, and its delivery closed
     /// with what they showed. `ghost` and `repaint` are what to do next when nothing was attributed.
     private func judged(
-        _ performed: String,
-        in request : InputRequest,
-        before     : SceneSnapshot,
-        targetID   : String?,
-        ghost      : String,
-        repaint    : String
+        _ performed      : String,
+        in request       : InputRequest,
+        before           : SceneSnapshot,
+        targetID         : String?,
+        ghost            : String,
+        repaint          : String,
+        countsValueChange: Bool = false
     ) async -> ActOutcome {
         let pid = request.processID
         await settle(pid)
@@ -954,7 +957,8 @@ public struct ActionEngine: Sendable {
                 + "the window is back")
         }
         let effect = Self.gatedEffect(
-            before: before, after: after, targetID: targetID ?? "", popupIsOpen: (await surfaces(pid)).hasOpenPopup
+            before: before, after: after, targetID: targetID ?? "", popupIsOpen: (await surfaces(pid)).hasOpenPopup,
+            countsValueChange: countsValueChange
         )
         let verdict = ActVerification.verdict(before: before, after: after, effect: effect)
         let delivery: DeliveryEffect = switch verdict {
@@ -984,12 +988,15 @@ public struct ActionEngine: Sendable {
     /// A menu is believable only while a pop-up window exists; and when one does, the menu's rows
     /// are the effect whatever the scene difference read, because the after scene IS the menu.
     static func gatedEffect(
-        before     : SceneSnapshot,
-        after      : SceneSnapshot,
-        targetID   : String,
-        popupIsOpen: Bool
+        before           : SceneSnapshot,
+        after            : SceneSnapshot,
+        targetID         : String,
+        popupIsOpen      : Bool,
+        countsValueChange: Bool = false
     ) -> SceneEffect? {
-        var effect = SceneDifference.effect(before: before, after: after, targetID: targetID)
+        var effect = SceneDifference.effect(
+            before: before, after: after, targetID: targetID, countsValueChange: countsValueChange
+        )
         if case .menuOpened(let labels) = effect, !popupIsOpen { effect = .elementsAppeared(labels: labels) }
         if popupIsOpen {
             let items = after.elements

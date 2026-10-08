@@ -379,7 +379,7 @@ struct InputDeliveryTests {
     }
 
     @Test("unknown, invalid or ambiguous selection cannot verify a key", arguments: [
-        "unknown before", "unknown after", "different value", "different identity",
+        "unknown before", "unknown after", "different identity",
         "different role", "duplicate ID", "invalid range"
     ])
     func uncertainSelectionCannotVerifyAKey(_ issue: String) async {
@@ -390,7 +390,6 @@ struct InputDeliveryTests {
         switch issue {
             case "unknown before"   : before.selectedRange = nil
             case "unknown after"    : after.selectedRange = nil
-            case "different value"  : after.value = "Bé🧪"
             case "different identity": after.id = "another-field"
             case "different role"   : after.role = "AXStaticText"
             case "invalid range"    : after.selectedRange = NSRange(location: Int.max, length: 1)
@@ -405,6 +404,45 @@ struct InputDeliveryTests {
         #expect(outcome.kind == .actedUnverified)
         #expect(actuator.confirmations == [.unknown])
         #expect(actuator.gestures.count == 1)
+    }
+
+    @Test("a key that changes a field's value is verified by the new value, caret included or not")
+    func keyChangesFieldValue() async {
+        var before = field(value: "")
+        before.selectedRange = NSRange(location: 0, length: 0)
+        var after = field(value: "a")
+        after.selectedRange = NSRange(location: 1, length: 0)
+        for (was, now) in [(before, after), (field(value: ""), field(value: "a"))] {
+            let actuator = RecordingActuator()
+            let outcome = await engine(
+                scenes: ScriptedScenes([scene([was]), scene([now])]), actuator: actuator
+            ).deliver(request(.pressKey(KeyChord(.character("a")), times: 1)))
+            #expect(outcome.kind == .foundActed, Comment(rawValue: outcome.message))
+            #expect(outcome.message == "pressed a: 'Project Name' now reads 'a'")
+            #expect(actuator.confirmations == [.observed])
+        }
+    }
+
+    @Test("a value unreadable on either side is no change for a key", arguments: ["before", "after"])
+    func unreadableValueIsNoChange(_ side: String) async {
+        let before = field(value: side == "before" ? nil : "")
+        let after = field(value: side == "after" ? nil : "a")
+        let actuator = RecordingActuator()
+        let outcome = await engine(
+            scenes: ScriptedScenes([scene([before], token: "t1"), scene([after], token: "t2")]), actuator: actuator
+        ).deliver(request(.pressKey(KeyChord(.character("a")), times: 1)))
+        #expect(outcome.kind == .actedUnverified, Comment(rawValue: outcome.message))
+        #expect(actuator.confirmations == [.unknown])
+    }
+
+    @Test("a caret move that the scene cannot read stays unverified when the value is the same")
+    func caretMoveWithoutReadableRangeStaysUnverified() async {
+        var after = field(value: "abc")
+        after.role = "AXTextField"
+        let outcome = await engine(
+            scenes: ScriptedScenes([scene([field(value: "abc")], token: "t1"), scene([after], token: "t2")])
+        ).deliver(request(.pressKey(KeyChord(.left), times: 1)))
+        #expect(outcome.kind == .actedUnverified, Comment(rawValue: outcome.message))
     }
 
     @Test("a key is found_acted only when the scene changed, and repeats go out as separate presses")
