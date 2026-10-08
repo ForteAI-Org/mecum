@@ -137,8 +137,9 @@ enum SQLiteExperienceRows {
 
     static func experience(_ handle: some SQLiteQuerying, id: String) throws -> ExperienceRecord? {
         guard let row = try handle.query(
-            "SELECT phrase, route_id, step_id, created_at_ms FROM memory_experiences WHERE experience_id = ?", [.text(id)]
-        ) { (phrase: try $0.text(0) ?? "", route: try $0.text(1) ?? "", step: try $0.text(2), created: $0.integer(3) ?? 0) }.first else { return nil }
+            "SELECT phrase, route_id, step_id, created_at_ms FROM memory_experiences WHERE experience_id = ?", [.text(id)],
+            { (phrase: try $0.text(0) ?? "", route: try $0.text(1) ?? "", step: try $0.text(2), created: $0.integer(3) ?? 0) }
+        ).first else { return nil }
         func refuse(_ malformation: EventFactError.Malformation) -> EventFactError {
             .malformedRow(table: "memory_experience_bindings", id: id, malformation: malformation)
         }

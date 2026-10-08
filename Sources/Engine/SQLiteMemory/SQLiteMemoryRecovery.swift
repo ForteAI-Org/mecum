@@ -221,7 +221,7 @@ package enum SQLiteMemoryRecovery {
         do {
             try connection.execute("BEGIN")
             defer { _ = try? connection.execute("COMMIT") }
-            if thorough, try connection.query("PRAGMA quick_check") { try $0.text(0) ?? "" } != ["ok"] { return false }
+            if thorough, try connection.query("PRAGMA quick_check", [], { try $0.text(0) ?? "" }) != ["ok"] { return false }
             return try SQLiteMemoryStore.inspect(connection, expected: expected) == .current
         } catch {
             return false

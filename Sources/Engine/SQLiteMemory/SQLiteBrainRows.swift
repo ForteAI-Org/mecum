@@ -530,8 +530,9 @@ enum SQLiteBrainRows {
         makeSceneID  : () -> String
     ) throws -> String {
         if let found = try transaction.query(
-            "SELECT scene_id FROM brain_scenes WHERE app_id = ? AND scene_kind = 'app'", [.integer(appID)]
-        ) { try $0.text(0) ?? "" }.first {
+            "SELECT scene_id FROM brain_scenes WHERE app_id = ? AND scene_kind = 'app'", [.integer(appID)],
+            { try $0.text(0) ?? "" }
+        ).first {
             return found
         }
         let id = makeSceneID()

@@ -137,9 +137,10 @@ enum SQLiteTaskRows {
         }
         guard let row = try handle.query(
             "SELECT scope, method, verdict, expected_text, observed_text, step_occurrence_id FROM memory_verifications WHERE event_id = ?",
-            [.text(eventID)]
-        ) { (scope: try $0.text(0) ?? "", method: try $0.text(1) ?? "", verdict: try $0.text(2) ?? "", expected: try $0.text(3),
-             observed: try $0.text(4), step: try $0.text(5)) }.first,
+            [.text(eventID)],
+            { (scope: try $0.text(0) ?? "", method: try $0.text(1) ?? "", verdict: try $0.text(2) ?? "", expected: try $0.text(3),
+               observed: try $0.text(4), step: try $0.text(5)) }
+        ).first,
               let event = try SQLiteEventRows.read(handle, eventID: eventID) else { return nil }
         guard let scope = code(VerificationScope.self, row.scope) else { throw refuse(.unknownCode(column: "scope", code: row.scope)) }
         guard let method = code(VerificationMethod.self, row.method) else { throw refuse(.unknownCode(column: "method", code: row.method)) }

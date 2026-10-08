@@ -29,8 +29,9 @@ enum SQLiteIdentityRows {
 
     static func ensureApp(_ transaction: SQLiteTransaction, bundleID: String) throws -> Int64 {
         if let found = try transaction.query(
-            "SELECT app_id FROM brain_apps WHERE bundle_id = ?", [.text(bundleID)]
-        ) { $0.integer(0) }.first, let appID = found {
+            "SELECT app_id FROM brain_apps WHERE bundle_id = ?", [.text(bundleID)],
+            { $0.integer(0) }
+        ).first, let appID = found {
             return appID
         }
         try transaction.execute("INSERT INTO brain_apps (bundle_id) VALUES (?)", [.text(bundleID)])
@@ -46,8 +47,9 @@ enum SQLiteIdentityRows {
         let versionText = version ?? "", localeText = locale ?? ""
         if let found = try transaction.query(
             "SELECT context_id FROM brain_app_contexts WHERE app_id = ? AND app_version = ? AND app_locale = ?",
-            [.integer(appID), .text(versionText), .text(localeText)]
-        ) { $0.integer(0) }.first, let contextID = found {
+            [.integer(appID), .text(versionText), .text(localeText)],
+            { $0.integer(0) }
+        ).first, let contextID = found {
             return contextID
         }
         try transaction.execute(

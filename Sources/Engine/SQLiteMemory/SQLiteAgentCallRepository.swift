@@ -300,8 +300,9 @@ enum SQLiteAgentCallRows {
                     SELECT observation_id FROM memory_event_observations
                     WHERE event_id = ? AND phase = ? AND sample_ordinal = ? AND observation_kind = 'capture'
                     """,
-                    [.text(sample.eventID), .text(sample.phase.rawValue), .integer(Int64(sample.ordinal))]
-                ) { $0.integer(0) }.first ?? nil else {
+                    [.text(sample.eventID), .text(sample.phase.rawValue), .integer(Int64(sample.ordinal))],
+                    { $0.integer(0) }
+                ).first ?? nil else {
                     throw AgentCallError.missingSample(eventID: eventID, sample: sample)
                 }
                 try transaction.execute(
@@ -486,16 +487,18 @@ enum SQLiteAgentCallRows {
             case "status":
                 guard let status = try handle.query(
                     "SELECT session_id, screen_recording, accessibility, post_event FROM memory_agent_action_status WHERE event_id = ?",
-                    [.text(eventID)]
-                ) { row in
-                    StatusResult(sessionID: try row.text(0), screenRecording: row.integer(1) == 1,
-                                 accessibility: row.integer(2) == 1, postEvent: row.integer(3) == 1)
-                }.first else { throw refuse("status row") }
+                    [.text(eventID)],
+                    { row in
+                        StatusResult(sessionID: try row.text(0), screenRecording: row.integer(1) == 1,
+                                     accessibility: row.integer(2) == 1, postEvent: row.integer(3) == 1)
+                    }
+                ).first else { throw refuse("status row") }
                 return .status(status)
             case "listing":
                 guard let listing = try handle.query(
-                    "SELECT listing_kind, hidden_count FROM memory_agent_action_listings WHERE event_id = ?", [.text(eventID)]
-                ) { (try $0.text(0) ?? "", Int($0.integer(1) ?? -1)) }.first else { throw refuse("listing row") }
+                    "SELECT listing_kind, hidden_count FROM memory_agent_action_listings WHERE event_id = ?", [.text(eventID)],
+                    { (try $0.text(0) ?? "", Int($0.integer(1) ?? -1)) }
+                ).first else { throw refuse("listing row") }
                 guard let listingKind = ListingResult.Kind(rawValue: listing.0) else { throw refuse("listing kind \(listing.0)") }
                 let windows = try handle.query(
                     """
@@ -534,14 +537,15 @@ enum SQLiteAgentCallRows {
                     SELECT session_id, session_revision, observed_at_ms, sample_event_id, sample_phase, sample_ordinal
                     FROM memory_agent_action_observations WHERE event_id = ?
                     """,
-                    [.text(eventID)]
-                ) { row -> ObservationResult in
-                    guard let phase = CapturePhase(rawValue: try row.text(4) ?? "") else { throw refuse("sample phase") }
-                    return ObservationResult(
-                        sessionID: try row.text(0) ?? "", sessionRevision: row.integer(1) ?? -1, observedAtMS: row.integer(2) ?? 0,
-                        sample: CaptureSampleKey(eventID: try row.text(3) ?? "", phase: phase, ordinal: Int(row.integer(5) ?? -1))
-                    )
-                }.first else { throw refuse("observation row") }
+                    [.text(eventID)],
+                    { row -> ObservationResult in
+                        guard let phase = CapturePhase(rawValue: try row.text(4) ?? "") else { throw refuse("sample phase") }
+                        return ObservationResult(
+                            sessionID: try row.text(0) ?? "", sessionRevision: row.integer(1) ?? -1, observedAtMS: row.integer(2) ?? 0,
+                            sample: CaptureSampleKey(eventID: try row.text(3) ?? "", phase: phase, ordinal: Int(row.integer(5) ?? -1))
+                        )
+                    }
+                ).first else { throw refuse("observation row") }
                 return .observation(observation)
             default:
                 throw refuse("result_kind \(kind)")

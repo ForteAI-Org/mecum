@@ -1300,7 +1300,7 @@ extension DialogEndpointResolver where Node == AXUIElement {
                 let window = windows.first {
                     WindowRelocator.windowNumber(of: $0, table: table) == number
                 }
-                window.map { AXUIElementSetMessagingTimeout($0, BoundedAccessibilityRead.fastTimeout) }
+                if let window { AXUIElementSetMessagingTimeout(window, BoundedAccessibilityRead.fastTimeout) }
                 return window
             },
             inertWindowlessLeaf: Self.inertWindowlessLeaf,

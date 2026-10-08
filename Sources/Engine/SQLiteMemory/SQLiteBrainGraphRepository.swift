@@ -33,8 +33,9 @@ public struct SQLiteBrainGraphRepository: BrainGraphStoring {
     public func link(element sceneElementID: String, toAnchor anchorID: String) async throws -> MemoryReceipt {
         try await store.write { transaction in
             guard let row = try transaction.query(
-                "SELECT app_id, anchor_id FROM brain_scene_elements WHERE scene_element_id = ?", [.text(sceneElementID)]
-            ) { (app: $0.integer(0) ?? 0, anchor: try $0.text(1)) }.first else { throw EventFactError.missingDefinition(id: sceneElementID) }
+                "SELECT app_id, anchor_id FROM brain_scene_elements WHERE scene_element_id = ?", [.text(sceneElementID)],
+                { (app: $0.integer(0) ?? 0, anchor: try $0.text(1)) }
+            ).first else { throw EventFactError.missingDefinition(id: sceneElementID) }
             guard try transaction.query("SELECT count(*) FROM brain_anchors WHERE anchor_id = ? AND app_id = ?", [.text(anchorID), .integer(row.app)],
                                         { $0.integer(0) ?? 0 }).first ?? 0 > 0 else { throw EventFactError.missingDefinition(id: anchorID) }
             if let current = row.anchor {
@@ -236,13 +237,14 @@ enum SQLiteGraphRows {
                    t.evidence_count, \(projectionOwned)
             FROM brain_transitions t JOIN brain_apps a ON a.app_id = t.app_id WHERE t.transition_id = ?
             """,
-            [.text(id)]
-        ) { row in
-            (bundle: try row.text(0) ?? "", from: try row.text(1) ?? "", anchor: try row.text(2), element: try row.text(3), menu: try row.text(4),
-             trigger: try row.text(5) ?? "", to: try row.text(6), kind: try row.text(7) ?? "", text: try row.text(8), required: try row.text(9),
-             resulting: try row.text(10), epoch: row.integer(11), status: try row.text(12) ?? "", first: row.integer(13) ?? 0, last: row.integer(14) ?? 0,
-             evidence: row.integer(15) ?? 0, owned: row.integer(16) == 1)
-        }.first else { return nil }
+            [.text(id)],
+            { row in
+                (bundle: try row.text(0) ?? "", from: try row.text(1) ?? "", anchor: try row.text(2), element: try row.text(3), menu: try row.text(4),
+                 trigger: try row.text(5) ?? "", to: try row.text(6), kind: try row.text(7) ?? "", text: try row.text(8), required: try row.text(9),
+                 resulting: try row.text(10), epoch: row.integer(11), status: try row.text(12) ?? "", first: row.integer(13) ?? 0, last: row.integer(14) ?? 0,
+                 evidence: row.integer(15) ?? 0, owned: row.integer(16) == 1)
+            }
+        ).first else { return nil }
         if row.owned { return nil }
         func refuse(_ malformation: EventFactError.Malformation) -> EventFactError { .malformedRow(table: "brain_transitions", id: id, malformation: malformation) }
         func gesture() throws -> TransitionTrigger {

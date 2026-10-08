@@ -211,8 +211,9 @@ enum SQLiteFactRows {
     static func event(_ handle: some SQLiteQuerying, _ eventID: String, sources: [MemoryEventSource], kind: MemoryEventKind,
                       expected: String) throws -> Int64? {
         guard let row = try handle.query(
-            "SELECT source, event_kind, app_id FROM memory_events WHERE event_id = ?", [.text(eventID)]
-        ) { (source: try $0.text(0) ?? "", kind: try $0.text(1) ?? "", app: $0.integer(2)) }.first else {
+            "SELECT source, event_kind, app_id FROM memory_events WHERE event_id = ?", [.text(eventID)],
+            { (source: try $0.text(0) ?? "", kind: try $0.text(1) ?? "", app: $0.integer(2)) }
+        ).first else {
             throw EventFactError.missingEvent(eventID: eventID)
         }
         guard sources.contains(where: { $0.rawValue == row.source }), row.kind == kind.rawValue else {
