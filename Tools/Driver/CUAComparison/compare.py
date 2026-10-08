@@ -151,7 +151,14 @@ def target_for(app, scenario, fixtures):
         pid = fixture.get("pid") or prepare.process_pid(scenario["process"])
     if not pid:
         raise RuntimeError(f"{app} is not running")
-    return pid, fixture.get("window") or scenario.get("window"), name
+    title = fixture.get("window") or scenario.get("window")
+    # The window list names Chrome's window "<page> - Google Chrome"; both drivers see only "<page>".
+    if title and title.endswith(" - Google Chrome"):
+        title = title[:-len(" - Google Chrome")]
+    return pid, title, name
+
+
+HOME_FRONT = (None, None)
 
 
 def window_server():
@@ -793,6 +800,11 @@ def run_app(app, drivers, options, recorder, log, fixtures):
         if index:
             print(f"-- cooldown {options.cooldown} s", flush=True)
             time.sleep(options.cooldown)
+        before = prepare.restore_front(HOME_FRONT)
+        if before[0] != HOME_FRONT[0]:
+            # Evidence of the previous block leaving another application in front of the person's.
+            recorder.write(dict(recorder.meta, op="front_restored", app=app, driver=blocks[index - 1][0] if index else None,
+                                block=index, left_in_front=before[1], ok=True))
         series = "step_legacy" if name == "cua-legacy" else "step"
         recorder.ctx = dict(mode=options.mode, block=index, series=series,
                             order_pass="forward" if index < len(drivers) else "reverse")
@@ -848,6 +860,8 @@ def main():
     if options.mode == "soak" and options.apps == parser.get_default("apps"):
         apps = ["TextEdit"]
     os.makedirs(options.scratch, exist_ok=True)
+    global HOME_FRONT
+    HOME_FRONT = prepare.home_front(list(SCENARIOS) + ["Adobe Photoshop", "DaVinci"])
     fixtures_path = os.path.join(options.scratch, "fixtures.json")
     fixtures = json.load(open(fixtures_path)) if os.path.exists(fixtures_path) else {}
     meta = {"run": time.strftime("%Y-%m-%dT%H:%M:%S"), "reps": options.reps, "phases": options.phases or None}

@@ -10,6 +10,7 @@ check after the run (AX values, files, a local state server), never from the mod
 import argparse, json, math, os, subprocess, sys, threading, time, unicodedata
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
+import prepare as bench_prepare
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 CLAUDE = os.environ.get("CLAUDE_CLI", "/Users/mac/.local/bin/claude")
@@ -348,6 +349,11 @@ def claude_argv(launch, prompt_cfg):
             "--setting-sources", "", "--no-session-persistence", "--max-budget-usd", "2"]
 
 
+HOME_FRONT = None
+TARGET_NAMES = ["Calculator", "TextEdit", "Google Chrome", "Safari", "Obsidian", "kitty", "Adobe Photoshop",
+                "Prism Launcher", "Stocks", "DaVinci"]
+
+
 def parse_stream(events, t0):
     """events: [(arrival time, parsed line)]. Returns the run totals and the per-call rows."""
     calls, order, usage, result = {}, [], {}, {}
@@ -406,6 +412,11 @@ def run_one(task, driver, rep, scratch, out, server):
     if ctx.skip or ctx.stale:
         return write(out, dict(row, status="skipped", reason=ctx.skip or "check already true before the run"))
     prompt = CONFIG["preamble"] + task["prompt"].format(**ctx.vars) if task["id"] != "selftest" else task["prompt"].format(**ctx.vars)
+    global HOME_FRONT
+    HOME_FRONT = HOME_FRONT or bench_prepare.home_front(TARGET_NAMES)
+    # Every run starts with the same application in front, whatever the previous driver left active.
+    left = bench_prepare.restore_front(HOME_FRONT)
+    row["left_in_front"] = left[1] if left[0] != HOME_FRONT[0] else None
     launch = Launch(driver, scratch, run_id)
     front0 = run_json([PROBE, str(ctx.pid)])
     ctx.sampler = Sampler(ctx.pid, getattr(ctx, "sample_titles", False))

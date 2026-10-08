@@ -61,6 +61,37 @@ def process_pid(name, prefix=False):
     return min(found) if found else None
 
 
+def front_app():
+    """(pid, bundle path) of the frontmost application, from LaunchServices; (None, None) when unknown."""
+    try:
+        asn = subprocess.run(["lsappinfo", "front"], capture_output=True, text=True, timeout=5).stdout.strip()
+        info = subprocess.run(["lsappinfo", "info", "-only", "pid", "-only", "bundlepath", asn],
+                              capture_output=True, text=True, timeout=5).stdout
+    except (OSError, subprocess.SubprocessError):
+        return None, None
+    pid, path = re.search(r'pid"?\s*=\s*(\d+)', info), re.search(r'bundle ?path"?\s*=\s*"([^"]+)"', info)
+    return (int(pid.group(1)) if pid else None), (path.group(1) if path else None)
+
+
+def home_front(target_names):
+    """The application to keep in front between drivers: the one in front now, or Finder when that is a target."""
+    home = front_app()
+    if home[1] is None or any(os.path.basename(home[1]).startswith(n) for n in target_names):
+        return process_pid("Finder"), "/System/Library/CoreServices/Finder.app"
+    return home
+
+
+def restore_front(home):
+    """Brings back the application that was in front when the run started, as the person left it.
+    A driver that leaves its target active (a menu that raises the window, for example) would otherwise
+    change the starting state of the next driver. Returns the (pid, bundle path) that was in front before."""
+    before = front_app()
+    if home and home[1] and before[0] != home[0]:
+        subprocess.run(["open", "-a", home[1]], check=False)
+        time.sleep(1)
+    return before
+
+
 def process_name(prefix):
     """The full executable name of the first process starting with `prefix`, e.g. the Photoshop year."""
     for pid, _, comm in sorted(processes()):
