@@ -289,7 +289,10 @@ def open_steps(app, scratch, stamp):
         return [("fresh copy of bench.txt, opened in its own window", open_a + [os.path.join(scratch, f"bench-{stamp}.txt")])]
     if app == "Google Chrome":
         return [("own profile, a window titled Bench Page", ["open", "-g", "-n", "-a", name, "--args", f"--user-data-dir={chrome_profile(scratch)}",
-                                                              "--no-first-run", "--no-default-browser-check", "--new-window", BENCH_PAGE])]
+                                                              "--no-first-run", "--no-default-browser-check",
+                                                              # A fresh profile builds the page's accessibility tree only on
+                                                              # demand; both drivers read the page through it.
+                                                              "--force-renderer-accessibility", "--new-window", BENCH_PAGE])]
     if app == "Safari":
         return [("if Safari already runs: AXPress File > New Window first (no activation)", [DESK, "press", "<pid>", "File", "New Window"]),
                 ("bench page, a window whose title ends with Bench Page", open_a + [BENCH_PAGE]),

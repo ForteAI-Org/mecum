@@ -2,6 +2,8 @@
 // (the terminal that runs bench.sh), which is what the benchmark's child binaries inherit. Never prompts.
 // desk press <pid> <menu> <item>: AXPress on one menu bar item without activating the app (a File > New Window
 // opens a window and leaves the app in the background). One JSON line {"ok": bool, "error": ...}. Built to .build/desk.
+// desk quit <pid>: asks the app to quit as the Quit menu command does; a signal makes some apps (DaVinci Resolve)
+// relaunch with a crash report instead.
 import AppKit
 import ApplicationServices
 
@@ -46,7 +48,15 @@ case "press" where arguments.count == 4:
     let result = AXUIElementPerformAction(item, kAXPressAction as CFString)
     emit(["ok": result == .success, "error": result == .success ? NSNull() : "AXPress \(result.rawValue)"])
     exit(result == .success ? 0 : 1)
+case "quit" where arguments.count == 2:
+    guard let pid = Int32(arguments[1]), let app = NSRunningApplication(processIdentifier: pid) else {
+        emit(["ok": false, "error": "no such process"])
+        exit(1)
+    }
+    let asked = app.terminate()
+    emit(["ok": asked, "error": asked ? NSNull() : "the app refused the quit request"])
+    exit(asked ? 0 : 1)
 default:
-    emit(["ok": false, "error": "usage: desk permissions | desk press <pid> <menu> <item>"])
+    emit(["ok": false, "error": "usage: desk permissions | desk press <pid> <menu> <item> | desk quit <pid>"])
     exit(2)
 }

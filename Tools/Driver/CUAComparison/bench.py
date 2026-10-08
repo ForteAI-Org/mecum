@@ -174,10 +174,15 @@ def end_launched(run):
             continue
         name = subprocess.run(["ps", "-p", str(pid), "-o", "comm="], capture_output=True, text=True).stdout.strip()
         if os.path.basename(name) == PROCESS_OF.get(app, app) or os.path.basename(name).startswith(PROCESS_OF.get(app, app)):
-            os.kill(pid, signal.SIGTERM)  # never SIGKILL: an app that stays is left and said so
-            time.sleep(2)
+            # A quit request as the Quit menu command makes it, never a signal: DaVinci Resolve relaunches itself
+            # with a crash report after SIGTERM. An app that stays is left and said so.
+            subprocess.run([os.path.join(HERE, ".build/desk"), "quit", str(pid)], capture_output=True)
+            for _ in range(30):
+                if subprocess.run(["ps", "-p", str(pid)], capture_output=True).returncode != 0:
+                    break
+                time.sleep(1)
             alive = subprocess.run(["ps", "-p", str(pid)], capture_output=True).returncode == 0
-            print(f"    {'still running after SIGTERM, close it yourself' if alive else 'ended'}: {app} (pid {pid}), launched by prepare.py", flush=True)
+            print(f"    {'still running after the quit request, close it yourself' if alive else 'ended'}: {app} (pid {pid}), launched by prepare.py", flush=True)
         else:
             print(f"    left {app} (pid {pid}): the pid is now {name or 'gone'}", flush=True)
 
