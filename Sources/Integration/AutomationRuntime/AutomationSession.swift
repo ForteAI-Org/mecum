@@ -83,8 +83,7 @@ public final class AutomationSession: AutomationSessionOperating {
     public func observe() async throws -> SceneSnapshot {
         let (application, runtime, _) = try current()
         let perceived = try await runtime.scenes.currentScene(of: application.processIdentifier)
-        _ = try await runtime.memory.observe(perceived.scene)
-        return await runtime.memory.enrich(perceived.scene)
+        return await recorder(runtime).observe(perceived)
     }
 
     public func act(target: String, verb: ActionVerb, section: String?, desiredState: ControlState?) async throws -> ActOutcome {
@@ -106,6 +105,7 @@ public final class AutomationSession: AutomationSessionOperating {
         )
         let remotePanel = try seat.agentSeat().holdsRemoteFilePanel
         return await enriched(runtime.engine(
+            recorder                  : recorder(runtime),
             allowsDestructive         : allowsDestructive,
             selectsFieldsByTripleClick: remotePanel,
             refusesMenuOpeningClicks  : remotePanel
@@ -140,6 +140,7 @@ public final class AutomationSession: AutomationSessionOperating {
             input: input, section: section
         )
         return await enriched(runtime.engine(
+            recorder                  : recorder(runtime),
             allowsDestructive         : allowsDestructive,
             selectsFieldsByTripleClick: try seat.agentSeat().holdsRemoteFilePanel
         ).deliver(request), by: runtime)
@@ -209,6 +210,22 @@ public final class AutomationSession: AutomationSessionOperating {
         id = nil
         await cleanup.value
         closing = nil
+    }
+
+    /// The recorder of the call this task is performing, or one of the session's own for a call made
+    /// without the tools, so what the call sees and teaches always reaches the memory.
+    private func recorder(_ runtime: EngineRuntime) -> CallRecorder {
+        CallRecorder.current ?? runtime.recorder(ActionContext(
+            source: .system, streamID: "session-\(id?.uuidString ?? "none")", sessionID: id?.uuidString
+        ))
+    }
+
+    /// The Knowledge directory whose memory this session's calls are recorded in.
+    public var memoryDirectory: URL? { knowledgeDirectory }
+
+    /// The application of the session, as a call's event names it.
+    public var memoryApplication: String? {
+        application.map { $0.bundleIdentifier ?? "pid.\($0.processIdentifier)" }
     }
 
     /// `outcome` with its scene enriched by the Brain, so an action's scene reads like an observed one.

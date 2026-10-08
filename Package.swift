@@ -111,13 +111,15 @@ func perceptionTests(
 func engine(
     _ name        : String,
     _ dependencies: [String]       = [],
-      settings    : [SwiftSetting] = facility
+      settings    : [SwiftSetting] = facility,
+      resources   : [Resource]?    = nil
 ) -> Target {
 
     .target(
         name         : name,
         dependencies : dependencies.map { .target(name: $0) },
         path         : "Sources/Engine/\(name)",
+        resources    : resources,
         swiftSettings: settings
     )
 }
@@ -284,9 +286,18 @@ let package = Package(
             "SeatBroker",
             ["SeatBroker", "PerceptionCore", "SeatCore", "SeatCapture",
              "SeatSession", "SeatInput", "TargetReader", "EngineCore", "ModelTransports",
-             "SeatDriving", "AutomationRuntime", "Engine", "AutomationMCP", "LocalMCP"]
+             "SeatDriving", "AutomationRuntime", "Engine", "AutomationMCP", "LocalMCP", "Memory"]
         ),
         brokerTests("ModelTransports", ["ModelTransports"]),
+        // The living memory wired to the tools, the sessions and the engine: the queue, the recorder, the
+        // calls the tools record and what an action waits for. No desktop, no seat.
+        .testTarget(
+            name         : "AutomationRuntimeTests",
+            dependencies : ["AutomationRuntime", "AutomationMCP", "Memory", "SQLiteMemory", "EngineCore",
+                            "PerceptionCore", "LocalMCP"].map { .target(name: $0) },
+            path         : "Tests/Integration/AutomationRuntimeTests",
+            swiftSettings: suite
+        ),
 
         // Host (TCC, real display) and Live (fixture and reader) tiers, gated by
         // AGENTSEAT_HOST_TESTS=1 and AGENTSEAT_LIVE_TESTS=1 and run serialized.
@@ -346,6 +357,12 @@ let package = Package(
         // `KnowledgeStoring` over one JSON file per application, with backups and write-behind.
         engine("FileKnowledge", ["Memory"], settings: pure),
 
+        // The SQLite foundation of the living memory: one file at a chosen path, schema 1, a serial writer
+        // and a separate reader, typed errors. Imports Memory and the SDK's SQLite3 only; AutomationRuntime's
+        // MemoryService composes it.
+        engine("SQLiteMemory", ["Memory"], settings: pure,
+               resources: [.copy("Resources/brain-living-memory-schema.sql")]),
+
         // `SceneProviding` for a window on the real screen: census, capture, pipeline.
         engine("LiveScenes", ["EngineCore", "PerceptionCore", "Perception", "ScreenCapture"], settings: pure),
 
@@ -374,16 +391,16 @@ let package = Package(
         .target(name: "LocalMCP", path: "Sources/Chat/LocalMCP", swiftSettings: facility),
         integration("AutomationRuntime", ["Perception", "VisionText", "PixelSections", "PixelRegions", "WindowServerListing", "AccessibilityFacts",
                     "ScreenCapture", "Engine", "EngineCore", "HIDActuation", "AccessibilityActions",
-                    "WorkspaceActivation", "Memory", "FileKnowledge", "LiveScenes", "PerceptionCore",
+                    "WorkspaceActivation", "Memory", "SQLiteMemory", "LiveScenes", "PerceptionCore",
                     "SeatDriving", "SeatCore", "SeatSession", "PrivateSymbols", "WindowPlacement"]),
-        integration("AutomationMCP", ["AutomationRuntime", "LocalMCP", "EngineCore", "PerceptionCore",
+        integration("AutomationMCP", ["AutomationRuntime", "LocalMCP", "EngineCore", "PerceptionCore", "Memory",
                                      "PrivateSymbols", "SeatCore", "WindowServerListing"]),
         // The foreground command line: windows, scene, act, memory. What a model host does, by hand.
         .executableTarget(
             name: "mecum",
             dependencies: ["Perception", "PerceptionCore", "VisionText", "WindowServerListing", "AccessibilityFacts",
                            "ScreenCapture", "Engine", "EngineCore", "HIDActuation", "AccessibilityActions",
-                           "WorkspaceActivation", "Memory", "FileKnowledge", "LiveScenes",
+                           "WorkspaceActivation", "Memory", "FileKnowledge", "SQLiteMemory", "LiveScenes",
                            "SeatDriving", "SeatCore", "SeatSession", "PrivateSymbols", "AutomationRuntime",
                            "ChatCore", "CLIProviders", "FileConversations", "LocalMCP", "AutomationMCP", "SceneOverlay", "InteractionListener", "InteractionObservation"].map { .target(name: $0) },
             path: "Tools/Engine/mecum",
@@ -395,6 +412,16 @@ let package = Package(
             dependencies: [.target(name: "LocalMCP")],
             path: "Tools/Engine/mecum-bridge",
             swiftSettings: facility
+        ),
+        // The living memory's process helper: a second real process on one store file, driven by lines on its
+        // standard input, for the two-process and crash proofs of `SQLiteMemoryTests` and the cost measures.
+        // Not a product and bundled nowhere.
+        .executableTarget(
+            name: "memory-probe",
+            dependencies: [.target(name: "SQLiteMemory"), .target(name: "Memory"), .target(name: "EngineCore"),
+                           .target(name: "PerceptionCore")],
+            path: "Tools/Engine/memory-probe",
+            swiftSettings: pure
         ),
 
         // MARK: Perception tests
@@ -428,5 +455,8 @@ let package = Package(
                     resources: [.copy("Fixtures/route-corpus.json"), .copy("Fixtures/misfire-corpus.json"),
                                 .copy("Fixtures/misfire-corpus.md")]),
         engineTests("FileKnowledge", ["FileKnowledge", "Memory", "PerceptionCore"]),
+        // The capture and scene fixtures walk a fake accessibility tree through the producer, the merge and
+        // the pure pipeline before they reach the store, so the suite imports the perception modules too.
+        engineTests("SQLiteMemory", ["SQLiteMemory", "Memory", "EngineCore", "PerceptionCore", "Perception"]),
     ]
 )

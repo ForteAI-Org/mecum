@@ -5,6 +5,7 @@
 //  Created by Eliomar Alejandro Rodriguez Ferrer on 24/09/2026.
 //
 
+import AutomationRuntime
 import SwiftUI
 
 /// BrainSettings is what the engine's Brain has learned, one application at a
@@ -18,11 +19,19 @@ struct BrainSettings: View {
     let directory: URL
 
     @State private var apps: [BrainApp] = []
+    @State private var unavailable: String?
+    @State private var memory: MemoryService.Status?
 
     var body: some View {
         NavigationStack {
             Group {
-                if apps.isEmpty {
+                if let unavailable {
+                    ContentUnavailableView(
+                        "Brain Unavailable",
+                        systemImage: "exclamationmark.triangle",
+                        description: Text("The Brain's memory could not be read: \(unavailable)")
+                    )
+                } else if apps.isEmpty {
                     ContentUnavailableView(
                         "No App Knowledge Yet",
                         systemImage: "brain",
@@ -45,11 +54,48 @@ struct BrainSettings: View {
                     .formStyle(.grouped)
                 }
             }
+            .safeAreaInset(edge: .bottom) {
+                if let memory {
+                    Text(Self.summary(of: memory))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal)
+                        .padding(.bottom, 8)
+                }
+            }
             .navigationTitle("Brain")
             .navigationDestination(for: String.self) { bundleID in
                 if let app = apps.first(where: { $0.bundleID == bundleID }) { BrainAppView(app: app) }
             }
         }
-        .task { apps = BrainLibrary.apps(in: directory) }
+        .task {
+            // This process's own view of its memory: read without opening, creating or copying anything.
+            memory = await MemoryService.shared(for: directory).status()
+            switch await BrainLibrary.apps(in: directory) {
+                case .loaded(let loaded)    : apps = loaded; unavailable = nil
+                case .unavailable(let why)  : apps = []; unavailable = why
+            }
+        }
+    }
+
+    /// The memory's state in two lines: the archive and the library, then this run's writes. The
+    /// counts start at zero with each launch of Mecum.
+    static func summary(of status: MemoryService.Status) -> String {
+        let state: String = switch status.state {
+            case .notOpened         : "not opened yet"
+            case .open              : "open"
+            case .degraded(let why) : "unavailable: \(why)"
+            case .closed            : "closed"
+        }
+        var lines = ["Memory \(state) at \(status.path), SQLite \(status.libraryVersion ?? "unknown")."]
+        lines.append("Since Mecum started: \(status.written) saved, \(status.failed) failed, \(status.dropped) dropped, "
+                     + "\(status.pending + status.inFlight) not yet saved."
+                     + (status.partial > 0 ? " \(status.partial) saved in part." : ""))
+        if let copy = status.lastBackup { lines.append("Last copy: \(copy.formatted(date: .abbreviated, time: .shortened)).") }
+        if let recovery = status.lastRecovery { lines.append(recovery) }
+        if let imported = status.lastImport { lines.append(imported.prefix(1).uppercased() + imported.dropFirst() + ".") }
+        return lines.joined(separator: "\n")
     }
 }

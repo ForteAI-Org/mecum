@@ -204,6 +204,32 @@ public struct ActionEngine: Sendable {
     /// target resolved like `act`'s, the gestures through the actuator, the effect judged by perceiving
     /// again. Only a seen effect is `found_acted`.
     public func deliver(_ request: InputRequest) async -> ActOutcome {
+        let trail = InputTrail()
+        let outcome = await Self.$inputTrail.withValue(trail) { await self.deliverInput(request) }
+        guard let observer = dependencies.observer else { return outcome }
+        let windows = trail.windows
+        var isMenuChoice = false
+        if case .contextMenu = request.input { isMenuChoice = true }
+        let attempt: ActionAttempt = switch outcome.kind {
+            case .dryRun, .refused, .honestMiss, .ambiguous: .notAttempted(reason: outcome.kind.rawValue)
+            default                                       : .delivered
+        }
+        await observer.record(InputRecord(
+            bundleID: request.bundleID,
+            input   : request.input,
+            target  : nil,
+            before  : windows.first,
+            menu    : isMenuChoice && windows.count >= 3 ? windows[1] : nil,
+            after   : windows.count >= 2 ? windows.last : nil,
+            effect  : trail.effect,
+            attempt : attempt
+        ))
+        return outcome
+    }
+
+    /// The input as `deliver` performs it, every perception it takes and the effect it attributes left
+    /// in the task's `InputTrail` for the record.
+    private func deliverInput(_ request: InputRequest) async -> ActOutcome {
         let pid = request.processID
         guard let perceived = await perceive(pid) else {
             return ActOutcome(.honestMiss, await noSceneReason(appName: request.appName, processID: pid))
@@ -258,17 +284,26 @@ public struct ActionEngine: Sendable {
             }
         } catch {
             await dependencies.actuator.confirm(.unknown, in: pid)
+            await dependencies.observer?.record(ActionRecord(
+                bundleID: request.bundleID, element: element, verb: request.verb, effect: nil, windowTitleAfter: nil,
+                before: perceived, attempt: .deliveryFailed("\(error)")
+            ))
             return ActOutcome(.actedUnverified, "\(request.verb.performed) '\(element.label)': delivery failed: "
                 + "\(error)", scene: nil)
         }
         await pause(timing.clickSettle)
-        guard let after = await perceive(pid)?.scene else {
+        guard let afterWindow = await perceive(pid) else {
             await dependencies.actuator.confirm(.unknown, in: pid)
+            await dependencies.observer?.record(ActionRecord(
+                bundleID: request.bundleID, element: element, verb: request.verb, effect: nil, windowTitleAfter: nil,
+                before: perceived
+            ))
             return ActOutcome(
                 .actedUnverified,
                 "\(request.verb.performed) '\(element.label)': no scene could be read "
                 + "afterwards; observe the window once it is available")
         }
+        let after = afterWindow.scene
         let surfacesAfter = await surfaces(pid)
         let effect = Self.gatedEffect(
             before: perceived.scene, after: after, targetID: element.id, popupIsOpen: surfacesAfter.hasOpenPopup
@@ -279,7 +314,9 @@ public struct ActionEngine: Sendable {
             element         : element,
             verb            : request.verb,
             effect          : effect,
-            windowTitleAfter: after.windowTitle
+            windowTitleAfter: after.windowTitle,
+            before          : perceived,
+            after           : afterWindow
         ))
         let elsewhere = ElsewhereGuide.forUnverifiedAct(
             app: request.appName, before: censusBefore, after: surfacesAfter.verdicts
@@ -336,7 +373,8 @@ public struct ActionEngine: Sendable {
             return ActOutcome(.actedUnverified, "set '\(element.label)': delivery failed: \(error)")
         }
         await pause(timing.clickSettle)
-        let after = await perceive(pid)?.scene
+        let afterWindow = await perceive(pid)
+        let after = afterWindow?.scene
         let readBack = await dependencies.controls?.toggleState(at: point, in: pid)
             ?? after?.elements.first(where: { $0.id == element.id })?.state
             ?? after?.elements.first(where: {
@@ -348,7 +386,9 @@ public struct ActionEngine: Sendable {
             element         : element,
             verb            : .setToggle,
             effect          : effect,
-            windowTitleAfter: after?.windowTitle
+            windowTitleAfter: after?.windowTitle,
+            before          : perceived,
+            after           : afterWindow
         ))
         await dependencies.actuator.confirm(readBack == desired ? .observed : .unknown, in: pid)
         switch readBack {
@@ -934,6 +974,7 @@ public struct ActionEngine: Sendable {
             before: before, after: after, targetID: targetID ?? "", popupIsOpen: (await surfaces(pid)).hasOpenPopup
         )
         let verdict = ActVerification.verdict(before: before, after: after, effect: effect)
+        Self.inputTrail?.attribute(effect)
         let delivery: DeliveryEffect = switch verdict {
             case .landed        : .observed
             case .ghost         : .absent
@@ -978,8 +1019,27 @@ public struct ActionEngine: Sendable {
     }
 
     private func perceive(_ processID: pid_t) async -> PerceivedWindow? {
-        try? await dependencies.scenes.currentScene(of: processID)
+        let window = try? await dependencies.scenes.currentScene(of: processID)
+        if let window { Self.inputTrail?.append(window) }
+        return window
     }
+
+    /// InputTrail is what one input's handling perceived, in order, and the effect it attributed: the
+    /// facts `deliver` reports to the observer once the outcome is decided. It changes no decision.
+    final class InputTrail: @unchecked Sendable {
+        private let lock = NSLock()
+        private var perceived: [PerceivedWindow] = []
+        private var attributed: SceneEffect?
+
+        var windows: [PerceivedWindow] { lock.withLock { perceived } }
+        var effect: SceneEffect? { lock.withLock { attributed } }
+
+        func append(_ window: PerceivedWindow) { lock.withLock { perceived.append(window) } }
+        func attribute(_ effect: SceneEffect?) { lock.withLock { attributed = effect } }
+    }
+
+    /// The trail of the input being delivered in this task, when one is.
+    @TaskLocal static var inputTrail: InputTrail?
 
     private func surfaces(_ processID: pid_t) async -> WindowSurfaces {
         let rows = (try? dependencies.windows.windows(ownedBy: processID)) ?? []

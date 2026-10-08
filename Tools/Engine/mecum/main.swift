@@ -6,6 +6,7 @@
 //
 
 import AppKit
+import AutomationRuntime
 import Darwin
 import Foundation
 import LocalMCP
@@ -59,8 +60,11 @@ Task { @MainActor in
                 FileHandle.standardError.write(Data("unknown command '\(command)'\n\n\(Usage.text)\n".utf8))
                 exit(2)
         }
+        // The process ends here: what the commands left in the memory's queue is saved or counted.
+        await MemoryService.closeAll()
         exit(0)
     } catch {
+        await MemoryService.closeAll()
         FileHandle.standardError.write(Data("mecum: \(error)\n".utf8))
         exit(1)
     }

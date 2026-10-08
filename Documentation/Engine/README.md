@@ -37,16 +37,20 @@ and is never a reason to send the gesture again.
 
 | Module | What it owns |
 |---|---|
-| `EngineCore` | pure types and contracts: `ActOutcome` and its closed kinds, `ActVerification` with `ActOracle` and `OracleEvidence`, `ActionVerb`, `ActionPolicy` and `ActionPermissions`, `ActivationPolicy`, `ActionTiming`, `ActionRequest`, `ElsewhereGuide`, `PopupRowPick`, and the roles `Actuating`, `SceneProviding`, `ControlPressing`, `ApplicationActivating`, `EffectExpecting`, `ActionObserving` |
+| `EngineCore` | pure types and contracts: `ActOutcome` and its closed kinds, `ActVerification` with `ActOracle` and `OracleEvidence`, `ActionVerb`, `ActionPolicy` and `ActionPermissions`, `ActivationPolicy`, `ActionTiming`, `ActionRequest`, `ElsewhereGuide`, `PopupRowPick`, `CaptureSurface`, and the roles `Actuating`, `SceneProviding` (whose `PerceivedWindow` carries the capture's quality and surface), `ControlPressing`, `ApplicationActivating`, `EffectExpecting`, `ActionObserving` (whose `ActionRecord` and `InputRecord` carry the perceptions an action or an input used) |
 | `Engine` | `ActionEngine`: the act cycle and the observe side (`describeScene`, `describeSection`, `checkGoal`) over the roles |
 | `HIDActuation` | the foreground `Actuating`: synthetic events at the HID system tap |
 | `AccessibilityActions` | `ControlPressing` over the live accessibility tree: open a dropdown by its own press, read a combo box's value, read a toggle under a point |
 | `WorkspaceActivation` | `ApplicationActivating` over AppKit's workspace |
-| `Memory` | what the agent remembers, pure: `AppKnowledge` (observed objects per window state, menu commands, the brain, routes), `UIBrain` with `ObjectAnchor`, `SiblingGroup`, `LearnedTransition`, `BrainMatcher`, `BrainUpdater` and `BrainRetention`, `Route`, `RouteEarning`, `Recall` with `RecallEvidence` and `SightingGraph`, `Allowlist`, `KnowledgeCoding`, the role `KnowledgeStoring` with `InMemoryKnowledgeStore`, and `BrainMemory`, which fills `EffectExpecting` and `ActionObserving` from the brain |
-| `FileKnowledge` | `KnowledgeStoring` over one JSON file per application: write-behind, a directory lock, daily backups, quarantine and restore; and `FileAllowlistStore` |
+| `Memory` | what the agent remembers, pure: `AppKnowledge` (observed objects per window state, menu commands, the brain, routes), `UIBrain` with `ObjectAnchor`, `SiblingGroup`, `LearnedTransition`, `BrainMatcher`, `BrainUpdater` and `BrainRetention`, `Route`, `RouteEarning`, `Recall` with `RecallEvidence` and `SightingGraph`, `Allowlist`, `KnowledgeCoding`, the role `KnowledgeStoring` with `InMemoryKnowledgeStore`, and `BrainMemory`, which fills `EffectExpecting` and enriches scenes from the stored brain (`BrainReading`); and the contracts of the living memory, pure: the observation contract (`ObservationKind`, `CaptureSample` with `CaptureElement`, `MemoryEventRecord`, `SceneSkeleton` and `SceneStructureMatcher`, `SceneDefinition`), the brain's storage and applications (`BrainStoring`, `BrainApplicationStoring` with `BrainApplicationCommand` and `BrainApplicationKey`, `BrainKeys`, `DecayReport`, `BrainClock`, `TransitionEffectRecord`), the agent calls (`AgentCallStoring` with `AgentTool`, `AgentCallRequest`, `AgentCallRecord`, `AgentCallProgress`, `AgentCallResult`, `ObservedEffect`), the menu commands as data (`MenuCommandStoring`), the observed inputs and explicit attributions (`ObservedInputStoring`, `VerificationStoring`, `TaskAttributionStoring`), the procedures and experiences (`RouteStoring`, `StepOccurrenceStoring`, `ExperienceStoring`), the brain's general graph (`BrainGraphStoring`, `MemoryOverview`) and the read of traces (`MemoryTraceReading`); the store's answers (`MemoryStoreError`, `MemoryReceipt`, `MemorySchemaMismatch`, `MemoryTextFault`, `MemorySnapshotRefusal`) |
+| `FileKnowledge` | `KnowledgeStoring` over one JSON file per application: write-behind, a directory lock, daily backups, quarantine and restore; and `FileAllowlistStore`. No source imports it since the Brain moved to SQLite; `mecum` still lists it as a dependency and the `MecumEngine` library vends it. The JSON files it wrote are not read at run time |
+| `SQLiteMemory` | the living memory's SQLite store, composed by `AutomationRuntime`'s `MemoryService`: `SQLiteMemoryStore` opens one file, bootstraps schema 1 from the module's one DDL resource and refuses any other shape, runs typed write and read transactions over a serial writer and a separate reader, checkpoints passively, copies the file through the backup API (`snapshot(to:)`) and reports the reader's `data_version`; the `SQLite*Repository` types fill the `Memory` roles above, one transaction per write. 46 of the 48 tables are contract data with a typed writer and reader; `brain_scene_roles` and `brain_scene_labels` are projections written and not read. See [the memory schema](MemorySchema.md) and [the memory contracts](MemoryContracts.md) |
+| `memory-probe` (tool, `Tools/Engine/memory-probe`) | a second real process on one store file for the module's tests and `measure-memory-store.sh`: driven by lines on its standard input, one answer per line; a package executable, bundled nowhere |
 | `LiveScenes` | `LiveSceneProvider`, the `SceneProviding` for a window on the real screen: census, capture (the union with an open pop-up), pipeline |
 | `SeatDriving` (`Sources/Integration`) | the Driver's seat filling the Engine's roles: `SeatTarget` owns the host, the seat and the adopted window; `SeatSceneProvider` is `SceneProviding` over the seat's stills; `SeatActuator` is `Actuating` over routed Commands inside a Turn, answering every receipt with what the engine saw; `SeatControls` is `ControlPressing` without the geometric read |
-| `mecum` (tool, `Tools/Engine/mecum`) | the command line: `windows`, `scene`, `act`, `select`, `memory`; the composition root that wires the foreground adapters, or the Seat's with `--seat` |
+| `AutomationRuntime` (`Sources/Integration`) | the composition root: `EngineRuntime` wires the foreground adapters or the Seat's, the expectations from `BrainMemory` over the directory's `MemoryService`, and the call's `CallRecorder` as the engine's observer. `MemoryService` is the one living memory of a Knowledge directory in the process (`shared(for:)`): `memory.sqlite`, opened on first use, written through one ordered queue no action waits for, read with a Brain cache, copied once a day; `CallRecorder` records one call (its request, start and end, its samples and what it taught the Brain); `ActionContext` is who acts under which trace; `MemoryClock` keeps the facts' calendar, the Brain's clock and durations apart. `AutomationSession` is the foreground application session, `AutomationSessionOperating` the role the tools drive |
+| `AutomationMCP` (`Sources/Integration`) | `AutomationTools`, the seventeen tools over `AutomationSessionOperating`; each call it answers is recorded under its `CallProducer` (the app's worker, an external MCP client, the CLI chat) when the session names a memory, and a memory that cannot be written never stops a tool |
+| `mecum` (tool, `Tools/Engine/mecum`) | the command line: `windows`, `scene`, `act`, `select`, `batch`, `memory` (an application's Brain, `--status`, or `--import-json <dir>` to copy earlier JSON Brains into the archive by hand); the composition root that wires the foreground adapters, or the Seat's with `--seat` |
 
 Before the first SeatDriving observation reaches the Engine, `SeatTarget`
 requires the full attested identity of the adopted window, including its process
@@ -57,7 +61,10 @@ selection change before borrowing cannot redefine the opening target.
 
 Link the `MecumEngine` library product. `EngineCore` imports `PerceptionCore`, Foundation and
 CoreGraphics; `Memory` imports `EngineCore` and `PerceptionCore`; the adapters import their core
-module and one framework, and `FileKnowledge` imports `Memory` and Foundation only. A background seat fills
+module and one framework, `FileKnowledge` imports `Memory` and Foundation only, and `SQLiteMemory`
+imports `Memory`, Foundation and the SDK's `SQLite3`. In production it is imported by
+`AutomationRuntime` (`MemoryService`, `CallRecorder`) and by `mecum`'s `memory` command; no library
+product vends it. A background seat fills
 `Actuating` with its own delivery and leaves `ApplicationActivating` unfilled: its windows are never
 in front and its gestures need no raising, which is why the engine treats that role as optional.
 
@@ -80,19 +87,24 @@ outcome.message   // one sentence a model can act on next
 outcome.scene     // the scene after acting, so no second perception is paid to see what happened
 ```
 
-With memory, the same engine learns from what it does and reads what it learned:
+With memory, the same engine learns from what it does and reads what it learned, and each call
+leaves its facts in the living memory of the Knowledge directory:
 
 ```swift
-let store  = FileKnowledgeStore(directory: knowledgeDirectory, clock: { Date() }, diagnostics: { print($0) })
-let memory = BrainMemory(store: store, clock: { Date() })
-let engine = ActionEngine(ActionEngine.Dependencies(
-    scenes: sceneSource, actuator: HIDActuator(), windows: WindowServerWindowListing(),
-    expectations: memory,                    // trusted transitions become expectations, by family
-    observer    : memory                     // every performed action's effect becomes evidence
-))
-try await memory.observe(scene)              // anchors the scene's elements, scoped to its window
-let annotated = await memory.enrich(scene)   // group tags, affordances, recalled names; positions stay live
+let runtime   = EngineRuntime(knowledgeDirectory: knowledgeDirectory) // the process's MemoryService for it
+let recorder  = runtime.recorder(ActionContext(source: .cli, streamID: stream, traceID: trace))
+let engine    = runtime.engine(recorder: recorder, allowsDestructive: false)
+let perceived = try await runtime.scenes.currentScene(of: pid)
+let scene     = await recorder.observe(perceived)  // the current sample, the Brain's ingest, the enriched scene
+let outcome   = await engine.act(request)          // before/after samples; an effect is recorded in the Brain
+await runtime.finish()                             // waits up to the closing budget for queued writes
 ```
+
+Every write is queued on the service and the call goes on; only an observation waits, at most
+50 ms, for the queue (its own ingest included) before it enriches the scene. The call's own row (planned, started, its
+end) is written when a producer calls `CallRecorder.begin` and `end`, as `AutomationTools` does for
+every tool call; the command line's `scene` and `act` write the event, its samples and the Brain's
+learning, with no call row.
 
 From the terminal, the same composition is the `mecum` tool. Screen Recording and Accessibility must
 be granted to the terminal that runs it.
@@ -103,7 +115,7 @@ swift build --product mecum
 .build/debug/mecum scene "Pro Tools"                        # the text map a model reads; also teaches the brain
 .build/debug/mecum act "Pro Tools" "EditModeSpot"           # resolve, click, verify: found_acted or an honest miss
 .build/debug/mecum act "Pro Tools" "Solo" --verb set_toggle --value on --section "Audio 1"
-.build/debug/mecum memory "Pro Tools"                       # anchors, groups, transitions, routes
+.build/debug/mecum memory "Pro Tools"                       # the archive's Brain: anchors, groups, worth naming
 ```
 
 Measured on this Mac against Pro Tools on the first run: a 589-element scene in 1.5 s, an act in 1.4 s
@@ -280,11 +292,39 @@ Driver offers is not yet turned on here.
   actuator has nothing to answer; the Seat's answers each receipt and gives its Turn back, which is
   the Seat's own rule that an event that went out is never repeated.
 - `SceneProviding.currentScene` is a fresh perception at every call, never a cache: an action is
-  resolved against this instant's positions.
+  resolved against this instant's positions. The `PerceivedWindow` it answers states what the
+  provider measured about this one capture: the pipeline's `CaptureQuality` and the
+  `CaptureSurface`, which is `popupUnion` while a pop-up is open (two windows in one picture, never
+  a structural surface), else classified from the role and subrole the tree reported, else
+  `unknown`. Nothing is inferred from the title or the elements; a provider that read no tree
+  leaves both unknown.
+- `ActionObserving` receives every action's and every input's record once the outcome is decided:
+  the element, the verb or input, the effect the scenes attributed, how far the gesture got, and the
+  perceptions the engine used (`before`, `after`, and for a contextual menu choice the `menu`). An
+  input's perceptions are gathered in a task-local `InputTrail` and change no decision. A conformer
+  records or drops; it never fails the action.
+- The observation contract (`Memory/Observation`) is what the living memory keeps of a capture:
+  the sample's identity (event, phase, ordinal; ordinal 0 is the perception the engine used), its
+  completeness as the walk measured it, its surface, and its role-bearing elements with label
+  origin and the structural path truncated at the collection. `ObservationKind` is a closed,
+  versioned registry (`capture`, `capture_field`, `element` at version 1): an unknown code or
+  version is refused on the way in and on the way out, never mapped to a known kind.
+- Structure-v3 (`SceneStructureMatcher`) compares a complete capture's skeleton with the scenes of
+  its application and answers same, different or uncertain per scene; it confirms only one same
+  with nothing uncertain, lists candidates otherwise, creates a scene only when every known scene
+  is different and the capture is complete, on a window, dialog or sheet, with a structural role.
+  Titles, states, values, static text, pixels, counts and everything inside a collection are not
+  identity; differing captions or paths are uncertainty, not proof. No threshold, no score, no
+  first-candidate pick. The repository runs it inside the transaction that reads the scenes and
+  writes the decision, and never re-decides a sample it already decided.
 - The `windows` tool reads window candidates through `AutomationSessionOperating`.
   The broker uses its adoption discovery policy, including qualified nonminimized
   standard AX windows kept offscreen by Stage Manager. Listing opens no Seat and
-  grants no input authority; adoption still reattests the candidate.
+  grants no input authority; adoption still reattests the candidate. A window on
+  another desktop (Space) of its display than the one the display shows is not
+  found, by the app or the command line: it is not in the window server's
+  on-screen list, and the AX fallback covers fullscreen and Stage Manager only.
+  Bring it to the visible desktop first. A clearer answer is later work on main.
 - A pop-up is a window of its own. A target inside an open pop-up is chosen with the keyboard from
   `PopupRowPick`'s plan over the scene's rows (the highlight starts on the control's value, the arrows
   wrap, Return chooses), verified by reading the control's value back. An item of an open native menu
@@ -311,15 +351,66 @@ Driver offers is not yet turned on here.
   to the window that was looked at, never by the calendar: an application nobody opens does not
   forget (the 2026-09-06 wipe). A name a person or a model assigned is protected until a
   contradiction retracts it. A state transition is trusted at evidence two; a menu reveal at one.
+- The brain's stored projection (`SQLiteBrainRepository`) runs the same algorithms, never new ones:
+  load, `BrainUpdater`, difference, in one transaction with the clock as a canonical millisecond
+  value. What the algorithm drops is retired with the cause it applied (`DecayReport`), never
+  deleted. Production mutates it only through `BrainApplicationStoring`, where one key (an
+  observation's sample, an action's event) is one application: a retry answers the stored outcome,
+  another command under the key is a conflict, and the application's clock never runs backwards.
+  The one other writer is `JSONBrainImport`, which writes a whole Brain only for an application the
+  archive holds none of: once when an open creates the archive beside main's JSON files, and by hand
+  through `mecum memory --import-json`.
+- A recorded call is a fact, not a success (`AgentCallStoring`): `completed` means the call
+  concluded, its outcome keeps its own meaning, a skipped batch step is never shown as run, and the
+  arguments are the ones the tool decoded, with its defaults written once. `AutomationTools`
+  records each call it can represent planned and started before the tool runs and ends it with the
+  result the tool answered (an outcome with the effect the engine observed, a listing's rows, an
+  observation tied to its real sample, a batch's summary, `close_session`'s answer) or `failed` with
+  its error. Those writes are queued in that order; the tool does not wait for them, and nothing is
+  replayed.
+- The memory never holds up a tool (`MemoryService`): writes run one after another on the
+  service's own task, a busy archive is waited out by that task alone, and a write that fails or
+  arrives at a full queue (4096 writes) is a counted gap, logged and shown by `status()`, never an
+  error for the caller. An archive that cannot be opened degrades the service with its reason;
+  reads answer no opinion and writes are gaps until it opens again after its interval. Nothing
+  resets or replaces the file, except a file the library calls corrupt, which is moved aside and
+  replaced by the newest daily copy, or by an empty archive when there is none.
+- Three times, kept apart (`MemoryClock`): the facts' calendar as the wall said it, kept even when
+  it ran backwards; the Brain's clock, a reference plus the monotonic time elapsed, never backwards
+  within the process; and durations from monotonic readings of one process. A session's own
+  observation after `open_session` belongs to an observation event that names the call it was
+  taken for (`origin_event_id`), a durable relation apart from a batch's parent.
+- A stored menu command is data, not a choice (`MenuCommandStoring`): its identity is an id the
+  producer chose, never the joined path or the accessibility identifier; nothing runs, merges or
+  scores a command, and no producer writes one yet.
+- Inputs, correlations, verifications, episodes and labels are facts and stated attributions:
+  nothing observes, correlates, judges, segments or labels on its own. The Watcher
+  (`InteractionListener`, `mecum watch`) is not connected to the memory.
+- A procedure is a definition, not a script (`RouteStoring`): publication checks its structure,
+  never its reliability, and authorizes no replay; changing a published Route is a new version.
+  The brain's projection owns only the transitions `LearnedTransition` represents; every other arc
+  lives in the general graph, which nothing in production writes.
 - A route is a belief: only a proof (`RouteEarning.verdict` over the outcomes its own steps cover,
   and an answer that does not hand the work back) may create one, a contradiction demotes it, and
   demotion never erases. Steps store semantic targets, never coordinates, and never typed text.
 - Recall answers `fire`, `hint` or `abstain`, and every slot it fills itself must name something
   concrete: an application the graph knows by a whole component or an end of one, or an entity
   sighted inside the targeted application. "Seen but not trusted" is narrated; "never seen" is silent.
+  `Route`, `RouteEarning` and `Recall` work over `AppKnowledge` and are called by tests only: no
+  production path earns a route or recalls one in this checkout.
 - `KnowledgeStoring` serializes its own mutations, and a load after a mutation returns sees what
   the mutation wrote whether or not it has reached disk. No storage type appears in a public API of
   the pure module; the file adapter takes its directory, clock and diagnostics at construction.
+- `SQLiteMemoryStore` answers a write only after its commit. A busy lock is waited for between
+  attempts, outside any transaction and with the caller's cancellation; `write` holds the work
+  cycle after cycle of the lock budget until the commit, the cancellation, the close or a failure
+  that is not contention, and `attemptWrite` runs one cycle and answers `contention`. A constraint,
+  a trigger, a missing bound value or an over-long text is `contract`; a path that cannot be opened
+  is `open`; a file whose version, tables, columns, indexes or triggers are not exactly the ones
+  this build creates is `schema`, and the file is left as found. Text is bound and read by its
+  byte length and read strictly: a stored text that is not valid UTF-8 is `malformedText`, never
+  replaced. Foreign keys are enabled and verified per connection, the file is in WAL, and no
+  statement outlives the call that prepared it.
 
 ## Evidence
 
@@ -330,22 +421,36 @@ the interrupted reading), `ActionPolicyTests`, `ElsewhereGuideTests`,
 whole cycle through doubles that honor the roles: resolution and its misses, the destructive gate,
 dry runs, a landed click, a ghost, a repaint with a window that appeared elsewhere, expectation by
 family, menu gating, activation, a dropdown opened by press, delivery failure, `set_toggle`'s three
-answers, the keyboard pick, type-ahead, and the pop-up dismissal. `MemoryTests` (121) covers the
+answers, the keyboard pick, type-ahead, and the pop-up dismissal; `CaptureSurfaceTests` (2) the
+surface classification. `MemoryTests` (162 in 19 suites, `swift test list`, 2026-10-07) covers the
 knowledge containers and their legacy JSON, the brain (anchors, groups, ordinal rescue, identity
 hygiene from measured Premiere failures, enrichment, the naming ledger, decay and the observation
 clock), routes and route earning against the real `route-corpus.json`, recall against the real
-`misfire-corpus.json` and its human table, the in-memory store's serialization, and the
-`BrainMemory` seam end to end. `FileKnowledgeTests` (7) proves the file adapter at its boundary:
+`misfire-corpus.json` and its human table, the in-memory store's serialization, the `BrainMemory`
+seam over a stored Brain, structure-v3 on synthetic skeletons, the brain's two seams for its stored
+projection, and the contracts of calls, results, sample keys and content, menu commands, inputs
+and attributions, and procedures. `FileKnowledgeTests` (7) proves the file adapter at its boundary:
 round-trip, write-behind and scheduled flush, two hundred concurrent increments, daily backups with
-pruning, and quarantine with restore. The other adapters are proven at their framework boundary on a
-Mac.
+pruning, and quarantine with restore. `SQLiteMemoryTests` (227 in 43 suites) proves the store and
+its repositories on temporary files, with `memory-probe` for the proofs that need a second
+process, and `verify-memory-schema.py` runs 242 SQL checks on the shipped resource in `make test`;
+both are listed in [the memory schema](MemorySchema.md#verification).
+`AutomationRuntimeTests.MemoryWiringTests` (15) proves the wiring on temporary directories: the
+queue's order and its limit, a refused archive degraded and left as found, the daily copy and the
+recovery of a corrupt archive, a call recorded through its recorder with its samples, effect and
+Brain record, the open's own observation with its origin, a call outside the tools, a batch's
+steps, the Brain cache, the tools' calls under their producer, and three latency measures. The
+other adapters are proven at their framework boundary on a Mac.
 
 ## Not here yet, in porting order
 
 1. `Scrolling`: the scroll and reach machinery, over `Actuating` and `SceneProviding`; reach reads
    `UIBrain.revealers` so a name behind a dropdown is never hunted by scrolling.
-2. The experience and sighting stores behind `Recall.World` (the SQLite living memory), behind a
-   role beside `KnowledgeStoring`; read-hit accounting with them.
+2. The experience and sighting stores behind `Recall.World`, and read-hit accounting with them.
+   `SQLiteMemory` has every repository of schema 1; production writes the calls, samples, scene
+   associations and Brain applications through `MemoryService`. The Watcher's inputs, the menus,
+   tasks, Routes and experiences have repositories and fixtures, not producers, and nothing searches
+   or recalls over them ([the memory contracts](MemoryContracts.md)).
 3. `AppAdapters`: Premiere, Pro Tools, Resolve, AppleScript, Chrome, each behind one capability
    role, so the engine never imports a bridge.
 4. A native `AgentLoop`. CLI chat currently delegates reasoning and conversation context to

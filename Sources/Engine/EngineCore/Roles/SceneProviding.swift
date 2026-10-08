@@ -19,15 +19,30 @@ public protocol SceneProviding: Sendable {
     func currentScene(of processID: pid_t) async throws -> PerceivedWindow
 }
 
-/// PerceivedWindow is a scene together with the global frame of the window it describes.
+/// PerceivedWindow is a scene together with the global frame of the window it describes, the
+/// quality of the accessibility read behind it and the surface the capture was taken of.
+///
+/// Quality and surface describe this one capture. A provider states them from what it measured:
+/// the pipeline's capture quality, the pop-up it saw open, the role and subrole the tree reported.
+/// A provider that did not read a tree leaves both `unknown`; nothing here is inferred from the
+/// scene's elements or its title.
 public struct PerceivedWindow: Sendable, Equatable {
 
     public let scene: SceneSnapshot
     public let frame: CGRect
+    public let capture: CaptureQuality
+    public let surface: CaptureSurface
 
-    public init(scene: SceneSnapshot, frame: CGRect) {
-        self.scene = scene
-        self.frame = frame
+    public init(
+        scene  : SceneSnapshot,
+        frame  : CGRect,
+        capture: CaptureQuality = .unknown,
+        surface: CaptureSurface = .unknown
+    ) {
+        self.scene   = scene
+        self.frame   = frame
+        self.capture = capture
+        self.surface = surface
     }
 
     /// The global point at the center of an element of this scene.

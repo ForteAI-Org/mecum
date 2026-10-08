@@ -92,9 +92,13 @@ public struct SeatSceneProvider: SceneProviding {
             frame       : frame,
             windowNumber: observedWindow.id
         )
-        let scene = try await pipeline.perceive(image, of: window)
+        let capture = try await pipeline.capture(image, of: window)
         await MainActor.run { target.lastSceneImage = image }
-        return PerceivedWindow(scene: scene, frame: frame)
+        // The union with an open pop-up is two windows in one picture, not a structural surface.
+        let surface = popups.isEmpty
+            ? CaptureSurface.classified(role: capture.quality.windowRole, subrole: capture.quality.windowSubrole)
+            : CaptureSurface.popupUnion
+        return PerceivedWindow(scene: capture.scene, frame: frame, capture: capture.quality, surface: surface)
     }
 }
 

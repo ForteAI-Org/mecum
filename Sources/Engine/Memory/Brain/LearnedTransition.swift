@@ -37,6 +37,25 @@ public struct LearnedTransition: Sendable, Equatable, Codable {
         self.lastObservedEpoch = lastObservedEpoch
     }
 
+    /// Key is the triple `BrainUpdater.recordTransition` accumulates evidence under: one anchor,
+    /// one trigger, one effect string. It names a transition inside a brain, where no other
+    /// identity exists; a stored projection keeps its own row id beside it.
+    public struct Key: Sendable, Equatable, Hashable {
+
+        public let anchorKey: String
+        public let trigger: TransitionTrigger
+        public let effect: String
+
+        public init(anchorKey: String, trigger: TransitionTrigger, effect: String) {
+            self.anchorKey = anchorKey
+            self.trigger   = trigger
+            self.effect    = effect
+        }
+    }
+
+    /// The triple this transition accumulates evidence under.
+    public var key: Key { Key(anchorKey: anchorKey, trigger: trigger, effect: effect) }
+
     /// True for a menu reveal, the one effect trusted at evidence one.
     public var isMenuReveal: Bool { effect.hasPrefix("menuOpened:") }
 

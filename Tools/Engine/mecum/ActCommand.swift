@@ -50,7 +50,8 @@ enum ActCommand {
 
     /// Borrows a runtime for one action; its caller owns flushing and Seat cleanup.
     static func perform(_ request: ActionRequest, _ runtime: Runtime, _ invocation: Invocation) async -> ActOutcomeKind {
-        let engine = runtime.engine(allowsDestructive: invocation.flags.contains("allow-destructive"))
+        let engine = runtime.engine(recorder: runtime.commandLineRecorder(),
+                                    allowsDestructive: invocation.flags.contains("allow-destructive"))
         let started = ContinuousClock.now
         let outcome = await engine.act(request)
         let elapsed = started.duration(to: .now)

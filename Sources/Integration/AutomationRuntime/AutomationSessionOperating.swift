@@ -33,6 +33,12 @@ public protocol AutomationSessionOperating: AnyObject {
     func applications(matching query: String?) async throws -> [ApplicationCandidate]
     /// Read-only window candidates exposed by this session's discovery policy; no adoption or input.
     func windowCandidates(ownedBy processID: pid_t) throws -> [WindowRow]
+    /// The Knowledge directory whose living memory this session's calls are recorded in; nil for a
+    /// session with no memory, whose calls are not recorded.
+    var memoryDirectory: URL? { get }
+    /// The bundle ID of the application the session holds, as a call's event names it; nil before
+    /// `open` and after `close`.
+    var memoryApplication: String? { get }
 }
 
 public extension AutomationSessionOperating {
@@ -42,6 +48,10 @@ public extension AutomationSessionOperating {
     var seatNotice: String? { nil }
 
     var observedWindowNumber: Int? { nil }
+
+    var memoryDirectory: URL? { nil }
+
+    var memoryApplication: String? { nil }
 
     func windowCandidates(ownedBy processID: pid_t) throws -> [WindowRow] {
         try WindowServerWindowListing().windows(ownedBy: processID)

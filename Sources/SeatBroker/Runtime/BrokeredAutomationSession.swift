@@ -133,11 +133,26 @@ public final class BrokeredAutomationSession: AutomationSessionOperating {
         return (opened, try session.borrowedSeatTarget())
     }
 
-    /// Ron's scene provider over the borrowed target, observed and enriched by the Brain.
+    /// Ron's scene provider over the borrowed target, observed into the Brain through the call's
+    /// recorder, or one of its own for a call made without the tools, and enriched by the Brain.
     static let perceivedThroughTheEngine: Perceiving = { runtime, pid in
         let perceived = try await runtime.scenes.currentScene(of: pid)
-        _ = try await runtime.memory.observe(perceived.scene)
-        return await runtime.memory.enrich(perceived.scene)
+        return await recorder(runtime, sessionID: nil).observe(perceived)
+    }
+
+    /// The recorder of the call this task is performing, or one of the session's own.
+    static func recorder(_ runtime: EngineRuntime, sessionID: UUID?) -> CallRecorder {
+        CallRecorder.current ?? runtime.recorder(ActionContext(
+            source: .system, streamID: "session-\(sessionID?.uuidString ?? "none")", sessionID: sessionID?.uuidString
+        ))
+    }
+
+    /// The Knowledge directory whose memory this session's calls are recorded in.
+    public var memoryDirectory: URL? { knowledgeDirectory }
+
+    /// The application of the session, as a call's event names it.
+    public var memoryApplication: String? {
+        application.map { $0.bundleIdentifier ?? "pid.\($0.processIdentifier)" }
     }
 
     init(
@@ -358,6 +373,7 @@ public final class BrokeredAutomationSession: AutomationSessionOperating {
         )
         let remotePanel = try seat.agentSeat().holdsRemoteFilePanel
         return await enriched(runtime.engine(
+            recorder                    : Self.recorder(runtime, sessionID: id),
             allowsDestructive           : allowsDestructive,
             contextMenusOnTextFieldsOnly: Self.drawsMenusUnderThePointer(application),
             selectsFieldsByTripleClick  : remotePanel,
@@ -397,6 +413,7 @@ public final class BrokeredAutomationSession: AutomationSessionOperating {
             section  : section
         )
         return await enriched(runtime.engine(
+            recorder                    : Self.recorder(runtime, sessionID: id),
             allowsDestructive           : allowsDestructive,
             contextMenusOnTextFieldsOnly: Self.drawsMenusUnderThePointer(application),
             selectsFieldsByTripleClick  : try seat.agentSeat().holdsRemoteFilePanel

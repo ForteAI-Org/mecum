@@ -62,9 +62,10 @@ struct PremiereSceneBoundaryTests {
         print("captured \(image.width)×\(image.height) px for a \(Int(target.frame.width))×\(Int(target.frame.height)) pt window")
 
         let started = ContinuousClock.now
-        let harvested = try await AccessibilityAugmenter().augmentation(for: processID, windowFrame: target.frame)
+        let harvest = try await AccessibilityAugmenter().augmentation(for: processID, windowFrame: target.frame)
+        let harvested = harvest.elements
         let axDuration = started.duration(to: .now)
-        print("accessibility harvest: \(harvested.count) elements in \(axDuration)")
+        print("accessibility harvest: \(harvested.count) elements in \(axDuration), \(harvest.quality.completeness.rawValue)")
         for element in harvested.prefix(40) {
             let state = element.state.map { " [\($0.rawValue)]" } ?? ""
             print("  \(element.role ?? "?") \(element.label)\(state) @ \(String(format: "%.3f,%.3f", element.bounds.x, element.bounds.y))")

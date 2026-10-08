@@ -14,6 +14,7 @@ import PerceptionCore
 final class FakeNode: @unchecked Sendable {
 
     var role: String?
+    var subrole: String?
     var title: String?
     var descriptionText: String?
     var identifier: String?
@@ -27,6 +28,7 @@ final class FakeNode: @unchecked Sendable {
 
     init(
         _ role         : String,
+        subrole        : String? = nil,
         title          : String? = nil,
         descriptionText: String? = nil,
         value          : String? = nil,
@@ -35,6 +37,7 @@ final class FakeNode: @unchecked Sendable {
         isEnabled      : Bool? = true
     ) {
         self.role            = role
+        self.subrole         = subrole
         self.title           = title
         self.descriptionText = descriptionText
         self.value           = value
@@ -55,7 +58,7 @@ final class FakeNode: @unchecked Sendable {
 struct FakeReader: AccessibilityTreeReading {
 
     func role(_ node: FakeNode) -> String? { node.role }
-    func subrole(_ node: FakeNode) -> String? { nil }
+    func subrole(_ node: FakeNode) -> String? { node.subrole }
     func title(_ node: FakeNode) -> String? { node.title }
     func descriptionText(_ node: FakeNode) -> String? { node.descriptionText }
     func identifier(_ node: FakeNode) -> String? { node.identifier }

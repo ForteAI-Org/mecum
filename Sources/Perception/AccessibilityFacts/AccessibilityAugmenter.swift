@@ -16,8 +16,11 @@ import PerceptionCore
 ///
 /// The budget is the guard against a pathological tree: a file browser exposing hundreds of rows
 /// measured nine seconds per window unbounded. Running out returns the rows read so far, fewer labels
-/// rather than wrong ones. Reading needs the Accessibility grant; without it every tree is empty and
-/// the answer is an empty array, not an error.
+/// rather than wrong ones, and the quality says the walk stopped at its deadline. Reading needs the
+/// Accessibility grant; without it every tree is empty, the answer is an empty list, not an error,
+/// and the quality says the grant was absent. A capture whose frame matches no window of the tree
+/// answers an empty list with `windowFound` false: that is not a denied grant, and the grant is
+/// reported on its own.
 public struct AccessibilityAugmenter: SceneAugmenting {
 
     private let budgetSeconds: TimeInterval
@@ -39,22 +42,27 @@ public struct AccessibilityAugmenter: SceneAugmenting {
         self.windowNumberResolver    = windowNumberResolver
     }
 
-    public func augmentation(for processID: pid_t, windowFrame: CGRect) async throws -> [SceneElement] {
+    public func augmentation(for processID: pid_t, windowFrame: CGRect) async throws -> AccessibilityHarvest {
         await read(processID: processID, windowNumber: nil, windowFrame: windowFrame)
     }
 
     public func augmentation(
         for processID: pid_t, windowNumber: Int, windowFrame: CGRect
-    ) async throws -> [SceneElement] {
+    ) async throws -> AccessibilityHarvest {
         await read(processID: processID, windowNumber: windowNumber, windowFrame: windowFrame)
     }
 
+    /// An identified capture without a resolver is not looked up at all, so its window stays unknown
+    /// rather than missing; a capture no window of the tree matches is `windowFound` false.
     private func read(
         processID: pid_t, windowNumber: Int?, windowFrame: CGRect
-    ) async -> [SceneElement] {
+    ) async -> AccessibilityHarvest {
         let budget = budgetSeconds, timeout = messagingTimeoutSeconds, resolve = windowNumberResolver
         return await MainActor.run {
-            guard windowNumber == nil || resolve != nil else { return [] }
+            let trusted = AXIsProcessTrusted()
+            guard windowNumber == nil || resolve != nil else {
+                return AccessibilityHarvest(elements: [], quality: CaptureQuality(isGrantAvailable: trusted))
+            }
             let reader = LiveAccessibilityReader()
             let application = reader.application(processID: processID)
             reader.setMessagingTimeout(application, seconds: timeout)
@@ -64,14 +72,21 @@ public struct AccessibilityAugmenter: SceneAugmenting {
                     guard let windowNumber else { return true }
                     return resolve?(node) == windowNumber
                 }
-            ) else { return [] }
+            ) else {
+                return AccessibilityHarvest(
+                    elements: [],
+                    quality : CaptureQuality(windowFound: false, isGrantAvailable: trusted)
+                )
+            }
             let deadline = Date().addingTimeInterval(budget)
-            return AccessibilityAugmentation.elements(
+            var harvest = AccessibilityAugmentation.harvest(
                 under      : window,
                 windowFrame: windowFrame,
                 reader     : reader,
                 limits     : AccessibilityAugmentation.Limits(isPastDeadline: { Date() >= deadline })
             )
+            harvest.quality.isGrantAvailable = trusted
+            return harvest
         }
     }
 }

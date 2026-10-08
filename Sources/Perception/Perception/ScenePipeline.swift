@@ -92,9 +92,19 @@ public struct ScenePipeline: Sendable {
     }
 
     /// Perceives one image of one window. Throws when recognition or segmentation cannot run;
-    /// an empty window is a scene with no elements, not an error.
+    /// an empty window is a scene with no elements, not an error. The scene of `capture`, for a
+    /// caller that needs no quality.
     @concurrent
     public func perceive(_ image: CGImage, of window: Window) async throws -> SceneSnapshot {
+        try await capture(image, of: window).scene
+    }
+
+    /// Perceives one image of one window and answers the scene with the quality of the
+    /// accessibility read that contributed to it. The quality is the augmentation stage's own
+    /// answer; when the stage is absent, or the window names no process and frame to read, no read
+    /// took place and the quality is `unknown`, never a complete read that did not happen.
+    @concurrent
+    public func capture(_ image: CGImage, of window: Window) async throws -> SceneCapture {
         try Task.checkCancellation()
         let text = self.text, regions = self.regions, sections = self.sections, accuracy = self.accuracy
         async let recognized = text.recognizeText(in: image, accuracy: accuracy)
@@ -119,11 +129,14 @@ public struct ScenePipeline: Sendable {
             images   : visual.images,
             overlays : visual.overlays
         )
-        let nativeElements = try await harvested
+        let harvest = try await harvested
         try Task.checkCancellation()
-        let merged = Self.augmented(scene, with: nativeElements)
-        guard let controlState else { return merged }
-        return Self.stated(merged, from: image, segments: visual.icons, reader: controlState)
+        let merged = Self.augmented(scene, with: harvest.elements)
+        guard let controlState else { return SceneCapture(scene: merged, quality: harvest.quality) }
+        return SceneCapture(
+            scene  : Self.stated(merged, from: image, segments: visual.icons, reader: controlState),
+            quality: harvest.quality
+        )
     }
 
     /// Asks the control state reader about every switch, checkbox and radio the grouper's candidate
@@ -185,8 +198,8 @@ public struct ScenePipeline: Sendable {
         )
     }
 
-    private func augmentationElements(for window: Window) async throws -> [SceneElement] {
-        guard let augmentation, let processID = window.processID, let frame = window.frame else { return [] }
+    private func augmentationElements(for window: Window) async throws -> AccessibilityHarvest {
+        guard let augmentation, let processID = window.processID, let frame = window.frame else { return .none }
         if let windowNumber = window.windowNumber {
             return try await augmentation.augmentation(
                 for: processID, windowNumber: windowNumber, windowFrame: frame
@@ -214,8 +227,14 @@ public struct ScenePipeline: Sendable {
         return try await perceive(crop, of: local)
     }
 
+    /// Merges a harvest into a pixel-built scene and keeps its quality beside the result. Pure; what
+    /// a fixture calls to produce a capture without an image.
+    public static func augmented(_ scene: SceneSnapshot, with harvest: AccessibilityHarvest) -> SceneCapture {
+        SceneCapture(scene: augmented(scene, with: harvest.elements), quality: harvest.quality)
+    }
+
     /// Merges harvested elements into a pixel-built scene and recomputes the token. Pure; what
-    /// `perceive` calls after the augmenter has answered.
+    /// `capture` calls after the augmenter has answered.
     public static func augmented(_ scene: SceneSnapshot, with harvested: [SceneElement]) -> SceneSnapshot {
         guard !harvested.isEmpty else { return scene }
         var merged = AccessibilityAugmentation.merge(pixels: scene.elements, accessibility: harvested)

@@ -6,6 +6,7 @@
 //
 
 import AppKit
+import AutomationRuntime
 import SeatBroker
 
 /// Quitting gives the seat back and keeps what was typed.
@@ -50,7 +51,13 @@ final class SeatReleasingDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         let drafts    = teams.allObjects.filter(\.hasUnsavedDraft)
         let agents    = teams.allObjects.filter(\.hasAgentHosts)
-        guard !drafts.isEmpty || !agents.isEmpty || model?.mcp.hasDirectory == true || model?.mcp.isBusy == true else { return .terminateNow }
+        guard !Self.canEndAtOnce(
+            drafts      : drafts.count,
+            agents      : agents.count,
+            mcpDirectory: model?.mcp.hasDirectory == true,
+            mcpBusy     : model?.mcp.isBusy == true,
+            memoryBusy  : MemoryService.hasUnfinishedWork
+        ) else { return .terminateNow }
 
         Task { @MainActor in
             await Self.bounded(.seconds(2)) {
@@ -64,9 +71,22 @@ final class SeatReleasingDelegate: NSObject, NSApplicationDelegate {
                 await model?.broker.queue.shutdown()
             }
 
+            // What the workers and the clients taught is written before the process ends, within the
+            // memory's own closing budget; what is left after it is a counted gap.
+            await Self.bounded(.seconds(4)) {
+                await MemoryService.closeAll()
+            }
+
             sender.reply(toApplicationShouldTerminate: true)
         }
         return .terminateLater
+    }
+
+    /// Whether Quit can end the process at once: nothing to save, no seat or client to give back, and
+    /// no memory still writing or copying. Memory work alone is enough to take the bounded path,
+    /// where the memory closes within its own budget.
+    static func canEndAtOnce(drafts: Int, agents: Int, mcpDirectory: Bool, mcpBusy: Bool, memoryBusy: Bool) -> Bool {
+        drafts == 0 && agents == 0 && !mcpDirectory && !mcpBusy && !memoryBusy
     }
 
     /// Runs `work` and stops waiting for it at `limit`, whichever comes first.

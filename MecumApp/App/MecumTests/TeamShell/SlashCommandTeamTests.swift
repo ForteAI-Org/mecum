@@ -235,7 +235,13 @@ struct SlashCommandTeamTests {
     @Test("/model and /effort change the worker's model; /model alone asks for the model popup")
     func modelAndEffort() async throws {
         let harness = try await Harness()
-        _ = try await harness.team.connections.loadCatalogue(for: .claudeCode)
+        // The catalogue the provider lists, fixed as the composer's window tests fix it: the installed
+        // Claude Code's own list depends on its version and account, and is not this test's subject.
+        harness.team.connections.recordCatalogue(
+            [("claude-opus-5", "Claude Opus 5"), ("claude-sonnet-5", "Claude Sonnet 5"), ("claude-haiku-4-5", "Claude Haiku 4.5")]
+                .map { ModelInfo(id: $0.0, title: $0.1, efforts: [.low, .medium, .high]) },
+            for: .claudeCode
+        )
 
         await harness.send("/model claude-opus-5")
         #expect(harness.team.worker(harness.atlas)?.configuration?.model == "claude-opus-5")
