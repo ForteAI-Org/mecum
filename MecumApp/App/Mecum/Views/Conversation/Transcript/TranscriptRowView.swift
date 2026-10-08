@@ -763,6 +763,15 @@ final class TranscriptRowView: NSView {
         return true
     }
 
+    /// Worded when assistive technology asks, never on configure: a tool line's
+    /// label reads every step's JSON, and a resize configures each visible row per frame.
+    override func accessibilityLabel() -> String? {
+        guard let row else { return nil }
+        return TranscriptWording.accessibilityLabel(
+            for: row.item, workerName: workerName, content: row.item.messageID != nil ? row.text.string : nil
+        )
+    }
+
     private func copyControl(at point: CGPoint, in row: PreparedRow) -> Int? {
         row.text.blocks.indices.first { index in
             row.text.blocks[index].isCompleteCode && row.geometry.blocks.indices.contains(index)
@@ -859,9 +868,6 @@ final class TranscriptRowView: NSView {
         let isMessage = row.item.messageID != nil
         setAccessibilityElement(true)
         setAccessibilityRole(Self.isToolRun(row) ? .button : .staticText)
-        setAccessibilityLabel(TranscriptWording.accessibilityLabel(
-            for: row.item, workerName: workerName, content: isMessage ? row.text.string : nil
-        ))
 
         let isStructured = isMessage && row.text.blocks.contains { $0.kind != .text }
         setAccessibilityChildren(isStructured ? blockElements(row) : nil)

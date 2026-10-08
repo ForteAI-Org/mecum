@@ -48,8 +48,7 @@ struct TeamSidebarView: View, Equatable {
     /// What the search field holds; empty shows every worker.
     @State private var query = ""
 
-    @AppStorage(AppPreferences.sidebarShowsSearch)
-    private var showsSearch = AppPreferences.sidebarShowsSearchDefault
+    private var showsSearch: Bool { AppPreferenceValues.shared.sidebarShowsSearch }
 
     /// Decided from the width the split gives the sidebar; nothing here changes that width.
     @State private var isCompact = false

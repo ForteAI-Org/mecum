@@ -48,8 +48,7 @@ struct ConversationComposer: View {
 
     @State private var isChoosingModel = WindowSnapshots.opensModelPopup
 
-    @AppStorage(AppPreferences.chatSendsWithCommandReturn)
-    private var sendsWithCommandReturn = AppPreferences.chatSendsWithCommandReturnDefault
+    private var sendsWithCommandReturn: Bool { AppPreferenceValues.shared.chatSendsWithCommandReturn }
 
     /// The model button's frame in the window, which the popup is centred on.
     @State private var modelButton = CGRect.zero

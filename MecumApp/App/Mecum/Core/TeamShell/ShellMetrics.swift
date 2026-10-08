@@ -62,6 +62,15 @@ nonisolated enum ShellMetrics {
         conversationMinimum + max(sidebar.ideal, compactSidebar + inspector.ideal)
     }
 
+    /// The window's minimum while the inspector is asked for or shown: the
+    /// conversation beside the compact sidebar. AppKit adds the inspector's own
+    /// width to the window's minimum, and an inspector opened in a window
+    /// narrower than that sum keeps the conversation's width and pushes the
+    /// window wider instead, so the minimum drops to this before it opens.
+    static var windowMinimumBesideInspector: Double {
+        conversationMinimum + compactSidebar
+    }
+
     /// Whether a sidebar `width` points wide shows the compact tiles.
     static func showsCompactTiles(sidebarWidth width: Double) -> Bool {
         width < sidebar.minimum

@@ -32,7 +32,9 @@ import SwiftUI
 /// gives room first (the sidebar turning compact, the inspector closing), and
 /// what takes it after (the inspector opening, the sidebar widening). The
 /// inspector closes over about a quarter of a second while the sidebar widens
-/// at once, so the second step waits `inspectorClosing` after a close.
+/// at once, so the second step waits `inspectorClosing` after a close. The
+/// window's minimum leaves out the inspector's width from its request on, as
+/// AppKit adds that width itself (`ShellMetrics.windowMinimumBesideInspector`).
 ///
 /// The request is the window's own memory, passed in as a binding, so the
 /// offscreen snapshot hosts this view without a scene. The column widths a
@@ -121,6 +123,7 @@ struct TeamShellView: View {
                         )
                 }
         }
+        .frame(minWidth: isInspectorInWindow ? ShellMetrics.windowMinimumBesideInspector : ShellMetrics.windowMinimum)
         .background(WindowWidthReader(onWidth: windowResized))
         .onChange(of: columns) { previous, now in
             guard now != .all else { return }
@@ -265,6 +268,11 @@ struct TeamShellView: View {
             )
             .help("Show or hide the inspector.")
         }
+    }
+
+    /// Whether the inspector is asked for or still shown, when the window's minimum leaves out its width.
+    private var isInspectorInWindow: Bool {
+        target.isInspectorShown || division.isInspectorShown
     }
 
     /// True while the selected worker has a screen to watch, which is when the screen toggle works.

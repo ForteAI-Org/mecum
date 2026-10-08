@@ -39,11 +39,8 @@ struct WorkerRowView: View {
 
     @Namespace private var morph
 
-    @AppStorage(AppPreferences.sidebarShowsModel)
-    private var showsModel = AppPreferences.sidebarShowsModelDefault
-
-    @AppStorage(AppPreferences.sidebarShowsUnreadCount)
-    private var showsUnreadCount = AppPreferences.sidebarShowsUnreadCountDefault
+    private var showsModel      : Bool { AppPreferenceValues.shared.sidebarShowsModel }
+    private var showsUnreadCount: Bool { AppPreferenceValues.shared.sidebarShowsUnreadCount }
 
     @Environment(\.accessibilityReduceMotion)
     private var reducesMotion

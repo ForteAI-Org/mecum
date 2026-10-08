@@ -28,7 +28,7 @@ enum WindowSnapshots {
     static var opensModelPopup = false
 
     /// The defaults the drawn views read, a suite of their own apart from the person's.
-    private static let appStorage = UserDefaults(suiteName: "dev.forte.Mecum.snapshots")
+    static let appStorage = UserDefaults(suiteName: "dev.forte.Mecum.snapshots")
 
     /// A turn that read a page and searched the web, as `WebToolRecords` writes it.
     private static let webTools = [

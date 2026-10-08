@@ -7,10 +7,10 @@
 
 import Foundation
 
-/// AppPreferences names the app's own settings, which Settings edits and
-/// the views read through `@AppStorage`, each key with its default beside it
-/// so every reader starts from the same value. The provider settings are not
-/// here: they belong to `ModelSettingsStore`.
+/// AppPreferences names the app's own settings, which Settings edits through
+/// `@AppStorage` and the team window reads through `AppPreferenceValues`, each
+/// key with its default beside it so every reader starts from the same value.
+/// The provider settings are not here: they belong to `ModelSettingsStore`.
 enum AppPreferences {
 
     // MARK: General

@@ -78,4 +78,14 @@ struct ShellMetricsTests {
         #expect(ShellMetrics.division(window: ShellMetrics.windowMinimum, previous: nil) == Self.compact)
         #expect(ShellMetrics.windowMinimum - ShellMetrics.sidebar.ideal >= ShellMetrics.conversationMinimum)
     }
+
+    @Test("Wherever the inspector opens, the window less the inspector holds the minimum beside it")
+    func theInspectorNeverAsksTheWindowToGrow() {
+        for window in stride(from: 600.0, through: 2_000, by: 1) {
+            guard ShellMetrics.division(window: window, previous: nil).isInspectorShown else { continue }
+
+            #expect(window - ShellMetrics.inspector.ideal >= ShellMetrics.windowMinimumBesideInspector)
+        }
+        #expect(ShellMetrics.windowMinimumBesideInspector + ShellMetrics.inspector.ideal == ShellMetrics.windowMinimum)
+    }
 }

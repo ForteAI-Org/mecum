@@ -156,6 +156,10 @@ final class TranscriptController: NSObject {
     @ObservationIgnored private var unsentCheck   : Task<Void, Never>?
     @ObservationIgnored private var observers     : [any NSObjectProtocol] = []
 
+    /// The relayout a resize asked for, until it starts: further resizes join it, and it takes the latest width.
+    @ObservationIgnored private var resizeRelayout    : Task<Void, Never>?
+    @ObservationIgnored private var lastResizeRelayout = ContinuousClock.now
+
     /// `pasteboard` receives Copy and Copy block; a test passes its own.
     init(
         source    : any ConversationWindowSource,
@@ -435,6 +439,9 @@ final class TranscriptController: NSObject {
         isEmpty    = rows.isEmpty
         scheduleUnsentCheck(window, now: now)
     }
+
+    /// The shortest time between two relayouts while a resize goes on, about six frames.
+    private static let resizeRelayoutInterval = Duration.milliseconds(100)
 
     @concurrent
     private static func project(_ window: TranscriptWindow, expanded: Set<TranscriptItem.ID>, opensToolSteps: Bool,
@@ -798,9 +805,23 @@ final class TranscriptController: NSObject {
         reportWhenResting()
     }
 
+    /// A resize relays out at most once per `resizeRelayoutInterval`, the last
+    /// time at the width it ends on: a drag moves the width every frame, and a
+    /// relayout measures every row of the window again. In between, the rows
+    /// draw at the width they were placed at (`TranscriptRowView.drift`).
     private func didResize() {
-        guard currentWidth != preparedWidth, window != nil else { return }
-        enqueue { await self.relayout() }
+        guard currentWidth != preparedWidth, window != nil, resizeRelayout == nil else { return }
+        let wait = lastResizeRelayout + Self.resizeRelayoutInterval - ContinuousClock.now
+        resizeRelayout = Task {
+            if wait > .zero { try? await Task.sleep(for: wait) }
+            enqueue {
+                self.resizeRelayout     = nil
+                // A relayout before this one may have reached the width already.
+                guard self.currentWidth != self.preparedWidth else { return }
+                self.lastResizeRelayout = .now
+                await self.relayout()
+            }
+        }
     }
 
     /// Reports the reading position once scrolling has rested for a moment.

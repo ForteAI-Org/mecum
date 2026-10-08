@@ -62,7 +62,7 @@ struct WorkerConversationView: View {
                     reveal      : { transcript?.revealQuoted($0) }
                 )
             }
-            .onGeometryChange(for: CGFloat.self) { $0.safeAreaInsets.top } action: { titleBarHeight = $0 }
+            .background(TitleBarHeightReader { titleBarHeight = $0 })
     }
 
     // MARK: Transcript

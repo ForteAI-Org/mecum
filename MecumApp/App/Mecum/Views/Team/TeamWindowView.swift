@@ -44,8 +44,9 @@ struct TeamWindowView: View {
 
     var body: some View {
         content
+            // The shell sets the window's minimum width itself, as it depends on the inspector.
             .frame(
-                minWidth : ShellMetrics.windowMinimum,
+                minWidth : team == nil ? ShellMetrics.windowMinimum : nil,
                 minHeight: 560
             )
             .task {

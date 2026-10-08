@@ -25,17 +25,11 @@ struct TranscriptHost: NSViewRepresentable {
     /// which the last message scrolls clear of.
     var bottomInset: CGFloat = 0
 
-    @AppStorage(TextSizeCommands.storageKey)
-    private var bodyPointSize = Double(TranscriptStyle.actualSize.bodyPointSize)
-
-    @AppStorage(AppPreferences.chatFontFamily)
-    private var fontFamily = AppPreferences.chatFontFamilyDefault
-
-    @AppStorage(AppPreferences.chatShowsTimes)
-    private var showsTimes = AppPreferences.chatShowsTimesDefault
-
-    @AppStorage(AppPreferences.chatOpensToolSteps)
-    private var opensToolSteps = AppPreferences.chatOpensToolStepsDefault
+    // Read as the host is made, in its parent's body, which updates when one of them changes.
+    let bodyPointSize  = AppPreferenceValues.shared.bodyPointSize
+    let fontFamily     = AppPreferenceValues.shared.chatFontFamily
+    let showsTimes     = AppPreferenceValues.shared.chatShowsTimes
+    let opensToolSteps = AppPreferenceValues.shared.chatOpensToolSteps
 
     func makeNSView(context: Context) -> NSView {
         applyStyle()
