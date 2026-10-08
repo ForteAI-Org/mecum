@@ -402,7 +402,12 @@ public final class AutomationTools {
             var complete = true
             var verified = 0
             for (index, step) in steps.enumerated() {
-                try Task.checkCancellation()
+                if Task.isCancelled {
+                    // The cancellation ends the call as before; the steps it leaves unrun are recorded as never
+                    // run, as after a stop, so none stays planned in the memory.
+                    for child in (children ?? []).dropFirst(results.count) { await child.skip() }
+                    throw CancellationError()
+                }
                 let child = children?.indices.contains(index) == true ? children?[index] : nil
                 await child?.startStep()
                 let result: ActOutcome
