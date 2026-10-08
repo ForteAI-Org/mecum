@@ -59,6 +59,81 @@ struct UncertainInputTests {
         #expect(unfinished.isEmpty, "unfinished calls: \(unfinished.map { "\($0.request.tool) \($0.progress.status)" })")
     }
 
+    @Test("the second key took effect but came back unverified: the batch stops there, nothing is sent again, the rest is recorded as never run")
+    func uncertainKeyStopsTheBatch() async throws {
+        let session = try CalculatorSession()
+        session.outcomes[2] = .actedUnverified
+        let answer = try await tools(session).call("batch", batch(["1", "2", "+", "3", "0", "="], in: session)).payload
+
+        #expect(session.inputs == ["1", "2"], "the uncertain key is not sent again and no later key is sent")
+        #expect(session.display == "12", "the key took effect")
+        #expect(answer["status"].string == "stopped")
+        #expect(answer["attemptedSteps"] == .number(2) && answer["verifiedSteps"] == .number(1))
+        #expect(answer["steps"].array?.last?["status"].string == "acted_unverified")
+
+        let recorded = try #require(try await batches(session).first)
+        guard case .batch(let stopped, let attempted, let verified)? = recorded.batch.progress.result else {
+            Issue.record("the batch's result is not a batch summary: \(String(describing: recorded.batch.progress.result))"); return
+        }
+        #expect(stopped && attempted == 2 && verified == 1)
+        #expect(recorded.steps.map(\.progress.status) == [.completed, .completed, .skipped, .skipped, .skipped, .skipped])
+        if case .outcome(let kind, _)? = recorded.steps[1].progress.result { #expect(kind == .actedUnverified) }
+        else { Issue.record("the uncertain step's outcome is not recorded") }
+        try await nothingUnfinished(session)
+    }
+
+    @Test("a caller that reads the state after the uncertain key resumes from it: every key reaches the calculator once, and 42 is what it reads")
+    func resumptionFromTheObservedState() async throws {
+        let session = try CalculatorSession()
+        session.outcomes[2] = .actedUnverified
+        let tools = tools(session)
+        _ = try await tools.call("batch", batch(["1", "2", "+", "3", "0", "="], in: session))
+
+        let observed = try await tools.call("observe", .object(["session": .string(session.id!.uuidString),
+                                                                 "full"   : .bool(true)])).payload
+        #expect(observed["scene"].string?.contains("[text] 12 ") == true,
+                "the fresh observation shows what the uncertain key did")
+        let answer = try await tools.call("batch", batch(["+", "3", "0", "="], in: session)).payload
+
+        #expect(session.inputs == ["1", "2", "+", "3", "0", "="], "each key once")
+        #expect(session.display == "42")
+        #expect(answer["status"].string == "completed" && answer["verifiedSteps"] == .number(4))
+        let recorded = try await batches(session)
+        #expect(recorded.count == 2)
+        #expect(recorded.last?.steps.map(\.progress.status) == [.completed, .completed, .completed, .completed])
+        try await nothingUnfinished(session)
+    }
+
+    @Test("a key the tools cannot find or may not press stops the batch with nothing invented after it", arguments: [
+        ActOutcomeKind.honestMiss, .refused, .ambiguous,
+    ])
+    func wrongStateStopsTheBatch(_ kind: ActOutcomeKind) async throws {
+        let session = try CalculatorSession()
+        session.outcomes[3] = kind
+        let answer = try await tools(session).call("batch", batch(["1", "2", "+", "3", "0", "="], in: session)).payload
+
+        #expect(session.inputs == ["1", "2", "+"])
+        #expect(answer["status"].string == "stopped" && answer["verifiedSteps"] == .number(2))
+        #expect(answer["steps"].array?.last?["status"].string == kind.rawValue)
+        let recorded = try #require(try await batches(session).first)
+        #expect(recorded.steps.map(\.progress.status) == [.completed, .completed, .completed, .skipped, .skipped, .skipped])
+        try await nothingUnfinished(session)
+    }
+
+    @Test("a step that fails mid-batch: the keys before it keep their effect, nothing after it is sent, nothing is replayed")
+    func failedStepStopsTheBatch() async throws {
+        let session = try CalculatorSession()
+        session.failsAt = 3
+        let answer = try await tools(session).call("batch", batch(["1", "2", "+", "3", "0", "="], in: session)).payload
+
+        #expect(session.inputs == ["1", "2", "+"] && session.display == "12", "the effects before the failure stay, and are not undone")
+        #expect(answer["status"].string == "stopped" && answer["verifiedSteps"] == .number(2))
+        #expect(answer["steps"].array?.last?["status"].string == "error")
+        let recorded = try #require(try await batches(session).first)
+        #expect(recorded.steps.map(\.progress.status) == [.completed, .completed, .failed, .skipped, .skipped, .skipped])
+        try await nothingUnfinished(session)
+    }
+
     @Test("a batch cancelled between two keys: the call ends with the cancellation, nothing after it is sent, and the keys it never sent are recorded as never run")
     func cancelledBatchRecordsTheRestAsNeverRun() async throws {
         let session = try CalculatorSession()
@@ -74,6 +149,25 @@ struct UncertainInputTests {
         try await nothingUnfinished(session)
     }
 
+    @Test("every key verified but the result is 41: the batch says its steps completed and shows 41; nothing claims the task succeeded")
+    func completedBatchIsNotATaskSuccess() async throws {
+        let session = try CalculatorSession()
+        session.wrongResult = "41"
+        let answer = try await tools(session).call("batch", batch(["1", "2", "+", "3", "0", "="], in: session)).payload
+
+        #expect(session.display == "41")
+        #expect(answer["status"].string == "completed" && answer["verifiedSteps"] == .number(6))
+        let last = String(decoding: try JSONEncoder().encode(answer["steps"].array?.last ?? .null), as: UTF8.self)
+        #expect(last.contains("[text] 41 "), "the last step's observation carries the display the caller must judge: \(last)")
+        #expect(Set(answer.object.map { Array($0.keys) } ?? []) == ["status", "steps", "attemptedSteps", "verifiedSteps", "requested"],
+                "a batch reports its steps, not a task's outcome")
+        let recorded = try #require(try await batches(session).first)
+        guard case .batch(let stopped, let attempted, let verified)? = recorded.batch.progress.result else {
+            Issue.record("no batch summary"); return
+        }
+        #expect(!stopped && attempted == 6 && verified == 6)
+        try await nothingUnfinished(session)
+    }
 }
 
 /// CalculatorSession is a session over a simulated calculator: every key `act` names changes the display

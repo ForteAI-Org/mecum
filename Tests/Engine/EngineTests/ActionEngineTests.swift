@@ -31,6 +31,18 @@ struct ActionEngineTests {
         }
     }
 
+    /// The window as read before the gesture, and no scene after it: every read once the actuator acted fails.
+    final class ScenesLostAfterGesture: SceneProviding, @unchecked Sendable {
+        let before  : PerceivedWindow
+        let actuator: RecordingActuator
+        var readsAfter = 0
+        init(_ before: PerceivedWindow, after actuator: RecordingActuator) { self.before = before; self.actuator = actuator }
+        func currentScene(of processID: pid_t) async throws -> PerceivedWindow {
+            guard actuator.gestures.isEmpty else { readsAfter += 1; throw Unavailable() }
+            return before
+        }
+    }
+
     final class RecordingActuator: Actuating, @unchecked Sendable {
         var gestures: [Gesture] = []
         var confirmations: [DeliveryEffect] = []
@@ -275,6 +287,22 @@ struct ActionEngineTests {
         #expect(outcome.message.contains("nothing structural"))
         #expect(outcome.message.contains("NEW window \"Save\" appeared"))
         #expect(!outcome.message.contains("likely did not register"))
+    }
+
+    @Test("a click after which no scene can be read is unverified: one gesture, not repeated, and no success claimed")
+    func clickWithNoSceneAfterIsUnverified() async {
+        let actuator = RecordingActuator()
+        let scenes   = ScenesLostAfterGesture(scene([export], token: "before"), after: actuator)
+        let outcome  = await ActionEngine(
+            ActionEngine.Dependencies(scenes: scenes, actuator: actuator, windows: ScriptedWindows([[mainWindow]]),
+                                      controls: nil, activation: nil, expectations: nil, observer: nil),
+            permissions: ActionPermissions(), pause: { _ in }
+        ).act(request("Export"))
+
+        #expect(outcome.kind == .actedUnverified)
+        #expect(actuator.gestures.count == 1, "the click is sent once and never again")
+        #expect(actuator.confirmations == [.unknown])
+        #expect(scenes.readsAfter >= 1, "the engine tried to read the window after the click")
     }
 
     @Test("an unclassified display update does not invite replay", arguments: ["7+", "78"])
