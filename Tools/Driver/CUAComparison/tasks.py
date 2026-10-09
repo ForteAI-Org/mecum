@@ -130,8 +130,14 @@ class Ctx:
         self.sampler = None
 
 
+CALC_RUNS = 0
+
+
 def prep_calculator(c):
-    a = 12 + c.rep
+    # One operand per run, not per repetition: the previous driver's run leaves its result on the display.
+    global CALC_RUNS
+    CALC_RUNS += 1
+    a = 11 + CALC_RUNS
     c.expect = str(a * 7 + 5)
     c.vars = dict(a=a)
     shown = [clean(e.get("value", "")) for e in read_ax(c.pid)["elements"]]
@@ -172,11 +178,11 @@ def prep_form(c):
     c.vars = dict(run=c.id, name=f"Bench{c.rep}", color=["Blue", "Green", "Blue"][c.rep % 3])
     url = f"http://127.0.0.1:{c.server.server_port}/form.html?run={c.id}"
     profile = os.environ.get("BENCH_CHROME_PROFILE")
-    if c.task["app"] == "Google Chrome" and profile:
+    if c.task.get("app", c.task["process"]) == "Google Chrome" and profile:
         # Chrome hands a URL to the running instance of that profile, so the page lands in the benchmark's Chrome.
         argv = ["open", "-g", "-n", "-a", "Google Chrome", "--args", f"--user-data-dir={profile}", url]
     else:
-        argv = ["open", "-g", "-a", c.task["app"], url]
+        argv = ["open", "-g", "-a", c.task.get("app", c.task["process"]), url]
     subprocess.run(argv, check=False)
     if not wait_for(lambda: c.id in STATE):
         c.skip = "form page did not load"
