@@ -609,11 +609,12 @@ def task_cells(cell):
 def task_markers(cells):
     """Markers of the drivers' task cells: by success rate, and by median time when the success rates are all even."""
     live = {d: x for d, x in cells.items() if x and x["runs"] and x["success"]["of"]}
-    ok = markers({d: x["success"]["count"] / x["success"]["of"] for d, x in live.items()}, False,
-                 {d: wilson(x["success"]["count"], x["success"]["of"]) for d, x in live.items()})
-    if live and all(m == "🟡" for m in ok.values()):
+    rates = {d: x["success"]["count"] / x["success"]["of"] for d, x in live.items()}
+    # With three runs per task every Wilson interval overlaps, so 0/3 against 3/3 would read as even and the
+    # time would decide: the success rates are compared as they are, and the time only when they are equal.
+    if live and len(set(rates.values())) == 1:
         return markers({d: g(x, "wall_s", "median") for d, x in live.items()}, True)
-    return ok
+    return markers(rates, False)
 
 
 def t_tasks(t):
@@ -635,11 +636,12 @@ def t_tasks(t):
             s = task_cells(cell) + (" (fuori dal supporto dichiarato)" if cell.get("outside_declared_support") and k != "ALL(supported)" else "")
             if d != "mecum" and cm and cm["runs"]:
                 a, b = cm["success"], cell["success"]
-                mark = rate_verdict(a["count"], a["of"], b["count"], b["of"]) if a["of"] and b["of"] else ""
-                if mark == "🟡":
-                    mark = verdict(g(cm, "wall_s", "median"), g(cell, "wall_s", "median"))
+                # Rates as they are (three runs give overlapping intervals), the time only when they are equal.
+                ra, rb = (a["count"] / a["of"] if a["of"] else None), (b["count"] / b["of"] if b["of"] else None)
+                mark = "" if ra is None or rb is None else "🟢" if ra > rb else "🔴" if ra < rb else \
+                    verdict(g(cm, "wall_s", "median"), g(cell, "wall_s", "median"))
                 marks.append(mark)
-                if mark == "🔴" and k != "ALL(supported)":
+                if mark == "🔴":
                     c.losses.append(dict(area="Compiti", metric=f"compito {k}", mecum=task_cells(cm), other=task_cells(cell), against=LABEL[d], delta=None))
             row.append(with_mark(s, mk.get(d, "")))
         rows.append(row)
@@ -820,6 +822,8 @@ def caveats(c):
         bullets.append("Blocchi interrotti: " + ", ".join(aborted) + ".")
     if c.T:
         bullets.append("Fase compiti: poche ripetizioni per compito, un solo modello e un solo livello di sforzo.")
+    # Notes the run itself records (a supplementary pass, a result settled by hand), in its own words.
+    bullets += list(c.RUN.get("notes") or [])
     return ["- " + b for b in bullets]
 
 
@@ -1257,7 +1261,7 @@ def report(c, phases_text=None):
            sec(14, "Tasks with a real model", r_tasks(c)),
            sec(15, "Phase breakdown", ("```\n" + phases_text.strip() + "\n```\n") if phases_text else nodata("`--phases` was not run")),
            sec(16, "Changes since 6 October", r_deltas(c)),
-           sec(17, "Limits", LIMITS),
+           sec(17, "Limits", LIMITS + "".join(f"\n- {n}" for n in c.RUN.get("notes_en") or [])),
            sec(18, "Reproduction", REPRO),
            sec(19, "Per-operation latency", r_per_op(c))]
     return "\n".join(out).replace("n/d", "n/a")

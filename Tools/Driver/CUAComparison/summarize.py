@@ -168,7 +168,8 @@ def intrusion(rs):
     count = lambda key: sum(1 for r in probed if r.get(key))
     return dict(calls=len(probed), frontmost_changed=count("frontmost_changed"), cursor_moved=count("cursor_moved"),
                 cursor_moved_during_call=sum(1 for r in rs if r.get("cursor_moved_call")),
-                window_on_user_display=count("window_on_user_display"))
+                # Ending a session hands the window back to the person's display: that is the contract, not an intrusion.
+                window_on_user_display=sum(1 for r in probed if r.get("window_on_user_display") and r.get("op") != "close_session"))
 
 
 def idle_summary(rs, baseline_per_s):
