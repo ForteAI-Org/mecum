@@ -36,6 +36,16 @@ The composition operation still requires an explicit bounded
 `AgentSeat.withNativeTextInput` scope. Individual key tools do not implicitly
 start a composition lifetime.
 
+## Safari reuses this policy
+
+Safari draws its pages in WebKit, not in a Chromium renderer, and on the app path it
+dropped an unprepared click, drag and bulk insertion exactly as a renderer does, so
+`TargetPlatform` selects `ChromiumPlatform` for the exact bundle identifier
+`com.apple.Safari`. No renderer helper is looked for and the native composition
+qualification stays off. The evidence, the placement and new window findings and the
+keyboard route are in [ADR 0038](../adr/Adr0038SafariPreparationAndBriefNewWindow.md)
+and [ADR 0014](../adr/Adr0014WindowlessContentOfAnOrdinaryWindow.md).
+
 ## Repeatable local tier
 
 ```sh

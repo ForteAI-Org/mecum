@@ -91,6 +91,14 @@ public final class AgentSeat {
     /// absolute monotonic budget rather than a number of laps.
     private static let placementConfirmationNanoseconds: UInt64 = 2_000_000_000
 
+    /// How long a window has to stay where it stopped, short of the origin it
+    /// was sent to, before `confirmPlacement` takes that as its place. Safari
+    /// moves in steps after an accessibility write and holds each step for 300
+    /// to 450 ms (ADR 0038), so two agreeing readings 20 ms apart accepted a
+    /// step on the way as the target in 4 of 17 sessions; a window that is
+    /// simply held elsewhere by its application pays this once.
+    private static let offOriginSettleNanoseconds: UInt64 = 1_000_000_000
+
     // MARK: The state, which used to be seventeen properties of a view controller
 
     /// Where the seat is. Reading it is always allowed; acting on it is what
@@ -4882,11 +4890,16 @@ public final class AgentSeat {
         var refusedRaise: DisplayFailure?
         var didAttemptStage = false
         var readings = 0
+        // The stable reading a window gave short of its requested origin, and
+        // since when it has held it; kept only while the readings stay stable.
+        var offOrigin: (reference: WindowReference, body: CGRect, since: UInt64)?
 
         let deadline = DispatchTime.now().uptimeNanoseconds
             + Self.placementConfirmationNanoseconds
 
         while DispatchTime.now().uptimeNanoseconds < deadline {
+            let heldOffOrigin = offOrigin
+            offOrigin = nil
             try checkAdoptionMayContinue()
             await EventLoopWait.step(
                 readings < 4 ? .milliseconds(20) : .milliseconds(100)
@@ -4983,12 +4996,28 @@ public final class AgentSeat {
                    fullBody
                ),
                bounds.contains(reading.frame) {
-                return (reading, fullBody)
+                if takenInPlace || VirtualWindowPlacementCheck.framesMatch(
+                    reading.frame,
+                    requestedFrame,
+                    tolerance: VirtualWindowPlacementCheck.crossSourceTolerance
+                ) {
+                    return (reading, fullBody)
+                }
+                let now   = DispatchTime.now().uptimeNanoseconds
+                let since = heldOffOrigin.flatMap {
+                    VirtualWindowPlacementCheck.framesMatch($0.reference.frame, reading.frame) ? $0.since : nil
+                } ?? now
+                if now &- since >= Self.offOriginSettleNanoseconds { return (reading, fullBody) }
+                offOrigin = (reading, fullBody, since)
             }
 
             previous = reading
             previousBody = fullBody
         }
+
+        // Stable, and stopped short of its origin until the budget ran out: the
+        // window is where its application holds it, as before this check existed.
+        if let offOrigin { return (offOrigin.reference, offOrigin.body) }
 
         throw refusedRaise ?? DisplayFailure.placementNotConfirmed(
             windowNumber: window.windowNumber,

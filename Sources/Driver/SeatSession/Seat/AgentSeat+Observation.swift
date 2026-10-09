@@ -176,6 +176,17 @@ struct EndpointDiscovery {
         .failure(.subtreeUnreadable(surface: chain.surface))
     }
 
+    /// Keys for an ordinary window whose page names no focused control at all: the
+    /// application's focused window is the surface and the page's web area, under
+    /// a point of it, has the surface as its nearest ancestor naming a window.
+    /// Asked only without a modal relation and with nothing of the process
+    /// above the surface (ADR 0014).
+    var webAreaKeyboardContext: (
+        Int32, CGPoint?, DialogEndpointResolver<AXUIElement>.SurfaceChain, UInt64
+    ) -> Result<ResolvedInputEndpoint, InputEndpointRefusal> = { _, _, chain, _ in
+        .failure(.subtreeUnreadable(surface: chain.surface))
+    }
+
     /// The applications whose ordinary windows take their clicks through
     /// accessibility, as a remote panel's content does (ADR 0031). The one
     /// place this scope is decided; add a bundle identifier to widen it.
@@ -258,6 +269,11 @@ struct EndpointDiscovery {
             DialogEndpointResolver<AXUIElement>
                 .accessibility(assignedProcessID: processID)
                 .windowlessContentEndpoint(at: point, within: chain, selectionGeneration: generation)
+        },
+        webAreaKeyboardContext: { processID, point, chain, generation in
+            DialogEndpointResolver<AXUIElement>
+                .accessibility(assignedProcessID: processID)
+                .webAreaKeyboardContext(at: point, within: chain, selectionGeneration: generation)
         },
         clicksThroughAccessibility: { window in
             NSRunningApplication(processIdentifier: pid_t(window.processID))?.bundleIdentifier
@@ -808,6 +824,20 @@ extension AgentSeat {
                         instance.processID, chain, observation.selectionGeneration
                     )
             }
+            if !hasAttestedModalRelation,
+               case .failure(.subtreeUnreadable) = outcome,
+               let content = webAreaKeyboardContext(
+                   processID : instance.processID,
+                   chain     : chain,
+                   generation: observation.selectionGeneration
+               ) {
+                AgentSeat.observationLog.notice("""
+                    window \(sheet.windowNumber, privacy: .public) reports no focused control and its \
+                    web area is drawn inside it with nothing of the process above, so its keys go to \
+                    it: the discovery had answered \(String(describing: outcome), privacy: .public)
+                    """)
+                outcome = .success(content)
+            }
         }
         // Containment alone can admit a blocked document's Stage Manager
         // thumbnail. Modal eligibility remains authoritative for its recipient.
@@ -913,6 +943,71 @@ extension AgentSeat {
                     """)
                 throw refusal
         }
+    }
+
+    /// The web page's keyboard recipient when accessibility names no focused
+    /// control (ADR 0014): the resolver's proof about the page, and the window
+    /// server's about the order, which is the seat's to read. A process with
+    /// another visible window above the surface, or a reading that failed, answers
+    /// nothing, since that window may hold the keys instead.
+    private func webAreaKeyboardContext(
+        processID : Int32,
+        chain     : DialogEndpointResolver<AXUIElement>.SurfaceChain,
+        generation: UInt64
+    ) -> ResolvedInputEndpoint? {
+        guard surfaceIsTopmost(chain.surface),
+              case .success(let content) = endpoints.webAreaKeyboardContext(
+                  processID, nil, chain, generation
+              ),
+              // The order is read again after the page's proof: a window that
+              // opened during it is above the surface now.
+              surfaceIsTopmost(chain.surface)
+        else { return nil }
+        return content
+    }
+
+    /// Whether no window of the surface's process that someone could operate is
+    /// above it, by the window server's order now. The 66 by 20 traffic light
+    /// overlay macOS draws over every window it raises is above the surface for
+    /// the whole session, and the seat reads it as a decoration, so a decoration
+    /// or a tooltip never counts (ADR 0014).
+    private func surfaceIsTopmost(_ surface: WindowIdentity) -> Bool {
+        Self.isTopmost(
+            surface,
+            among   : sensing.windowSurfaces(ownedBy: [surface.processID]),
+            ignoring: { [self] window in
+                guard let role = selectionKit.core.facts[window]?.role else { return false }
+                return role == .decoration || role == .tooltip
+            }
+        )
+    }
+
+    /// Whether `surface` is listed, visible, and no other visible window of its
+    /// process is listed before it, not counting those `ignoring` names. The
+    /// list runs front to back, so an entry before the surface is above it. An
+    /// absent list or surface is not an answer, and a window whose identity
+    /// cannot be attested is never ignored.
+    static func isTopmost(
+        _ surface     : WindowIdentity,
+        among surfaces: [WindowSurface]?,
+        ignoring      : (WindowIdentity) -> Bool = { _ in false }
+    ) -> Bool {
+        guard let surfaces,
+              let index = surfaces.firstIndex(where: { $0.reference.identity == surface }),
+              surfaces[index].isVisible
+        else { return false }
+        return !surfaces[..<index].contains { above in
+            above.isVisible && !(above.reference.identity.map(ignoring) ?? false)
+        }
+    }
+
+    /// Whether `surface` is an attested modal at this instant: named as a
+    /// modal's host or its own application modal, or blocked by a modal.
+    private func attestedModalWindow(_ surface: WindowIdentity) -> Bool {
+        selectionKit.namedModalHost(of: surface) != nil
+            || selectionKit.isApplicationModal(surface)
+            || !selectionKit.modals(blocking: surface).isEmpty
+            || selectionKit.attachedHost(of: surface) != nil
     }
 
     /// How long `platform` waits on purpose before the first event of `command`.
@@ -1177,6 +1272,48 @@ extension AgentSeat {
                 else { return .focusedNodeChanged }
                 focused = current.focusedNodeWindowNumber
             }
+        } else if endpoint.kind == .keyboardContext, endpoint.evidence == .windowlessContentWithoutFocus {
+            // No control was focused at resolution: the absence is proved again, or the focus a
+            // preparation exposed must resolve back to this surface. Anything else retires it.
+            guard let instance = assignmentKit.lifecycle.current?.instance,
+                  !attestedModalWindow(endpoint.logicalSurface),
+                  surfaceIsTopmost(endpoint.logicalSurface)
+            else { return .focusedNodeChanged }
+            let chain = DialogEndpointResolver<AXUIElement>.SurfaceChain(
+                host        : endpoint.logicalSurface,
+                surface     : endpoint.logicalSurface,
+                surfaceFrame: endpoint.geometry.window.frame
+            )
+            let generation = selectionKit.selected?.generation ?? .max
+            func isThisEndpoint(_ current: ResolvedInputEndpoint) -> Bool {
+                current.kind == .keyboardContext
+                    && current.relation == .logicalSurface
+                    && current.identity == endpoint.identity
+                    && current.geometry.window.frame == endpoint.geometry.window.frame
+                    && current.geometry.scaleFactor == endpoint.geometry.scaleFactor
+                    && current.selectionGeneration == endpoint.selectionGeneration
+            }
+            let absent = webAreaKeyboardContext(
+                processID : instance.processID,
+                chain     : chain,
+                generation: generation
+            )
+            if let absent, absent.evidence == .windowlessContentWithoutFocus, isThisEndpoint(absent) {
+                // Still no focused control, and the page still proves it.
+            } else if case .success(let current) = endpoints.windowlessContent(
+                instance.processID, nil, chain, generation
+            ), current.evidence == .windowlessContentOfSurface, isThisEndpoint(current),
+               current.focusedNodeWindowNumber == endpoint.identity.windowNumber {
+                // A focused control of the page, windowless, with the surface as its nearest window.
+            } else if case .success(let current) = endpoints.keyboardContext(
+                instance.processID, chain, generation
+            ), current.evidence == .attestedSurfaceItself, isThisEndpoint(current),
+               current.focusedNodeWindowNumber == endpoint.identity.windowNumber {
+                // A focused control that names the surface window itself, such as the toolbar's.
+            } else {
+                return .focusedNodeChanged
+            }
+            focused = nil
         } else if endpoint.kind == .keyboardContext, endpoint.evidence == .windowlessContentOfSurface {
             // The focused control names no window, so the plain focus reading
             // would answer nil: the same proof is taken again instead.

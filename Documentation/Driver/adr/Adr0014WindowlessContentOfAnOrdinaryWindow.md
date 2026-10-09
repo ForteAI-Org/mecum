@@ -79,6 +79,63 @@ cover the positive route, missing proof, a directly named foreign focus, modal
 surfaces and proof loss before posting. App repeat results are tracked in
 [stabilization rounds](../reports/StabilizationRounds.md).
 
+## Follow-up: keys on a page that names no focused control (2026-10-09)
+
+Driven through the app with Safari in the background, `AXFocusedUIElement` answered
+`-25212` (no value) in every reading, even right after a click the seat had posted
+into the page. The keyboard discovery, `ordinaryKeyboardContext` (whose scan meets the
+windowless web nodes) and the focused-control path of `windowlessContentEndpoint`
+all refused, so Tab, Shift-Tab, the arrows, `type_text` and `insert_text` failed with
+`subtreeUnreadable` every time, while clicks, drags and scroll found their endpoint
+through the point route above.
+
+With no focused control the recipient is proved by the page instead, in a new route
+asked after `ordinaryKeyboardContext` and only without an attested modal relation.
+`DialogEndpointResolver.webAreaKeyboardContext` answers the surface itself, with
+evidence `windowlessContentWithoutFocus` and relation `logicalSurface`, only when all
+of these hold, and the first that does not refuses:
+
+- the application reports no focused control (`absent`, not unreadable);
+- its focused window is the surface, with the frame that framed the Command;
+- an `AXWebArea` is found climbing from the node under a point of the surface, which
+  is the centre of the surface when the Command carries none, and it names no window;
+- from the web area to the first node naming a window, every node is of the surface's
+  process and names no window or the surface, and that first node names the surface;
+- no other visible window of the process is listed above the surface by the window
+  server, read by the seat before and after the page's proof (`AgentSeat.isTopmost`);
+  an unreadable list, or a list without the surface, refuses. A window the seat
+  itself reads as a decoration or a tooltip does not count: the 66 by 20 point
+  traffic light overlay macOS draws over every window it raises is listed above
+  the surface for the whole session, on screen at alpha 1, and without this
+  exception no key would ever be admitted;
+- the two focus readings bracket the walk.
+
+**The proof is repeated at the boundary.** The endpoint carries no focused node window,
+since nothing was focused, so `endpointInvalidation` takes the whole proof again, the
+modal relation and the window order included, and a window that opened above or a
+modal that appeared retires the context with `focusedNodeChanged` before anything is
+posted. A control that took the focus meanwhile is accepted only when it resolves back
+to this exact surface, by the same routes that start from a focused control: a
+windowless control of the page (the route above) or a control that names the surface
+window itself, such as the toolbar's. This is not a loophole but the normal case of a
+prepared Command: Safari reports no focus while it is inactive and reports the field
+a click focused as soon as the preparation makes its window key, so a bulk insertion
+(`insert_text`, prepared) saw the absence at resolution and the field at the boundary,
+and was retired with `focusedNodeChanged` 5 of 5 times before this was added. A focus
+that resolves to another window's content, or to nothing, still retires the context.
+
+**What this does not claim.** Like the other routes it decides the recipient and never
+proves an effect. A hosted surface, an attested modal (remote panels included) and any
+route with a focused control keep their behavior: remote panels stay in the modal
+branch and are refused as before. A person's other visible window of the same
+application above the surface refuses too, which is stricter than necessary for a
+window that cannot take keys; it fails closed and is the limit of this change.
+The Driver unit tests cover the admission with every condition and the refusal when any one
+is missing, in `WebAreaKeyRoutingTests` and `DialogEndpointResolverTests`.
+
+The keys' delivery to a Safari page that is not active is a separate question, measured
+in [ADR 0038](Adr0038SafariPreparationAndBriefNewWindow.md).
+
 ## Why remote panel content stays refused
 
 Remote panel content draws inside a modal: Slack's open panel, DaVinci Resolve's
@@ -101,5 +158,7 @@ seat failed to attest remains the residual risk.
 - Keys on a page whose application reports no focused control. The shipping
   reading above answered `-25212` (no value) for `AXFocusedUIElement`: with no
   focused control this route refuses, and so does `ordinaryKeyboardContext`,
-  whose scan meets the windowless web nodes.
+  whose scan meets the windowless web nodes. Since 2026-10-09 the page's own proof
+  above answers it for a surface with no modal relation; its live results are in
+  ADR 0038.
 - Any other application or browser engine, and any other build.

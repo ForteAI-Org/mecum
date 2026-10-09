@@ -6,6 +6,7 @@
 //
 
 import ApplicationServices
+import AutomationRuntime
 import CoreGraphics
 import Foundation
 import Testing
@@ -26,6 +27,100 @@ struct BrowserOpeningTests {
                 "a browser this open launches has no window of the person's")
         #expect(!BrowserOpening.opensNewWindow(wasRunning: true, windowTitled: "Inbox", isBrowser: true),
                 "a window named explicitly is the one taken")
+    }
+
+    @Test("only Safari needs the front to open a window from its new window item")
+    func onlySafariNeedsTheFront() {
+        #expect(BrowserOpening.needsFrontToOpen(bundleID: "com.apple.Safari"))
+        #expect(!BrowserOpening.needsFrontToOpen(bundleID: "com.google.Chrome"))
+        #expect(!BrowserOpening.needsFrontToOpen(bundleID: "com.apple.SafariTechnologyPreview"))
+    }
+
+    /// What `pressNewWindow` did, in order, over a scripted press: the readings of the item that
+    /// failed before pressing, and the one that succeeded or failed in the press itself.
+    private func pressing(
+        forward   : (() async -> Bool)?,
+        outcomes  : [Result<String, AutomationFailure>],
+        readiness : Duration = .seconds(1)
+    ) async -> (calls: [String], pressed: String?, failure: String?) {
+        let log = Log()
+        var next = outcomes
+        do {
+            let pressed = try await BrowserOpening.pressNewWindow(
+                of             : 7,
+                bringingForward: forward.map { forward in
+                    {
+                        log.lines.append("forward")
+                        return await forward()
+                    }
+                },
+                readiness      : readiness,
+                press          : { _ in
+                    log.lines.append("press")
+                    return try next.removeFirst().get()
+                },
+                tick           : { log.lines.append("tick") }
+            )
+            return (log.lines, pressed, nil)
+        } catch {
+            return (log.lines, nil, "\(error)")
+        }
+    }
+
+    @Test("a browser that needs the front is brought forward before its item is pressed, once")
+    func theFrontComesBeforeThePress() async {
+        let run = await pressing(forward: { true }, outcomes: [.success("File > New Window")])
+        #expect(run.calls == ["forward", "press"])
+        #expect(run.pressed == "File > New Window")
+    }
+
+    @Test("an item that reads disabled while the browser activates is read again, and pressed once")
+    func aNotYetEnabledItemIsReadAgain() async {
+        let notYet = Result<String, AutomationFailure>.failure(
+            AutomationFailure("No enabled item of its menu bar opens a new window with Command-N."))
+        let run = await pressing(forward: { true }, outcomes: [notYet, notYet, .success("File > New Window")])
+        #expect(run.calls == ["forward", "press", "press", "press"])
+        #expect(run.pressed == "File > New Window")
+        #expect(!run.calls.contains("tick"), "the front stays until the window is listed")
+    }
+
+    @Test("an item that never reads enabled gives the front back and refuses")
+    func aNeverEnabledItemGivesTheFrontBack() async {
+        let notYet = Result<String, AutomationFailure>.failure(
+            AutomationFailure("No enabled item of its menu bar opens a new window with Command-N."))
+        let run = await pressing(
+            forward  : { true },
+            outcomes : Array(repeating: notYet, count: 200),
+            readiness: .milliseconds(60)
+        )
+        #expect(run.calls.first == "forward")
+        #expect(run.calls.last == "tick")
+        #expect(run.pressed == nil)
+        #expect(run.failure?.contains("No enabled item") == true)
+    }
+
+    @Test("a press that failed itself was attempted, so it is never repeated")
+    func aFailedPressIsFinal() async {
+        let failed = Result<String, AutomationFailure>.failure(
+            AutomationFailure("Pressing File > New Window failed with AXError -25204."))
+        let run = await pressing(forward: { true }, outcomes: [failed, .success("File > New Window")])
+        #expect(run.calls == ["forward", "press", "tick"])
+        #expect(run.pressed == nil)
+    }
+
+    @Test("a browser that cannot be brought forward is not pressed at all")
+    func noFrontMeansNoPress() async {
+        let run = await pressing(forward: { false }, outcomes: [.success("File > New Window")])
+        #expect(run.calls == ["forward", "tick"])
+        #expect(run.pressed == nil)
+        #expect(run.failure?.contains("could not be brought forward") == true)
+    }
+
+    @Test("a browser that opens from the background is pressed as before, with no front request")
+    func noFrontRequestForChrome() async {
+        let run = await pressing(forward: nil, outcomes: [.success("File > New Window")])
+        #expect(run.calls == ["press"])
+        #expect(run.pressed == "File > New Window")
     }
 
     @Test("the new window is one the browser did not have before the press")

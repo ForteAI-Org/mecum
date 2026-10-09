@@ -32,7 +32,9 @@ import SeatCore
 /// and none of that buys anything for one character. Scroll passes too.
 ///
 /// Electron and CEF reuse this policy; they still require independent qualification.
-/// Native composition is an explicit qualification separate from ordinary Commands.
+/// Safari reuses it for the same three Commands, measured on its own page content
+/// (ADR 0038). Native composition is an explicit qualification separate from ordinary
+/// Commands.
 nonisolated public struct ChromiumPlatform: InputPlatform {
 
     public let nativeTextInputIsQualified: Bool

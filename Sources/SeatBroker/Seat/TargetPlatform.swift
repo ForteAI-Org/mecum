@@ -56,9 +56,16 @@ import SeatInput
 ///    does: it is driven with `UXPPlatform`, whose attested modal keys use
 ///    recipient priming. Photoshop also selects the measured document-click
 ///    recipe; the seat removes that recipe from modal surfaces;
-/// 3. the bundle identifier is Apple's, and Apple ships its applications in
+/// 3. the bundle identifier is Safari's, which draws its pages in WebKit and,
+///    measured on 09/10/2026 on macOS 27, drops a click, a drag and a bulk
+///    insertion from a window its process does not consider key, as a
+///    renderer does, while scroll passes (ADR 0038). It is driven with the
+///    renderer's preparation and is no embedded renderer: the evidence is the
+///    exact identifier, as for Chrome's native composition and Photoshop's
+///    clicks;
+/// 4. the bundle identifier is Apple's, and Apple ships its applications in
 ///    AppKit, Finder included;
-/// 4. nothing is known, and nothing known is not a renderer: an application
+/// 5. nothing is known, and nothing known is not a renderer: an application
 ///    nobody has measured is driven without preparation, like the native one.
 ///
 /// **The known limit**: a Chromium-based application that ships neither known
@@ -79,10 +86,13 @@ enum TargetPlatform: Sendable, Equatable {
     /// Rule 2, second half: Adobe's UXP host found inside the bundle.
     case adobeUXP
 
-    /// Rule 3: an Apple bundle identifier.
+    /// Rule 3: Safari's bundle identifier, WebKit's page content (ADR 0038).
+    case webKitBrowser
+
+    /// Rule 4: an Apple bundle identifier.
     case appleNative
 
-    /// Rule 4: no evidence either way, which is not evidence of a renderer.
+    /// Rule 5: no evidence either way, which is not evidence of a renderer.
     case unmeasured
 
     /// What inside the bundle said it is a Chromium renderer. It is carried
@@ -102,6 +112,10 @@ enum TargetPlatform: Sendable, Equatable {
         "Electron Framework.framework",
         "Chromium Embedded Framework.framework",
     ]
+
+    /// The one bundle identifier ADR 0038 measured. Safari Technology Preview and
+    /// other WebKit shells are not covered until each is measured.
+    static let safariBundleIdentifier = "com.apple.Safari"
 
     /// What says the interface is drawn by Adobe's UXP host.
     private static let uxpHosts = ["dvauxphost.framework"]
@@ -128,19 +142,21 @@ enum TargetPlatform: Sendable, Equatable {
         if let bundleURL, shipsRendererHelper(bundleURL) { return .embeddedRenderer(.rendererHelper) }
         if let bundleURL, frameworks(of: bundleURL, contain: qtLibraries) { return .qtToolkit }
         if let bundleURL, frameworks(of: bundleURL, contain: uxpHosts) { return .adobeUXP }
+        if bundleIdentifier == Self.safariBundleIdentifier { return .webKitBrowser }
         if bundleIdentifier?.hasPrefix("com.apple.") == true { return .appleNative }
         return .unmeasured
     }
 
-    /// The platform the seat is handed. Only the renderer's clicks are
-    /// prepared; `AppKitPlatform` prepares nothing and is what the Apple and
-    /// the unmeasured cases answer.
+    /// The platform the seat is handed. Only the renderer's and Safari's
+    /// clicks are prepared; `AppKitPlatform` prepares nothing and is what the
+    /// Apple and the unmeasured cases answer. Safari takes `ChromiumPlatform`
+    /// as is: the same three Commands are prepared and keys and scroll are not.
     var platform: any InputPlatform {
         switch self {
-            case .embeddedRenderer         : ChromiumPlatform()
-            case .qtToolkit                : QtPlatform()
-            case .adobeUXP                 : UXPPlatform()
-            case .appleNative, .unmeasured : AppKitPlatform()
+            case .embeddedRenderer, .webKitBrowser: ChromiumPlatform()
+            case .qtToolkit                       : QtPlatform()
+            case .adobeUXP                        : UXPPlatform()
+            case .appleNative, .unmeasured        : AppKitPlatform()
         }
     }
 
@@ -168,6 +184,7 @@ enum TargetPlatform: Sendable, Equatable {
             case .embeddedRenderer(.rendererHelper): "the bundle ships a Chromium renderer helper"
             case .qtToolkit                        : "the bundle ships Qt"
             case .adobeUXP                         : "the bundle ships Adobe's UXP host"
+            case .webKitBrowser                    : "the bundle is Safari, whose web content drops unprepared clicks"
             case .appleNative                      : "the bundle identifier is Apple's"
             case .unmeasured                       : "nothing in the bundle says it is a renderer"
         }

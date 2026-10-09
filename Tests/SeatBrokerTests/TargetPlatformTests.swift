@@ -146,11 +146,62 @@ struct TargetPlatformTests {
             .embeddedRenderer(.rendererHelper),
             .qtToolkit,
             .adobeUXP,
+            .webKitBrowser,
             .appleNative,
             .unmeasured,
         ]
             .filter { $0.platform is ChromiumPlatform }
-        #expect(prepared == [.embeddedRenderer(.framework), .embeddedRenderer(.rendererHelper)])
+        #expect(prepared == [.embeddedRenderer(.framework), .embeddedRenderer(.rendererHelper), .webKitBrowser])
+    }
+
+    @Test("Safari prepares clicks, drags and bulk insertion like a renderer, and keys and scroll like AppKit")
+    func safariIsDrivenWithTheRenderersPreparation() throws {
+        // Measured on 09/10/2026 on the app path: unprepared, 0 of 5 button clicks, 0 of 6 link
+        // clicks and 0 of 5 text drags landed; prepared, 4 of 5, 4 of 4 and 5 of 5. Scroll passed
+        // either way (ADR 0038).
+        let choice = TargetPlatform.chosen(
+            bundleURL       : URL(fileURLWithPath: "/Applications/Safari.app"),
+            bundleIdentifier: "com.apple.Safari"
+        )
+        #expect(choice == .webKitBrowser)
+        #expect(choice.reason.contains("Safari"))
+        let platform = choice.platform(for: "com.apple.Safari")
+        let point    = InputLocation(screenPoint: .zero, windowPointFromTop: .zero)
+        #expect(platform is ChromiumPlatform)
+        #expect(platform.preparation(for: .click(point)) == .internalAppKitState)
+        #expect(platform.preparation(for: .drag(points: [point, point])) == .internalAppKitState)
+        #expect(platform.preparation(for: .insertText("hello")) == .internalAppKitState)
+        #expect(platform.preparation(for: .click(point, button: .right)) == .none)
+        #expect(platform.preparation(for: .key(virtualKey: 48, text: "\t")) == .none)
+        #expect(platform.preparation(for: .text("hello")) == .none)
+        #expect(platform.preparation(for: .scroll(point, deltaY: -5)) == .none)
+        #expect((platform as? ChromiumPlatform)?.nativeTextInputIsQualified == false,
+                "native composition stays a Chrome-only qualification")
+    }
+
+    @Test("only Safari's own bundle identifier selects the Safari recipe")
+    func onlySafariSelectsTheSafariRecipe() throws {
+        let plain = try Self.bundle()
+        for identifier in ["com.apple.SafariTechnologyPreview", "com.apple.dt.Xcode", "com.example.Safari", nil] {
+            let choice = TargetPlatform.chosen(bundleURL: plain, bundleIdentifier: identifier)
+            #expect(choice != .webKitBrowser, "\(identifier ?? "nil")")
+        }
+        #expect(TargetPlatform.chosen(bundleURL: nil, bundleIdentifier: "com.apple.Safari") == .webKitBrowser)
+        // The renderer and Qt evidence is read first: Safari's identifier never outranks a framework.
+        let electron = try Self.bundle(embedding: ["Electron Framework.framework"])
+        #expect(TargetPlatform.chosen(bundleURL: electron, bundleIdentifier: "com.apple.Safari")
+            == .embeddedRenderer(.framework))
+    }
+
+    @Test("a menu command is pressed in a brief activation for Adobe, TextEdit and Safari only")
+    func menuCommandsArePressedInFrontForQualifiedApplications() {
+        #expect(BrokeredAutomationSession.preparesMenuInFront(.adobeUXP, bundleIdentifier: "com.adobe.Photoshop"))
+        #expect(BrokeredAutomationSession.preparesMenuInFront(.appleNative, bundleIdentifier: "com.apple.TextEdit"))
+        #expect(BrokeredAutomationSession.preparesMenuInFront(.webKitBrowser, bundleIdentifier: "com.apple.Safari"))
+        #expect(!BrokeredAutomationSession.preparesMenuInFront(.appleNative, bundleIdentifier: "com.apple.finder"))
+        #expect(!BrokeredAutomationSession.preparesMenuInFront(.embeddedRenderer(.framework),
+                                                              bundleIdentifier: "com.google.Chrome"))
+        #expect(!BrokeredAutomationSession.preparesMenuInFront(.unmeasured, bundleIdentifier: nil))
     }
 
     @Test("an Electron bundle's renderer helper is evidence of a renderer on its own")

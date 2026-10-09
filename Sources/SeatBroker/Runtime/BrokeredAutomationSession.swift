@@ -417,11 +417,7 @@ public final class BrokeredAutomationSession: AutomationSessionOperating {
             bundleURL       : application.bundleURL,
             bundleIdentifier: application.bundleIdentifier
         )
-        // TextEdit leaves its editing menu disabled while its text view accepts
-        // background input. Read and dispatch its menu during verified activation,
-        // just as for Adobe; other native hosts remain separately qualified.
-        let preparesMenu = platform == .adobeUXP || application.bundleIdentifier == "com.apple.TextEdit"
-        if preparesMenu {
+        if Self.preparesMenuInFront(platform, bundleIdentifier: application.bundleIdentifier) {
             return try await MenuBarCommand.performInFront(
                 path,
                 processID: processID,
@@ -446,6 +442,14 @@ public final class BrokeredAutomationSession: AutomationSessionOperating {
             settling         : runtime.settling,
             observe          : { try await self.observe() }
         )
+    }
+
+    /// Whether a menu command of this application is read and pressed during a verified brief
+    /// activation. Adobe's UXP hosts and TextEdit leave menus disabled while driven in the
+    /// background (ADR 0013, 0029); Safari opens no window from File > New Window until it is
+    /// active (ADR 0038). Other native hosts remain separately qualified.
+    nonisolated static func preparesMenuInFront(_ platform: TargetPlatform, bundleIdentifier: String?) -> Bool {
+        platform == .adobeUXP || platform == .webKitBrowser || bundleIdentifier == "com.apple.TextEdit"
     }
 
     private static func briefMenuFailure(_ outcome: BriefActivationOutcome) -> String {

@@ -193,16 +193,30 @@ public final class AgentSession {
             isBrowser   : WebBrowsers.bundleIDs().contains(wanted.bundleID)
         ) {
             // Not launched: `launch` asks a running application with no window to reopen, one more window.
+            var armed: LaunchFocusComeback?
+            let bringForward: (() async -> Bool)? = BrowserOpening.needsFrontToOpen(bundleID: wanted.bundleID)
+                ? {
+                    guard let pid = wanted.pid, let armed else { return false }
+                    return await armed.bringInFront(processID: pid)
+                }
+                : nil
             return try await BrowserOpening.seat(
                 wanted,
                 prepare: { try await self.driver.prepareSeat() },
                 arm    : {
-                    LaunchFocusComeback(
+                    armed = LaunchFocusComeback(
                         allowUnvalidatedBuild: self.environment.configuration.allowUnvalidatedBuild,
                         taker                : "the browser"
                     )
+                    return armed
                 },
-                open   : { try await BrowserOpening.openWindow(of: wanted, tick: $0) },
+                open   : { tick in
+                    try await BrowserOpening.openWindow(
+                        of             : wanted,
+                        bringingForward: bringForward,
+                        tick           : tick
+                    )
+                },
                 use    : { newWindow in
                     let opened = TargetApp(pid: wanted.pid, bundleID: wanted.bundleID, name: wanted.name,
                                            bundleURL: wanted.bundleURL, windows: [newWindow.window],

@@ -37,20 +37,85 @@ final class LaunchFocusComeback: FrontRestoring {
     private let restorer: UserFocusRestorer
     private let window  : WindowReference
     private let taker   : String
+    private let allowUnvalidatedBuild: Bool
     private var restores = 0
 
     /// Nil when there is no person's window in front to come back to, or the restorer is not
     /// qualified on this build: the launch then goes on as it did before. `taker` names the
     /// application watched in the log line.
     init?(allowUnvalidatedBuild: Bool, taker: String = "the launched application") {
-        guard let front = NSWorkspace.shared.frontmostApplication?.processIdentifier,
-              let window = Self.focusedWindow(of: front),
-              let restorer = try? UserFocusRestorer(allowUnvalidatedBuild: allowUnvalidatedBuild),
-              (try? restorer.prepare(window, targets: [])) != nil
-        else { return nil }
+        guard let front = NSWorkspace.shared.frontmostApplication?.processIdentifier else {
+            Self.log.notice("no way back to the person's window: no frontmost application")
+            return nil
+        }
+        guard let window = Self.focusedWindow(of: front) else {
+            Self.log.notice("""
+                no way back to the person's window: process \(front, privacy: .public) has no \
+                attested focused window
+                """)
+            return nil
+        }
+        let restorer: UserFocusRestorer
+        do {
+            restorer = try UserFocusRestorer(allowUnvalidatedBuild: allowUnvalidatedBuild)
+            try restorer.prepare(window, targets: [])
+        } catch {
+            Self.log.notice("""
+                no way back to the person's window \(window.windowNumber, privacy: .public): \
+                \(String(describing: error), privacy: .public)
+                """)
+            return nil
+        }
         self.restorer = restorer
         self.window   = window
         self.taker    = taker
+        self.allowUnvalidatedBuild = allowUnvalidatedBuild
+    }
+
+    /// Brings the focused window of `pid` in front on purpose, through a restorer of its own so
+    /// the way back prepared in `init` stays whole, and answers whether that process held the
+    /// front within `bound`. The hand back is `restore(ifTakenBy:)`, which the caller owns.
+    ///
+    /// For an application whose new window item opens nothing from the background (Safari,
+    /// ADR 0038). The request is the one the seat's brief activation makes, key window included;
+    /// no seat exists yet, so nothing else is told to expect it. It refuses, answering false and
+    /// logging why, when the application has no attested focused window or the request fails.
+    func bringInFront(processID pid: pid_t, atMost bound: Duration = .seconds(1)) async -> Bool {
+        guard let target = Self.focusedWindow(of: pid) else {
+            Self.log.notice("""
+                \(self.taker, privacy: .public) \(pid, privacy: .public) has no attested focused \
+                window to bring forward
+                """)
+            return false
+        }
+        do {
+            let bringer = try UserFocusRestorer(allowUnvalidatedBuild: allowUnvalidatedBuild)
+            try bringer.prepare(target, targets: [])
+            let code = try bringer.restore(target, primesKeyWindow: true)
+            guard code == 0 else {
+                Self.log.notice("""
+                    the request to bring \(self.taker, privacy: .public) \(pid, privacy: .public) \
+                    forward was refused with code \(code, privacy: .public)
+                    """)
+                return false
+            }
+        } catch {
+            Self.log.notice("""
+                \(self.taker, privacy: .public) \(pid, privacy: .public) could not be brought \
+                forward: \(String(describing: error), privacy: .public)
+                """)
+            return false
+        }
+        let deadline = ContinuousClock.now + bound
+        while NSWorkspace.shared.frontmostApplication?.processIdentifier != pid {
+            guard ContinuousClock.now < deadline else {
+                Self.log.notice("\(self.taker, privacy: .public) \(pid, privacy: .public) did not take the front within the bound")
+                return false
+            }
+            do { try await Task.sleep(for: .milliseconds(20)) } catch { return false }
+        }
+        Self.log.notice("\(self.taker, privacy: .public) \(pid, privacy: .public) was brought forward on purpose")
+        return true
     }
 
     /// Whether the application of the person's window is the frontmost one now.
@@ -79,13 +144,19 @@ final class LaunchFocusComeback: FrontRestoring {
         }
     }
 
-    /// The focused window of `pid` as the window server attests it, or nil.
+    /// The focused window of `pid` as the window server attests it, or nil. An application that
+    /// answers `cannotComplete` inside the 0.1 s timeout is asked once more: the first request
+    /// from a new accessibility client can take longer (Claude's own Electron window, measured
+    /// on 09/10/2026), and a second one answers at once.
     static func focusedWindow(of pid: pid_t) -> WindowReference? {
         let application = AXUIElementCreateApplication(pid)
         AXUIElementSetMessagingTimeout(application, 0.1)
         var value: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(application, kAXFocusedWindowAttribute as CFString, &value) == .success,
-              let value, CFGetTypeID(value) == AXUIElementGetTypeID(),
+        var error = AXUIElementCopyAttributeValue(application, kAXFocusedWindowAttribute as CFString, &value)
+        if error == .cannotComplete {
+            error = AXUIElementCopyAttributeValue(application, kAXFocusedWindowAttribute as CFString, &value)
+        }
+        guard error == .success, let value, CFGetTypeID(value) == AXUIElementGetTypeID(),
               let number = WindowRelocator.windowNumber(of: unsafeDowncast(value, to: AXUIElement.self)),
               let window = WindowServerProbe.geometry(of: number), window.processID == pid
         else { return nil }

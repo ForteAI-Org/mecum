@@ -82,6 +82,17 @@ nonisolated public enum InputEndpointEvidence: Sendable, Equatable {
     /// does every node between it and the nearest one naming a window, which is
     /// the surface. Only for a surface with no attested modal relation (ADR 0014).
     case windowlessContentOfSurface
+
+    /// The surface the seat already holds, for keys, when accessibility reports
+    /// no focused control at all, as Safari does in the background. The
+    /// application's focused window is the surface, and the `AXWebArea` under a
+    /// point of it has the surface as its nearest ancestor naming a window, with
+    /// every node on that path of the surface's process. Nothing was focused, so
+    /// `focusedNodeWindowNumber` is nil and the whole proof is taken again at
+    /// the boundary, where a focus a preparation exposed is accepted only if it
+    /// resolves back to this surface. Only for a surface with no attested modal
+    /// relation and no other window of its process above it (ADR 0014).
+    case windowlessContentWithoutFocus
 }
 
 /// InputEndpointRelation is the endpoint's relation to the logical surface the

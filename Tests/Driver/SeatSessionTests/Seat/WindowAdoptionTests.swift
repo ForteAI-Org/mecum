@@ -43,6 +43,49 @@ struct WindowAdoptionTests {
         #expect(placing.moves.count == 1)
     }
 
+    @Test("a window that holds an intermediate step on its way is not taken for placed")
+    func intermediateStepDoesNotCompleteAdoption() async throws {
+        // Safari moves in steps after an accessibility write and held steps of 300 to
+        // 450 ms: two agreeing readings 20 ms apart took one for the target (ADR 0038).
+        let sensing  = FakeSensing()
+        let placing  = FakePlacing()
+        let original = FakeGeometry.userSeatWindow
+        let settled  = FakeGeometry.adoptedWindow
+        let step     = settled.replacingFrame(settled.frame.offsetBy(dx: -218, dy: -124))
+        var readings = 0
+        sensing.windowGeometryOverride = { number in
+            guard number == original.windowNumber else { return nil }
+            guard !placing.moves.isEmpty else { return original }
+            readings += 1
+            return readings <= 8 ? step : settled
+        }
+        let seat    = makeSeat(sensing: sensing, placing: placing)
+        let adopted = try await seat.adopt(original)
+        #expect(readings > 8)
+        #expect(adopted.reference.frame == settled.frame)
+        #expect(placing.moves.count == 1)
+    }
+
+    @Test("a window its application holds short of the requested origin is taken where it stays")
+    func heldElsewhereIsTakenAfterTheSettle() async throws {
+        let sensing  = FakeSensing()
+        let placing  = FakePlacing()
+        let original = FakeGeometry.userSeatWindow
+        let held     = FakeGeometry.adoptedWindow.replacingFrame(
+            FakeGeometry.adoptedWindow.frame.offsetBy(dx: 0, dy: 40)
+        )
+        sensing.windowGeometryOverride = { number in
+            guard number == original.windowNumber else { return nil }
+            return placing.moves.isEmpty ? original : held
+        }
+        let seat  = makeSeat(sensing: sensing, placing: placing)
+        let start = ContinuousClock.now
+        let adopted = try await seat.adopt(original)
+        #expect(adopted.reference.frame == held.frame)
+        #expect(start.duration(to: .now) >= .seconds(1), "it waited to see whether the window moved on")
+        #expect(placing.moves.count == 1)
+    }
+
     @Test("a staged window that never reaches its requested position is rolled back")
     func misplacedStageRollsBack() async throws {
         let sensing  = FakeSensing()

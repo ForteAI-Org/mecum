@@ -30,6 +30,11 @@ import WindowPlacement
 /// thumbnail in its strip, and about a second later Safari's `AXWindows` was empty while the window
 /// server still listed both its windows.
 ///
+/// Measured on 09/10/2026 (ADR 0038), Safari behind the person's application: the item is pressed
+/// and no window opens until Safari is active. `openWindow` brings it in front for the press when
+/// `bringingForward` is given, keeps it there until the window is listed, and `tick` then gives the
+/// front back as for Chrome.
+///
 /// The first live run, the same day, pressed that item and then failed to start the background
 /// display, which another process held: the new empty window stayed on the person's display for
 /// good, since by then nothing in accessibility listed it to close. Hence `seat`'s order.
@@ -47,6 +52,16 @@ enum BrowserOpening {
 
     /// How long a pressed item is given to show its window: Safari took about 1 s, Chrome 28 ms.
     static let windowTimeout: Duration = .seconds(3)
+
+    /// How long Safari is given, in front, to show an enabled new window item: its menu bar is
+    /// read again while it activates, and an unreadable one is not ready yet.
+    static let readinessTimeout: Duration = .seconds(2)
+
+    /// Whether the new window item of this browser opens a window only while the browser is
+    /// active (ADR 0038): Safari, measured on 09/10/2026. Chrome's opens one from the background.
+    static func needsFrontToOpen(bundleID: String) -> Bool {
+        bundleID == TargetPlatform.safariBundleIdentifier
+    }
 
     /// How many times the front is read after the adoption, one `tailInterval` apart: about a
     /// second, since Chrome took the front during or just after it (30/09/2026, 2 of 2).
@@ -138,31 +153,47 @@ enum BrowserOpening {
     /// Once the window is listed, its accessibility element is looked for by Window ID until
     /// `timeout`, and the window is answered with or without it. `tick` runs before every reading.
     ///
+    /// `bringingForward`, given for a browser that opens nothing from the background, brings the
+    /// browser in front first and answers whether it held the front. The item is then read until it
+    /// is enabled, at most `readinessTimeout`, and pressed once: a read that finds no item presses
+    /// nothing, and an error from the press itself is final. `tick` gives the front back after the
+    /// listing of the new window, and on every refusal after the browser was brought forward.
+    ///
     /// Throws `SeatBrokerError.driver` when there is no such item, the press fails or no new window
     /// appears within `timeout`, having adopted nothing and released nothing. A window that appears
     /// after the timeout stays open on the person's display.
     @MainActor
     static func openWindow(
-        of app        : TargetApp,
-        within timeout: Duration = windowTimeout,
-        tick          : () -> Void
+        of app          : TargetApp,
+        within timeout  : Duration = windowTimeout,
+        bringingForward : (() async -> Bool)? = nil,
+        tick            : () -> Void
     ) async throws -> OpenedWindow {
 
         guard let pid = app.pid else { throw refusal(app.name, "It is not running.") }
         let before  = windowNumbers(of: pid)
         let pressed: String
         do {
-            pressed = try MenuBarCommand.pressNewWindow(processID: pid)
+            pressed = try await pressNewWindow(of: pid, bringingForward: bringingForward, tick: tick)
         } catch {
+            if error is CancellationError { throw error }
             throw refusal(app.name, "\(error)")
         }
         let started = ContinuousClock.now
-        let opened  = try await awaitWindow(
-            within : timeout,
-            tick   : tick,
-            find   : { newWindow(among: TargetEnumerator.windows(of: pid), before: before) },
-            element: { element(ofWindow: $0.windowNumber, of: pid) }
-        )
+        // A browser brought forward for the press keeps the front until its window is listed.
+        let opened: OpenedWindow?
+        do {
+            opened = try await awaitWindow(
+                within : timeout,
+                tick   : bringingForward == nil ? tick : {},
+                find   : { newWindow(among: TargetEnumerator.windows(of: pid), before: before) },
+                element: { element(ofWindow: $0.windowNumber, of: pid) }
+            )
+        } catch {
+            if bringingForward != nil { tick() }
+            throw error
+        }
+        if bringingForward != nil { tick() }
         guard let opened else {
             throw refusal(app.name, "\(pressed) was pressed and no new window of it appeared within "
                 + "\(timeout.components.seconds) s; if one opens later, it stays on the person's screen.")
@@ -176,6 +207,43 @@ enum BrowserOpening {
             \(opened.element != nil, privacy: .public)
             """)
         return opened
+    }
+
+    /// Presses the new window item of `pid` through `press`, with the browser in front first when
+    /// `bringingForward` is given. Only a read that found no enabled item is repeated, until
+    /// `readiness` passes, since it pressed nothing; an error from the press itself is final. The
+    /// front goes back through `tick` when the item never became ready.
+    @MainActor
+    static func pressNewWindow(
+        of pid         : pid_t,
+        bringingForward: (() async -> Bool)?,
+        readiness      : Duration = readinessTimeout,
+        press          : (pid_t) throws -> String = { try MenuBarCommand.pressNewWindow(processID: $0) },
+        tick           : () -> Void
+    ) async throws -> String {
+
+        guard let bringingForward else { return try press(pid) }
+        guard await bringingForward() else {
+            tick()
+            throw AutomationFailure("Its new window item opens nothing while it is in the background, "
+                + "and it could not be brought forward for a moment.")
+        }
+        let deadline = ContinuousClock.now + readiness
+        while true {
+            do {
+                return try press(pid)
+            } catch {
+                // A failure of the press itself says the action was attempted: it is final.
+                guard !"\(error)".hasPrefix("Pressing "), ContinuousClock.now < deadline else {
+                    tick()
+                    throw error
+                }
+            }
+            do { try await Task.sleep(for: .milliseconds(20)) } catch {
+                tick()
+                throw error
+            }
+        }
     }
 
     /// Reads `find` until it answers a window and `element` answers that window's element, or

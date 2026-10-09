@@ -42,10 +42,20 @@ struct DialogEndpointResolverTests {
         var parents  : [Int: Int]    = [:]
         var unreadableWindows : Set<Int> = []
         var unreadableChildren: Set<Int> = []
+
+        /// The page's own facts: AX reports no focused control (`-25212`), the
+        /// application's focused window, and which nodes are an `AXWebArea`.
+        var focusIsAbsent: Bool = false
+        var focusedWindow: Int?
+        var webAreas     : Set<Int> = []
+
+        /// A control that takes the focus after this many reads of it.
+        var focusAppearsAfterReads: Int?
     }
 
     private final class Answers {
         var identityCalls = 0
+        var focusReads    = 0
     }
 
     private static let hostWindow    = 900
@@ -127,6 +137,13 @@ struct DialogEndpointResolverTests {
     ) -> DialogEndpointResolver<Node> {
 
         let answers = Answers()
+        let focusReading: (() -> DialogEndpointResolver<Node>.FocusedControlReading)? = tree.focusIsAbsent
+            ? {
+                answers.focusReads += 1
+                if let after = tree.focusAppearsAfterReads, answers.focusReads > after { return .node(Node(id: 4)) }
+                return .absent
+            }
+            : nil
         return DialogEndpointResolver<Node>(
             nodeAtPoint: { _ in tree.hit.map(Node.init) },
             focusedNode: { tree.focused.map(Node.init) },
@@ -146,11 +163,14 @@ struct DialogEndpointResolverTests {
             },
             geometry   : { window, _ in geometries[window] },
             now        : { now },
+            focusedControl: focusReading,
+            focusedWindow: { tree.focusedWindow.map(Node.init) },
             parent     : { tree.parents[$0.id].map(Node.init) },
             windowReading: { node in
                 if tree.unreadableWindows.contains(node.id) { return .unreadable }
                 return tree.windows[node.id].map { .window($0) } ?? .windowless
-            }
+            },
+            isWebArea  : { tree.webAreas.contains($0.id) }
         )
     }
 
@@ -560,6 +580,177 @@ struct DialogEndpointResolverTests {
         }
         _ = try windowless(path(60), pointer: pointer).get()
         #expect(windowless(path(70), pointer: pointer) == .failure(.subtreeUnreadable(surface: host)))
+    }
+
+    // MARK: Keys on a web page that names no focused control
+
+    /// Safari in the background: no focused control, the focused window is the
+    /// window, the page's web area (node 2) is windowless and its parent is the
+    /// window. The hit test at the centre answers a node inside the page.
+    private var unfocusedPageTree: Tree {
+        var tree = webPageTree
+        tree.focused       = nil
+        tree.focusIsAbsent = true
+        tree.focusedWindow = 1
+        tree.webAreas      = [2]
+        return tree
+    }
+
+    private func webArea(
+        _ tree: Tree,
+        at point: CGPoint? = nil,
+        within chain: DialogEndpointResolver<Node>.SurfaceChain? = nil
+    ) -> Result<ResolvedInputEndpoint, InputEndpointRefusal> {
+        pageResolver(tree).webAreaKeyboardContext(
+            at                 : point,
+            within             : chain ?? ordinaryChain,
+            selectionGeneration: 6
+        )
+    }
+
+    private var unreadable: Result<ResolvedInputEndpoint, InputEndpointRefusal> {
+        .failure(.subtreeUnreadable(surface: host))
+    }
+
+    @Test("with no focused control, the web area under the centre or a point is the window's own content",
+          arguments: [true, false])
+    func webAreaWithoutFocusIsTheSurfaces(usesPoint: Bool) throws {
+        // The routes that start from a focused control refuse this page.
+        #expect(pageResolver(unfocusedPageTree)
+            .keyboardContext(within: ordinaryChain, selectionGeneration: 6) == unreadable)
+        #expect(pageResolver(unfocusedPageTree)
+            .windowlessContentEndpoint(at: nil, within: ordinaryChain, selectionGeneration: 6) == unreadable)
+
+        let endpoint = try webArea(unfocusedPageTree, at: usesPoint ? Self.pointOnCancel : nil).get()
+        #expect(endpoint.identity == host)
+        #expect(endpoint.logicalSurface == host)
+        #expect(endpoint.relation == .logicalSurface)
+        #expect(endpoint.evidence == .windowlessContentWithoutFocus)
+        #expect(endpoint.kind == .keyboardContext)
+        #expect(endpoint.focusedNodeWindowNumber == nil)
+        #expect(endpoint.selectionGeneration == 6)
+    }
+
+    @Test("a focused control, or a focus that cannot be read, is not an absent focus")
+    func webAreaRefusesAFocusThatIsNotAbsent() {
+        var focused = unfocusedPageTree
+        focused.focusIsAbsent = false
+        focused.focused       = 4
+        #expect(webArea(focused) == unreadable)
+
+        var unread = unfocusedPageTree
+        unread.focusIsAbsent = false
+        unread.focused       = nil
+        #expect(webArea(unread) == unreadable)
+    }
+
+    @Test("a focus that appears while the page is proved refuses")
+    func webAreaRefusesAFocusThatAppearsDuringTheProof() {
+        var tree = unfocusedPageTree
+        tree.focusAppearsAfterReads = 1
+        #expect(webArea(tree) == unreadable)
+    }
+
+    @Test("the application's focused window has to be this window")
+    func webAreaRefusesAnotherFocusedWindow() {
+        var other = unfocusedPageTree
+        other.windows[6]    = Self.sheetWindow
+        other.processes[6]  = Self.hostProcessID
+        other.focusedWindow = 6
+        #expect(webArea(other) == unreadable)
+
+        var none = unfocusedPageTree
+        none.focusedWindow = nil
+        #expect(webArea(none) == unreadable)
+
+        // Another process's window named as focused cannot lend its page either.
+        var foreign = unfocusedPageTree
+        foreign.processes[1] = Self.remoteProcess
+        #expect(webArea(foreign) == unreadable)
+    }
+
+    @Test("a page with no web area on the path refuses, and so does a web area that names a window")
+    func webAreaNeedsAWindowlessWebArea() {
+        var none = unfocusedPageTree
+        none.webAreas = []
+        #expect(webArea(none) == unreadable)
+
+        var named = unfocusedPageTree
+        named.windows[2] = Self.hostWindow
+        #expect(webArea(named) == unreadable)
+    }
+
+    /// The path from the web area: node 2 below node 6 below the window.
+    private var deepPageTree: Tree {
+        var tree = unfocusedPageTree
+        tree.parents[2]   = 6
+        tree.parents[6]   = 1
+        tree.processes[6] = Self.hostProcessID
+        tree.frames[6]    = Self.contentFrame
+        return tree
+    }
+
+    @Test("a longer windowless path to the window is proved node by node")
+    func webAreaAcceptsALongerPath() throws {
+        let endpoint = try webArea(deepPageTree).get()
+        #expect(endpoint.identity == host)
+    }
+
+    @Test("a node of the path that names another window, even of the same process, refuses")
+    func webAreaRefusesAForeignWindowOnThePath() {
+        var sameProcess = deepPageTree
+        sameProcess.windows[6] = Self.sheetWindow
+        #expect(webArea(sameProcess) == unreadable)
+
+        var otherProcess = deepPageTree
+        otherProcess.windows[6]   = Self.remoteWindow
+        otherProcess.processes[6] = Self.remoteProcess
+        #expect(webArea(otherProcess) == unreadable)
+    }
+
+    @Test("a node of another process on the path refuses, above the web area or below it")
+    func webAreaRefusesAnotherProcess() {
+        var above = deepPageTree
+        above.processes[6] = Self.remoteProcess
+        #expect(webArea(above) == unreadable)
+
+        var webAreaItself = unfocusedPageTree
+        webAreaItself.processes[2] = Self.remoteProcess
+        #expect(webArea(webAreaItself) == unreadable)
+
+        var below = unfocusedPageTree
+        below.processes[3] = Self.remoteProcess
+        #expect(webArea(below) == unreadable)
+    }
+
+    @Test("a read that failed on the path refuses")
+    func webAreaRefusesAnUnreadableRead() {
+        var window = deepPageTree
+        window.unreadableWindows = [6]
+        #expect(webArea(window) == unreadable)
+
+        var parent = deepPageTree
+        parent.parents[6] = nil
+        #expect(webArea(parent) == unreadable)
+
+        var hit = unfocusedPageTree
+        hit.hit = nil
+        #expect(webArea(hit) == .failure(.noNodeAtPoint))
+    }
+
+    @Test("a hosted surface, a point outside the window, or a path past its budget refuses")
+    func webAreaRefusesAHostedSurfaceAnOutsidePointAndALongPath() {
+        #expect(webArea(unfocusedPageTree, within: chain) == .failure(.subtreeUnreadable(surface: sheet)))
+        #expect(webArea(unfocusedPageTree, at: CGPoint(x: 5, y: 5)) == .failure(.pointOutsideSurface))
+
+        var long = unfocusedPageTree
+        for node in 100..<170 {
+            long.processes[node] = Self.hostProcessID
+            long.parents[node]   = node + 1
+        }
+        long.parents[169] = 1
+        long.parents[2]   = 100
+        #expect(webArea(long) == unreadable)
     }
 
     // MARK: Retiring an endpoint
