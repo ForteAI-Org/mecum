@@ -482,10 +482,15 @@ extension AutomationToolsTests {
         let changes = try #require(observation["changes"].string)
         #expect(observation["scene"] == .null)
         #expect(observation["since"] == observed["revision"])
-        #expect(changes.hasPrefix("Changes since revision 1:"))
-        #expect(changes.contains("\nSection: Tracks, position: 0.00,0.00 1.00×1.00, 20 elements\n"))
-        #expect(changes.contains("\n  ~ [control] Track 7 muted  @ 0.10,0.24  (was label \"Track 7 volume\")"))
+        #expect(changes.hasPrefix("## Tracks @0,0 100x100\n"))
+        #expect(changes.contains("\n~ [control] Track 7 muted @10,24  (was label \"Track 7 volume\")"))
         #expect(!changes.contains("Track 8"))
+        // The result names the session once; its observation repeats neither it nor the time.
+        #expect(acted.payload["session"] == id)
+        #expect(observation["session"] == .null)
+        #expect(observation["observedAt"] == .null)
+        #expect(observed["session"] == id)
+        #expect(observed["observedAt"] != .null)
 
         #expect(observation["revision"] == .number(2))
         let again = try await tools.call("act", .object(["session": id, "target": .string("Track 7")]))
@@ -508,7 +513,7 @@ extension AutomationToolsTests {
 
         session.scene.elements[0].state = .on
         let changed = try await tools.call("observe", .object(["session": id])).payload
-        let stated = "~ [control] Track 1 volume [on]  @ 0.10,0.00  (was no state)"
+        let stated = "~ [control] Track 1 volume [on] @10,0  (was no state)"
         #expect(changed["changes"].string?.contains(stated) == true)
         #expect(changed["since"] == .number(2))
 
@@ -524,6 +529,12 @@ extension AutomationToolsTests {
         }
         #expect(session.calls == calls)
         let definition = try #require(AutomationTools.definitions.first { $0["name"].string == "observe" })
+        // A container is accepted where a section is, and the parameter says so.
+        let act = try #require(AutomationTools.definitions.first { $0["name"].string == "act" })
+        #expect(act["inputSchema"]["properties"]["section"]["description"].string?.contains("{container}") == true)
+        let opening = try #require(AutomationTools.definitions.first { $0["name"].string == "open_session" })
+        #expect(opening["description"].string?.contains("\"icons: id@x,y id×n\"") == true)
+        #expect(definition["description"].string?.contains("\"~ changed (was ...)\"") == true)
         #expect(definition["inputSchema"]["properties"]["full"]["type"] == .string("boolean"))
         #expect(definition["inputSchema"]["required"] == .array([.string("session")]))
     }
@@ -560,7 +571,7 @@ extension AutomationToolsTests {
         session.scene.windowTitle = ""
         let typed = try await tools.call("act", .object(["session": id, "target": .string("Name")])).payload
         #expect(typed["observation"]["since"] == .number(2))
-        #expect(typed["observation"]["changes"].string?.hasPrefix("Changes since revision 2:") == true)
+        #expect(typed["observation"]["changes"].string?.contains("window: Synthetic Mixer (test.synthetic)") == true)
 
         session.scene = Self.scene(Self.rows.map { $0 == "Track 7 volume" ? "Track 7 renamed" : $0 })
         session.observedWindowNumber = mainNumber

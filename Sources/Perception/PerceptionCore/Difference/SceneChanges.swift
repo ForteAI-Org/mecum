@@ -30,10 +30,13 @@ public enum SceneChanges {
     static let nearby = 0.02
 
     /// The changes from `before` to `after`, or the one line that says there are none. `revision` is
-    /// the number the reader knows `before` by.
+    /// the number the reader knows `before` by. The lines carry no preamble: what `+`, `-` and `~` mean
+    /// is said once in the tool instructions, and the result names its revision beside the text.
     public static func text(from before: SceneSnapshot, to after: SceneSnapshot, since revision: Int) -> String {
         var header: [String] = []
-        if before.header() != after.header() { header.append(after.header()) }
+        if before.compactHeader(counting: false) != after.compactHeader(counting: false) {
+            header.append("window: " + after.compactHeader(counting: false))
+        }
         if before.viewportPixelSize != after.viewportPixelSize {
             header.append("viewport: \(after.viewportPixelSize.width)x\(after.viewportPixelSize.height)\n")
         }
@@ -78,21 +81,20 @@ public enum SceneChanges {
                 bounds      : \.bounds,
                 tieBreak    : \.text
             )
-            body += ordered.map { "  " + $0.text + "\n" }
+            body += ordered.map { $0.text + "\n" }
         }
         if after.sections.isEmpty {
-            if sectionsChanged { body.append("elements (\(after.elements.count)):\n") }
+            if sectionsChanged { body.append("## \(SceneSnapshot.unsectioned)\n") }
             append(groups[String?.none] ?? [])
         } else {
             for section in after.sectionsInReadingOrder {
                 let lines = groups[section.name] ?? []
                 guard sectionsChanged || !lines.isEmpty else { continue }
-                let count = after.elements.filter { $0.section == section.name }.count
-                body.append(after.sectionLine(section, count: count))
+                body.append(after.compactSectionLine(section))
                 append(lines)
             }
             if let loose = groups[String?.none], !loose.isEmpty {
-                body.append("Unsectioned: \(after.elements.filter { $0.section == nil }.count) elements\n")
+                body.append("## \(SceneSnapshot.unsectioned)\n")
                 append(loose)
             }
         }
@@ -100,9 +102,7 @@ public enum SceneChanges {
             body.append(after.commands.isEmpty ? "commands: none\n" : after.commandsLine())
         }
         guard !header.isEmpty || !body.isEmpty else { return "Unchanged since revision \(revision)." }
-        let opening = "Changes since revision \(revision): + added, - removed, ~ changed (was earlier values), "
-            + "each under its section line; the rest is unchanged.\n"
-        return (opening + header.joined() + body.joined()).trimmingCharacters(in: .newlines)
+        return (header.joined() + body.joined()).trimmingCharacters(in: .newlines)
     }
 
     /// One reported element: the section it is listed under, nil for none, and where it is.
@@ -183,7 +183,7 @@ public enum SceneChanges {
         if old.container != new.container { was.append(old.container.map { "{\($0)}" } ?? "no container") }
         if old.does != new.does { was.append(old.does.map { ": \($0)" } ?? "no learned effect") }
         if abs(old.bounds.midX - new.bounds.midX) > nearby || abs(old.bounds.midY - new.bounds.midY) > nearby {
-            was.append(String(format: "@ %.2f,%.2f", old.bounds.x, old.bounds.y))
+            was.append(SceneSnapshot.place(old.bounds))
         }
         if let section = old.section, section != new.section, sections.contains(section) {
             was.append("in \(section)")
@@ -193,14 +193,14 @@ public enum SceneChanges {
 
     /// `text()`'s line for one element, without its indent and line break.
     private static func line(_ element: SceneElement) -> String {
-        String(SceneSnapshot.elementLine(element, indent: "").dropLast())
+        String(SceneSnapshot.elementLine(element).dropLast())
     }
 
     /// A removed element as the reader can still tell it apart: its tag, label, shown id and place.
     private static func short(_ element: SceneElement) -> String {
         let identity = shownID(element).map { " id:'\($0)'" } ?? ""
-        let position = String(format: "%.2f,%.2f", element.bounds.x, element.bounds.y)
-        return "[\(tag(element))] \(element.label)\(identity)  @ \(position)"
+        let label = element.isUnlabeled && element.label == SceneSnapshot.unlabeledLabel ? "" : " " + element.label
+        return "[\(tag(element))]\(label)\(identity) \(SceneSnapshot.place(element.bounds))"
     }
 
     /// The tag `text()` prints: `field` for text entry, a kind with `?` when unlabeled, else the kind.

@@ -149,11 +149,13 @@ extension SceneSnapshot {
         }
     }
 
-    /// One line listing each candidate's section (or exact id when unsectioned) and position.
+    /// One line listing each candidate's section (or exact id when unsectioned) and position. An id
+    /// is printed bare, the exact string to pass back; a section or container name may hold spaces,
+    /// so it stays quoted, and `resolve` accepts a container name as `section`.
     public func disambiguation(target: String, limit: Int = 6) -> String {
         candidates(target: target).prefix(limit).map { element in
-            let position = String(format: "@%.2f,%.2f", element.bounds.x, element.bounds.y)
-            let selector = (element.container ?? element.section).map { "section:'\($0)'" } ?? "id:'\(element.id)'"
+            let position = Self.place(element.bounds)
+            let selector = (element.container ?? element.section).map { "section:'\($0)'" } ?? "id:\(element.id)"
             let role = element.role.map { " role:'\($0)'" } ?? ""
             return "\(selector) label:'\(element.label)'\(role) \(position)"
         }.joined(separator: " OR ")

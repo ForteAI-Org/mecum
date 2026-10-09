@@ -51,12 +51,15 @@ struct SceneSnapshotTests {
         let scene = sample()
         let back = try JSONDecoder().decode(SceneSnapshot.self, from: JSONEncoder().encode(scene))
         #expect(back == scene)
-        let text = scene.text()
-        #expect(text.contains("Adobe Premiere (com.adobe.PremierePro)"))
-        #expect(text.contains("[text] Export"))
-        #expect(text.contains("[icon?] (unlabeled)"))
-        #expect(text.contains("[control] mute [off]"))
-        #expect(text.contains("File > Export…"))
+        #expect(scene.text() == """
+            Adobe Premiere (com.adobe.PremierePro) "Untitled.prproj" 1920x1080, 4 elements
+            Export @83,6
+            [icon] settings @12,20
+            [control] mute [off] @90,50
+            icons: ?|@3,4@30,40
+            commands (2): File > Export… · Edit > Undo
+
+            """)
     }
 
     @Test("a scene written by the previous engine still decodes")
@@ -84,9 +87,8 @@ struct SceneSnapshotTests {
             bounds: rect(0.7, 0.6, 0.02, 0.02), isUnlabeled: true
         ))
         let text = scene.text()
-        #expect(text.contains("id:'?|@3,4'"))
-        #expect(text.contains("[overlay-candidate?] (unlabeled)"))
-        #expect(text.contains("id:'?|@7,6'"))
+        #expect(text.contains("icons: ?|@3,4@30,40\n"))
+        #expect(text.contains("[overlay-candidate?] id:'?|@7,6' @70,60\n"))
     }
 
     @Test("the token moves with content and state, and with nothing else")
@@ -162,12 +164,13 @@ struct SceneSnapshotTests {
                                      viewportPixelSize: ViewportPixelSize(width: 1000, height: 1000),
                                      elements: elements.filter { $0.section != "open menu" }.reversed() + menu,
                                      sections: sections.reversed())
-        let order = scene.text().split(separator: "\n").compactMap { line -> String? in
-            if line.hasPrefix("Section: ") { return String(line.dropFirst(9).prefix { $0 != "," }) }
-            return line.hasPrefix("    [") ? String(line.split(separator: " ")[1]) : nil
+        let order = scene.text().split(separator: "\n").dropFirst().map { line -> String in
+            if line.hasPrefix("## ") { return String(line.dropFirst(3).components(separatedBy: " @")[0]) }
+            let named = line.hasPrefix("[icon] ") ? line.dropFirst(7) : line[...]
+            return String(named.components(separatedBy: " @")[0])
         }
         #expect(order == ["top bar", "Title", "sidebar", "Inbox", "content", "Alpha", "Beta", "Gamma",
-                          "open menu", "Zoom", "Yank", "Loose"])
+                          "open menu", "Zoom", "Yank", "unsectioned", "Loose"])
         #expect(shuffled.text() == scene.text())
     }
 }

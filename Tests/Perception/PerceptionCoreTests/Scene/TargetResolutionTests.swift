@@ -82,6 +82,22 @@ struct TargetResolutionTests {
         #expect(tab.id == "tab")
     }
 
+    @Test("a container name is accepted as the section, and the diagnostic offers it with bare ids")
+    func containerAsSection() {
+        let one = SceneElement(id: "control|mute", kind: .control, label: "Mute",
+                               bounds: rect(0.1, 0.1, 0.1, 0.03), container: "Track 1", section: "content")
+        let two = SceneElement(id: "control|mute", kind: .control, label: "Mute",
+                               bounds: rect(0.1, 0.4, 0.1, 0.03), container: "Track 2", section: "content")
+        let s = scene([one, two])
+        #expect(s.resolve(target: "Mute") == .ambiguous(2))
+        #expect(s.resolve(target: "Mute", section: "Track 2") == .found(two))
+        #expect(s.disambiguation(target: "Mute") == "section:'Track 1' label:'Mute' @10,10 OR "
+            + "section:'Track 2' label:'Mute' @10,40")
+        let loose = SceneElement(id: "?|@3,4", kind: .icon, label: "(unlabeled)",
+                                 bounds: rect(0.3, 0.4, 0.02, 0.02), isUnlabeled: true)
+        #expect(scene([loose]).disambiguation(target: "?|@3,4") == "id:?|@3,4 label:'(unlabeled)' @30,40")
+    }
+
     @Test("a shared ID diagnostic names its field and toggle candidates")
     func sharedIDDisambiguation() {
         let field = SceneElement(id: "control|search", kind: .control, label: "Search #2",
@@ -92,7 +108,7 @@ struct TargetResolutionTests {
         #expect(s.candidates(target: field.id) == [field, toggle])
         let hint = s.disambiguation(target: field.id)
         #expect(hint.contains("Search #2") && hint.contains("AXTextField"))
-        #expect(hint.contains("AXCheckBox") && hint.contains("@0.80,0.04"))
+        #expect(hint.contains("AXCheckBox") && hint.contains("@80,4"))
     }
 
     @Test("grep finds the goal through recognizer junk and filler")
@@ -291,7 +307,7 @@ struct TargetResolutionTests {
         let caption = SceneElement(id: "caption", kind: .text, label: "Create", bounds: rect(0.04, 0.30, 0.1, 0.05))
         let inferred = SceneElement(id: "inferred", kind: .control, label: "Create", bounds: rect(0.8, 0.85, 0.1, 0.05))
         #expect(scene([caption, inferred]).resolve(target: "Create", preferNativeControls: true) == .ambiguous(2))
-        #expect(scene([caption, inferred]).disambiguation(target: "Create").contains("id:'caption'"))
+        #expect(scene([caption, inferred]).disambiguation(target: "Create").contains("id:caption "))
         #expect(!scene([caption, inferred]).disambiguation(target: "Create").contains("section:'?'"))
     }
 

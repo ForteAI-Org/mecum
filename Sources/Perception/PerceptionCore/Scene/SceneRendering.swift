@@ -52,36 +52,39 @@ extension SceneSnapshot {
         return out
     }
 
-    /// Renders the full scene: one line per element, nested under its panel when sections exist.
+    /// Renders the full scene in the compact form the model reads: one header line, then one line
+    /// per element under its `## section` line, with unlabeled plain icons gathered on one `icons:` line.
     ///
     /// Panels, and the elements inside each, come in reading order rather than in the order
     /// composition gathered them, so one screen renders one text. An open menu keeps its own order.
+    /// The format is lossless for target resolution: every label, id, section and state it resolved
+    /// by is still printed, and a `{container}` is printed where it changes within a section.
     public func text() -> String {
-        var out = header()
-        out += "viewport: \(viewportPixelSize.width)x\(viewportPixelSize.height)\n"
+        var out = compactHeader(counting: true)
+        let shared = labelsSharedAcrossOwners
         if sections.isEmpty {
-            out += "elements (\(elements.count)):\n"
-            out += lines(of: elements, indent: "  ").joined()
+            out += compactLines(of: elements, sharedLabels: shared)
         } else {
-            out += "elements (\(elements.count)) in \(sections.count) sections:\n"
             for section in sectionsInReadingOrder {
-                let members = elements.filter { $0.section == section.name }
-                out += sectionLine(section, count: members.count)
-                if section.name == Self.openMenu {
-                    for element in members { out += Self.elementLine(element, indent: "    ") }
-                } else {
-                    out += lines(of: members, indent: "    ").joined()
-                }
+                out += compactSectionLine(section)
+                out += compactLines(
+                    of          : elements.filter { $0.section == section.name },
+                    sharedLabels: shared,
+                    keepingOrder: section.name == Self.openMenu
+                )
             }
             let loose = elements.filter { $0.section == nil }
             if !loose.isEmpty {
-                out += "Unsectioned: \(loose.count) elements\n"
-                out += lines(of: loose, indent: "    ").joined()
+                out += "## \(Self.unsectioned)\n"
+                out += compactLines(of: loose, sharedLabels: shared)
             }
         }
         if !commands.isEmpty { out += commandsLine() }
         return out
     }
+
+    /// The heading of the elements that belong to no section.
+    static let unsectioned = "unsectioned"
 
     /// The section name of an open pop-up menu: its rows are its surface, kept in the menu's order.
     static let openMenu = "open menu"
@@ -95,15 +98,45 @@ extension SceneSnapshot {
         Self.readingOrder(sections, rowTolerance: rowTolerance, bounds: \.bounds, tieBreak: \.name)
     }
 
-    /// The element lines of `members` in reading order.
-    func lines(of members: [SceneElement], indent: String) -> [String] {
-        let lines = members.map { Self.elementLine($0, indent: indent) }
-        return Self.readingOrder(
-            Array(zip(members, lines)),
+    /// The labels, lowercased, that more than one container owns: a line copied alone must still name
+    /// its container for `resolve` to tell them apart, so those lines print it even when it holds.
+    var labelsSharedAcrossOwners: Set<String> {
+        var owners: [String: Set<String?>] = [:]
+        for element in elements { owners[element.label.lowercased(), default: []].insert(element.container) }
+        return Set(owners.filter { $0.value.count > 1 }.keys)
+    }
+
+    /// The lines of `members` in the compact form: reading order unless `keepingOrder`, a container
+    /// printed where it differs from the line before or where `sharedLabels` names the label, and the
+    /// plain unlabeled icons on one last line.
+    func compactLines(
+        of members  : [SceneElement],
+        sharedLabels: Set<String>,
+        keepingOrder: Bool = false
+    ) -> String {
+        let ordered = keepingOrder ? members : Self.readingOrder(
+            members.map { ($0, Self.elementLine($0)) },
             rowTolerance: rowTolerance,
             bounds      : \.0.bounds,
             tieBreak    : \.1
-        ).map(\.1)
+        ).map(\.0)
+        var out = ""
+        var icons: [SceneElement] = []
+        var owner: String?
+        for element in ordered {
+            if Self.isPlainIcon(element) {
+                icons.append(element)
+                continue
+            }
+            // The owner holds until another one is printed; `{}` says the line has none.
+            let repeated = element.container == owner
+                && !(element.container != nil && sharedLabels.contains(element.label.lowercased()))
+            let note = repeated ? "" : element.container.map { " {\($0)}" } ?? " {}"
+            owner = element.container
+            out += Self.elementLine(element, ownerNote: note)
+        }
+        if !icons.isEmpty { out += Self.iconsLine(icons) }
+        return out
     }
 
     /// `items` in reading order: rows top to bottom, then left to right within a row. A row holds
@@ -139,6 +172,14 @@ extension SceneSnapshot {
         "app: \(appName) (\(bundleID))\(windowTitle.isEmpty ? "" : ": \"\(windowTitle)\"")\n"
     }
 
+    /// `App (bundle) "title"`, then the viewport and the element count when `counting`.
+    func compactHeader(counting: Bool) -> String {
+        let title = windowTitle.isEmpty ? "" : " \"\(windowTitle)\""
+        guard counting else { return "\(appName) (\(bundleID))\(title)\n" }
+        return "\(appName) (\(bundleID))\(title) \(viewportPixelSize.width)x\(viewportPixelSize.height), "
+            + "\(elements.count) elements\n"
+    }
+
     func commandsLine() -> String {
         "commands (\(commands.count)): " + commands.prefix(40).joined(separator: " · ") + "\n"
     }
@@ -151,16 +192,82 @@ extension SceneSnapshot {
         return "Section: \(section.name), position: \(position), \(count) elements\(vertical)\(horizontal)\n"
     }
 
-    static func elementLine(_ element: SceneElement, indent: String) -> String {
-        let position = String(format: "%.2f,%.2f", element.bounds.x, element.bounds.y)
-        let state    = element.state.map { " [\($0.rawValue)]" } ?? ""
-        let field    = AccessibilityAugmentation.textEntryRoles.contains(element.role ?? "")
-        let tag      = field ? "field" : (element.isUnlabeled ? "\(element.kind.rawValue)?" : element.kind.rawValue)
+    /// `## name @x,y wxh`, with the position and size in whole percent of the window.
+    func compactSectionLine(_ section: SceneSection) -> String {
+        let b = section.bounds
+        let vertical   = section.verticalScrollNote.map { " · \($0)" } ?? ""
+        let horizontal = section.horizontalScrollNote.map { " · \($0)" } ?? ""
+        return "## \(section.name) @\(Self.percent(b.x)),\(Self.percent(b.y)) "
+            + "\(Self.percent(b.width))x\(Self.percent(b.height))\(vertical)\(horizontal)\n"
+    }
+
+    /// A value in 0...1 as the whole percent its two-decimal print used to show, so nothing rounds
+    /// differently than before.
+    static func percent(_ value: Double) -> Int {
+        guard value.isFinite, let hundredths = Double(String(format: "%.2f", value)) else { return 0 }
+        return Int((hundredths * 100).rounded())
+    }
+
+    /// `@x,y`: where an element is, in whole percent of the window.
+    static func place(_ bounds: NormalizedRect) -> String {
+        "@\(percent(bounds.x)),\(percent(bounds.y))"
+    }
+
+    /// The one line of an element: its tag unless it is plain text, label, the id when a target needs
+    /// it, state, live details, learned effect and place. `ownerNote` is the `{container}` text to
+    /// print, or nil to print the element's own, which is what a line read on its own needs.
+    static func elementLine(_ element: SceneElement, ownerNote: String? = nil) -> String {
+        let field = AccessibilityAugmentation.textEntryRoles.contains(element.role ?? "")
+        // A text line that could read as a tag or as another line keeps its tag.
+        let plainText = element.kind == .text && !element.isUnlabeled && !field && !element.label.isEmpty
+            && !["[", "#", "icons:", "commands"].contains { element.label.hasPrefix($0) }
+        let tag = plainText ? "" : field ? "[field]"
+            : element.isUnlabeled ? "[\(element.kind.rawValue)?]" : "[\(element.kind.rawValue)]"
+        let label = element.isUnlabeled && element.label == unlabeledLabel ? "" : element.label
+        let head = [tag, label].filter { !$0.isEmpty }.joined(separator: " ")
         let identity = element.isUnlabeled || field ? " id:'\(element.id)'" : ""
-        let group    = element.group.map { " (\($0))" } ?? ""
+        let state    = element.state.map { " [\($0.rawValue)]" } ?? ""
+        let owner    = ownerNote ?? element.container.map { " {\($0)}" } ?? ""
         let recalled = element.isRecalled ? " ~recalled" : ""
         let does     = element.does.map { ": \($0)" } ?? ""
-        return "\(indent)[\(tag)] \(element.label)\(identity)\(state)\(liveDetails(element))\(group)\(recalled)\(does)  @ \(position)\n"
+        return "\(head)\(identity)\(state)\(compactDetails(element))\(owner)\(recalled)\(does) \(place(element.bounds))\n"
+    }
+
+    /// The label an element without a name carries; the line leaves it out, the `[icon?]` tag says it.
+    static let unlabeledLabel = "(unlabeled)"
+
+    /// True for an unlabeled icon that has nothing to print but its id and place, so it can share
+    /// the `icons:` line. An id with a space could not be told apart there.
+    private static func isPlainIcon(_ element: SceneElement) -> Bool {
+        element.kind == .icon && element.isUnlabeled && element.label == unlabeledLabel
+            && element.state == nil && element.value == nil && element.does == nil
+            && element.isEnabled != false && element.container == nil && !element.isRecalled
+            && !AccessibilityAugmentation.textEntryRoles.contains(element.role ?? "")
+            && !element.id.isEmpty && !element.id.contains { $0.isWhitespace }
+    }
+
+    /// `icons: id@x,y id×n`: an icon whose id is its own keeps the id and the place, icons that
+    /// share an id collapse to the id and how many, since the id alone cannot target any of them.
+    private static func iconsLine(_ icons: [SceneElement]) -> String {
+        let counts = Dictionary(icons.map { ($0.id, 1) }, uniquingKeysWith: +)
+        var seen = Set<String>()
+        var items: [String] = []
+        for icon in icons where seen.insert(icon.id).inserted {
+            items.append(counts[icon.id] == 1 ? icon.id + place(icon.bounds) : "\(icon.id)×\(counts[icon.id] ?? 0)")
+        }
+        return "icons: " + items.joined(separator: " ") + "\n"
+    }
+
+    /// Value, selection and availability of an element, the compact way: `[sel a..b/n]`.
+    private static func compactDetails(_ element: SceneElement) -> String {
+        let value = element.value.flatMap { $0 == element.label ? nil : " = \(visibleValue($0))" } ?? ""
+        let selection: String
+        if let text = element.value, let range = SceneElement.validRange(element.selectedRange, value: text) {
+            selection = " [sel \(range.location)..\(range.location + range.length)/\(text.utf16.count)]"
+        } else {
+            selection = ""
+        }
+        return value + selection + (element.isEnabled == false ? " [disabled]" : "")
     }
 
     private static func liveDetails(_ element: SceneElement) -> String {

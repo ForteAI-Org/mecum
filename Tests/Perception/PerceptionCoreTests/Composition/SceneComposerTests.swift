@@ -137,9 +137,8 @@ struct SceneComposerTests {
             elements: out, sections: sections
         )
         let text = scene.text()
-        #expect(text.contains("Section: CLIPS"))
-        #expect(text.contains("    [text] 01_Kick.1"))
-        #expect(text.contains("in 1 sections"))
+        #expect(text.contains("## CLIPS @"))
+        #expect(text.contains("\n01_Kick.1 @87,20\n"))
     }
 
     @Test("the map shows a stateful unlabeled icon with a targetable id")
@@ -169,7 +168,7 @@ struct SceneComposerTests {
             viewportPixelSize: ViewportPixelSize(width: 100, height: 100),
             elements: [element("a", "Hello", x: 0.1, y: 0.1)]
         )
-        #expect(scene.text().contains("elements (1):"))
+        #expect(scene.text().contains("1 elements\nHello @10,10\n"))
         #expect(!scene.text().contains("▣"))
     }
 }

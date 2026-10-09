@@ -72,8 +72,8 @@ struct AccessibilityAugmentationTests {
             bundleID: "fixture", appName: "Fixture", windowTitle: "Editor",
             viewportPixelSize: .init(width: 1000, height: 800), elements: merged
         )
-        #expect(scene.text().contains("[selection UTF-16: 0..4 of 4]"))
-        #expect(scene.mapText().contains("[selection UTF-16: 0..4 of 4]"))
+        #expect(scene.text().contains("[sel 0..4/4]"))
+        #expect(scene.mapText().contains("[sel 0..4/4]"))
     }
 
     @Test("web fields expose selection only with positive native focus",
@@ -124,7 +124,7 @@ struct AccessibilityAugmentationTests {
             )
             #expect(scene.text().contains(" = " + String(reflecting: raw)))
             #expect(!scene.text().contains("\r"))
-            #expect(scene.text().split(separator: "\n").count == 4)
+            #expect(scene.text().split(separator: "\n").count == 2)
         }
     }
 

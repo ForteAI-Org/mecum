@@ -65,9 +65,23 @@ scene.resolve(target: "Export")               // .found, .ambiguous(n) or .none
   eight captured pixels, then left to right, an exact tie broken by the line itself. One screen renders
   one text whatever order composition and augmentation gathered it in. An open menu keeps its own
   order, and the map tier keeps its ranking.
+- The text is compact and lossless for target resolution; `mapText()` keeps its own, older lines.
+  One header line (`App (bundle) "title" WxH, N elements`), a `## name @x,y wxh` line per section,
+  one line per element without indentation, and positions in whole percent of the window (the
+  hundredth the line used to print). Plain text lines carry no tag; `[control]`, `[field]`, `[icon?]`
+  stay. A `{container}` is printed where it changes within a section (`{}` for none) and on every
+  line whose label more than one container owns, so a line copied alone still names its owner.
+  A plain unlabeled icon (no state, value, effect or container) joins the section's `icons:` line:
+  `id@x,y` when its id is its own, `id×n` when n icons share it, since the id alone cannot target
+  any of them. Group ordinals `(row#n)` are not printed; the data stays in the element and
+  `LabelText.strippingDisplayAnnotations` still tolerates them in an old copy. The legend the model
+  reads is in the `open_session` and `observe` tool descriptions (`AutomationTools.sceneLegend`), not
+  in the instructions, which a bare MCP client never sends. Pinned by `CompactSceneTextTests`, which
+  reads the printed text back and checks that every element resolves as it did.
 - `SceneChanges` is the reader's update between two scenes of one window, in `text()`'s own lines:
   added elements whole, removed ones short, changed ones with their earlier values, under the section
-  each is in now, plus a changed title, viewport, section list or commands. Elements match by id
+  each is in now, plus a changed window line, viewport, section list or commands. Its lines carry no
+  preamble: what `+`, `-` and `~` mean is in the `observe` tool description. Elements match by id
   (kind and normalized label), duplicates by role and then distance, a caption regrouped into a
   control in place by label, and an unlabeled element, whose id is a grid cell, by kind within 0.02
   of the window. A new order, smaller moves, group tags and sections redrawn around an unchanged
