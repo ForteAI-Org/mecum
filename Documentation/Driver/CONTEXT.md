@@ -142,6 +142,12 @@ whether moved there or already contained there. It is distinct from the Assigned
 Application and need not be the current input or observation target.
 _Avoid_: hosted window, captured window, managed window
 
+**Desktop**:
+One of the desktops (Spaces) of a physical display. The kit reads which desktop
+a window is on and which one a display shows, to verify a return and to find a
+window on another desktop; it never writes one.
+_Avoid_: Space, virtual desktop (a Virtual Display is another thing)
+
 **Window Recency**:
 The relative order of verified appearances, reappearances and returns to the
 front within an Assigned Application, excluding raises caused by the kit.

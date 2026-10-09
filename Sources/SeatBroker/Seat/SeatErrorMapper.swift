@@ -913,15 +913,30 @@ enum SeatErrorMapper {
     /// What a finished teardown leaves the person to know, and nil when it
     /// leaves them nothing: the windows that did not go back to their display.
     static func teardown(_ report: TeardownReport) -> String? {
-        let stranded = report.windowsNotReturned
-        guard !stranded.isEmpty else { return nil }
-        return "The background display came down and "
+        let stranded  = report.windowsNotReturned
+        let elsewhere = otherDesktop(report.windowsOnAnotherDesktop)
+        guard !stranded.isEmpty else { return elsewhere }
+        let sentence = "The background display came down and "
             + (stranded.count == 1
                 ? "window \(stranded[0]) did not go back to your display"
                 : "windows \(stranded.map(String.init).joined(separator: ", ")) did not go back "
                     + "to your display")
             + ". Move \(stranded.count == 1 ? "it" : "them") back yourself, or quit the "
             + "application that owns \(stranded.count == 1 ? "it" : "them")."
+        return [sentence, elsewhere].compactMap { $0 }.joined(separator: " ")
+    }
+
+    /// What a window that is back on its display but on another desktop leaves
+    /// the person to do, and nil when there is none. The seat reads desktops and
+    /// never writes them, so only the person can move the window to its own.
+    static func otherDesktop(_ windowNumbers: [Int]) -> String? {
+        guard !windowNumbers.isEmpty else { return nil }
+        let names = windowNumbers.map(String.init).joined(separator: ", ")
+        let plural = windowNumbers.count > 1
+        return (plural ? "Windows \(names) are" : "Window \(names) is")
+            + " back on your display but on another desktop than \(plural ? "their" : "its") own: "
+            + "move \(plural ? "them" : "it") to the right desktop yourself, the seat does not "
+            + "move windows between desktops."
     }
 
     /// What a release of the whole assignment left the person to do, and nil
@@ -1012,6 +1027,7 @@ enum SeatErrorMapper {
     private static func restoration(_ outcome: WindowReleaseOutcome) -> String {
         switch outcome {
         case .returned:             "was put back where it was"
+        case .returnedToOtherSpace: "was put back where it was, but on another desktop than its own"
         case .leftOnVirtualDisplay: "was left on the background display"
         case .vanished:             "no longer exists"
         case .refused:              "could not be put back"

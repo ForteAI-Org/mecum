@@ -59,6 +59,46 @@ struct AssignedSurfaceInventoryTests {
         #expect(member?.isVerified == false)
     }
 
+    @Test("The desktop of a window outside the seat is remembered once, when it is first seen")
+    func firstSightingRecordsTheDesktop() {
+        var inventory = AssignedSurfaceInventory()
+        var asked: [Int] = []
+        inventory.fold(
+            Fixture.reading([
+                Fixture.row(11, at: Fixture.outside),
+                Fixture.row(12, at: Fixture.contained),
+            ]),
+            attributor: Self.attributor,
+            within    : Fixture.virtual,
+            displays  : Fixture.displays,
+            spaceOf   : { asked.append($0); return 2079 },
+            at        : 0,
+            isHandover: true
+        )
+        // Only the window outside the seat has a desktop worth keeping.
+        #expect(inventory.surfaces[11]?.originalSpaceID == 2079)
+        #expect(inventory.surfaces[12]?.originalSpaceID == nil)
+        #expect(asked == [11])
+
+        inventory.fold(
+            Fixture.reading([Fixture.row(11, at: Fixture.outside), Fixture.row(12, at: Fixture.contained)]),
+            attributor: Self.attributor,
+            within    : Fixture.virtual,
+            displays  : Fixture.displays,
+            spaceOf   : { asked.append($0); return 1 },
+            at        : 10_000_000
+        )
+        #expect(inventory.surfaces[11]?.originalSpaceID == 2079)
+        #expect(asked == [11])
+    }
+
+    @Test("Without a desktop reading no desktop is recorded")
+    func noReadingNoDesktop() {
+        var inventory = AssignedSurfaceInventory()
+        Self.fold(&inventory, [Fixture.reading([Fixture.row(11, at: Fixture.outside)])])
+        #expect(inventory.surfaces[11]?.originalSpaceID == nil)
+    }
+
     @Test("A window that appears later belongs to the assignment and was born in it")
     func laterWindowIsBornDuringAssignment() {
         var inventory = AssignedSurfaceInventory()

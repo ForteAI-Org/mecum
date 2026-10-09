@@ -707,6 +707,9 @@ public final class BrokeredAutomationSession: AutomationSessionOperating {
         if error is ObservationUnavailable {
             return AutomationFailure(SeatErrorMapper.message(for: error))
         }
+        if let refused = error as? SeatBrokerError, case .windowOnAnotherDesktop = refused {
+            return AutomationFailure(refused.localizedDescription)
+        }
         guard case .noWindowShown(let name, let seconds, let wasLaunched, let wasQuit)? = error as? SeatBrokerError
         else { return error }
         let fact = wasLaunched

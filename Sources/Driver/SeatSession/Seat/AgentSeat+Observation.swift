@@ -402,6 +402,7 @@ extension AgentSeat {
             reading,
             within  : sensing.virtualDisplayBounds,
             displays: [:],
+            spaceOf : { [unowned self] in singleSpace(of: $0) },
             at      : now
         )
         for claim in claims.roles        { selectionKit.declareRole(claim) }
@@ -1365,6 +1366,7 @@ extension AgentSeat {
         logicalClosureEvidence.removeAll()
         reconciledLogicalClosures.removeAll()
         pendingDestruction.removeAll()
+        physicalOrigins.removeAll()
         guard assignmentKit.lifecycle.isAssigned else {
             observationIssuer.invalidate(reason)
             outstandingGeometry = nil

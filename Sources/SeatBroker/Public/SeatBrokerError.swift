@@ -41,6 +41,11 @@ public enum SeatBrokerError: LocalizedError {
     /// asked to quit, which happens to an application this call launched and never to another.
     case noWindowShown(application: String, seconds: Int64, wasLaunched: Bool, wasQuit: Bool)
 
+    /// A running application has a window, and it is on a desktop that no
+    /// display shows now. Its own case because waiting changes nothing: the seat
+    /// never switches desktops, so the person has to bring the window over.
+    case windowOnAnotherDesktop(application: String)
+
     public var errorDescription: String? {
         switch self {
         case .windowNotAttested(let n): "Window \(n) could not be attested by the window server."
@@ -54,6 +59,8 @@ public enum SeatBrokerError: LocalizedError {
         case .applicationNotResolved(let sentence): sentence
         case .inputPaused(let sentence): sentence
         case .observationSuspended(let sentence): sentence
+        case .windowOnAnotherDesktop(let application):
+            "\(application)'s window is on another desktop: bring it to the current desktop and ask again."
         case .noWindowShown(let application, let seconds, let wasLaunched, let wasQuit):
             "\(application) launched but showed no window within \(seconds) s. "
                 + ApplicationOpening.unseated(application, wasLaunched: wasLaunched, wasQuit: wasQuit)

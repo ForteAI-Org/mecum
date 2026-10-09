@@ -106,8 +106,16 @@ nonisolated public enum WindowTransferRefusal: String, Sendable, Equatable {
 /// it, and closing is not the kit's business.
 nonisolated public enum WindowReleaseOutcome: String, Sendable, Equatable {
 
-    /// Back at its original frame in the User Seat.
+    /// Back at its original frame in the User Seat, and on the desktop it was
+    /// taken from, or that desktop could not be read (ADR 0037).
     case returned
+
+    /// Back at its original frame and display, but a reading puts it on a
+    /// different desktop than the one it was taken from. The seat writes no
+    /// desktops, so it cannot finish the return: the person has to bring the
+    /// window back to its desktop. It is not `returned`, and not a refusal
+    /// either: nothing more is owed by the seat.
+    case returnedToOtherSpace
 
     /// Left on the virtual display, as asked.
     case leftOnVirtualDisplay
@@ -122,6 +130,12 @@ nonisolated public enum WindowReleaseOutcome: String, Sendable, Equatable {
     /// Hidden by its application, with no element to move until it is shown
     /// again: `HiddenWindowReturns` puts it back then.
     case returnsWhenShown
+
+    /// True when the seat owes nothing more for the window: it is back (on its
+    /// desktop or not, the seat cannot write desktops) or it is gone.
+    var leavesNothingToRestore: Bool {
+        self == .returned || self == .returnedToOtherSpace || self == .vanished
+    }
 }
 
 /// TeardownReport is the whole outcome of taking a seat host down, as fields.
@@ -175,6 +189,12 @@ nonisolated public struct TeardownReport: Sendable, Equatable {
     /// one line of a teardown report a person has to read.
     public var windowsNotReturned: [Int] {
         windows.filter { $0.value == .refused }.keys.sorted()
+    }
+
+    /// The windows that are back on their display and on another desktop than
+    /// the one they came from.
+    public var windowsOnAnotherDesktop: [Int] {
+        windows.filter { $0.value == .returnedToOtherSpace }.keys.sorted()
     }
 }
 

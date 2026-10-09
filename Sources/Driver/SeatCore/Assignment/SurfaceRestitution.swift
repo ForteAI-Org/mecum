@@ -137,6 +137,10 @@ nonisolated package struct SurfaceRestitution: Sendable {
         package let originalFrame    : CGRect
         package let originalDisplayID: CGDirectDisplayID?
 
+        /// The desktop the surface was on when it was first attributed, nil when
+        /// it was not read. A return that can verify desktops checks against it.
+        package let originalSpaceID: Int?
+
         /// The destination of the last issued request, nil while none was.
         package fileprivate(set) var destinationFrame: CGRect?
 
@@ -148,12 +152,14 @@ nonisolated package struct SurfaceRestitution: Sendable {
             identity         : WindowIdentity,
             origin           : SurfaceOrigin,
             originalFrame    : CGRect,
-            originalDisplayID: CGDirectDisplayID?
+            originalDisplayID: CGDirectDisplayID?,
+            originalSpaceID  : Int? = nil
         ) {
             self.identity          = identity
             self.origin            = origin
             self.originalFrame     = originalFrame
             self.originalDisplayID = originalDisplayID
+            self.originalSpaceID   = originalSpaceID
             self.destinationFrame  = nil
             self.lastObservedFrame = nil
         }
@@ -177,7 +183,8 @@ nonisolated package struct SurfaceRestitution: Sendable {
                 identity         : member.identity,
                 origin           : member.origin,
                 originalFrame    : member.originalFrame,
-                originalDisplayID: member.originalDisplayID
+                originalDisplayID: member.originalDisplayID,
+                originalSpaceID  : member.originalSpaceID
             )
         }
     }

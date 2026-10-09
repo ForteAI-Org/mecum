@@ -175,10 +175,15 @@ public final class SeatBroker {
         var comeback: LaunchFocusComeback?
         if let running = app.pid {
             pid = running
+            let shown = TargetEnumerator.windows(of: running)
+            // A window on another desktop is not a missing one: answer at once (ADR 0037).
+            if shown.isEmpty, TargetEnumerator.hasWindowOnAnotherDesktop(of: running) {
+                throw SeatBrokerError.windowOnAnotherDesktop(application: app.name)
+            }
             // A running application with no window is asked for one, the way a click on its Dock icon
             // asks, and is left behind: Finder opens a window, most applications a new document.
             // Without it the wait below could only run out, since the seat never brings it forward.
-            if TargetEnumerator.windows(of: running).isEmpty, let url = app.bundleURL {
+            if shown.isEmpty, let url = app.bundleURL {
                 let configuration = NSWorkspace.OpenConfiguration()
                 configuration.activates = false
                 _ = try? await NSWorkspace.shared.openApplication(at: url, configuration: configuration)

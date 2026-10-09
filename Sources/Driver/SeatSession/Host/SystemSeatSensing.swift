@@ -110,6 +110,12 @@ nonisolated final class SystemSeatSensing: SeatSensing, @unchecked Sendable {
         WindowGeometryProbe.observation(of: window)
     }
 
+    var desktopLayout: DesktopLayout? { WindowSpaceProbe.layout() }
+
+    func windowSpaces(of windowNumber: Int) -> [Int]? {
+        WindowSpaceProbe.spaces(of: windowNumber)
+    }
+
     /// Three-valued: nil says the process is gone, which is a different Issue
     /// from "the person is in it".
     func isActive(processID: Int32) -> Bool? {

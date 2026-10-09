@@ -88,6 +88,11 @@ nonisolated package struct AssignedSurface: Sendable, Equatable {
     /// arbitrary display later.
     package let originalDisplayID: CGDirectDisplayID?
 
+    /// The desktop (Space) the surface was on when it was first attributed, nil
+    /// when it was not read or the surface was already inside the seat. It is
+    /// carried to the return so a verification can tell the desktop it is owed.
+    package let originalSpaceID: Int?
+
     /// When the surface was first seen, which is where the containment deadline
     /// for a new window is measured from.
     package let firstDetectedAtNanoseconds: UInt64
@@ -267,13 +272,16 @@ nonisolated package struct AssignedSurfaceInventory: Sendable {
     /// surfaces are recorded as pre-existing. `displays` maps online physical
     /// displays to their bounds and is used once per surface, to remember which
     /// display held it; an empty map means no display is known, never that the
-    /// surface belongs to an arbitrary one.
+    /// surface belongs to an arbitrary one. `spaceOf` answers the desktop of a
+    /// Window ID and is asked only for a surface outside the seat, once, when
+    /// it is first recorded.
     @discardableResult
     package mutating func fold(
         _ reading           : SurfaceInventoryReading,
         attributor          : SurfaceAttributor,
         within virtualBounds: CGRect,
         displays            : [CGDirectDisplayID: CGRect] = [:],
+        spaceOf             : ((Int) -> Int?)? = nil,
         at now              : UInt64,
         isHandover          : Bool = false
     ) -> [SurfaceEvent] {
@@ -310,6 +318,7 @@ nonisolated package struct AssignedSurfaceInventory: Sendable {
                     origin     : .bornDuringAssignment,
                     displays   : displays,
                     bounds     : virtualBounds,
+                    spaceOf    : spaceOf,
                     at         : now
                 )
                 surfaces[number]?.isOrderedOut = row.isOrderedOut
@@ -327,6 +336,7 @@ nonisolated package struct AssignedSurfaceInventory: Sendable {
                     origin     : isHandover ? .preexisting : .bornDuringAssignment,
                     displays   : displays,
                     bounds     : virtualBounds,
+                    spaceOf    : spaceOf,
                     at         : now
                 )
                 events.append(.attributed(reference))
@@ -421,6 +431,7 @@ nonisolated package struct AssignedSurfaceInventory: Sendable {
         origin     : SurfaceOrigin,
         displays   : [CGDirectDisplayID: CGRect],
         bounds     : CGRect,
+        spaceOf    : ((Int) -> Int?)?,
         at now     : UInt64
     ) -> AssignedSurface {
 
@@ -431,6 +442,7 @@ nonisolated package struct AssignedSurfaceInventory: Sendable {
             origin                    : origin,
             originalFrame             : reference.frame,
             originalDisplayID         : Self.display(containing: reference.frame, in: displays),
+            originalSpaceID           : presence == .outsideSeat ? spaceOf?(reference.windowNumber) : nil,
             firstDetectedAtNanoseconds: now,
             reference                 : reference,
             presence                  : presence,

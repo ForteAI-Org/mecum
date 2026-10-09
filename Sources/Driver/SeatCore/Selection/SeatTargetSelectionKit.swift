@@ -112,6 +112,7 @@ package final class SeatTargetSelectionKit {
         claims              : [HelperRelationClaim] = [],
         within virtualBounds: CGRect,
         displays            : [CGDirectDisplayID: CGRect] = [:],
+        spaceOf             : ((Int) -> Int?)? = nil,
         at now              : UInt64
     ) -> TargetSelectionStatus {
 
@@ -120,6 +121,7 @@ package final class SeatTargetSelectionKit {
             claims  : claims,
             within  : virtualBounds,
             displays: displays,
+            spaceOf : spaceOf,
             at      : now
         )
         // The fold comes first, so that a reading of a newly handed over

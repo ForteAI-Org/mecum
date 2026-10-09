@@ -73,6 +73,13 @@ nonisolated public struct AdoptedWindow: Sendable, Equatable, Identifiable {
     /// never picks an arbitrary display.
     public let originalDisplayID: CGDirectDisplayID?
 
+    /// The desktop (Space) the window was on in the User Seat, read before the
+    /// seat took it and never written back by the seat. The return verifies the
+    /// window is on this desktop, or on its display's current one when this one
+    /// has been closed. `nil` when it could not be read: the return then says
+    /// the desktop is unknown and claims nothing about it (ADR 0037).
+    public let originalSpaceID: Int?
+
     /// Whether the window was in **native macOS fullscreen** when the seat took
     /// it. Kept separately from the frame, and kept at all, because a release
     /// that is refused otherwise leaves nothing in the model that knows this
@@ -109,7 +116,8 @@ nonisolated public struct AdoptedWindow: Sendable, Equatable, Identifiable {
         originalDisplayID  : CGDirectDisplayID? = nil,
         wasFullScreen      : Bool = false,
         originalServerFrame: CGRect? = nil,
-        owesNoReturn       : Bool = false
+        owesNoReturn       : Bool = false,
+        originalSpaceID    : Int? = nil
     ) {
         self.reference           = reference
         self.originalFrame       = originalFrame
@@ -118,6 +126,7 @@ nonisolated public struct AdoptedWindow: Sendable, Equatable, Identifiable {
         self.wasFullScreen       = wasFullScreen
         self.originalServerFrame = originalServerFrame
         self.owesNoReturn        = owesNoReturn
+        self.originalSpaceID     = originalSpaceID
     }
 
     /// The same adopted window read again at a new reference.
@@ -137,7 +146,8 @@ nonisolated public struct AdoptedWindow: Sendable, Equatable, Identifiable {
             originalDisplayID  : originalDisplayID,
             wasFullScreen      : wasFullScreen,
             originalServerFrame: originalServerFrame,
-            owesNoReturn       : owesNoReturn
+            owesNoReturn       : owesNoReturn,
+            originalSpaceID    : originalSpaceID
         )
     }
 }

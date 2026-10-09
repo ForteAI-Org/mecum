@@ -157,6 +157,23 @@ nonisolated public struct Facility: Sendable, Hashable {
         ]
     )
 
+    /// Read-only desktop (Space) readings: which desktops each display has and
+    /// which one a window is on. It verifies a window's return and finds a
+    /// window on another desktop, and writes nothing.
+    ///
+    /// Separate from the baseline Facilities for the reason `remoteWindowGeometry`
+    /// is: its two primitives are not promoted into the build ledger, and a
+    /// missing reading must leave a return unverified on this axis, never block
+    /// input or display work.
+    public static let windowSpaces = Facility(
+        name: "windowSpaces",
+        requirements: [
+            .symbol(.mainConnectionID),
+            .symbol(.copySpacesForWindows),
+            .symbol(.copyManagedDisplaySpaces),
+        ]
+    )
+
     /// The HID cursor fence. It is built entirely on public API, so its Ledger
     /// requirement is the build entry itself and its gate is the permission.
     public static let fence = Facility(

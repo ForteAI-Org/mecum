@@ -33,7 +33,9 @@ struct PrimitiveRequirementTests {
         #expect(PrivateSymbol.getWindowBounds.rawValue == "SLSGetWindowBounds")
         #expect(Facility.focusRecovery.requirements.contains(.symbol(.getFrontProcess)))
         #expect(!Facility.input.requirements.contains(.symbol(.getFrontProcess)))
-        #expect(PrivateSymbol.allCases.count == 12)
+        #expect(PrivateSymbol.copySpacesForWindows.rawValue == "SLSCopySpacesForWindows")
+        #expect(PrivateSymbol.copyManagedDisplaySpaces.rawValue == "SLSCopyManagedDisplaySpaces")
+        #expect(PrivateSymbol.allCases.count == 14)
     }
 
     /// The unlisted-window reading is its own Facility. Folding its unpromoted
@@ -54,6 +56,22 @@ struct PrimitiveRequirementTests {
         for requirement in Facility.windowIdentity.requirements {
             #expect(Facility.remoteWindowGeometry.requirements.contains(requirement))
         }
+    }
+
+    /// The two desktop readings are read-only and unpromoted, so they are their
+    /// own Facility: a missing reading leaves a return unverified on that axis
+    /// and blocks nothing else.
+    @Test("the desktop readings keep their primitives out of the baseline facilities")
+    func windowSpacesIsSeparate() {
+        let spaces = Facility.windowSpaces
+        #expect(spaces.requirements.contains(.symbol(.copySpacesForWindows)))
+        #expect(spaces.requirements.contains(.symbol(.copyManagedDisplaySpaces)))
+        #expect(spaces.permissions.isEmpty)
+        for facility in [Facility.display, .input, .windowIdentity, .remoteWindowGeometry, .focusRecovery] {
+            #expect(!facility.requirements.contains(.symbol(.copySpacesForWindows)))
+            #expect(!facility.requirements.contains(.symbol(.copyManagedDisplaySpaces)))
+        }
+        #expect(!Facility.all.contains(spaces))
     }
 
     @Test("a selector's Ledger key is its class and its spelling")

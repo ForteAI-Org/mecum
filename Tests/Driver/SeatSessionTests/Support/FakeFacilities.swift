@@ -252,6 +252,20 @@ final class FakeSensing: SeatSensing, @unchecked Sendable {
         return menus
     }
 
+    /// The desktops the fake window server publishes, and the desktops of each
+    /// window. Nil and absent are the readings that failed: "Space unknown".
+    var desktops: DesktopLayout?
+    var windowDesktops: [Int: [Int]] = [:]
+
+    /// Answers each reading of a window's desktops when a test needs them to
+    /// change with time, as the window server's do after a move.
+    var windowDesktopReader: ((Int) -> [Int]?)?
+
+    var desktopLayout: DesktopLayout? { desktops }
+    func windowSpaces(of windowNumber: Int) -> [Int]? {
+        windowDesktopReader?(windowNumber) ?? windowDesktops[windowNumber]
+    }
+
     /// What the window server answers for the driven processes. `nil` is the
     /// reading that failed, which the watch has to tell from an empty desktop.
     var surfaces: [WindowSurface]? = []

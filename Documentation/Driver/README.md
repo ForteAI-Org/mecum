@@ -230,6 +230,16 @@ move again after adoption. The existing deadline and rollback apply; ordinary
 full-size and in-place windows retain their confirmation rules. See
 [ADR 0025](adr/Adr0025ConfirmStashedPlacementPosition.md).
 
+With several desktops (Spaces) a returned window is owed its own. The seat
+records every window's frame, display and desktop before the Virtual Display is
+created (the broker reads them and the seat takes them in; a caller without one
+gets the seat's own reading before its first move), puts it back through `AXPosition`, and reads its desktops after the two agreeing
+frame readings: a window back on another desktop is `returnedToOtherSpace`, not
+`returned`, and a desktop it cannot read is said to be unknown. Desktops are
+read and never written. A running application whose only windows are on another
+desktop is refused at once on open, with that reason. See
+[ADR 0037](adr/Adr0037ReturnTheWindowToItsOwnDesktop.md).
+
 A window of the application the seat cannot take in is named beside the
 observation of the target instead of suspending it, and a withdrawn target
 with nothing to take over is kept. See [ADR 0032](adr/Adr0032ObserveTheTargetBesideWindowsElsewhere.md).

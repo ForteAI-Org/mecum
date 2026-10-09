@@ -60,6 +60,14 @@ nonisolated public enum PrivateSymbol: String, Sendable, CaseIterable {
     /// Maps an accessibility window element to its Window ID.
     case axUIElementGetWindow   = "_AXUIElementGetWindow"
 
+    /// Read-only. The desktop (Space) ids a Window ID is on. Used to verify
+    /// that a returned window is on the desktop it was taken from; the kit
+    /// never writes a desktop.
+    case copySpacesForWindows   = "SLSCopySpacesForWindows"
+
+    /// Read-only. Every display's desktops and the one each shows now.
+    case copyManagedDisplaySpaces = "SLSCopyManagedDisplaySpaces"
+
     /// The image to `dlopen` when the symbol is not in the process yet.
     ///
     /// `dlopen(nil)` searches the images that are **already loaded**, so what

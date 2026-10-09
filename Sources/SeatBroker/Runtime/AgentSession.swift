@@ -308,7 +308,8 @@ public final class AgentSession {
         let handback = driver.releaseAssignedApplication()
         let finish = Self.finishing(held.provenance.finish(windowRestored: !driver.hasUnrestoredWindow),
                                     handback: handback, app: held.name)
-        var sentences = [notClosed, finish.sentence].compactMap { $0 }
+        var sentences = [notClosed, finish.sentence, finish.quits ? nil : driver.otherDesktopSentence]
+            .compactMap { $0 }
         if finish.quits {
             guard await ledger.quitHandedBack(held.pid) else {
                 sentences = [notClosed].compactMap { $0 } + ["\(held.name) was returned to your desktop but is "

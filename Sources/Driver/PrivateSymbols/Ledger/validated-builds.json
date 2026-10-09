@@ -227,6 +227,20 @@
      },
      "notes": "The only accessibility primitive the kit uses, and only to place a window."
     },
+    "SLSCopySpacesForWindows": {
+     "kind": "symbol",
+     "image": "SkyLight",
+     "state": "untested",
+     "checks": {},
+     "notes": "Read-only. Answers the desktop (Space) ids a Window ID is on; the verification of a window's return reads it and never writes a desktop. Resolved and read live on 26A434 (2026-10-09), not run on this build and not promoted: it is used through the windowSpaces Facility, which is not in the baseline four."
+    },
+    "SLSCopyManagedDisplaySpaces": {
+     "kind": "symbol",
+     "image": "SkyLight",
+     "state": "untested",
+     "checks": {},
+     "notes": "Read-only. Lists every display's desktops and the one it shows now. Resolved and read live on 26A434 (2026-10-09), not run on this build and not promoted: same Facility and same scope as SLSCopySpacesForWindows."
+    },
     "CGDisplayIsOnline.removedDisplayReturns0xFFFFFFFF": {
      "kind": "behavior",
      "state": "verified",

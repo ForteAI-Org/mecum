@@ -221,6 +221,48 @@ enum TargetEnumerator {
         )
     }
 
+    /// True when the process has a window that exists and is on a desktop no
+    /// display shows now.
+    ///
+    /// Such a window is in no on-screen list and answers no accessibility
+    /// element, so `windows(of:)` reads the application as having none, and an
+    /// open waits for a window that is already there. Only the desktop reading
+    /// tells the two apart (ADR 0037). It answers false when the desktops cannot
+    /// be read: no claim is made without evidence.
+    static func hasWindowOnAnotherDesktop(of pid: pid_t, minimumSize: CGFloat = 120) -> Bool {
+        let list = CGWindowListCopyWindowInfo([.optionAll, .excludeDesktopElements], kCGNullWindowID)
+            as? [[String: Any]] ?? []
+        return hasWindowOnAnotherDesktop(
+            in         : list,
+            of         : pid,
+            minimumSize: minimumSize,
+            layout     : WindowSpaceProbe.layout(),
+            spaces     : { WindowSpaceProbe.spaces(of: $0) }
+        )
+    }
+
+    /// The decision behind `hasWindowOnAnotherDesktop`, with the window list,
+    /// the layout and the per window reading supplied by the caller.
+    static func hasWindowOnAnotherDesktop(
+        in list     : [[String: Any]],
+        of pid      : pid_t,
+        minimumSize : CGFloat,
+        layout      : DesktopLayout?,
+        spaces      : (Int) -> [Int]?
+    ) -> Bool {
+        guard layout != nil else { return false }
+        return list.contains { info in
+            guard info[kCGWindowOwnerPID as String] as? pid_t == pid,
+                  info[kCGWindowLayer as String] as? Int ?? 0 == 0,
+                  let number = info[kCGWindowNumber as String] as? Int,
+                  let boundsDict = info[kCGWindowBounds as String] as? NSDictionary,
+                  let bounds = CGRect(dictionaryRepresentation: boundsDict),
+                  bounds.width >= minimumSize, bounds.height >= minimumSize
+            else { return false }
+            return SpaceReturn.isOnAnotherDesktop(windowSpaces: spaces(number), in: layout)
+        }
+    }
+
     /// The windows `launch` hands on for one process: its on-screen ones, and
     /// when it has none, every window accessibility says is in native
     /// fullscreen, as the window server lists it.

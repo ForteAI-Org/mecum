@@ -50,6 +50,26 @@ struct SurfaceRestitutionTests {
         return restitution
     }
 
+    // MARK: The desktop travels with the obligation
+
+    @Test("The desktop a window was on is carried into the pending return")
+    func desktopIsCarriedIntoThePendingReturn() {
+        var inventory = AssignedSurfaceInventory()
+        inventory.fold(
+            Fixture.reading([Fixture.row(11, at: Fixture.outside)]),
+            attributor: SurfaceAttributor(instance: Fixture.target),
+            within    : Fixture.virtual,
+            displays  : Fixture.displays,
+            spaceOf   : { _ in 2079 },
+            at        : 0,
+            isHandover: true
+        )
+        var restitution = SurfaceRestitution()
+        restitution.begin(members: inventory.members)
+        #expect(restitution.pending[11]?.originalSpaceID == 2079)
+        #expect(Self.restitution().pending[11]?.originalSpaceID == nil)
+    }
+
     // MARK: A pre-existing window goes back where it was
 
     @Test("A pre-existing window goes back to its original frame while that place is valid")

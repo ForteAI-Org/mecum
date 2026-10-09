@@ -54,6 +54,21 @@ nonisolated public enum SymbolABI {
         UnsafeMutablePointer<CGRect>?
     ) -> Int32
 
+    /// `SLSCopySpacesForWindows(connection, mask, windowIDs)`, a retained array
+    /// of `NSNumber` Space ids or nil. Mask 0x7 is every kind of desktop.
+    public typealias CopySpacesForWindows = @convention(c) (
+        Int32,
+        Int32,
+        CFArray
+    ) -> Unmanaged<CFArray>?
+
+    /// `SLSCopyManagedDisplaySpaces(connection)`, a retained array with one
+    /// dictionary per display (`Display Identifier`, `Current Space`, `Spaces`)
+    /// or nil.
+    public typealias CopyManagedDisplaySpaces = @convention(c) (
+        Int32
+    ) -> Unmanaged<CFArray>?
+
     /// `SLEventRecordPointer(event)`, the private record behind a `CGEvent`.
     public typealias EventRecordPointer = @convention(c) (
         UnsafeRawPointer?

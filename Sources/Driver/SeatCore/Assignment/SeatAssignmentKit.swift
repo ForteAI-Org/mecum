@@ -217,6 +217,7 @@ package final class SeatAssignmentKit {
         claims              : [HelperRelationClaim] = [],
         within virtualBounds: CGRect,
         displays            : [CGDirectDisplayID: CGRect] = [:],
+        spaceOf             : ((Int) -> Int?)? = nil,
         at now              : UInt64
     ) -> AssignmentStatus {
 
@@ -241,6 +242,7 @@ package final class SeatAssignmentKit {
             attributor: attributor,
             within    : virtualBounds,
             displays  : displays,
+            spaceOf   : spaceOf,
             at        : now,
             isHandover: awaitsHandoverReading
         )
