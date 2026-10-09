@@ -7,7 +7,7 @@ Each run starts `claude -p` with built-in tools off and exactly one MCP server n
 stream-json, and writes one `run` row plus one `tool` row per tool call. Success comes from an independent
 check after the run (AX values, files, a local state server), never from the model's own claim.
 """
-import argparse, json, math, os, subprocess, sys, threading, time, unicodedata
+import argparse, json, math, os, shutil, subprocess, sys, threading, time, unicodedata
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
 import prepare as bench_prepare
@@ -220,7 +220,7 @@ def check_obsidian(c):
     note = find_note(c.vault, c.vars["title"])
     if note:  # Moved, never deleted: the note is the agent's test output inside the person's vault.
         os.makedirs(os.path.join(c.scratch, "notes"), exist_ok=True)
-        os.rename(note, os.path.join(c.scratch, "notes", os.path.basename(note)))
+        shutil.move(note, os.path.join(c.scratch, "notes", os.path.basename(note)))  # the vault can sit on another volume
     return bool(note), f"note {'found' if note else 'missing'} in {c.vault}"
 
 
