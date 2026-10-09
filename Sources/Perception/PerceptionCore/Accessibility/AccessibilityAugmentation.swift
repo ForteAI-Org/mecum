@@ -31,7 +31,7 @@ public enum AccessibilityAugmentation {
         public var isPastDeadline: @Sendable () -> Bool
 
         public init(
-            maxDepth      : Int = 16,
+            maxDepth      : Int = 32,
             maxTables     : Int = 24,
             maxElements   : Int = 400,
             isPastDeadline: @escaping @Sendable () -> Bool = { false }
@@ -227,11 +227,15 @@ public enum AccessibilityAugmentation {
 
     // MARK: Merge
 
-    /// Merges harvested elements into a pixel-built list. Additive: a harvested element is dropped only
+    /// Merges harvested elements into a pixel-built list. A harvested element is dropped only
     /// when a pixel element already carries the same core label or field value at the same spot. An interactive
     /// harvest upgrades that pixel element in place, keeping its precise position and taking the
-    /// authoritative identity, role, state and clean name; a row harvest yields to the pixel element. Pixels
-    /// are never removed.
+    /// authoritative identity, role, state and clean name; a row harvest yields to the pixel element.
+    ///
+    /// A harvested name is cleaner than a pixel guess over the same widget, so it wins: a static text
+    /// takes the label of the pixel text it matches, and a placed non-row, non-field element removes the
+    /// unlabeled icons and the lone pixel text it covers. A pixel row that merely contains a harvested
+    /// name keeps the rest of its text. Pixels stay wherever accessibility has nothing to say.
     ///
     /// A harvested element is final once placed, whether it upgraded a pixel element or was appended
     /// as its own. Some toolkits expose one visual control twice (a panel tab is a radio button
@@ -246,6 +250,66 @@ public enum AccessibilityAugmentation {
         var coreKeys = pixels.map { LabelText.coreKey(strippingOrdinal($0.label)) }
         var valueKeys = pixels.map { LabelText.coreKey($0.label) }
         var upgraded = Set<Int>()
+        var removed = Set<Int>()
+
+        // Pixel elements over the same widget as `element`, other than the one it matched.
+        func absorb(_ element: SceneElement, matched: Int?) {
+            guard element.role != "AXRow", !textEntryRoles.contains(element.role ?? "") else { return }
+            let box = element.bounds
+            let label = strippingOrdinal(element.label)
+            var captions: [Int] = []
+            for index in result.indices where index != matched && !upgraded.contains(index)
+                && !removed.contains(index) {
+                let pixel = result[index]
+                let shared = pixel.bounds.cgRect.intersection(box.cgRect)
+                guard !shared.isNull, shared.width * shared.height > 0 else { continue }
+                let covered = Double(shared.width * shared.height)
+                if pixel.kind == .icon, pixel.isUnlabeled {
+                    // A name is not claimed for a glyph inside something much taller than the glyph.
+                    if covered > 0.6 * pixel.bounds.area, box.height <= 2.5 * pixel.bounds.height {
+                        removed.insert(index)
+                    }
+                } else if pixel.kind == .text, pixel.role == nil {
+                    // A name found as whole words inside a longer pixel row shortens that row.
+                    if covered > 0.4 * min(box.area, pixel.bounds.area), label.count >= 2,
+                       LabelText.isNameworthy(label), pixel.label.count > label.count,
+                       let range = pixel.label.range(of: label, options: [.caseInsensitive, .diacriticInsensitive]),
+                       !(pixel.label[..<range.lowerBound].last.map { $0.isLetter || $0.isNumber } ?? false),
+                       !(pixel.label[range.upperBound...].first.map { $0.isLetter || $0.isNumber } ?? false) {
+                        let before = pixel.label[..<range.lowerBound].trimmingCharacters(in: .whitespaces)
+                        let after = pixel.label[range.upperBound...].trimmingCharacters(in: .whitespaces)
+                        let rest = (before + " " + after).trimmingCharacters(in: .whitespaces)
+                        guard LabelText.tokens(rest).contains(where: { $0.count >= 2 }) else {
+                            removed.insert(index)
+                            continue
+                        }
+                        // Only one end can be cut from the row's box; a name in the middle keeps it whole.
+                        var bounds = pixel.bounds
+                        if after.isEmpty, box.x > bounds.x {
+                            bounds.width = box.x - bounds.x
+                        } else if before.isEmpty, box.maxX < bounds.maxX {
+                            bounds.width = bounds.maxX - box.maxX
+                            bounds.x = box.maxX
+                        }
+                        result[index].label = rest
+                        result[index].bounds = bounds
+                        result[index].id = SceneIdentity.key(
+                            kind       : .text,
+                            label      : rest,
+                            bounds     : bounds,
+                            isUnlabeled: false
+                        )
+                        coreKeys[index] = LabelText.coreKey(strippingOrdinal(rest))
+                        valueKeys[index] = LabelText.coreKey(rest)
+                    } else if covered > 0.6 * pixel.bounds.area {
+                        captions.append(index)
+                    }
+                }
+            }
+            // One pixel text inside the widget is its caption, however it was misread.
+            if captions.count == 1, box.area <= 8 * result[captions[0]].bounds.area { removed.insert(captions[0]) }
+        }
+
         for element in accessibility {
             let core = LabelText.coreKey(strippingOrdinal(element.label))
             let isInteractive = interactiveRoles.contains(element.role ?? "")
@@ -267,6 +331,21 @@ public enum AccessibilityAugmentation {
                 if candidates.count == 1 { match = candidates.first }
             }
             if let index = match {
+                // A static text names the same words more cleanly than a recognizer that fused a glyph into them.
+                if !isInteractive, !upgraded.contains(index), element.kind == .text,
+                   result[index].kind == .text, result[index].role == nil,
+                   result[index].label != strippingOrdinal(element.label) {
+                    upgraded.insert(index)
+                    result[index].id = element.id
+                    result[index].role = element.role
+                    result[index].value = element.value
+                    result[index].container = element.container
+                    result[index].label = element.label
+                    coreKeys[index] = core
+                    valueKeys[index] = LabelText.coreKey(element.label)
+                    continue
+                }
+                absorb(element, matched: index)
                 if result[index].container == nil { result[index].container = element.container }
                 if result[index].isEnabled == nil { result[index].isEnabled = element.isEnabled }
                 if result[index].value == nil { result[index].value = element.value }
@@ -286,13 +365,14 @@ public enum AccessibilityAugmentation {
                 result[index].isUnlabeled = false
                 if result[index].does == nil { result[index].does = element.does }
             } else {
+                absorb(element, matched: nil)
                 upgraded.insert(result.count)
                 result.append(element)
                 coreKeys.append(core)
                 valueKeys.append(LabelText.coreKey(element.label))
             }
         }
-        return result
+        return result.indices.filter { !removed.contains($0) }.map { result[$0] }
     }
 
     private static func overlap(_ first: NormalizedRect, _ second: NormalizedRect) -> Double {

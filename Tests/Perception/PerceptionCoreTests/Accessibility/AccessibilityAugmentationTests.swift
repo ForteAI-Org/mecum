@@ -385,14 +385,14 @@ struct AccessibilityAugmentationTests {
         #expect(merged[0].label == "Lumetri Scopes")
         #expect(merged[0].role == "AXRadioButton")
         #expect(merged[0].state == .off)
-        // The same tab when its pixel text was garbled ("irce: (no clips)"): the radio is appended as
-        // its own element, and the combo must not overwrite that either.
+        // The same tab when its pixel text was garbled ("irce: (no clips)"): the radio replaces the
+        // misread caption as its own element, and the combo must not overwrite that either.
         let garbled = [pixel("g", "irce: (no clips)", x: 0.0, y: 0.06, w: 0.06, h: 0.015)]
         let sourceRadio = harvested("Source: (no clips)", role: "AXRadioButton", x: -0.019, y: 0.047, w: 0.07, h: 0.03, state: .off)
         let sourceCombo = harvested("Source: (no clips) #2", role: "AXComboBox", x: -0.013, y: 0.052, w: 0.06, h: 0.02)
         let appended = AccessibilityAugmentation.merge(pixels: garbled, accessibility: [sourceRadio, sourceCombo])
-        #expect(appended.map(\.label) == ["irce: (no clips)", "Source: (no clips)"])
-        #expect(appended[1].state == .off)
+        #expect(appended.map(\.label) == ["Source: (no clips)"])
+        #expect(appended[0].state == .off)
     }
 
     @Test("a duplicate row yields to pixels; a new row is added; pixels are never removed")
@@ -414,6 +414,97 @@ struct AccessibilityAugmentationTests {
         #expect(merged[0].label == "Track Name #2")
         #expect(AccessibilityAugmentation.strippingOrdinal("Track Name #2") == "Track Name")
         #expect(AccessibilityAugmentation.strippingOrdinal("Room #") == "Room #")
+    }
+
+    @Test("an accessibility label replaces the unlabeled icon it covers")
+    func labelReplacesIcon() {
+        let icon = SceneElement(id: "?|@3,0", kind: .icon, label: "(unlabeled)",
+                                bounds: NormalizedRect(x: 0.35, y: 0.06, width: 0.03, height: 0.03), isUnlabeled: true)
+        let other = SceneElement(id: "?|@6,0", kind: .icon, label: "(unlabeled)",
+                                 bounds: NormalizedRect(x: 0.80, y: 0.06, width: 0.03, height: 0.03), isUnlabeled: true)
+        let back = harvested("Navigate back", role: "AXButton", x: 0.34, y: 0.05, w: 0.05, h: 0.05)
+        let merged = AccessibilityAugmentation.merge(pixels: [icon, other], accessibility: [back])
+        #expect(merged.map(\.label) == ["(unlabeled)", "Navigate back"])
+        #expect(merged[0].bounds == other.bounds)
+        // A glyph inside something much larger than itself is not claimed by that thing's name.
+        let panel = harvested("Sidebar", role: "AXButton", x: 0.0, y: 0.0, w: 0.5, h: 0.5)
+        #expect(AccessibilityAugmentation.merge(pixels: [icon], accessibility: [panel]).count == 2)
+    }
+
+    private func staticName(of label: String, x: Double) -> SceneElement {
+        SceneElement(id: "text|\(LabelText.normalize(label))", kind: .text, label: label,
+                     bounds: NormalizedRect(x: x, y: 0.10, width: 0.1, height: 0.02), role: "AXStaticText")
+    }
+
+    @Test("a static text replaces the overlapping pixel text it misread")
+    func staticTextReplacesPixelText() {
+        // Obsidian's folder rows: recognition fuses the disclosure glyph into the name.
+        let fused = pixel("t", "> Archive", x: 0.06, y: 0.12, w: 0.08, h: 0.02)
+        let name = SceneElement(id: "text|archive", kind: .text, label: "Archive",
+                                bounds: NormalizedRect(x: 0.08, y: 0.12, width: 0.05, height: 0.02), role: "AXStaticText")
+        let merged = AccessibilityAugmentation.merge(pixels: [fused], accessibility: [name])
+        #expect(merged.map(\.label) == ["Archive"])
+        #expect(merged[0].role == "AXStaticText")
+        // A different reading over the same words (Cyrillic C in "Copy") loses to the native name.
+        let button = harvested("Copy", role: "AXButton", x: 0.30, y: 0.50, w: 0.10, h: 0.05)
+        let misread = pixel("m", "\u{0421}opy", x: 0.32, y: 0.51, w: 0.05, h: 0.02)
+        let neighbor = pixel("n", "Paste", x: 0.60, y: 0.51, w: 0.05, h: 0.02)
+        let copied = AccessibilityAugmentation.merge(pixels: [misread, neighbor], accessibility: [button])
+        #expect(copied.map(\.label) == ["Paste", "Copy"])
+        // An ordinal on a second native twin does not rename the pixel text the first one matched.
+        let same = pixel("s", "Done", x: 0.10, y: 0.10)
+        let twins = [staticName(of: "Done", x: 0.10), staticName(of: "Done #2", x: 0.10)]
+        #expect(AccessibilityAugmentation.merge(pixels: [same], accessibility: twins).map(\.label) == ["Done"])
+    }
+
+    @Test("a control inside a longer pixel row leaves the row its remaining text")
+    func controlShortensRow() {
+        let row = pixel("r", "Press me Presses: 0", x: 0.10, y: 0.30, w: 0.40, h: 0.03)
+        let button = harvested("Press me", role: "AXButton", x: 0.09, y: 0.29, w: 0.15, h: 0.05)
+        let merged = AccessibilityAugmentation.merge(pixels: [row], accessibility: [button])
+        #expect(merged.map(\.label) == ["Presses: 0", "Press me"])
+        #expect(merged[0].bounds.x >= 0.24 - 1e-9)
+        #expect(merged[0].bounds.maxX == row.bounds.maxX)
+        // Nothing meaningful left: the whole row was the control plus recognition noise.
+        let noisy = pixel("q", "Q Go to file 9 O", x: 0.61, y: 0.62, w: 0.20, h: 0.02)
+        let goTo = harvested("Go to file", role: "AXButton", x: 0.60, y: 0.61, w: 0.22, h: 0.04)
+        #expect(AccessibilityAugmentation.merge(pixels: [noisy], accessibility: [goTo]).map(\.label) == ["Go to file"])
+        // A name inside a word is not that name.
+        let start = pixel("s", "Start", x: 0.10, y: 0.30, w: 0.10, h: 0.03)
+        let art = harvested("art", role: "AXButton", x: 0.10, y: 0.30, w: 0.05, h: 0.03)
+        #expect(AccessibilityAugmentation.merge(pixels: [start], accessibility: [art]).map(\.label).contains("Start"))
+    }
+
+    @Test("pixels stay where no accessibility element overlaps them")
+    func pixelsStayWithoutOverlap() {
+        let text = pixel("a", "Somewhere else", x: 0.10, y: 0.80)
+        let icon = SceneElement(id: "?|@9,9", kind: .icon, label: "(unlabeled)",
+                                bounds: NormalizedRect(x: 0.90, y: 0.90, width: 0.03, height: 0.03), isUnlabeled: true)
+        let button = harvested("Press me", role: "AXButton", x: 0.40, y: 0.30, w: 0.10, h: 0.05)
+        let merged = AccessibilityAugmentation.merge(pixels: [text, icon], accessibility: [button])
+        #expect(merged.map(\.label) == ["Somewhere else", "(unlabeled)", "Press me"])
+    }
+
+    @Test("the walk reaches deep renderer labels and wrapper nodes add no element")
+    func deepLabelsAndSilentWrappers() throws {
+        func chain(depth: Int) -> FakeNode {
+            var node = FakeNode("AXStaticText", value: "Archive", frame: box(120, 200, 80, 20))
+            for _ in 0..<depth { node = FakeNode("AXGroup", frame: window).adding(node) }
+            return FakeNode("AXWindow", frame: window).adding(node)
+        }
+        // The folder names of an Electron vault sit below sixteen wrappers.
+        let found = AccessibilityAugmentation.elements(under: chain(depth: 19), windowFrame: window, reader: reader)
+        #expect(found.map(\.label) == ["Archive"])
+        #expect(AccessibilityAugmentation.elements(
+            under: chain(depth: 30), windowFrame: window, reader: reader
+        ).map(\.label) == ["Archive"])
+        #expect(AccessibilityAugmentation.elements(
+            under: chain(depth: 40), windowFrame: window, reader: reader
+        ).isEmpty)
+        let wrappers = FakeNode("AXWindow", frame: window).adding(FakeNode("AXGroup", frame: window).adding(
+            FakeNode("AXGroup", frame: window), FakeNode("AXGenericElement", frame: box(120, 200, 80, 20))
+        ))
+        #expect(AccessibilityAugmentation.elements(under: wrappers, windowFrame: window, reader: reader).isEmpty)
     }
 
     @Test("labels are cleaned of toolkit suffixes and prefixes")
