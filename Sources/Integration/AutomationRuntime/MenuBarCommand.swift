@@ -287,7 +287,12 @@ public enum MenuBarCommand {
                 let error = press(item)
                 // An item that opens a modal can keep the reply past the timeout: it was pressed.
                 guard error == .success || error == .cannotComplete else {
-                    return (nil, ActOutcome(.actedUnverified, "Pressing \(path) failed with AXError \(error.rawValue)."),
+                    return (nil, ActOutcome(.actedUnverified, "Pressing \(path) failed with AXError \(error.rawValue).",
+                                            check: Self.windowCheck(
+                                                .unknown,
+                                                limits   : [.deliveryUncertain],
+                                                performed: .uncertain
+                                            )),
                             nil)
                 }
                 return (path, ActOutcome(.foundActed, "pressed \(path)"), nil)
@@ -435,17 +440,37 @@ public enum MenuBarCommand {
             return ActOutcome(.actedUnverified, outcome.message
                 + " Observation after dispatch failed: \(error). Do not repeat this command. "
                 + "Observe the session before further input; if observation remains unavailable, "
-                + "stop and report this error.")
+                + "stop and report this error.", check: windowCheck(.unknown, limits: [.noAfterScene]))
         }
         if outcome.kind == .actedUnverified {
-            return ActOutcome(.actedUnverified, outcome.message, scene: scene)
+            return ActOutcome(
+                .actedUnverified,
+                outcome.message,
+                scene: scene,
+                check: outcome.check ?? windowCheck(.unknown, limits: [.deliveryUncertain], performed: .uncertain)
+            )
         }
         let changed = windowSignature(of: processID) != before
+        // A window that did not change does not show the command failed: its effect may be elsewhere, so it is unknown.
+        let check = windowCheck(changed ? .passed : .unknown)
         return changed
             ? ActOutcome(.foundActed, "pressed \(pressed): a window of the application opened, closed or was retitled",
-                         scene: scene)
+                         scene: scene, check: check)
             : ActOutcome(.actedUnverified, "pressed \(pressed): no window opened, closed or was retitled; "
-                         + "the scene shows whether it took effect. Do not press it again blind.", scene: scene)
+                         + "the scene shows whether it took effect. Do not press it again blind.",
+                         scene: scene, check: check)
+    }
+
+    /// The check of a menu command or a dialog button: the application's windows compared before and
+    /// after, which shows a window opening, closing or retitling and never the command's own effect.
+    static func windowCheck(
+        _ verdict: OperationCheck.Verdict,
+        limits   : [OperationCheck.Limit] = [],
+        performed: OperationCheck.Performed = .requested
+    ) -> OperationCheck {
+        OperationCheck(condition: .windowSetChanged, method: .windowSignature, verdict: verdict,
+                       expected: "windows changed", observed: verdict == .passed ? "windows changed" : nil,
+                       limits: limits + [.commandEffectUnchecked], performed: performed)
     }
 
     /// What says a command changed the application's windows: every accessibility window's role,

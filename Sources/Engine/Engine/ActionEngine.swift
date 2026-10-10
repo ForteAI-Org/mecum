@@ -126,8 +126,18 @@ public struct ActionEngine: Sendable {
 
     // MARK: Act
 
-    /// Performs one request and answers with an outcome a model can act on next.
+    /// Performs one request and answers with an outcome a model can act on next, with the check its
+    /// path made (`OperationCheck`): an outcome no gesture produced says so.
     public func act(_ request: ActionRequest) async -> ActOutcome {
+        Self.checked(await performAct(request))
+    }
+
+    /// The check of an outcome whose path stated none (`ActOutcome.withStatedCheck`).
+    static func checked(_ outcome: ActOutcome) -> ActOutcome {
+        outcome.withStatedCheck
+    }
+
+    private func performAct(_ request: ActionRequest) async -> ActOutcome {
         let pid = request.processID
         guard let perceived = await perceive(pid) else {
             return ActOutcome(.honestMiss, await noSceneReason(appName: request.appName, processID: pid))
@@ -175,23 +185,37 @@ public struct ActionEngine: Sendable {
                 return ActOutcome(.dryRun, "a pop-up is open and '\(element.label)' is not one of its items: would "
                     + "Escape it first")
             }
-            try? await dependencies.actuator.perform(.key(code: Key.escape), in: pid)
+            var escaped = true
+            do { try await dependencies.actuator.perform(.key(code: Key.escape), in: pid) } catch { escaped = false }
             await pause(timing.popupDismiss)
-            let after = await perceive(pid)?.scene
+            let afterWindow = await perceive(pid)
+            let after = afterWindow?.scene
             let dismissed = (try? dependencies.windows.windows(ownedBy: pid)).map {
                 !WindowSurfaceClassifier.classify($0).hasOpenPopup
             } ?? false
             await dependencies.actuator.confirm(dismissed ? .observed : .unknown, in: pid)
+            // The requested click never went out: what is checked is the recovery's own effect, and only that.
+            let recovery = OperationCheck(
+                condition: .recoveryInsteadOfRequest, method: .windowCensus, verdict: dismissed ? .passed : .unknown,
+                expected: "pop-up closed", observed: dismissed ? "pop-up closed" : nil,
+                limits: escaped ? [] : [.deliveryUncertain], performed: escaped ? .substitute : .uncertain,
+                substitute: escaped ? "escape" : nil, target: OperationCheck.Target(element)
+            )
+            await dependencies.observer?.record(ActionRecord(
+                bundleID: request.bundleID, element: element, verb: request.verb, effect: nil,
+                windowTitleAfter: after?.windowTitle, before: perceived, after: afterWindow,
+                attempt: .notAttempted(reason: "recovery_instead_of_request")
+            ))
             guard dismissed else {
                 return ActOutcome(.actedUnverified,
                     "could not confirm the pop-up menu's closure after Escape; it may be still open. "
                         + "'\(element.label)' was not clicked. Observe before deciding what to do next.",
-                    scene: after)
+                    scene: after, check: recovery)
             }
             return ActOutcome(.actedNoop, "a pop-up menu was open and '\(element.label)' is NOT one of its items: "
                 + "closed the menu instead of clicking through it. The scene below is current; act '\(element.label)' "
                     + "again now.",
-                scene: after)
+                scene: after, check: recovery)
         }
         return await clickVerified(
             request, element: element, at: point, perceived: perceived, surfacesBefore: surfaces, expected: expected
@@ -205,19 +229,23 @@ public struct ActionEngine: Sendable {
     /// again. Only a seen effect is `found_acted`.
     public func deliver(_ request: InputRequest) async -> ActOutcome {
         let trail = InputTrail()
-        let outcome = await Self.$inputTrail.withValue(trail) { await self.deliverInput(request) }
+        let outcome = Self.checked(await Self.$inputTrail.withValue(trail) { await self.deliverInput(request) })
         guard let observer = dependencies.observer else { return outcome }
         let windows = trail.windows
         var isMenuChoice = false
         if case .contextMenu = request.input { isMenuChoice = true }
-        let attempt: ActionAttempt = switch outcome.kind {
-            case .dryRun, .refused, .honestMiss, .ambiguous: .notAttempted(reason: outcome.kind.rawValue)
-            default                                       : .delivered
+        let attempt: ActionAttempt = switch (outcome.kind, outcome.check?.performed) {
+            case (.dryRun, _), (.refused, _), (.honestMiss, .none?), (.ambiguous, _):
+                .notAttempted(reason: outcome.kind.rawValue)
+            case (_, .uncertain?):
+                .deliveryFailed(outcome.message)
+            default:
+                .delivered
         }
         await observer.record(InputRecord(
             bundleID: request.bundleID,
             input   : request.input,
-            target  : nil,
+            target  : trail.target,
             before  : windows.first,
             menu    : isMenuChoice && windows.count >= 3 ? windows[1] : nil,
             after   : windows.count >= 2 ? windows.last : nil,
@@ -289,7 +317,9 @@ public struct ActionEngine: Sendable {
                 before: perceived, attempt: .deliveryFailed("\(error)")
             ))
             return ActOutcome(.actedUnverified, "\(request.verb.performed) '\(element.label)': delivery failed: "
-                + "\(error)", scene: nil)
+                + "\(error)", scene: nil, check: OperationCheck(
+                    condition: .structuralEffect, method: .sceneDifference, verdict: .unknown,
+                    limits: [.deliveryUncertain], performed: .uncertain, target: OperationCheck.Target(element)))
         }
         await pause(timing.clickSettle)
         guard let afterWindow = await perceive(pid) else {
@@ -301,7 +331,10 @@ public struct ActionEngine: Sendable {
             return ActOutcome(
                 .actedUnverified,
                 "\(request.verb.performed) '\(element.label)': no scene could be read "
-                + "afterwards; observe the window once it is available")
+                + "afterwards; observe the window once it is available",
+                check: OperationCheck(condition: .structuralEffect, method: .sceneDifference, verdict: .unknown,
+                                      limits: [.noAfterScene], performed: .requested,
+                                      target: OperationCheck.Target(element)))
         }
         let after = afterWindow.scene
         let surfacesAfter = await surfaces(pid)
@@ -328,15 +361,18 @@ public struct ActionEngine: Sendable {
             case .unattributable: .unknown
         }
         await dependencies.actuator.confirm(delivery, in: pid)
+        // A press through accessibility found its control by label, anywhere in the application.
+        let check = OperationCheck.sceneDifference(verdict, expected: expected, target: OperationCheck.Target(element),
+                                                   limits: [.windowWide] + (openedByPress ? [.labelMatchOnly] : []))
         switch verdict {
             case .landed(let effect, true):
                 let asExpected = expected == nil ? "" : " (as expected)"
                 return ActOutcome(.foundActed, "\(request.verb.performed) '\(element.label)': "
-                    + "\(effect.summary)\(asExpected)", scene: after)
+                    + "\(effect.summary)\(asExpected)", scene: after, check: check)
             case .landed(let effect, false):
                 return ActOutcome(.actedUnverified, "\(request.verb.performed) '\(element.label)': expected "
                     + "\(expected?.summary ?? "?") but observed \(effect.summary); re-perceive and re-decide. "
-                        + "\(elsewhere.sentence)", scene: after)
+                        + "\(elsewhere.sentence)", scene: after, check: check)
             case .ghost, .unattributable:
                 let why = verdict == .ghost
                     ? "this window did NOT change (identical scene)"
@@ -345,7 +381,7 @@ public struct ActionEngine: Sendable {
                 let advice = elsewhere.changed ? "" : " Verify the intended result in a fresh observation "
                     + "before deciding on further input; do not repeat the click solely from this verdict."
                 return ActOutcome(.actedUnverified, "\(request.verb.performed) '\(element.label)': \(why).\(advice) "
-                    + "\(elsewhere.sentence)", scene: after)
+                    + "\(elsewhere.sentence)", scene: after, check: check)
         }
     }
 
@@ -361,8 +397,16 @@ public struct ActionEngine: Sendable {
             return ActOutcome(.refused, "set_toggle needs a desired state of on or off")
         }
         if element.state == desired {
+            // Already in the requested state: the reading is the check, and no gesture is attributed.
+            await dependencies.observer?.record(ActionRecord(
+                bundleID: request.bundleID, element: element, verb: .setToggle, effect: nil, windowTitleAfter: nil,
+                before: perceived, attempt: .notAttempted(reason: "requested_state_already_present")
+            ))
             return ActOutcome(.actedNoop, "'\(element.label)' is already \(desired.rawValue): nothing to "
-                + "do", scene: perceived.scene)
+                + "do", scene: perceived.scene, check: OperationCheck(
+                    condition: .requestedStateAlreadyPresent, method: .controlState, verdict: .passed,
+                    expected: desired.rawValue, observed: element.state?.rawValue, performed: .none,
+                    target: OperationCheck.Target(element)))
         }
         if request.isDryRun {
             return ActOutcome(.dryRun, "would click '\(element.label)' to set it \(desired.rawValue)")
@@ -370,7 +414,15 @@ public struct ActionEngine: Sendable {
         do { try await dependencies.actuator.perform(.click(at: point), in: pid) }
         catch {
             await dependencies.actuator.confirm(.unknown, in: pid)
-            return ActOutcome(.actedUnverified, "set '\(element.label)': delivery failed: \(error)")
+            await dependencies.observer?.record(ActionRecord(
+                bundleID: request.bundleID, element: element, verb: .setToggle, effect: nil, windowTitleAfter: nil,
+                before: perceived, attempt: .deliveryFailed("\(error)")
+            ))
+            return ActOutcome(.actedUnverified, "set '\(element.label)': delivery failed: \(error)",
+                              check: OperationCheck(condition: .stateAfterGesture, method: .controlState,
+                                                    verdict: .unknown, expected: desired.rawValue,
+                                                    limits: [.deliveryUncertain], performed: .uncertain,
+                                                    target: OperationCheck.Target(element)))
         }
         await pause(timing.clickSettle)
         let afterWindow = await perceive(pid)
@@ -391,16 +443,24 @@ public struct ActionEngine: Sendable {
             after           : afterWindow
         ))
         await dependencies.actuator.confirm(readBack == desired ? .observed : .unknown, in: pid)
+        let check = OperationCheck(
+            condition: .stateAfterGesture, method: .controlState,
+            verdict: readBack == desired ? .passed : readBack == nil ? .unknown : .failed,
+            expected: desired.rawValue, observed: readBack?.rawValue,
+            limits: (readBack == nil ? [.readbackUnavailable] : []) + (afterWindow == nil ? [.noAfterScene] : []),
+            performed: .requested, target: OperationCheck.Target(element)
+        )
         switch readBack {
             case desired:
-                return ActOutcome(.foundActed, "set '\(element.label)' → \(desired.rawValue)", scene: after)
+                return ActOutcome(.foundActed, "set '\(element.label)' → \(desired.rawValue)",
+                                  scene: after, check: check)
             case .some(let other):
                 return ActOutcome(.actedUnverified, "clicked '\(element.label)' but it now reads '\(other.rawValue)' "
                     + "(wanted \(desired.rawValue)): "
-                    + "re-perceive and re-decide, don't retry blindly", scene: after)
+                    + "re-perceive and re-decide, don't retry blindly", scene: after, check: check)
             case nil:
                 return ActOutcome(.actedUnverified, "clicked '\(element.label)': state unreadable after the click; "
-                    + "judge from the scene", scene: after)
+                    + "judge from the scene", scene: after, check: check)
         }
     }
 
@@ -416,13 +476,20 @@ public struct ActionEngine: Sendable {
            await controls.pressMenuItem(titled: element.label, within: popupFrame, in: pid) {
             await pause(timing.popupCommit)
             let stillOpen = await surfaces(pid).hasOpenPopup
-            let after = await perceive(pid)?.scene
+            let afterWindow = await perceive(pid)
+            let after = afterWindow?.scene
+            await recordPick(request, element: element, before: perceived, after: afterWindow)
+            let check = OperationCheck(
+                condition: .menuClosedAfterChoice, method: .windowCensus, verdict: stillOpen ? .failed : .passed,
+                expected: "menu closed", observed: stillOpen ? "menu open" : "menu closed",
+                limits: [.commandEffectUnchecked], performed: .requested, target: OperationCheck.Target(element)
+            )
             if stillOpen {
                 return ActOutcome(.actedUnverified, "pressed '\(element.label)' in the open menu, but the "
-                    + "menu is still open: observe before choosing again.", scene: after)
+                    + "menu is still open: observe before choosing again.", scene: after, check: check)
             }
             return ActOutcome(.foundActed, "chose '\(element.label)' in the open menu through its accessibility "
-                + "item; the menu closed. Check the command's own effect before going on.", scene: after)
+                + "item; the menu closed. Check the command's own effect before going on.", scene: after, check: check)
         }
         let rows = PopupRowPick.rows(in: perceived.scene, windowFrame: perceived.frame, popupFrame: popupFrame)
         let labels = Set(rows.flatMap { $0.map { LabelText.normalize($0.label) } }.filter { !$0.isEmpty })
@@ -442,26 +509,40 @@ public struct ActionEngine: Sendable {
                 try await dependencies.actuator.perform(.key(code: Key.return), in: pid)
             } catch {
                 await dependencies.actuator.confirm(.unknown, in: pid)
-                return ActOutcome(.actedUnverified, "picking '\(element.label)': delivery failed: \(error)")
+                await recordPick(request, element: element, before: perceived, after: nil,
+                                 attempt: .deliveryFailed("\(error)"))
+                return ActOutcome(.actedUnverified, "picking '\(element.label)': delivery failed: \(error)",
+                                  check: OperationCheck(condition: .valueReadBack, method: .controlValue,
+                                                        verdict: .unknown, expected: element.label,
+                                                        limits: [.deliveryUncertain], performed: .uncertain,
+                                                        target: OperationCheck.Target(element)))
             }
             await pause(timing.popupCommit)
             let stillOpen = await surfaces(pid).hasOpenPopup
             let value = await dependencies.controls?.controlValue(matchingAny: labels, in: pid)
-            let after = await perceive(pid)?.scene
+            let afterWindow = await perceive(pid)
+            let after = afterWindow?.scene
             let picked = value.map { LabelText.normalize($0) == LabelText.normalize(element.label) } ?? false
             await dependencies.actuator.confirm(picked ? .observed : .unknown, in: pid)
+            await recordPick(request, element: element, before: perceived, after: afterWindow)
+            let check = OperationCheck(
+                condition: .valueReadBack, method: .controlValue,
+                verdict: picked ? .passed : value == nil ? .unknown : .failed,
+                expected: element.label, observed: value, limits: value == nil ? [.readbackUnavailable] : [],
+                performed: .requested, target: OperationCheck.Target(element)
+            )
             if let value, LabelText.normalize(value) == LabelText.normalize(element.label) {
                 return ActOutcome(.foundActed, "selected '\(element.label)' in the pop-up (keyboard \(plan.route); the "
-                    + "control now reads '\(value)')", scene: after)
+                    + "control now reads '\(value)')", scene: after, check: check)
             }
             if stillOpen {
                 return ActOutcome(.actedUnverified, "moved the pop-up highlight (\(plan.route)) but the list is still "
                     + "open and the control "
-                    + "reads '\(value ?? "?")': describe_scene and act the exact row.", scene: after)
+                    + "reads '\(value ?? "?")': describe_scene and act the exact row.", scene: after, check: check)
             }
             return ActOutcome(.actedUnverified, "the pop-up closed but the control reads "
                 + "'\(value ?? "?")', not '\(element.label)': "
-                + "re-open it and re-decide.", scene: after)
+                + "re-open it and re-decide.", scene: after, check: check)
         }
         // No control to read the highlight from: the menu's own type-ahead, first word only.
         let typed = PopupRowPick.typeAheadPrefix(for: element.label)
@@ -481,10 +562,13 @@ public struct ActionEngine: Sendable {
             try await dependencies.actuator.perform(.key(code: Key.rightArrow), in: pid)
             await pause(timing.popupArrow)
             if (await surfaces(pid)).popups.count > popupsBefore {
-                let after = await perceive(pid)?.scene
+                let afterWindow = await perceive(pid)
                 await dependencies.actuator.confirm(.observed, in: pid)
+                await recordPick(request, element: element, before: perceived, after: afterWindow)
                 return ActOutcome(.foundActed, "'\(element.label)' opened a SUBMENU: its items are in the scene "
-                    + "below; act the one you want next.", scene: after)
+                    + "below; act the one you want next.", scene: afterWindow?.scene, check: OperationCheck(
+                        condition: .submenuOpened, method: .windowCensus, verdict: .passed, expected: "submenu opened",
+                        observed: "submenu opened", performed: .requested, target: OperationCheck.Target(element)))
             }
             // Commit only while the list is still open: a Return after it closed would hit the dialog behind it.
             if (await surfaces(pid)).hasOpenPopup {
@@ -493,20 +577,47 @@ public struct ActionEngine: Sendable {
             }
         } catch {
             await dependencies.actuator.confirm(.unknown, in: pid)
-            return ActOutcome(.actedUnverified, "typing '\(typed)': delivery failed: \(error)")
+            await recordPick(request, element: element, before: perceived, after: nil,
+                             attempt: .deliveryFailed("\(error)"))
+            return ActOutcome(.actedUnverified, "typing '\(typed)': delivery failed: \(error)", check: OperationCheck(
+                condition: .menuClosedAfterChoice, method: .windowCensus, verdict: .unknown,
+                limits: [.deliveryUncertain, .commandEffectUnchecked], performed: .uncertain,
+                target: OperationCheck.Target(element)))
         }
-        let after = await perceive(pid)?.scene
+        let afterWindow = await perceive(pid)
+        let after = afterWindow?.scene
         let stillOpen = (await surfaces(pid)).hasOpenPopup
         // A menu closing after typed keys proves the closing, not the item: Finder's Compress did nothing.
         await dependencies.actuator.confirm(.unknown, in: pid)
+        await recordPick(request, element: element, before: perceived, after: afterWindow)
+        let check = OperationCheck(
+            condition: .menuClosedAfterChoice, method: .windowCensus, verdict: stillOpen ? .failed : .unknown,
+            expected: "the row chosen", observed: stillOpen ? "menu open" : "menu closed",
+            limits: [.commandEffectUnchecked], performed: .requested, target: OperationCheck.Target(element)
+        )
         if stillOpen {
             return ActOutcome(.actedUnverified, "typed '\(typed)' but a pop-up is still open: that prefix may not "
                 + "match a row; "
-                + "describe_scene to read the exact item labels, then act the precise one.", scene: after)
+                + "describe_scene to read the exact item labels, then act the precise one.", scene: after, check: check)
         }
         return ActOutcome(.actedUnverified, "typed '\(typed)' to choose '\(element.label)' in the pop-up (keyboard "
             + "type-ahead): the menu closed but the effect is not confirmed; observe before acting again.",
-            scene: after)
+            scene: after, check: check)
+    }
+
+    /// Reports a choice in an open pop-up to the observer: the perceptions around it and how far the
+    /// gesture got. A choice teaches the Brain nothing (no effect is attributed to the row).
+    private func recordPick(
+        _ request: ActionRequest,
+        element  : SceneElement,
+        before   : PerceivedWindow,
+        after    : PerceivedWindow?,
+        attempt  : ActionAttempt = .delivered
+    ) async {
+        await dependencies.observer?.record(ActionRecord(
+            bundleID: request.bundleID, element: element, verb: request.verb, effect: nil,
+            windowTitleAfter: after?.scene.windowTitle, before: before, after: after, attempt: attempt
+        ))
     }
 
     // MARK: The inputs
@@ -595,20 +706,29 @@ public struct ActionEngine: Sendable {
         }
         let pid = request.processID
         if let error = await send([.insert(text)], to: pid) {
-            return ActOutcome(.actedUnverified, "inserting text: delivery failed: \(error); observe before any retry")
+            return ActOutcome(.actedUnverified, "inserting text: delivery failed: \(error); observe before any retry",
+                              check: Self.undelivered(expecting == nil ? .none : .valueReadBack, method: .controlValue,
+                                                      expected: expecting))
         }
         await pause(timing.clickSettle)
         let after = await perceive(pid)?.scene
         let value = await dependencies.controls?.focusedFieldValue(in: pid)
         let verified = expecting != nil && value != nil && value == expecting
         await dependencies.actuator.confirm(verified ? .observed : .unknown, in: pid)
+        // Without an expected value there is nothing to compare: the insertion stays unknown, never passed.
+        let check = expecting == nil
+            ? OperationCheck(condition: .none, method: .none, verdict: .unknown, limits: [.noExpectedValue],
+                             performed: .requested)
+            : OperationCheck(condition: .valueReadBack, method: .controlValue,
+                             verdict: verified ? .passed : value == nil ? .unknown : .failed, expected: expecting,
+                             observed: value, limits: value == nil ? [.readbackUnavailable] : [], performed: .requested)
         if verified, let value {
             return ActOutcome(.foundActed, "inserted text: the focused field reads '\(Self.shortened(value))'",
-                              scene: after)
+                              scene: after, check: check)
         }
         return ActOutcome(.actedUnverified,
             "inserted text at the current focus and selection, but the exact resulting value is unconfirmed; "
-            + "observe its effect before further input and never insert again blindly", scene: after)
+            + "observe its effect before further input and never insert again blindly", scene: after, check: check)
     }
 
     private func typeText(
@@ -629,6 +749,7 @@ public struct ActionEngine: Sendable {
         } catch {
             return error.outcome
         }
+        Self.inputTrail?.resolve(element)
         let point = perceived.globalPoint(of: element)
         let kept = replacing && permissions.selectsFieldsByTripleClick
             ? Self.keptExtension(of: element.value, replacedBy: text)
@@ -654,7 +775,9 @@ public struct ActionEngine: Sendable {
             byTripleClick: permissions.selectsFieldsByTripleClick
         ) + [inserts ? .insert(typed) : .type(typed)]
         if let error = await send(gestures, to: pid) {
-            return ActOutcome(.actedUnverified, "typing into '\(element.label)': delivery failed: \(error)")
+            return ActOutcome(.actedUnverified, "typing into '\(element.label)': delivery failed: \(error)",
+                              check: Self.undelivered(.valueReadBack, method: .controlValue, expected: typed,
+                                                      target: element))
         }
         await pause(timing.clickSettle)
         let after = await perceive(pid)?.scene
@@ -663,22 +786,31 @@ public struct ActionEngine: Sendable {
         let wanted = replacing ? typed : element.value.map { $0 + text }
         await dependencies.actuator.confirm(readBack != nil && readBack == wanted ? .observed : .unknown, in: pid)
         let composing = inserts ? " This text is inserted as one event; an active input method may reject it." : ""
+        let verdict: OperationCheck.Verdict = switch (readBack, wanted) {
+            case (.some(let value), .some(let wanted)): value == wanted ? .passed : .failed
+            default                                   : .unknown
+        }
+        let check = OperationCheck(
+            condition: .valueReadBack, method: .controlValue, verdict: verdict, expected: wanted, observed: readBack,
+            limits: (readBack == nil ? [.readbackUnavailable] : []) + (wanted == nil ? [.previousValueUnknown] : []),
+            performed: .requested, target: OperationCheck.Target(element)
+        )
         switch (readBack, wanted) {
             case (.some(let value), .some(let wanted)) where value == wanted:
                 return ActOutcome(.foundActed, "typed into '\(element.label)'\(keeping): the field reads "
-                    + "'\(Self.shortened(value))'", scene: after)
+                    + "'\(Self.shortened(value))'", scene: after, check: check)
             case (.some(let value), .some(let wanted)):
                 return ActOutcome(.actedUnverified, "typed into '\(element.label)'\(keeping) but the field reads "
                     + "'\(Self.shortened(value))', not '\(Self.shortened(wanted))': observe and re-decide, do not "
-                    + "type it again blindly.\(composing)", scene: after)
+                    + "type it again blindly.\(composing)", scene: after, check: check)
             case (.some(let value), nil):
                 return ActOutcome(.actedUnverified, "typed into '\(element.label)' and the field reads "
                     + "'\(Self.shortened(value))', but what it held before could not be read, so the appended text "
-                    + "cannot be confirmed: observe and re-decide.", scene: after)
+                    + "cannot be confirmed: observe and re-decide.", scene: after, check: check)
             case (nil, _):
                 return ActOutcome(.actedUnverified, "typed into '\(element.label)'\(keeping): no field's value could be "
                     + "read afterwards, so the text cannot be confirmed; observe before typing again.\(composing)",
-                    scene: after)
+                    scene: after, check: check)
         }
     }
 
@@ -707,7 +839,8 @@ public struct ActionEngine: Sendable {
         }
         await raiseIfNeeded(pid, isPopupOpen: (await surfaces(pid)).hasOpenPopup)
         if let error = await send(Array(repeating: chord.gesture, count: times), to: pid) {
-            return ActOutcome(.actedUnverified, "\(pressed): delivery failed: \(error)")
+            return ActOutcome(.actedUnverified, "\(pressed): delivery failed: \(error)",
+                              check: Self.undelivered(.structuralEffect, method: .sceneDifference))
         }
         // A background chord's unchanged scene does not qualify the target's menu support.
         let note = dependencies.activation == nil && chord.modifiers.contains(.command) ? Self.menuShortcutNote : ""
@@ -738,6 +871,7 @@ public struct ActionEngine: Sendable {
                 return error.outcome
             }
         }
+        Self.inputTrail?.resolve(element)
         let point = element.map(perceived.globalPoint(of:))
             ?? CGPoint(x: perceived.frame.midX, y: perceived.frame.midY)
         let amount = "\(abs(lines)) line\(abs(lines) == 1 ? "" : "s") \(lines > 0 ? "up" : "down") over "
@@ -748,7 +882,8 @@ public struct ActionEngine: Sendable {
         let scrolled = "scrolled \(amount)"
         await raiseIfNeeded(pid, isPopupOpen: (await surfaces(pid)).hasOpenPopup)
         if let error = await send([.scroll(at: point, deltaY: lines)], to: pid) {
-            return ActOutcome(.actedUnverified, "\(scrolled): delivery failed: \(error)")
+            return ActOutcome(.actedUnverified, "\(scrolled): delivery failed: \(error)",
+                              check: Self.undelivered(.structuralEffect, method: .sceneDifference, target: element))
         }
         return await judged(
             scrolled, in: request, before: perceived.scene, targetID: element?.id,
@@ -772,6 +907,7 @@ public struct ActionEngine: Sendable {
         } catch {
             return error.outcome
         }
+        Self.inputTrail?.resolve(element)
         let start = perceived.globalPoint(of: element)
         let finish: CGPoint
         let destination: String
@@ -805,7 +941,8 @@ public struct ActionEngine: Sendable {
         }
         await raiseIfNeeded(pid, isPopupOpen: (await surfaces(pid)).hasOpenPopup)
         if let error = await send([.drag(from: start, to: finish)], to: pid) {
-            return ActOutcome(.actedUnverified, "\(dragged): delivery failed: \(error)")
+            return ActOutcome(.actedUnverified, "\(dragged): delivery failed: \(error)",
+                              check: Self.undelivered(.structuralEffect, method: .sceneDifference, target: element))
         }
         return await judged(
             dragged, in: request, before: scene, targetID: element.id,
@@ -834,6 +971,7 @@ public struct ActionEngine: Sendable {
         } catch {
             return error.outcome
         }
+        Self.inputTrail?.resolve(element)
         if ActionPolicy.isDestructive(label: item), !permissions.allowsDestructive {
             return ActOutcome(.refused, "'\(item)' looks destructive/irreversible: refused. If you want the agent "
                 + "to do this, the person must allow destructive actions.", scene: perceived.scene)
@@ -849,7 +987,9 @@ public struct ActionEngine: Sendable {
         let before = await surfaces(pid)
         await raiseIfNeeded(pid, isPopupOpen: before.hasOpenPopup)
         if let error = await send([.click(at: point, button: .right)], to: pid) {
-            return ActOutcome(.actedUnverified, "right-clicking '\(element.label)': delivery failed: \(error)")
+            return ActOutcome(.actedUnverified, "right-clicking '\(element.label)': delivery failed: \(error)",
+                              check: Self.undelivered(.menuItemChosen, method: .windowCensus, expected: item,
+                                                      target: element))
         }
         await pause(timing.clickSettle)
         let popups = (await surfaces(pid)).popups
@@ -858,7 +998,10 @@ public struct ActionEngine: Sendable {
             let after = await perceive(pid)?.scene
             await dependencies.actuator.confirm(.unknown, in: pid)
             return ActOutcome(.actedUnverified, "right-clicked '\(element.label)' but no contextual menu could be "
-                + "read, so nothing was chosen: observe; this element may have no menu of its own", scene: after)
+                + "read, so nothing was chosen: observe; this element may have no menu of its own", scene: after,
+                check: OperationCheck(condition: .menuItemChosen, method: .windowCensus, verdict: .unknown,
+                                      expected: item, limits: [.commandEffectUnchecked], performed: .substitute,
+                                      substitute: "right_click", target: OperationCheck.Target(element)))
         }
         let rows = PopupRowPick.rows(in: opened.scene, windowFrame: opened.frame, popupFrame: menu)
         let wanted = LabelText.normalize(item)
@@ -872,7 +1015,10 @@ public struct ActionEngine: Sendable {
             let offered = rows.compactMap { $0.first?.label }.prefix(14).map { "'\($0)'" }
             return ActOutcome(.honestMiss, "no item '\(item)' in the contextual menu of '\(element.label)'"
                 + (offered.isEmpty ? "" : ": it offered \(offered.joined(separator: ", "))")
-                + (closed ? "; the menu was closed" : "; the menu may still be open, observe"), scene: after)
+                + (closed ? "; the menu was closed" : "; the menu may still be open, observe"), scene: after,
+                check: OperationCheck(condition: .menuItemChosen, method: .sceneText, verdict: .failed, expected: item,
+                                      observed: nil, performed: .substitute, substitute: "right_click_then_escape",
+                                      target: OperationCheck.Target(element)))
         }
         let choice = ActionRequest(
             processID: pid, bundleID: request.bundleID, appName: request.appName, target: row.label, verb: .click
@@ -965,10 +1111,13 @@ public struct ActionEngine: Sendable {
     ) async -> ActOutcome {
         let pid = request.processID
         await pause(timing.clickSettle)
+        let target = Self.inputTrail?.target.map(OperationCheck.Target.init)
         guard let after = await perceive(pid)?.scene else {
             await dependencies.actuator.confirm(.unknown, in: pid)
             return ActOutcome(.actedUnverified, "\(performed): no scene could be read afterwards; observe when "
-                + "the window is back")
+                + "the window is back", check: OperationCheck(
+                    condition: .structuralEffect, method: .sceneDifference, verdict: .unknown,
+                    limits: [.noAfterScene, .noExpectation], performed: .requested, target: target))
         }
         let effect = Self.gatedEffect(
             before: before, after: after, targetID: targetID ?? "", popupIsOpen: (await surfaces(pid)).hasOpenPopup
@@ -981,16 +1130,31 @@ public struct ActionEngine: Sendable {
             case .unattributable: .unknown
         }
         await dependencies.actuator.confirm(delivery, in: pid)
+        // An input has no learned expectation: any structural change anywhere in the window passes.
+        let check = OperationCheck.sceneDifference(verdict, expected: nil, target: target, limits: [.windowWide])
         switch verdict {
             case .landed(let effect, _):
-                return ActOutcome(.foundActed, "\(performed): \(effect.summary)", scene: after)
+                return ActOutcome(.foundActed, "\(performed): \(effect.summary)", scene: after, check: check)
             case .ghost:
                 return ActOutcome(.actedUnverified, "\(performed): this window did NOT change (identical scene). "
-                    + ghost, scene: after)
+                    + ghost, scene: after, check: check)
             case .unattributable:
                 return ActOutcome(.actedUnverified, "\(performed): the window's pixels changed but nothing "
-                    + "structural did. \(repaint)", scene: after)
+                    + "structural did. \(repaint)", scene: after, check: check)
         }
+    }
+
+    /// The check of a gesture whose delivery failed part way: what went out is unknown, the condition
+    /// it was to be judged on stays unknown.
+    static func undelivered(
+        _ condition: OperationCheck.Condition,
+        method     : OperationCheck.Method,
+        expected   : String? = nil,
+        target     : SceneElement? = nil
+    ) -> OperationCheck {
+        OperationCheck(condition: condition, method: method, verdict: .unknown, expected: expected,
+                       limits: [.deliveryUncertain], performed: .uncertain,
+                       target: target.map(OperationCheck.Target.init))
     }
 
     /// A value a sentence quotes, cut so the sentence stays readable.
@@ -1030,12 +1194,18 @@ public struct ActionEngine: Sendable {
         private let lock = NSLock()
         private var perceived: [PerceivedWindow] = []
         private var attributed: SceneEffect?
+        private var resolvedTarget: SceneElement?
 
         var windows: [PerceivedWindow] { lock.withLock { perceived } }
         var effect: SceneEffect? { lock.withLock { attributed } }
+        var target: SceneElement? { lock.withLock { resolvedTarget } }
 
         func append(_ window: PerceivedWindow) { lock.withLock { perceived.append(window) } }
         func attribute(_ effect: SceneEffect?) { lock.withLock { attributed = effect } }
+        /// The element the input acted on: the field, the scrolled element, the dragged source, the opener.
+        func resolve(_ element: SceneElement?) {
+            lock.withLock { if resolvedTarget == nil { resolvedTarget = element } }
+        }
     }
 
     /// The trail of the input being delivered in this task, when one is.

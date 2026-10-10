@@ -39,17 +39,21 @@ public struct SeatDropdownSelector {
         permissions: ActionPermissions = ActionPermissions(),
         dryRun: Bool = false,
         onMenu: @escaping @MainActor @Sendable (ContextMenu) -> Void = { _ in },
-        onCapture: @escaping @MainActor @Sendable (String, CGImage) throws -> Void = { _, _ in }
+        onCapture: @escaping @MainActor @Sendable (String, CGImage) throws -> Void = { _, _ in },
+        report: @escaping @MainActor (SelectorPerception) async -> Void = { _ in }
     ) async throws -> (outcome: ActOutcome, receipt: PopupMenuReceipt?) {
         let seat = try target.agentSeat()
         let window = try target.currentWindow()
         let turn = try await seat.acquire()
+        var perception = SelectorPerception()
         do {
             let result = try await perform(
                 control: control, item: item, identity: identity, permissions: permissions,
-                dryRun: dryRun, seat: seat, window: window, turn: turn, onMenu: onMenu, onCapture: onCapture
+                dryRun: dryRun, seat: seat, window: window, turn: turn, onMenu: onMenu, onCapture: onCapture,
+                perception: &perception
             )
             try seat.release(turn)
+            await report(perception)
             return result
         } catch {
             do { try seat.release(turn) }
@@ -68,7 +72,8 @@ public struct SeatDropdownSelector {
         window: AdoptedWindow,
         turn: Turn,
         onMenu: @escaping @MainActor @Sendable (ContextMenu) -> Void,
-        onCapture: @escaping @MainActor @Sendable (String, CGImage) throws -> Void
+        onCapture: @escaping @MainActor @Sendable (String, CGImage) throws -> Void,
+        perception: inout SelectorPerception
     ) async throws -> (outcome: ActOutcome, receipt: PopupMenuReceipt?) {
         let beforeDelivery = try await target.observe()
         let beforeStill = beforeDelivery.frame
@@ -83,6 +88,7 @@ public struct SeatDropdownSelector {
             beforeStill, identity: identity, title: window.title,
             stage: "before", onCapture: onCapture
         )
+        perception.before = before
         var opener: SceneElement?
         var scopedBounds: NormalizedRect?
         // A native popup and its static caption can share a name. Prefer the control;
@@ -111,7 +117,10 @@ public struct SeatDropdownSelector {
         if dryRun {
             return (ActOutcome(.dryRun, "would open '\(opener.label)' and select '\(item)' in its own menu window", scene: before.scene), nil)
         }
+        perception.target = opener
+        let checked = OperationCheck.Target(opener)
         var menuScene: SceneSnapshot?
+        var menuWindow: PerceivedWindow?
         @MainActor @Sendable func readItem(_ menu: ContextMenu, fromDisplay: Bool) async throws -> SceneElement? {
             onMenu(menu)
             guard let identityOfMenu = menu.window.identity else { throw SeatDrivingFailure.frameUnusable }
@@ -144,6 +153,7 @@ public struct SeatDropdownSelector {
                 )
             }
             menuScene = observed.scene
+            menuWindow = observed
             guard observed.frame == menu.frame else { throw SeatDrivingFailure.frameUnusable }
             guard case .found(let element) = observed.scene.resolve(target: item) else { return nil }
             return element
@@ -209,33 +219,75 @@ public struct SeatDropdownSelector {
             afterStill, identity: identity, title: window.title,
             stage: "after", onCapture: onCapture
         )
+        perception.menu  = menuWindow
+        perception.after = after
         guard receipt.selectionRequested else {
             let labels = remoteListing
                 ?? menuScene?.elements.map(\.label).joined(separator: ", ")
                 ?? "unreadable"
-            return (ActOutcome(.honestMiss, "no unique '\(item)' in the dropdown; menu closed. Items: \(labels)", scene: after.scene), receipt)
+            // The menu opened and closed with no row chosen: the requested selection was not performed.
+            return (
+                ActOutcome(
+                    .honestMiss,
+                    "no unique '\(item)' in the dropdown; menu closed. Items: \(labels)",
+                    scene: after.scene,
+                    check: OperationCheck(
+                        condition : .menuItemChosen,
+                        method    : .driverReceipt,
+                        verdict   : .failed,
+                        expected  : item,
+                        performed : .substitute,
+                        substitute: "menu_opened_and_closed",
+                        target    : checked
+                    )
+                ),
+                receipt
+            )
         }
         let verified: Bool
+        let method: OperationCheck.Method
+        var read: String?
+        var readable = true
         if remotePanel {
             // The popup's own value, by its label or, once changed, by the value it now holds.
             let value = (try? DropdownOpening.value(control: opener.label, in: nativeWindow))
                 ?? (try? DropdownOpening.value(control: item, in: nativeWindow))
             verified = value.map { LabelText.normalize($0) == LabelText.normalize(item) } ?? false
+            method   = .controlValue
+            read     = value
+            readable = value != nil
         } else if let scopedBounds {
             let scoped = try await controlScene(afterStill, bounds: scopedBounds, identity: identity, title: window.title)
             if let scoped, case .found(let value) = scoped.resolve(target: item) {
                 verified = LabelText.normalize(value.label) == LabelText.normalize(item)
                     && after.frame.size == before.frame.size
-            } else { verified = false }
+                read = value.label
+            } else {
+                verified = false
+                readable = false
+            }
+            method = .sceneText
         } else {
             verified = DropdownValueVerification.verifies(
                 item: item, control: opener, after: after.scene.elements
             )
+            method   = .controlValue
+            read     = verified ? item : nil
+            readable = verified
         }
+        // A value that did not read as the item is not proved another: it stays unknown unless a value was read.
+        let check = OperationCheck(
+            condition: .valueReadBack, method: method,
+            verdict: verified ? .passed : (read != nil ? .failed : .unknown), expected: item, observed: read,
+            limits: readable ? [] : [.readbackUnavailable], performed: .requested, target: checked
+        )
         let message = verified
             ? "selected '\(item)' in menu window #\(receipt.menu.window.windowNumber); the dropdown now reads '\(item)'"
             : "requested '\(item)' in menu window #\(receipt.menu.window.windowNumber), but the dropdown value was not verified"
-        return (ActOutcome(verified ? .foundActed : .actedUnverified, message, scene: after.scene), receipt)
+        return (
+            ActOutcome(verified ? .foundActed : .actedUnverified, message, scene: after.scene, check: check),
+            receipt
+        )
     }
 
     private func controlScene(

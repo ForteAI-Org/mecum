@@ -118,16 +118,22 @@ public enum DialogButtonPress {
                 let error  = AXUIElementPerformAction(button, kAXPressAction as CFString)
                 // A button that opens a modal can keep the reply past the timeout: it was pressed.
                 guard error == .success || error == .cannotComplete else {
-                    return ActOutcome(.actedUnverified, "Pressing '\(title)' failed with AXError \(error.rawValue).")
+                    return ActOutcome(
+                        .actedUnverified,
+                        "Pressing '\(title)' failed with AXError \(error.rawValue).",
+                        check: MenuBarCommand.windowCheck(.unknown, limits: [.deliveryUncertain], performed: .uncertain)
+                    )
                 }
                 try? await Task.sleep(for: .milliseconds(400))
                 let scene   = try await observe()
                 let changed = MenuBarCommand.windowSignature(of: processID) != before
+                let check   = MenuBarCommand.windowCheck(changed ? .passed : .unknown)
                 return changed
                     ? ActOutcome(.foundActed, "pressed '\(title)': a window of the application opened, closed or "
-                        + "was retitled", scene: scene)
+                        + "was retitled", scene: scene, check: check)
                     : ActOutcome(.actedUnverified, "pressed '\(title)': no window opened, closed or was retitled; "
-                        + "the scene shows whether it took effect. Do not press it again blind.", scene: scene)
+                        + "the scene shows whether it took effect. Do not press it again blind.",
+                        scene: scene, check: check)
         }
     }
 
