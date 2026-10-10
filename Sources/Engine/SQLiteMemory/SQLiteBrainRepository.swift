@@ -118,14 +118,87 @@ public struct SQLiteBrainRepository: BrainStoring {
     ///
     /// The rows are written at the Brain's own last instant, never later: a row the import stamps
     /// is then no newer than what the file says it saw. `now` is used only for a Brain that saw
-    /// nothing.
+    /// nothing. The Brain is admitted first (`importAdmitted`).
     public func importProjection(_ imported: UIBrain, into bundleID: String, now: Date) async throws -> Bool {
+        try await importAdmitted(imported, into: bundleID, now: now).imported
+    }
+
+    /// Imports a Brain as `importProjection` does, once admitted as a live Brain would have learned it:
+    /// credential shapes withheld from its labels, aliases, window families and group names, and the
+    /// transitions whose effect held one left out (`ValueMinimization.minimize(brain:)`). The archive
+    /// never keeps what the file had to withhold; the file itself is only read. Answers whether it
+    /// imported, and what it withheld.
+    public func importAdmitted(
+        _ imported: UIBrain,
+        into bundleID: String,
+        now: Date
+    ) async throws -> (imported: Bool, withheld: ValueMinimization.BrainWithholding) {
+        let (admitted, withheld) = ValueMinimization().minimize(brain: imported)
+        let latest = (admitted.objects.map(\.lastSeen) + admitted.groups.map(\.lastSeen)
+            + admitted.transitions.map(\.lastObserved)).max() ?? now
+        let done = try await mutate(bundleID, now: latest) { brain, _ in
+            guard brain.objects.isEmpty, brain.groups.isEmpty, brain.transitions.isEmpty else { return (false, DecayReport()) }
+            brain = admitted
+            return (true, DecayReport())
+        }
+        return (done, withheld)
+    }
+
+    /// Merges an earlier origin's Brain into the application's projection (`BrainMerge`), at the Brain's
+    /// own last instant as an import is, and journals every element under `originID` in the same
+    /// transaction; the origin must be journaled already. Merged again, nothing is added twice: what this
+    /// origin added is then present, and its first journal row is the one kept. The Brain is admitted
+    /// first, as `importAdmitted` admits one, and the journal says what was withheld.
+    public func merge(_ origin: UIBrain, into bundleID: String, origin originID: String,
+                      now: Date) async throws -> BrainMerge {
+        let (imported, withheld) = ValueMinimization().minimize(brain: origin)
         let latest = (imported.objects.map(\.lastSeen) + imported.groups.map(\.lastSeen)
             + imported.transitions.map(\.lastObserved)).max() ?? now
-        return try await mutate(bundleID, now: latest) { brain, _ in
-            guard brain.objects.isEmpty, brain.groups.isEmpty, brain.transitions.isEmpty else { return (false, DecayReport()) }
-            brain = imported
-            return (true, DecayReport())
+        let canonical: Date
+        do {
+            canonical = try BrainClock.canonical(latest)
+        } catch let problem as BrainClock.Problem {
+            throw BrainProjectionError.clock(problem)
+        }
+        let nowMS            = try SQLiteBrainRows.milliseconds(of: canonical)
+        let makeTransitionID = self.makeTransitionID
+        let makeSceneID      = self.makeSceneID
+        return try await store.write { transaction in
+            let appID = try SQLiteIdentityRows.ensureApp(transaction, bundleID: bundleID)
+            func holders(_ table: String, _ column: String, _ keys: [String]) throws -> [String: Int64] {
+                var held: [String: Int64] = [:]
+                for key in keys {
+                    let app = try transaction.query(
+                        "SELECT app_id FROM \(table) WHERE \(column) = ?",
+                        [.text(key)]
+                    ) { $0.integer(0) }.first
+                    if let app = app ?? nil { held[key] = app }
+                }
+                return held
+            }
+            let heldAnchors = try holders("brain_anchors", "anchor_id", imported.objects.map(\.anchorKey))
+            let heldGroups  = try holders("brain_groups", "group_id", imported.groups.map(\.id.uuidString))
+            let loaded = try SQLiteBrainRows.load(transaction, appID: appID)
+            let merge = try SQLiteBrainRows.mutate(
+                transaction, appID: appID, loaded: loaded, now: canonical, nowMS: nowMS,
+                makeTransitionID: makeTransitionID, makeSceneID: makeSceneID
+            ) { brain, _ in
+                let merge = BrainMerge.merge(imported, into: &brain, appID: appID, heldAnchors: heldAnchors,
+                                             heldGroups: heldGroups, withheld: withheld)
+                return (merge, DecayReport())
+            }.result
+            for contribution in merge.contributions {
+                try transaction.execute(
+                    """
+                    INSERT OR IGNORE INTO memory_origin_brain_contributions
+                        (origin_id, bundle_id, element_kind, element_key, disposition, withheld)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    [.text(originID), .text(bundleID), .text(contribution.kind.rawValue), .text(contribution.key),
+                     .text(contribution.disposition.rawValue), .integer(contribution.withheld ? 1 : 0)]
+                )
+            }
+            return merge
         }
     }
 

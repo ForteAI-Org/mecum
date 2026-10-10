@@ -10,19 +10,27 @@ import Foundation
 import Testing
 @testable import Mecum
 
-/// Each external client keeps a living memory of its own, as on main: the directory main gave each
-/// profile, now holding that client's SQL archive, apart from the workers' and the other clients'.
+/// G76 D1: external clients share the user's one living memory with the workers. Before it each client kept
+/// a memory of its own in the directory main gave its profile (the C07 decision of the merge); that
+/// directory is now only an origin the shared archive takes in once, read only, and keeps where it was.
 struct MCPKnowledgeDirectoryTests {
 
-    @Test func eachProfileHasAnArchiveOfItsOwn() {
+    @Test func clientsShareTheUsersArchiveAndTheirEarlierDirectoriesAreOrigins() throws {
         let support = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("mcp-knowledge-\(UUID().uuidString)")
         let first   = UUID(), second = UUID()
         let a = AppModel.knowledgeDirectory(of: first, under: support)
         let b = AppModel.knowledgeDirectory(of: second, under: support)
         #expect(a.path == support.appendingPathComponent("MCP/Knowledge/\(first.uuidString)").path, "the path main used")
         #expect(a != b)
-        #expect(a != support.appendingPathComponent("Knowledge", isDirectory: true), "apart from the workers' memory")
-        let archives = Set([a, b, support.appendingPathComponent("Knowledge")].map { MemoryService.shared(for: $0).url.path })
-        #expect(archives.count == 3, "three archives: \(archives.sorted())")
+        let shared = KnowledgeLocation.knowledge(under: support)
+        #expect(shared.path == support.appendingPathComponent("Knowledge").path, "the workers' and the clients' one directory")
+
+        try FileManager.default.createDirectory(at: a, withIntermediateDirectories: true)
+        try Data("{}".utf8).write(to: a.appendingPathComponent("com.example.Editor.json"))
+        try FileManager.default.createDirectory(at: b, withIntermediateDirectories: true)
+        let origins = KnowledgeLocation.legacyProfiles(under: support)
+        #expect(origins.map(\.originID) == ["mcp-profile:\(first.uuidString)"], "an empty earlier directory is no origin")
+        #expect(origins.first?.location == "MCP/Knowledge/\(first.uuidString)" && origins.first?.hasArchive == false)
+        #expect(MemoryService.shared(for: shared).url.path == shared.appendingPathComponent("memory.sqlite").path)
     }
 }

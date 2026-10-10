@@ -13,10 +13,15 @@ import SQLiteMemory
 /// into the memory's archive, each as its application's projection, when the archive holds no Brain of that
 /// application yet: a Brain already there is kept, never merged or replaced. The JSON files are only read,
 /// never changed. Only the Brain is carried, with the file's counts and no evidence; not the files' window
-/// states, menu commands or routes, and no history. What the agent learns afterwards adds to it.
+/// states, menu commands or routes, and no history. What the agent learns afterwards adds to it. A Brain
+/// is admitted before it is written, as a live one would have learned it: a credential's shape in a
+/// label, alias, window or group name is withheld, and a transition whose effect held one is left out
+/// (`SQLiteBrainRepository.importAdmitted`); the report counts them.
 ///
 /// `MemoryService` runs it once, on the JSON files beside an archive its open has just created, and
-/// `mecum memory --import-json <dir>` runs it by hand on any directory.
+/// `mecum memory --import-json <dir>` runs it by hand on any directory. The JSON files of an earlier
+/// origin (an MCP client's directory) are merged instead (`merge`), element by element, into the Brain
+/// the shared archive may already hold.
 nonisolated public enum JSONBrainImport {
 
     /// Outcome is what became of one application's Brain.
@@ -31,6 +36,8 @@ nonisolated public enum JSONBrainImport {
     public struct Entry: Sendable, Equatable {
         public let bundleID: String
         public let outcome : Outcome
+        /// The anchors, groups and transitions the admission withheld a value from or left out.
+        public var withheld: Int = 0
     }
 
     public struct Report: Sendable, Equatable {
@@ -45,10 +52,12 @@ nonisolated public enum JSONBrainImport {
         public var summary: String {
             var anchors = 0, groups = 0, transitions = 0
             for case .imported(let a, let g, let t) in entries.map(\.outcome) { anchors += a; groups += g; transitions += t }
-            let kept   = entries.filter { $0.outcome == .kept }.count
-            let failed = entries.count - imported - kept
+            let kept     = entries.filter { $0.outcome == .kept }.count
+            let failed   = entries.count - imported - kept
+            let withheld = entries.reduce(0) { $0 + $1.withheld }
             return "\(imported) of \(entries.count) JSON Brains imported (\(anchors) anchors, \(groups) groups, "
                 + "\(transitions) transitions)" + (kept > 0 ? ", \(kept) kept" : "") + (failed > 0 ? ", \(failed) refused" : "")
+                + (withheld > 0 ? ", \(withheld) elements with a credential withheld or left out" : "")
         }
     }
 
@@ -70,16 +79,43 @@ nonisolated public enum JSONBrainImport {
         }
     }
 
+    /// MergeFailure is a Brain of an origin the archive did not take: the merge stops, to be resumed.
+    public struct MergeFailure: Error, CustomStringConvertible {
+        public let bundleID: String
+        public let reason  : String
+        public var description: String { "the JSON Brain of \(bundleID) was not merged: \(reason)" }
+    }
+
+    /// Merges each application's Brain of an earlier origin into the archive's (`SQLiteBrainRepository.merge`),
+    /// one transaction each, journaled under `origin`; throws `MergeFailure` at the first the archive
+    /// refuses, so the origin is not concluded and is merged again on the next open.
+    public static func merge(_ applications: [AppKnowledge], into brains: SQLiteBrainRepository, origin: String,
+                             now: Date) async throws -> [(bundleID: String, merge: BrainMerge)] {
+        var merged: [(bundleID: String, merge: BrainMerge)] = []
+        for app in applications {
+            do {
+                let merge = try await brains.merge(app.brain, into: app.bundleID, origin: origin, now: now)
+                merged.append((app.bundleID, merge))
+            } catch {
+                throw MergeFailure(bundleID: app.bundleID, reason: MemoryService.describe(error))
+            }
+        }
+        return merged
+    }
+
     /// Imports each application's Brain into the archive the repository writes, one transaction each.
     public static func run(_ applications: [AppKnowledge], into brains: SQLiteBrainRepository, now: Date) async -> Report {
         var entries: [Entry] = []
         for app in applications {
             let brain = app.brain
             do {
-                if try await brains.importProjection(brain, into: app.bundleID, now: now) {
+                let (done, withheld) = try await brains.importAdmitted(brain, into: app.bundleID, now: now)
+                if done {
+                    let count = withheld.anchors.count + withheld.groups.count + withheld.transitions.count
                     entries.append(Entry(bundleID: app.bundleID, outcome: .imported(
-                        anchors: brain.objects.count, groups: brain.groups.count, transitions: brain.transitions.count
-                    )))
+                        anchors: brain.objects.count, groups: brain.groups.count,
+                        transitions: brain.transitions.count - withheld.transitions.count
+                    ), withheld: count))
                 } else {
                     entries.append(Entry(bundleID: app.bundleID, outcome: .kept))
                 }

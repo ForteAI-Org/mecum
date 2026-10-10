@@ -5,6 +5,7 @@
 //  Created by Eliomar Alejandro Rodriguez Ferrer on 22/09/2026.
 //
 
+import AutomationRuntime
 import Foundation
 import LocalMCP
 import ModelTransports
@@ -24,10 +25,10 @@ final class AppModel {
 
     let settings = ModelSettingsStore()
 
-    /// External clients share the app's Seat broker and each have private engine state, as on main:
-    /// each profile's calls and learning go to a living memory of its own (`knowledgeDirectory(of:)`),
-    /// apart from the workers' and from every other client's, recorded with the `mcp` source and the
-    /// profile as their stream.
+    /// External clients share the app's Seat broker and the user's one living memory with the workers
+    /// (`KnowledgeLocation`, G76): what a client learns the workers may reuse and the other way round, each
+    /// call recorded with the `mcp` source and the profile as its stream, each task its own. A client's
+    /// earlier private archive is unified into it once (`MemoryService.unify`), and kept where it was.
     lazy var mcp = MCPConnectionsModel(
         directory: WorkspaceLaunch.directory.appendingPathComponent("MCP", isDirectory: true),
         executable: Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/mecum-bridge")
@@ -35,7 +36,7 @@ final class AppModel {
         let desktop = BrokeredAutomationSession(
             broker: broker,
             workerID: UUID(),
-            knowledgeDirectory: Self.knowledgeDirectory(of: profile.id, under: WorkspaceLaunch.directory)
+            knowledgeDirectory: KnowledgeLocation.knowledge(under: WorkspaceLaunch.directory)
         )
         let session = ExternalMCPSession(
             profile: profile,
@@ -50,14 +51,18 @@ final class AppModel {
         return MCPHostSession(router: session.router) { await session.close() }
     }
 
-    /// The Knowledge directory of an external client's profile, under the app's support directory:
-    /// `MCP/Knowledge/<profile>`, the path main gave it, now holding that client's `memory.sqlite`.
+    /// The Knowledge directory an external client's profile had before G76, under the app's support
+    /// directory: `MCP/Knowledge/<profile>`. Nothing writes there any more; the shared memory unifies it
+    /// (`KnowledgeLocation.legacyProfiles`).
     nonisolated static func knowledgeDirectory(of profile: UUID, under support: URL) -> URL {
         support.appendingPathComponent("MCP/Knowledge/" + profile.uuidString, isDirectory: true)
     }
 
     init() {
         broker.display = Self.storedDisplay
+        // The external clients' earlier private archives come into the shared memory when it first opens.
+        MemoryService.unify(KnowledgeLocation.knowledge(under: WorkspaceLaunch.directory),
+                            with: KnowledgeLocation.legacyProfiles(under: WorkspaceLaunch.directory))
         let checks = AppPreferences.bool(
             AppPreferences.checksConnectionsAtLaunch,
             default: AppPreferences.checksConnectionsAtLaunchDefault

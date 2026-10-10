@@ -66,7 +66,7 @@ enum ChatCommand {
         let transcript = ChatTranscript(conversation: selected, store: store)
         try transcript.save()
         let knowledge = options.knowledgeDirectory.map { URL(fileURLWithPath: ($0 as NSString).expandingTildeInPath) }
-            ?? support.appendingPathComponent("Knowledge", isDirectory: true)
+            ?? EngineRuntime.sharedKnowledge()
         let tools = ChatTools(session: AutomationSession(knowledgeDirectory: knowledge,
                                                         allowsDestructive: options.allowDestructive))
         tools.producer = CallProducer(source: .cli, streamID: "chat-" + selected.id.uuidString,

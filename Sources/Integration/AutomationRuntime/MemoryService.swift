@@ -259,6 +259,8 @@ public actor MemoryService: BrainReading, BrainApplicationStoring {
         public let pendingEssential: Int
         /// The migration the archive's open ran, when it ran one: from which version and the copy kept.
         public let lastMigration: String?
+        /// What the unification of the user's earlier archives took in, when it ran.
+        public let lastUnification: String?
     }
 
     /// Activity is what a quitting process may ask without waiting for the actor: whether this
@@ -328,6 +330,9 @@ public actor MemoryService: BrainReading, BrainApplicationStoring {
         let body : @Sendable (MemoryRepositories) async throws -> Void
     }
 
+    private var unifying: Task<Void, Never>?
+    private var lastUnification: String?
+
     private var lastBackup: Date?
     private var lastRecovery: String?
     private var lastImport: String?
@@ -350,6 +355,17 @@ public actor MemoryService: BrainReading, BrainApplicationStoring {
 
     private static let services = Mutex<[String: MemoryService]>([:])
 
+    /// The earlier archives each directory's service unifies when it opens, by the directory's key.
+    private static let legacyOrigins = Mutex<[String: [KnowledgeLocation.LegacyKnowledge]]>([:])
+
+    /// Registers the earlier Knowledge directories whose facts and Brains the service of `directory` takes in
+    /// when it opens its archive (`unify`). Called by a frontend before its first use of the memory; a
+    /// directory with none registered unifies nothing.
+    public static func unify(_ directory: URL, with legacy: [KnowledgeLocation.LegacyKnowledge]) {
+        let key = directory.standardizedFileURL.resolvingSymlinksInPath().path
+        legacyOrigins.withLock { $0[key] = legacy }
+    }
+
     /// The service of the directory for this process, made on first request. Every caller of the same
     /// directory gets the same service, so the process has one writer per archive.
     public static func shared(for directory: URL) -> MemoryService {
@@ -360,6 +376,13 @@ public actor MemoryService: BrainReading, BrainApplicationStoring {
             services[key] = made
             return made
         }
+    }
+
+    /// Forgets the shared service of the directory, closed by the caller, so the next `shared(for:)` opens
+    /// the archive anew, as another process would: for tests that reopen it through the producers.
+    package static func forget(_ directory: URL) {
+        let key = directory.standardizedFileURL.resolvingSymlinksInPath().path
+        services.withLock { _ = $0.removeValue(forKey: key) }
     }
 
     /// Closes every shared service of the process, each within its closing budget: what the queue
@@ -657,6 +680,11 @@ public actor MemoryService: BrainReading, BrainApplicationStoring {
             state             = .open
             degradedSince     = nil
             scheduleBackupIfDue()
+            let key    = directory.standardizedFileURL.resolvingSymlinksInPath().path
+            let legacy = Self.legacyOrigins.withLock { $0[key] ?? [] }
+            if !legacy.isEmpty, unifying == nil {
+                unifying = Task { await self.unify(legacy, into: store, repositories: repositories) }
+            }
             return repositories
         } catch {
             if state != .closed {
@@ -724,6 +752,85 @@ public actor MemoryService: BrainReading, BrainApplicationStoring {
         }
         // Whatever the recovery did, this open went through one: it never counts as a new archive.
         return (try await SQLiteMemoryStore.open(at: url, configuration: configuration.store), true)
+    }
+
+    // MARK: Unification
+
+    /// Takes in the earlier Knowledge directories of the user's other producers, once each and resumably:
+    /// each origin's archive through `SQLiteArchiveTransfer` (facts with their source, Brains learned
+    /// again by key), and its JSON Brains for the applications this archive holds no Brain of. Runs beside
+    /// the producers, after the archive opened; the earlier directories are only read. `status()` says
+    /// what came in (`lastUnification`); a transfer that stops resumes at the next open.
+    private func unify(_ legacy: [KnowledgeLocation.LegacyKnowledge], into store: SQLiteMemoryStore,
+                       repositories: MemoryRepositories) async {
+        var lines: [String] = []
+        for origin in legacy {
+            guard !Task.isCancelled, admitting else { break }
+            let nowMS = clock.calendarMS()
+            let base: @Sendable () async throws -> Void = {
+                let applications = JSONBrainImport.applications(in: origin.directory)
+                guard !applications.isEmpty else { return }
+                _ = try await JSONBrainImport.merge(applications, into: repositories.brains, origin: origin.originID,
+                                                    now: Date())
+            }
+            do {
+                let report: SQLiteArchiveTransfer.Report
+                if origin.hasArchive {
+                    guard await SQLiteArchiveTransfer.needsTransfer(
+                        source: origin.archive,
+                        origin: origin.originID,
+                        into  : store
+                    )
+                    else { continue }
+                    let staging = directory.appendingPathComponent(".unification", isDirectory: true)
+                        .appendingPathComponent(
+                            origin.originID.replacingOccurrences(of: ":", with: "-"),
+                            isDirectory: true
+                        )
+                    report = try await SQLiteArchiveTransfer.transfer(
+                        from: origin.archive, origin: origin.originID, location: origin.location, into: store,
+                        staging: staging, nowMS: nowMS, importBase: base
+                    )
+                } else {
+                    // The same lock as an archive's transfer: one opener merges an origin's JSON Brains at a time.
+                    let merged = try await SQLiteArchiveTransfer.coordinated(
+                        destination: store,
+                        origin: origin.originID,
+                        wait: .seconds(30)
+                    ) {
+                        () async throws -> SQLiteArchiveTransfer.Report? in
+                        let journaled = try await SQLiteArchiveTransfer.origins(store)[origin.originID]
+                        guard !SQLiteArchiveTransfer.ended.contains(journaled ?? "") else { return nil }
+                        try await SQLiteArchiveTransfer.beginJSONOnly(store, origin: origin.originID,
+                                                                      location: origin.location, nowMS: nowMS)
+                        try await base()
+                        return try await SQLiteArchiveTransfer.recordJSONOnly(store, origin: origin.originID,
+                                                                              nowMS: nowMS)
+                    }
+                    guard let merged else { continue }
+                    report = merged
+                }
+                lines.append(
+                    "\(origin.location): \(report.status), \(report.eventsAdded) events added, "
+                    + "\(report.eventsDuplicate) already here, \(report.eventsRenamed) renamed, "
+                    + "\(report.applicationsAdded) Brain applications learned, "
+                    + "\(report.brainsImported) JSON Brains merged"
+                    + (report.detail.map { " (\($0))" } ?? "")
+                )
+            } catch {
+                lines.append("\(origin.location): stopped (\(Self.describe(error))); it resumes on the next open")
+            }
+        }
+        if !lines.isEmpty {
+            lastUnification = lines.joined(separator: "; ")
+            Self.log.info("memory unified: \(self.lastUnification ?? "", privacy: .public)")
+        }
+        unifying = nil
+    }
+
+    /// Waits for the unification this open started, for a caller that reads what it took in (a test, a diagnosis).
+    public func unificationFinished() async {
+        await unifying?.value
     }
 
     /// Imports, once, the JSON Brains main left in the directory into the archive this open has just created
@@ -846,6 +953,8 @@ public actor MemoryService: BrainReading, BrainApplicationStoring {
         let deadline = started + configuration.closingBudget
         let copying  = backingUp != nil
         backingUp?.cancel()
+        // A unification in progress stops at its next step and resumes at the next open.
+        unifying?.cancel()
         let drained = await waitUntil(deadline - Self.closingReserve(of: configuration.closingBudget)) {
             self.drainer == nil && self.queue.isEmpty
         }
@@ -959,7 +1068,7 @@ public actor MemoryService: BrainReading, BrainApplicationStoring {
                       lastRecovery: lastRecovery, lastImport: lastImport, lastClose: lastClose,
                       essentialWritten: essentialWritten, essentialFailed: essentialFailed,
                       suspended: suspendedReason, pendingEssential: pendingEssential.count,
-                      lastMigration: lastMigration)
+                      lastMigration: lastMigration, lastUnification: lastUnification)
     }
 
     /// The archive's applications and counts.
@@ -983,6 +1092,11 @@ public actor MemoryService: BrainReading, BrainApplicationStoring {
     }
 
     /// A stored event.
+    /// The earlier archives a fact came from (`EventOrigin`): none for a fact this archive's producers wrote.
+    public func origins(of eventID: String) async throws -> [EventOrigin] {
+        try await SQLiteArchiveTransfer.origins(of: eventID, in: try await ready().store)
+    }
+
     public func event(_ eventID: String) async throws -> MemoryEventRecord? {
         try await ready().captures.event(eventID)
     }

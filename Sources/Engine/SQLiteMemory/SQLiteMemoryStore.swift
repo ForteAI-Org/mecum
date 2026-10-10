@@ -309,19 +309,30 @@ public actor SQLiteMemoryStore {
     /// yet, and every refusal `producer` makes). Both decide on the file as it is when they open it
     /// (the producer under its write lock, the reader in a read transaction, which writes nothing),
     /// so a file that appears, vanishes or changes before the decision is judged as it is then.
-    /// Once open, a store is the same whichever opening made it.
+    /// `existingCopy` is the open of a copy made to be read through the store (a unification's staging
+    /// copy): like a reader it never creates the file and refuses one with no schema, since a copy that
+    /// is missing or empty is not the copy that was made; like a producer it migrates an archive of an
+    /// earlier schema, the copy being its own. Once open, a store is the same whichever opening made it.
     public enum Opening: Sendable, Equatable {
         case producer
         case existingArchive
+        case existingCopy
+
+        /// Whether the open may create the file and bootstrap a schema in it.
+        var creates: Bool { self == .producer }
+
+        /// Whether the open may write: bootstrap or migrate.
+        var writes: Bool { self != .existingArchive }
     }
 
     /// Opens and bootstraps a store at the URL, ready for use.
     public static func open(
         at url       : URL,
-        configuration: Configuration = Configuration()
+        configuration: Configuration = Configuration(),
+        opening      : Opening = .producer
     ) async throws -> SQLiteMemoryStore {
         let store = SQLiteMemoryStore(url: url, configuration: configuration)
-        try await store.open()
+        try await store.open(opening)
         return store
     }
 
@@ -854,7 +865,7 @@ public actor SQLiteMemoryStore {
             ddl      = try SQLiteMemorySchema.text()
             expected = try Expected()
             // A reader of a file that is not there makes nothing beside it, not even the lock file.
-            if kind == .existingArchive, !FileManager.default.fileExists(atPath: path) {
+            if !kind.creates, !FileManager.default.fileExists(atPath: path) {
                 if let pending = SQLiteMemoryRecovery.pending(of: url) {
                     throw MemoryStoreError.unavailable(.interruptedRecovery(pending))
                 }
@@ -869,7 +880,8 @@ public actor SQLiteMemoryStore {
             if let pending = SQLiteMemoryRecovery.pending(of: url) {
                 throw MemoryStoreError.unavailable(.interruptedRecovery(pending))
             }
-            writer   = try acquire(path, mayCreate: kind == .producer)
+            // Without the create flag the library itself refuses a file that is not there when it opens.
+            writer   = try acquire(path, mayCreate: kind.creates)
         } catch {
             throw abandonedOpen(after: error)
         }
@@ -877,13 +889,13 @@ public actor SQLiteMemoryStore {
             // Inspect before touching the journal mode, so a file this build refuses is left as found. A
             // producer inspects under the write lock it may bootstrap under; a reader in a read transaction,
             // since the library writes a header into a zero-byte file at the end of any write transaction.
-            let found = try await transaction(on: writer, begin: kind == .producer ? "BEGIN IMMEDIATE" : "BEGIN",
+            let found = try await transaction(on: writer, begin: kind.writes ? "BEGIN IMMEDIATE" : "BEGIN",
                                               phase: .bootstrap) {
                 try Self.inspect(writer, expected: expected)
             }
             try stillOpening()
-            if found == .empty, kind == .existingArchive {
-                // A reader never makes an archive: a file with no schema yet is refused as found.
+            if found == .empty, !kind.creates {
+                // A reader or a copy never makes an archive: a file with no schema yet is refused as found.
                 let pages = try Self.integerPragma(writer, "page_count")
                 throw MemoryStoreError.schema(.uninitialized(fileIsEmpty: pages == 0))
             }
@@ -920,7 +932,7 @@ public actor SQLiteMemoryStore {
                 migration = try await migrate(writer, from: version, expected: expected)
                 try stillOpening()
             }
-            let reader = try acquire(path, mayCreate: kind == .producer)
+            let reader = try acquire(path, mayCreate: kind.creates)
             do {
                 try Self.verifyJournal(reader, phase: .open)
             } catch {

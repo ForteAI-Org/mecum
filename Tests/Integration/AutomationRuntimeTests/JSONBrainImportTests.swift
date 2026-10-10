@@ -132,4 +132,28 @@ struct JSONBrainImportTests {
         #expect(try await service.brain(of: W.bundle) == nil)
         await service.close()
     }
+
+    @Test("review F02c: a credential in a JSON Brain beside a new archive is withheld from what is imported, and the import says so; the file is unchanged")
+    func credentialWithheldOnImport() async throws {
+        let directory = try W.directory()
+        let scratch   = try W.service()
+        _ = await W.recorder(scratch).observe(W.window([W.save]))
+        #expect(await scratch.flush(within: .seconds(10)))
+        var legacy = try #require(try await scratch.brain(of: W.bundle))
+        await scratch.close()
+        let secret = "sk-mecumReviewSynthetic0000123456789"
+        #expect(ValueMinimization.hasCredentialShape(secret))
+        legacy.objects[0].label = "Saved key \(secret)"
+        let data = try KnowledgeCoding.makeEncoder().encode(AppKnowledge(bundleID: W.bundle, brain: legacy))
+        let source = directory.appendingPathComponent("\(W.bundle).json")
+        try data.write(to: source)
+        let memory = MemoryService(directory: directory)
+        _ = try await memory.ready()
+        let imported = try #require(try await memory.brain(of: W.bundle))
+        #expect(imported.objects.map(\.label) == ["Saved key [withheld]"])
+        #expect(await memory.status().lastImport?.contains("1 elements with a credential withheld or left out") == true)
+        await memory.close()
+        #expect(try archiveOccurrences(of: secret, in: memory.url).isEmpty)
+        #expect(try Data(contentsOf: source) == data, "the earlier file is only read")
+    }
 }

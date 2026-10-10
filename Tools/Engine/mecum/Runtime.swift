@@ -12,19 +12,27 @@ extension EngineRuntime {
         self.init(knowledgeDirectory: Self.knowledgeDirectory(invocation), seat: seat)
     }
 
-    /// Where memory lives for this invocation: `--knowledge`, or the app's own Knowledge directory.
+    /// Where memory lives for this invocation: `--knowledge`, used as given, or the user's one Knowledge
+    /// directory (`KnowledgeLocation`), shared with the app, whose earlier client archives it unifies.
     static func knowledgeDirectory(_ invocation: Invocation) -> URL {
         if let path = invocation.options["knowledge"] {
             return URL(fileURLWithPath: (path as NSString).expandingTildeInPath, isDirectory: true)
         }
-        return FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appendingPathComponent("Mecum/Knowledge", isDirectory: true)
+        return sharedKnowledge()
     }
 
     /// The recorder of one command line call: a `cli` producer, this process its stream and its trace,
     /// so the Brain learns from the command line as it always did and the calls stay apart.
     func commandLineRecorder() -> CallRecorder {
         recorder(CommandLineTrace.context())
+    }
+
+    /// The user's one Knowledge directory, with its earlier client archives registered for unification.
+    static func sharedKnowledge() -> URL {
+        let support = KnowledgeLocation.support()
+        let shared  = KnowledgeLocation.knowledge(under: support)
+        MemoryService.unify(shared, with: KnowledgeLocation.legacyProfiles(under: support))
+        return shared
     }
 
     /// A command line recorder over the memory of `knowledge`, for a command that builds no runtime.
