@@ -76,6 +76,10 @@ nonisolated public struct MemoryRepositories: Sendable {
     public let applications: SQLiteBrainApplicationRepository
     public let graph       : SQLiteBrainGraphRepository
     public let traces      : SQLiteTraceRepository
+    public let facts       : SQLiteOperationFactRepository
+    public let tasks       : SQLiteTaskContextRepository
+    public let attributions: SQLiteTaskRepository
+    public let verifications: SQLiteVerificationRepository
 
     /// The store under the roles, for the package's tests: a write that holds it, as a long
     /// transaction of a producer would.
@@ -90,6 +94,10 @@ nonisolated public struct MemoryRepositories: Sendable {
         applications = SQLiteBrainApplicationRepository(store: store)
         graph        = SQLiteBrainGraphRepository(store: store)
         traces       = SQLiteTraceRepository(store: store)
+        facts        = SQLiteOperationFactRepository(store: store)
+        tasks        = SQLiteTaskContextRepository(store: store)
+        attributions = SQLiteTaskRepository(store: store)
+        verifications = SQLiteVerificationRepository(store: store)
     }
 }
 
@@ -99,14 +107,21 @@ nonisolated public struct MemoryRepositories: Sendable {
 /// for the same directory, as each of them used to open the same JSON directory: none of them owns
 /// it and none closes it. The process closes every service once, at its end (`closeAll`).
 ///
-/// Writing never holds up an action. A producer `enqueue`s a write and goes on; the writes run one
-/// after another, in the order they were enqueued, on a task of the service's own, so a sample
-/// always follows its event and a call's end its start. A busy archive is waited out by that task
-/// alone. A write that fails is counted and logged, never retried in a loop and never thrown back at
-/// the action: it is a gap, visible in `status()`. A queue that grows past `queueLimit` (the archive
-/// stuck for a long time) drops what arrives next and counts it, rather than holding the process's
-/// memory without bound. `flush(within:)` waits for what is queued, within a budget, for the few
-/// places that read what they just wrote, and for the end of the process.
+/// Two kinds of write. The essential facts of an operation (its start before the effect, its samples,
+/// end and verification after it, a task's declarations) are `confirm`ed: the caller waits for the
+/// commit and gets its receipt, or a typed `EssentialWriteFailure`, with contention waited for within
+/// `essentialCycles` lock budgets and recoverable failures retried with the same identity up to
+/// `essentialAttempts` times. A failure before an effect stops the effect; a failure after one keeps
+/// the write and suspends the service: no producer may confirm the start of a new effect until that
+/// write is saved, retried first at each such start, and the effect is never repeated.
+///
+/// What can be rebuilt from those facts (scene associations, the Brain's learning) is `enqueue`d and
+/// never holds up an action. The writes run one after another, in the order they were enqueued, on a
+/// task of the service's own; a busy archive is waited out by that task alone. A write that fails is
+/// counted and logged, never retried in a loop and never thrown back at the action: it is a gap,
+/// visible in `status()`. A queue that grows past `queueLimit` drops what arrives next and counts it.
+/// `flush(within:)` waits for what is queued, within a budget: it says the queue drained, never that
+/// a fact was saved, and no essential fact relies on it.
 ///
 /// An open that creates the archive where none was imports, in the same open and before any queued write
 /// runs, the Brains of the JSON files main kept in the directory (`JSONBrainImport`); `status().lastImport`
@@ -157,6 +172,16 @@ public actor MemoryService: BrainReading, BrainApplicationStoring {
         /// How many copies are kept, the newest first.
         public var keptBackups: Int
 
+        /// How many times an essential write is offered when it fails for a reason that may pass.
+        public var essentialAttempts: Int
+
+        /// How many lock budgets of the store an essential write waits through before contention is
+        /// its answer.
+        public var essentialCycles: Int
+
+        /// The pause before an essential write is offered again, doubled at each attempt.
+        public var essentialPause: Duration
+
         public init(
             fileName      : String = "memory.sqlite",
             store         : SQLiteMemoryStore.Configuration = SQLiteMemoryStore.Configuration(),
@@ -164,7 +189,10 @@ public actor MemoryService: BrainReading, BrainApplicationStoring {
             queueLimit    : Int = 4096,
             closingBudget : Duration = .seconds(3),
             backupInterval: Duration = .seconds(86_400),
-            keptBackups   : Int = 3
+            keptBackups   : Int = 3,
+            essentialAttempts: Int = 3,
+            essentialCycles  : Int = 2,
+            essentialPause   : Duration = .milliseconds(50)
         ) {
             self.fileName       = fileName
             self.store          = store
@@ -173,6 +201,9 @@ public actor MemoryService: BrainReading, BrainApplicationStoring {
             self.closingBudget  = closingBudget
             self.backupInterval = backupInterval
             self.keptBackups    = keptBackups
+            self.essentialAttempts = max(1, essentialAttempts)
+            self.essentialCycles   = max(1, essentialCycles)
+            self.essentialPause    = essentialPause
         }
     }
 
@@ -219,6 +250,15 @@ public actor MemoryService: BrainReading, BrainApplicationStoring {
         public let lastImport: String?
         /// How the close went, once the service closed: how long it took, what it saved and what not.
         public let lastClose: String?
+        /// Essential writes confirmed since the service was made, and those that ended without a commit.
+        public let essentialWritten: Int
+        public let essentialFailed: Int
+        /// Why the service is suspended, and how many facts written after an effect wait to be saved;
+        /// nil and zero when it is not.
+        public let suspended: String?
+        public let pendingEssential: Int
+        /// The migration the archive's open ran, when it ran one: from which version and the copy kept.
+        public let lastMigration: String?
     }
 
     /// Activity is what a quitting process may ask without waiting for the actor: whether this
@@ -267,6 +307,26 @@ public actor MemoryService: BrainReading, BrainApplicationStoring {
     private var lastFailure: String?
 
     private var brains: [String: (version: Int64, brain: UIBrain?)] = [:]
+
+    private var essentialWritten = 0
+    private var essentialFailed  = 0
+    /// Facts confirmed after an effect that the archive did not save, oldest first: retried with their
+    /// identity before any new effect may start, kept until they are saved or the service closes.
+    private var pendingEssential: [Essential] = []
+    private var suspendedReason: String?
+    private var lastMigration: String?
+
+    /// The one retry of the kept facts in progress: every start that finds them waits for it, so no
+    /// fact is offered by two producers at once and each is removed once, when it is saved.
+    private var retrying: Task<EssentialWriteFailure?, Never>?
+
+    /// One essential write as it may wait to be retried: its identity in the list, a label for the log
+    /// and the body.
+    private struct Essential {
+        let id = UUID()
+        let label: String
+        let body : @Sendable (MemoryRepositories) async throws -> Void
+    }
 
     private var lastBackup: Date?
     private var lastRecovery: String?
@@ -356,6 +416,148 @@ public actor MemoryService: BrainReading, BrainApplicationStoring {
         return true
     }
 
+    // MARK: Essential writes
+
+    /// Writes an essential fact and answers once it is committed, or throws an `EssentialWriteFailure`.
+    ///
+    /// `beforeEffect` is the start of an effect, which a suspended service refuses: the facts it keeps
+    /// are retried first, and while one still fails the answer is `suspended` and the effect must not
+    /// begin. Any other write (`beforeEffect` false) is made whatever the suspension, so the facts of an
+    /// effect already made are always offered. A write `afterEffect` that fails is kept, with its
+    /// identity, and suspends the service until it is saved; a write before any effect that fails
+    /// leaves nothing behind. The body must be idempotent: it is offered again, as it is, after a
+    /// failure whose outcome is unknown, and a stored identical fact answers `alreadyApplied`.
+    ///
+    /// The write runs in a task of its own, so cancelling the caller after an effect never abandons
+    /// the effect's facts; a write before any effect is abandoned with the caller.
+    ///
+    /// A `fallback` is the least the effect's facts may be saved as when the archive refuses the body as
+    /// offered (a contract's refusal or a conflict, which no retry changes): it runs instead, given that
+    /// refusal, and its own failure is the one that suspends. It must save, in its own transaction, the
+    /// durable declaration of what it left out and why; the answer is `.least`, never `.whole`.
+    @discardableResult
+    public func confirm(
+        _ label     : String,
+        beforeEffect: Bool = false,
+        afterEffect : Bool = false,
+        fallback    : (@Sendable (MemoryRepositories, EssentialWriteFailure) async throws -> Void)? = nil,
+        _ body      : @escaping @Sendable (MemoryRepositories) async throws -> Void
+    ) async throws -> Confirmation {
+        if beforeEffect {
+            try Task.checkCancellation()
+            try await retryPending()
+        }
+        var essential = Essential(label: label, body: body)
+        var outcome   = await run(essential, cancellable: !afterEffect)
+        var saved     = Confirmation.whole
+        if case .failure(let failure) = outcome, failure.isRefusal, let fallback {
+            saved = .least(refused: failure)
+            Self.log.error("memory refused \(label, privacy: .public) as offered, saving its least: \(failure.description, privacy: .public)")
+            essential = Essential(label: label + " (least)") { try await fallback($0, failure) }
+            outcome   = await run(essential, cancellable: !afterEffect)
+        }
+        switch outcome {
+            case .success:
+                return saved
+            case .failure(let failure):
+                if afterEffect {
+                    pendingEssential.append(essential)
+                    suspendedReason = "\(essential.label): \(failure)"
+                    Self.log.error("memory suspended: \(essential.label, privacy: .public): \(failure.description, privacy: .public)")
+                }
+                throw failure
+        }
+    }
+
+    /// Confirmation is what an essential write saved: the whole body, or its fallback's least, with the
+    /// refusal that made the body unsavable.
+    public enum Confirmation: Sendable, Equatable {
+        case whole
+        case least(refused: EssentialWriteFailure)
+    }
+
+    /// One essential write in a task of its own: abandoned with the caller only when `cancellable`.
+    private func run(_ essential: Essential, cancellable: Bool) async -> Result<Void, EssentialWriteFailure> {
+        let attempt = Task { await self.offer(essential) }
+        return cancellable
+            ? await withTaskCancellationHandler { await attempt.value } onCancel: { attempt.cancel() }
+            : await attempt.value
+    }
+
+    /// Runs a write or a read whose answer the caller needs typed (a task's declaration, a diagnosis):
+    /// the archive opened, contention waited for within `essentialCycles` lock budgets, every error as
+    /// the store or the contract threw it. It touches no suspension: it starts no effect.
+    public func perform<T: Sendable>(_ body: @Sendable (MemoryRepositories) async throws -> T) async throws -> T {
+        let repositories = try await ready()
+        return try await SQLiteMemoryStore.$cycleLimit.withValue(configuration.essentialCycles) {
+            try await body(repositories)
+        }
+    }
+
+    /// Offers the facts kept after an earlier effect again, through the one retry in progress or a new
+    /// one; throws `suspended` while one still fails. A caller cancelled meanwhile starts nothing.
+    private func retryPending() async throws {
+        let retry: Task<EssentialWriteFailure?, Never>
+        if let retrying {
+            retry = retrying
+        } else {
+            guard !pendingEssential.isEmpty || suspendedReason != nil else { return }
+            retry = Task { await self.drainPending() }
+            retrying = retry
+        }
+        if let failure = await retry.value {
+            throw EssentialWriteFailure.suspended(suspendedReason ?? failure.description)
+        }
+        try Task.checkCancellation()
+    }
+
+    /// The retry itself: the kept facts, oldest first, including those kept while it runs, until one
+    /// fails or none is left. It alone removes a fact from the list, by its identity, so a close that
+    /// emptied the list meanwhile removes nothing twice; the suspension lifts only on an empty list.
+    private func drainPending() async -> EssentialWriteFailure? {
+        defer { retrying = nil }
+        while let first = pendingEssential.first {
+            if case .failure(let failure) = await offer(first) {
+                suspendedReason = "\(first.label): \(failure)"
+                return failure
+            }
+            pendingEssential.removeAll { $0.id == first.id }
+        }
+        if suspendedReason != nil {
+            Self.log.info("memory suspension lifted: every fact kept after an effect is saved")
+            suspendedReason = nil
+        }
+        return nil
+    }
+
+    /// One essential write, offered up to `essentialAttempts` times while its failure may pass, each
+    /// within `essentialCycles` lock budgets: the outcome, counted.
+    private func offer(_ essential: Essential) async -> Result<Void, EssentialWriteFailure> {
+        var pause = configuration.essentialPause
+        for attempt in 1...configuration.essentialAttempts {
+            do {
+                guard !storeClosing else { throw MemoryUnavailable("the memory is closed") }
+                let repositories = try await open()
+                try await SQLiteMemoryStore.$cycleLimit.withValue(configuration.essentialCycles) {
+                    try await essential.body(repositories)
+                }
+                essentialWritten += 1
+                return .success(())
+            } catch {
+                let failure = EssentialWriteFailure(error)
+                guard failure.isRetryable, attempt < configuration.essentialAttempts, !Task.isCancelled else {
+                    essentialFailed += 1
+                    lastFailure = "\(essential.label): \(failure)"
+                    Self.log.error("memory essential write failed: \(essential.label, privacy: .public): \(failure.description, privacy: .public)")
+                    return .failure(failure)
+                }
+                try? await Task.sleep(for: pause)
+                pause = pause * 2
+            }
+        }
+        return .failure(.unavailable("no attempt was made"))
+    }
+
     private func drain() async {
         while !queue.isEmpty, !Task.isCancelled {
             let write = queue.removeFirst()
@@ -439,6 +641,12 @@ public actor MemoryService: BrainReading, BrainApplicationStoring {
                 throw MemoryUnavailable("the memory is closed")
             }
             let repositories  = MemoryRepositories(store: store)
+            if let migration = (try? await store.diagnostics())?.migration {
+                lastMigration =
+                    "the archive was migrated from schema \(migration.fromVersion) to \(migration.toVersion); "
+                        + "its copy at schema \(migration.fromVersion) is \(migration.copyName)"
+                Self.log.info("memory \(self.lastMigration ?? "", privacy: .public)")
+            }
             // An archive this open created where none was, not one a recovery left empty: the JSON Brains
             // beside it come in now, before any write of the queue can learn into it.
             if !existed, !recovered, (try? await store.diagnostics().bootstrappedNow) == true {
@@ -671,6 +879,8 @@ public actor MemoryService: BrainReading, BrainApplicationStoring {
             case (true, true, true?):  copy = ", the copy in progress finished before it was stopped"
             case (true, true, _):      copy = ", the copy in progress stopped with nothing published"
         }
+        let unsaved = pendingEssential.count
+        pendingEssential.removeAll()
         state        = .closed
         store        = nil
         repositories = nil
@@ -680,10 +890,11 @@ public actor MemoryService: BrainReading, BrainApplicationStoring {
             + "\(unsettled) unsettled"
             + (leftQueued > 0 ? ", \(leftQueued) still queued at the end of the drain" : "")
             + stillRunning + copy
+            + (unsaved > 0 ? ", \(unsaved) facts written after an effect never saved (suspended until the close)" : "")
             + (archiveClosed.isRaised ? "" : ", the archive still closing at the bound (a synchronous operation holds it; "
                + "it closes when that ends, or with the process)")
         lastClose = summary
-        if drained && stillRunning.isEmpty && archiveClosed.isRaised {
+        if drained && stillRunning.isEmpty && archiveClosed.isRaised && unsaved == 0 {
             Self.log.info("memory \(summary, privacy: .public)")
         } else {
             Self.log.error("memory \(summary, privacy: .public)")
@@ -745,7 +956,10 @@ public actor MemoryService: BrainReading, BrainApplicationStoring {
                       pending: queue.count, inFlight: running == nil ? 0 : 1, written: written, failed: failed,
                       partial: partial, dropped: dropped, unsettled: unsettled,
                       lastFailure: lastFailure, lastBackup: lastBackup ?? newestBackup()?.date,
-                      lastRecovery: lastRecovery, lastImport: lastImport, lastClose: lastClose)
+                      lastRecovery: lastRecovery, lastImport: lastImport, lastClose: lastClose,
+                      essentialWritten: essentialWritten, essentialFailed: essentialFailed,
+                      suspended: suspendedReason, pendingEssential: pendingEssential.count,
+                      lastMigration: lastMigration)
     }
 
     /// The archive's applications and counts.

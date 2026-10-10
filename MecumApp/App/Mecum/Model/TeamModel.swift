@@ -638,8 +638,9 @@ final class TeamModel {
                         default: AppPreferences.workersSearchWebDefault,
                         in     : preferences
                     )
-                    // The memory traces this turn's calls to the message it answers.
-                    host.callProducer.traceID = message.id.uuidString
+                    // The memory traces this turn's calls to the message it answers, which a task names as its origin.
+                    host.callProducer.traceID    = message.id.uuidString
+                    host.callProducer.messageRef = message.id.uuidString
                     // The turn gives the seat back as it ends when another entry is waiting for it.
                     try await desktop.turn {
                         try await host.run(

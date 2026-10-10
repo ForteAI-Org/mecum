@@ -84,6 +84,7 @@ final class Probe {
             case "brain-application": try await brainApplication(arguments)
             case "call-record"     : try await callRecord(arguments, die: false)
             case "call-record-and-die": try await callRecord(arguments, die: true)
+            case "call-open-and-die": try await callOpen(arguments)
             case "hold"            : try await hold(arguments, pause: nil)
             case "hold-for":
                 let pause = Int(arguments.first ?? "0") ?? 0
@@ -287,6 +288,29 @@ final class Probe {
             kill(getpid(), SIGKILL)
         }
         emit(receipt == .committed ? "committed" : "alreadyApplied")
+    }
+
+    /// Confirms a call planned and started, as a producer does before its gesture, then dies as a process
+    /// ending between the gesture and the call's end would: nothing ends the call.
+    private func callOpen(_ arguments: [String]) async throws {
+        let store = try opened()
+        guard arguments.count == 3 else {
+            emit("error usage call-open-and-die")
+            return
+        }
+        let call = try AgentCallRecord(
+            event: MemoryEventRecord(eventID: arguments[0], source: .app, streamID: "worker", traceID: "trace-1",
+                                     sessionID: arguments[1], kind: .action,
+                                     app: AppContextIdentity(bundleID: "test.fixture.calls"),
+                                     occurredAtMS: 1_700_000_000_000),
+            request: .act(target: arguments[2], verb: .click, value: nil, section: nil)
+        )
+        _ = try await SQLiteOperationFactRepository(store: store).open(try OperationOpening(
+            call: call,
+            startedAtMS: 1_700_000_000_001
+        ))
+        emit("started")
+        kill(getpid(), SIGKILL)
     }
 
     private func hold(_ arguments: [String], pause: Duration?) async throws {

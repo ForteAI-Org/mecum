@@ -129,7 +129,11 @@ public final class AutomationSession: AutomationSessionOperating {
                     name: application.localizedName ?? "application"
                 ),
                 section: section,
-                permissions: ActionPermissions(allowsDestructive: allowsDestructive)
+                permissions: ActionPermissions(allowsDestructive: allowsDestructive),
+                report: SelectorReporting.reporting(
+                    to: CallRecorder.current,
+                    bundleID: application.bundleIdentifier ?? "pid.\(application.processIdentifier)"
+                )
             )
             return await enriched(chosen, by: runtime)
         }
@@ -190,7 +194,11 @@ public final class AutomationSession: AutomationSessionOperating {
                 name: application.localizedName ?? "application"
             ),
             permissions: ActionPermissions(allowsDestructive: allowsDestructive),
-            dryRun: false
+            dryRun: false,
+            report: SelectorReporting.reporting(
+                to: CallRecorder.current,
+                bundleID: application.bundleIdentifier ?? "pid.\(application.processIdentifier)"
+            )
         )
         return await enriched(result.outcome, by: runtime)
     }

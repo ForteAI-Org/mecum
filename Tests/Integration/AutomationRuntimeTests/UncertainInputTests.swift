@@ -144,7 +144,8 @@ struct UncertainInputTests {
         await #expect(throws: CancellationError.self) { _ = try await call.value }
         #expect(session.inputs == ["1", "2", "+"], "no key after the cancellation")
         let recorded = try #require(try await batches(session).first)
-        #expect(recorded.batch.progress.status == .failed)
+        // G76 D1: a cancellation is recorded as cancelled, no longer as failed with its error (R21, R23).
+        #expect(recorded.batch.progress.status == .cancelled)
         #expect(recorded.steps.map(\.progress.status) == [.completed, .completed, .completed, .skipped, .skipped, .skipped])
         try await nothingUnfinished(session)
     }

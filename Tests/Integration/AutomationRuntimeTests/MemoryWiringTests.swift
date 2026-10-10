@@ -254,13 +254,16 @@ struct MemoryWiringTests {
         let service  = try W.service()
         let recorder = W.recorder(service)
         let opened   = SceneEffect.menuOpened(labels: ["Bold", "Italic"])
-        await recorder.begin(.act(target: "Format", verb: .click, value: nil, section: nil), app: AppContextIdentity(bundleID: W.bundle))
+        try await recorder.begin(
+            .act(target: "Format", verb: .click, value: nil, section: nil),
+            app: AppContextIdentity(bundleID: W.bundle)
+        )
         await recorder.record(ActionRecord(
             bundleID: W.bundle, element: W.format, verb: .click, effect: opened, windowTitleAfter: "Document",
             before: W.window([W.open, W.format, W.save]),
             after : W.window([W.open, W.format, W.save, W.button("Bold", x: 0.3), W.button("Italic", x: 0.4)])
         ))
-        await recorder.end(.completed, result: .outcome(.foundActed, message: "clicked 'Format'"), tool: .act)
+        try await recorder.end(.completed, result: .outcome(.foundActed, message: "clicked 'Format'"), tool: .act)
         #expect(await service.flush(within: .seconds(10)))
         #expect(await service.status().failed == 0)
 
@@ -286,10 +289,10 @@ struct MemoryWiringTests {
     func openSessionObservation() async throws {
         let service  = try W.service()
         let recorder = W.recorder(service)
-        await recorder.begin(.openSession(app: "Editor", window: nil), app: nil)
+        try await recorder.begin(.openSession(app: "Editor", window: nil), app: nil)
         let scene = await recorder.observe(W.window([W.open, W.format, W.save]))
         #expect(scene.elements.count == 3)
-        await recorder.end(.completed, result: nil, tool: .openSession)
+        try await recorder.end(.completed, result: nil, tool: .openSession)
         #expect(await service.flush(within: .seconds(10)))
         #expect(await service.status().failed == 0)
 
@@ -324,14 +327,14 @@ struct MemoryWiringTests {
         let first   = CallRecorder(memory: service, brain: W.brain(service), context: parent.context.child(0))
         let second  = CallRecorder(memory: service, brain: W.brain(service), context: parent.context.child(1))
         let app     = AppContextIdentity(bundleID: W.bundle)
-        await parent.begin(batch: [
+        try await parent.begin(batch: [
             (first, .act(target: "Missing", verb: .click, value: nil, section: nil)),
             (second, .insertText(text: "hello", expectedValue: nil)),
         ], app: app)
-        await first.startStep()
-        await first.end(.completed, result: .outcome(.honestMiss, message: "no Missing here"), tool: .act)
-        await second.skip()
-        await parent.end(.completed, result: .batch(stopped: true, attempted: 1, verified: 0), tool: .batch)
+        try await first.startStep()
+        try await first.end(.completed, result: .outcome(.honestMiss, message: "no Missing here"), tool: .act)
+        try await second.skip()
+        try await parent.end(.completed, result: .batch(stopped: true, attempted: 1, verified: 0), tool: .batch)
         #expect(await service.flush(within: .seconds(10)))
         let written = await service.status()
         #expect(written.failed == 0, "\(written.lastFailure ?? "")")
@@ -364,8 +367,12 @@ struct MemoryWiringTests {
     func learningIdempotency() async throws {
         let service  = try W.service()
         let recorder = W.recorder(service)
-        _ = await recorder.observe(W.window([W.open, W.format]))
-        await recorder.begin(.act(target: "Format", verb: .click, value: nil, section: nil), app: AppContextIdentity(bundleID: W.bundle))
+        // The scene is observed by a recorder of its own: a call's recorder begins before it observes.
+        _ = await W.recorder(service).observe(W.window([W.open, W.format]))
+        try await recorder.begin(
+            .act(target: "Format", verb: .click, value: nil, section: nil),
+            app: AppContextIdentity(bundleID: W.bundle)
+        )
         #expect(await service.flush(within: .seconds(10)))
         let at   = Date(timeIntervalSince1970: 1_790_000_000)
         let menu = ActionRecord(bundleID: W.bundle, element: W.format, verb: .click,
@@ -381,7 +388,10 @@ struct MemoryWiringTests {
         }
         let evidence = try #require(try await service.brain(of: W.bundle)?.transitions.first?.evidence)
         let again = W.recorder(service)
-        await again.begin(.act(target: "Format", verb: .click, value: nil, section: nil), app: AppContextIdentity(bundleID: W.bundle))
+        try await again.begin(
+            .act(target: "Format", verb: .click, value: nil, section: nil),
+            app: AppContextIdentity(bundleID: W.bundle)
+        )
         #expect(await service.flush(within: .seconds(10)))
         #expect(try await service.apply(try .record(menu, eventID: again.eventID, requestedAt: at)).receipt == .committed)
         #expect(try await service.brain(of: W.bundle)?.transitions.first?.evidence == evidence + 1,
@@ -460,28 +470,36 @@ struct MemoryWiringTests {
 
     // MARK: What an action waits for
 
-    @Test("an action does not wait for a busy archive: every write of a call is offered at once, and saved once the lock goes")
-    func busyArchiveDoesNotHoldTheAction() async throws {
-        let service = try W.service()
+    @Test("G76 D1: an action waits for its start to be confirmed; another holder's lock past the essential budget refuses it, writing nothing, and once the lock goes it is confirmed")
+    func busyArchiveHoldsTheStart() async throws {
+        // Before D1 an action offered its writes to the queue and never waited (the busy archive test of the merge).
+        // R59 asks the start to be confirmed before any input: now it waits, within a bound, and is refused past it.
+        let store = SQLiteMemoryStore.Configuration(lockBudget: .milliseconds(200), retryPause: .milliseconds(5),
+                                                    maximumRetryPause: .milliseconds(20))
+        let service = try W.service(MemoryService.Configuration(store: store, essentialAttempts: 1, essentialCycles: 1))
         _ = try await service.ready()
         let lock = try SQLiteConnection(path: service.url.path)
         try lock.execute("BEGIN IMMEDIATE")
-        let started = ContinuousClock.now
-        for index in 0..<10 {
-            let recorder = W.recorder(service, trace: "busy")
-            await recorder.begin(.act(target: "Save", verb: .click, value: nil, section: nil), app: AppContextIdentity(bundleID: W.bundle))
-            await recorder.record(ActionRecord(bundleID: W.bundle, element: W.save, verb: .click, effect: nil,
-                                               windowTitleAfter: nil, before: W.window([W.save]), after: W.window([W.save])))
-            await recorder.end(.completed, result: .outcome(.actedUnverified, message: "clicked \(index)"), tool: .act)
+        let recorder = W.recorder(service, trace: "busy")
+        let started  = ContinuousClock.now
+        await #expect(throws: EssentialWriteFailure.self) {
+            try await recorder.begin(
+                .act(target: "Save", verb: .click, value: nil, section: nil),
+                app: AppContextIdentity(bundleID: W.bundle)
+            )
         }
-        let offered = started.duration(to: .now)
-        print("MEMORY-LATENCY busy archive: 10 calls offered in \(offered)")
-        #expect(offered < .milliseconds(50) * 10, "within the 50 ms per action agreed for the memory")
-        #expect(await service.status().written == 0, "nothing could be written while the lock was held")
+        let waited = started.duration(to: .now)
+        print("MEMORY-LATENCY busy archive: start refused after \(waited)")
+        #expect(waited >= .milliseconds(150) && waited < .seconds(3), "it waited for the lock within its bound")
         try lock.execute("COMMIT")
         lock.close()
-        #expect(await service.flush(within: .seconds(20)))
-        #expect(try await service.calls(inTrace: "busy").count == 10)
+        #expect(try await service.calls(inTrace: "busy").isEmpty, "nothing of the refused start was written")
+        let next = W.recorder(service, trace: "busy")
+        try await next.begin(
+            .act(target: "Save", verb: .click, value: nil, section: nil),
+            app: AppContextIdentity(bundleID: W.bundle)
+        )
+        #expect(try await service.call(next.eventID)?.progress.status == .started, "confirmed once the lock went")
         await service.close()
     }
 
@@ -493,10 +511,17 @@ struct MemoryWiringTests {
         for index in 0..<40 {
             let started  = ContinuousClock.now
             let recorder = W.recorder(service, trace: "free")
-            await recorder.begin(.act(target: "Save", verb: .click, value: nil, section: nil), app: AppContextIdentity(bundleID: W.bundle))
+            try await recorder.begin(
+                .act(target: "Save", verb: .click, value: nil, section: nil),
+                app: AppContextIdentity(bundleID: W.bundle)
+            )
             await recorder.record(ActionRecord(bundleID: W.bundle, element: W.save, verb: .click, effect: nil,
                                                windowTitleAfter: nil, before: W.window([W.save]), after: W.window([W.save])))
-            await recorder.end(.completed, result: .outcome(.actedUnverified, message: "clicked \(index)"), tool: .act)
+            try await recorder.end(
+                .completed,
+                result: .outcome(.actedUnverified, message: "clicked \(index)"),
+                tool  : .act
+            )
             offered.append(started.duration(to: .now))
         }
         let sorted = offered.sorted()
@@ -563,4 +588,40 @@ func rawRows(_ sql: String, at url: URL) throws -> [String] {
     let connection = try SQLiteConnection(path: url.path, readOnly: true)
     defer { connection.close() }
     return try connection.query(sql) { try $0.text(0) ?? "" }
+}
+
+/// Every table and text column of an archive file holding `canary`, as `table.column`.
+func archiveOccurrences(of canary: String, in url: URL) throws -> [String] {
+    let connection = try SQLiteConnection(path: url.path, readOnly: true, mayCreate: false)
+    defer { connection.close() }
+    let tables = try connection.query(
+        "SELECT name FROM sqlite_schema WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
+    ) {
+        try $0.text(0) ?? ""
+    }
+    var found: [String] = []
+    for table in tables {
+        let columns = try connection.query("PRAGMA table_info(\(table))") { try $0.text(1) ?? "" }
+        for column in columns {
+            let hits = try connection.query(
+                "SELECT count(*) FROM \(table) WHERE instr(CAST(\(column) AS TEXT), ?) > 0",
+                [.text(canary)]
+            ) { $0.integer(0) ?? 0 }.first ?? 0
+            if hits > 0 { found.append("\(table).\(column)") }
+        }
+    }
+    return found
+}
+
+/// Edits an archive file by hand as an earlier build could have left it: every trigger is put aside
+/// while `edit` runs and put back as it was, so facts may be written that this build never writes.
+func rawEdit(_ url: URL, _ edit: (SQLiteConnection) throws -> Void) throws {
+    let connection = try SQLiteConnection(path: url.path)
+    defer { connection.close() }
+    let triggers = try connection.query("SELECT name, sql FROM sqlite_schema WHERE type = 'trigger'") {
+        (name: try $0.text(0) ?? "", sql: try $0.text(1) ?? "")
+    }
+    for trigger in triggers { try connection.execute("DROP TRIGGER \(trigger.name)") }
+    try edit(connection)
+    for trigger in triggers { try connection.execute(trigger.sql) }
 }

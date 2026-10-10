@@ -80,7 +80,10 @@ struct MCPAppBridgeTests {
                            'clientInfo': {'name': 'synthetic-client', 'version': '1'}})
         tools = rpc('tools/list', {})['tools']
         assert any(t['name'] == 'select' for t in tools)
-        assert not any(t['name'].startswith(('browser_', 'watch_', 'memory_', 'task_')) for t in tools)
+        # G76 D1: memory_task, the task the agent declares, is the one memory tool an external client sees.
+        assert any(t['name'] == 'memory_task' for t in tools)
+        assert not any(t['name'].startswith(('browser_', 'watch_', 'task_'))
+                       or (t['name'].startswith('memory_') and t['name'] != 'memory_task') for t in tools)
         tool('select', {'session': session, 'control': 'Mono', 'item': 'Stereo'})
         pathlib.Path(ready).write_text('ready')
         assert child.wait(timeout=10) == 1, 'Host revocation must disconnect the idle bridge'

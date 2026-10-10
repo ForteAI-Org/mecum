@@ -2,13 +2,15 @@ import AutomationRuntime
 import AppKit
 import EngineCore
 import Foundation
+import Memory
 import PerceptionCore
 import SeatDriving
 import SeatSession
 import WindowServerListing
 
 /// BatchCommand owns one Seat and one runtime for a sequence in the requested window. Each step
-/// perceives again. A lost or changed target stops the sequence instead of acting on its parent.
+/// perceives again. A lost or changed target stops the sequence instead of acting on its parent. The
+/// sequence is recorded as one batch with its steps (`CommandLineBatch`).
 enum BatchCommand {
 
     static func run(_ invocation: Invocation) async throws {
@@ -22,43 +24,59 @@ enum BatchCommand {
         try await SeatRuntime.withSeat(application, plan.invocation) { target in
             let original = try target.currentWindow()
             let runtime = Runtime(invocation: plan.invocation, seat: target)
+            // One recorded batch, each step a call of its own at its position.
+            let parent   = runtime.commandLineRecorder()
+            let children = plan.steps.indices.map { runtime.recorder(parent.context.child($0)) }
             do {
-                try await BatchSequence.run(plan.steps) { number, step in
-                    let seat = try target.agentSeat()
-                    let current = try target.currentWindow()
-                    let windows = try runtime.windows.windows(ownedBy: processID)
-                    guard seat.state == .ready, current.id == original.id,
-                          windows.contains(where: { $0.number == original.id }) else {
-                        throw UsageError.invalid(option: "window", value: original.title,
-                                                 expected: "the original batch window still available in a ready Seat")
-                    }
-                    print("batch: step \(number)/\(plan.steps.count): \(step.summary)")
-                    switch step {
-                        case .select(let control, let item):
-                            let directory = plan.invocation.options["evidence"].map {
-                                ($0 as NSString).appendingPathComponent("step-\(number)")
-                            }
-                            return try await SelectCommand.perform(
-                                control: control,
-                                item: item,
-                                identity: identity,
-                                target: target,
-                                invocation: plan.invocation,
-                                evidenceDirectory: directory
+                try await CommandLineBatch.run(
+                    plan.steps,
+                    app     : AppContextIdentity(bundleID: identity.bundleID),
+                    parent  : parent,
+                    children: children,
+                    prepare : { number, step in
+                        let seat = try target.agentSeat()
+                        let current = try target.currentWindow()
+                        let windows = try runtime.windows.windows(ownedBy: processID)
+                        guard seat.state == .ready, current.id == original.id,
+                              windows.contains(where: { $0.number == original.id }) else {
+                            throw UsageError.invalid(
+                                option  : "window",
+                                value   : original.title,
+                                expected: "the original batch window still available in a ready Seat"
                             )
-                        case .act(let action):
-                            let request = ActionRequest(
-                                processID: processID,
-                                bundleID: identity.bundleID,
-                                appName: identity.name,
-                                target: action.target,
-                                verb: action.verb,
-                                section: action.section,
-                                desiredState: action.desiredState
-                            )
-                            return await ActCommand.perform(request, runtime, plan.invocation)
+                        }
+                        print("batch: step \(number)/\(plan.steps.count): \(step.summary)")
+                    },
+                    perform : { number, step, recorder in
+                        switch step {
+                            case .select(let control, let item):
+                                let directory = plan.invocation.options["evidence"].map {
+                                    ($0 as NSString).appendingPathComponent("step-\(number)")
+                                }
+                                return try await SelectCommand.perform(
+                                    control: control,
+                                    item: item,
+                                    identity: identity,
+                                    target: target,
+                                    invocation: plan.invocation,
+                                    recorder: recorder,
+                                    begun: true,
+                                    evidenceDirectory: directory
+                                )
+                            case .act(let action):
+                                let request = ActionRequest(
+                                    processID: processID,
+                                    bundleID: identity.bundleID,
+                                    appName: identity.name,
+                                    target: action.target,
+                                    verb: action.verb,
+                                    section: action.section,
+                                    desiredState: action.desiredState
+                                )
+                                return try await ActCommand.perform(request, runtime, plan.invocation, step: recorder)
+                        }
                     }
-                }
+                )
                 await runtime.finish()
             } catch {
                 await runtime.finish()

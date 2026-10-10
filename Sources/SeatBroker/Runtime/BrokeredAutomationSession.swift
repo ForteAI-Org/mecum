@@ -401,6 +401,10 @@ public final class BrokeredAutomationSession: AutomationSessionOperating {
                 permissions: ActionPermissions(
                     allowsDestructive: allowsDestructive,
                     contextMenusOnTextFieldsOnly: Self.drawsMenusUnderThePointer(application)
+                ),
+                report: SelectorReporting.reporting(
+                    to: CallRecorder.current,
+                    bundleID: application.bundleIdentifier ?? "pid.\(application.processIdentifier)"
                 )
             )
             return await enriched(chosen, by: runtime)
@@ -525,7 +529,11 @@ public final class BrokeredAutomationSession: AutomationSessionOperating {
                 name: application.localizedName ?? "application"
             ),
             permissions: ActionPermissions(allowsDestructive: allowsDestructive),
-            dryRun: false
+            dryRun: false,
+            report: SelectorReporting.reporting(
+                to: CallRecorder.current,
+                bundleID: application.bundleIdentifier ?? "pid.\(application.processIdentifier)"
+            )
         )
         return await enriched(result.outcome, by: runtime)
     }

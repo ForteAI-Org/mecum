@@ -329,13 +329,14 @@ enum SQLiteAgentCallRows {
         let verified: Int
     }
 
-    /// The summary the current producer (`AutomationTools.call`, its batch) writes for the batch's
-    /// stored steps, or nil when no run of it could have left them so. In position order: a step is
+    /// The summary the producers (`AutomationTools.call`'s batch, `mecum batch`) write for the batch's
+    /// stored steps, or nil when no run of them could have left them so. In position order: a step is
     /// accepted when it completed with `found_acted`, or with `acted_noop` for `act` with
     /// `set_toggle`; the first step that completed with any other outcome, or failed, stops the
-    /// batch; every step after the stop is skipped, and no step is skipped before it. A cancelled or
-    /// interrupted step, one still open, or a count other than the batch's requested steps admits no
-    /// summary. The rule is the producer's, not a verdict on any step's or task's result.
+    /// batch, and so does the first skipped step (one whose start the memory refused, so it never
+    /// ran); every step after the stop is skipped. A cancelled or interrupted step, one still open,
+    /// or a count other than the batch's requested steps admits no summary. The rule is the
+    /// producer's, not a verdict on any step's or task's result.
     static func producerSummary(_ handle: some SQLiteQuerying, batchID: String, requestedSteps: Int?) throws -> BatchSummary? {
         let ids = try handle.query(
             "SELECT event_id FROM memory_events WHERE parent_event_id = ? ORDER BY parent_position", [.text(batchID)]
@@ -349,6 +350,8 @@ enum SQLiteAgentCallRows {
                 continue
             }
             switch (step.progress.status, step.progress.result) {
+                case (.skipped, _):
+                    stopped = true
                 case (.completed, .outcome(let kind, _)?):
                     attempted += 1
                     var accepted = kind == .foundActed
@@ -456,7 +459,9 @@ enum SQLiteAgentCallRows {
                     guard message == nil, let attempted, let verified else { throw refuse(.resultShape("batch")) }
                     result = .batch(stopped: code == "stopped", attempted: Int(attempted), verified: Int(verified))
                 case let code?:
-                    guard tool.isBatchStep, let outcome = ActOutcomeKind(rawValue: code), outcome.rawValue.utf8.elementsEqual(code.utf8) else {
+                    // An outcome is every operation's result, `menu` and `press` included, as the writer admits it.
+                    guard tool.isOperation, let outcome = ActOutcomeKind(rawValue: code),
+                          outcome.rawValue.utf8.elementsEqual(code.utf8) else {
                         throw refuse(.unknownCode(argument: "result_kind", code: code))
                     }
                     guard let message else { throw refuse(.resultShape("result_message")) }

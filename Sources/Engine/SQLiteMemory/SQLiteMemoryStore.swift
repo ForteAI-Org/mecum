@@ -446,15 +446,26 @@ public actor SQLiteMemoryStore {
     package func write<T: Sendable>(_ body: @Sendable (SQLiteTransaction) throws -> T) async throws -> T {
         retainedWrites += 1
         defer { retainedWrites -= 1 }
+        let limit = Self.cycleLimit
+        var cycles = 0
         while true {
             do {
                 return try await attemptWrite(body)
             } catch MemoryStoreError.contention(let fault, attempts: let attempts, waited: let cycleWaited) {
                 exhaustedCycles += 1
+                cycles += 1
                 waitObserver?(.cycleExhausted(fault.phase, attempts: attempts, waited: cycleWaited))
+                if let limit, cycles >= limit {
+                    throw MemoryStoreError.contention(fault, attempts: attempts, waited: cycleWaited)
+                }
             }
         }
     }
+
+    /// The most lock budgets a `write` of the current task waits through before it answers `contention`,
+    /// when its owner bound one: an essential write, which an action waits for, is bounded; an ordinary
+    /// one, bound to nothing, waits until the lock goes.
+    @TaskLocal package static var cycleLimit: Int?
 
     /// One cycle of `write`: begins, runs the body, commits, waiting for a busy lock only within
     /// the configured budget and answering `contention` when it is spent, with nothing written.

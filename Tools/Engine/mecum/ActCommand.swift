@@ -10,6 +10,7 @@ import AppKit
 import Engine
 import EngineCore
 import Foundation
+import Memory
 import PerceptionCore
 
 /// ActFailure is an action that did not land: the process exits non zero once the seat is down.
@@ -48,9 +49,30 @@ enum ActCommand {
         }
     }
 
-    /// Borrows a runtime for one action; its caller owns flushing and Seat cleanup.
-    static func perform(_ request: ActionRequest, _ runtime: Runtime, _ invocation: Invocation) async -> ActOutcomeKind {
-        let engine = runtime.engine(recorder: runtime.commandLineRecorder(),
+    /// Borrows a runtime for one action; its caller owns flushing and Seat cleanup. The action is a call
+    /// of the living memory, as an agent's is: confirmed before it acts, ended with its check after.
+    /// A start the memory does not confirm acts on nothing; an end it cannot save is reported and
+    /// throws once the outcome is printed.
+    /// Acts once and ends the call it records. `step` is the recorder of a batch's step its batch already
+    /// started; without one, the call is the command's own and is begun here.
+    static func perform(
+        _ request: ActionRequest,
+        _ runtime: Runtime,
+        _ invocation: Invocation,
+        step: CallRecorder? = nil
+    ) async throws -> ActOutcomeKind {
+        let recorder = step ?? runtime.commandLineRecorder()
+        let call = AgentCallRequest.act(target: request.target, verb: request.verb, value: request.desiredState,
+                                        section: request.section)
+        if !request.isDryRun, step == nil {
+            do {
+                try await recorder.begin(call, app: AppContextIdentity(bundleID: request.bundleID))
+            } catch {
+                print("refused: Mecum's memory did not confirm the action before it could act (\(error)); nothing was done")
+                return .refused
+            }
+        }
+        let engine = runtime.engine(recorder: recorder,
                                     allowsDestructive: invocation.flags.contains("allow-destructive"))
         let started = ContinuousClock.now
         let outcome = await engine.act(request)
@@ -61,11 +83,14 @@ enum ActCommand {
             print(scene.text())
         }
         FileHandle.standardError.write(Data("acted in \(elapsed)\n".utf8))
+        if !request.isDryRun {
+            try await CommandLineCall.end(recorder, outcome: outcome, tool: .act)
+        }
         return outcome.kind
     }
 
     private static func finishSingle(_ request: ActionRequest, _ runtime: Runtime, _ invocation: Invocation) async throws {
-        let kind = await perform(request, runtime, invocation)
+        let kind = try await perform(request, runtime, invocation)
         await runtime.finish()
         let acceptable: Set<ActOutcomeKind> = [.foundActed, .dryRun, .actedNoop]
         if !acceptable.contains(kind) { throw ActFailure(kind) }

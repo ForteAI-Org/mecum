@@ -4,6 +4,7 @@ import CoreGraphics
 import EngineCore
 import Foundation
 import ImageIO
+import Memory
 import Perception
 import SeatDriving
 import SeatCore
@@ -26,8 +27,9 @@ enum SelectCommand {
             name: application.localizedName ?? "application"
         )
         try await SeatRuntime.withSeat(application, invocation) { target in
+            let recorder = EngineRuntime.commandLineRecorder(knowledge: EngineRuntime.knowledgeDirectory(invocation))
             let kind = try await perform(control: control, item: item, identity: identity,
-                                         target: target, invocation: invocation)
+                                         target: target, invocation: invocation, recorder: recorder)
             guard [.foundActed, .dryRun].contains(kind) else { throw ActFailure(kind) }
         }
     }
@@ -39,21 +41,39 @@ enum SelectCommand {
         identity: ApplicationIdentity,
         target: SeatTarget,
         invocation: Invocation,
+        recorder: CallRecorder,
+        begun: Bool = false,
         evidenceDirectory: String? = nil
     ) async throws -> ActOutcomeKind {
         let selector = SeatDropdownSelector(target: target, pipeline: ScenePipeline(text: VisionTextRecognizer()))
+        let dryRun = invocation.flags.contains("dry-run")
+        // A batch's step is begun and started by its batch; the command's own call is begun here.
+        if !dryRun, !begun {
+            do {
+                try await recorder.begin(
+                    .select(control: control, item: item),
+                    app: AppContextIdentity(bundleID: identity.bundleID)
+                )
+            } catch {
+                print("refused: Mecum's memory did not confirm the selection before it could act (\(error)); nothing was done")
+                return .refused
+            }
+        }
         do {
             let result = try await selector.select(
                 control: control, item: item, identity: identity,
                 permissions: ActionPermissions(allowsDestructive: invocation.flags.contains("allow-destructive")),
-                dryRun: invocation.flags.contains("dry-run"),
-                onMenu: { menu in print("menu: observed #\(menu.window.windowNumber) at \(menu.frame)") }
-            ) { stage, image in
-                if let directory = evidenceDirectory ?? invocation.options["evidence"] {
-                    try save(image, stage: stage, directory: directory)
-                }
-            }
+                dryRun: dryRun,
+                onMenu: { menu in print("menu: observed #\(menu.window.windowNumber) at \(menu.frame)") },
+                onCapture: { stage, image in
+                    if let directory = evidenceDirectory ?? invocation.options["evidence"] {
+                        try save(image, stage: stage, directory: directory)
+                    }
+                },
+                report: SelectorReporting.reporting(to: dryRun ? nil : recorder, bundleID: identity.bundleID)
+            )
             print("\(result.outcome.kind.rawValue): \(result.outcome.message)")
+            if !dryRun { try await CommandLineCall.end(recorder, outcome: result.outcome, tool: .select) }
             if let receipt = result.receipt {
                 print("menu: #\(receipt.menu.window.windowNumber), closed by \(receipt.closedBy.rawValue)")
                 if receipt.opening != nil {
@@ -64,7 +84,16 @@ enum SelectCommand {
                 }
             }
             return result.outcome.kind
+        } catch let suspension as CommandLineCall.Unsaved {
+            throw suspension
         } catch {
+            if !dryRun {
+                try? await recorder.end(
+                    error is CancellationError ? .cancelled : .failed,
+                    result: error is CancellationError ? nil : .error(message: String(describing: error)),
+                    tool: .select
+                )
+            }
             let seat = try target.agentSeat()
             print("seat: selection stopped in state \(seat.state)")
             if seat.lastFocusRecovery != nil {
