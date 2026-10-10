@@ -34,7 +34,7 @@ struct SQLiteMemoryStoreTests {
         let url   = try temporaryDatabase()
         let store = try await SQLiteMemoryStore.open(at: url)
         let first = try await store.diagnostics()
-        #expect(first.schemaVersion == 1)
+        #expect(first.schemaVersion == 2)
         #expect(first.journalMode == "wal")
         #expect(first.synchronous == 2)
         #expect(first.foreignKeysEnabled)
@@ -42,7 +42,7 @@ struct SQLiteMemoryStoreTests {
         #expect(first.libraryVersion == SQLiteLibrary.version)
         #expect(first.commits == 0)
         let shape = try await store.read { snapshot in try SchemaShape(snapshot) }
-        #expect(shape == SchemaShape(tables: 48, triggers: 48, indexes: 31))
+        #expect(shape == SchemaShape.current)
         let foreignKeyCheck = try await store.read { snapshot in
             try snapshot.query("PRAGMA foreign_key_check") { try $0.text(0) ?? "" }
         }
@@ -55,7 +55,7 @@ struct SQLiteMemoryStoreTests {
 
         let again  = try await SQLiteMemoryStore.open(at: url)
         let second = try await again.diagnostics()
-        #expect(second.schemaVersion == 1)
+        #expect(second.schemaVersion == 2)
         #expect(second.journalMode == "wal")
         #expect(!second.bootstrappedNow)
         #expect(try await again.read { snapshot in try SchemaShape(snapshot) } == shape)
@@ -65,10 +65,12 @@ struct SQLiteMemoryStoreTests {
     @Test("every table of the resource is named by its parser")
     func tableNames() throws {
         let names = SQLiteMemorySchema.tableNames(in: try SQLiteMemorySchema.text())
-        #expect(names.count == 48)
+        #expect(names.count == SchemaShape.current.tables)
         #expect(names.first == "brain_apps")
-        #expect(names.last == "memory_experience_uses")
-        #expect(Set(names).count == 48)
+        #expect(names.last == "memory_origin_brain_contributions")
+        #expect(Set(names).count == SchemaShape.current.tables)
+        let first = SQLiteMemorySchema.tableNames(in: try SQLiteMemorySchema.text(of: 1))
+        #expect(first.count == 48 && first.last == "memory_experience_uses" && Array(names.prefix(48)) == first)
     }
 
     @Test("an empty archive answers zero rows; a file that is not a database is an open error and stays as it was")
@@ -130,18 +132,18 @@ struct SQLiteMemoryStoreTests {
         raw.close()
 
         let error = await storeError { _ = try await SQLiteMemoryStore.open(at: url) }
-        #expect(error == .schema(.future(found: 7, supported: 1)))
+        #expect(error == .schema(.future(found: 7, supported: 2)))
         let check = try SQLiteConnection(path: url.path)
         #expect(try check.query("PRAGMA user_version") { $0.integer(0) }.first == 7)
         #expect(try check.query(
             "SELECT count(*) FROM sqlite_schema WHERE type = 'table' AND name NOT LIKE 'sqlite_%'"
-        ) { $0.integer(0) }.first == 48)
+        ) { $0.integer(0) }.first == Int64(SchemaShape.current.tables))
     }
 
     @Test("a version 1 file of an earlier development form whose columns match but whose constraints differ is refused untouched")
     func differentShapeRefused() async throws {
         let url = try temporaryDatabase()
-        let ddl = try SQLiteMemorySchema.text()
+        let ddl = try SQLiteMemorySchema.text(of: 1)
         let earlier = ddl.replacingOccurrences(of: ",\n         'textSelectionChanged')),", with: ")),")
         #expect(earlier != ddl)
         let raw = try SQLiteConnection(path: url.path)
@@ -196,8 +198,8 @@ struct SQLiteMemoryStoreTests {
         let da = try await a.diagnostics()
         let db = try await b.diagnostics()
         #expect([da.bootstrappedNow, db.bootstrappedNow].filter { $0 }.count == 1)
-        #expect(da.schemaVersion == 1 && db.schemaVersion == 1)
-        #expect(try await a.read { snapshot in try SchemaShape(snapshot) } == SchemaShape(tables: 48, triggers: 48, indexes: 31))
+        #expect(da.schemaVersion == 2 && db.schemaVersion == 2)
+        #expect(try await a.read { snapshot in try SchemaShape(snapshot) } == SchemaShape.current)
         await a.close()
         await b.close()
     }

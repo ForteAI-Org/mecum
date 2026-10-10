@@ -37,7 +37,7 @@ struct SQLiteOpeningRetryTests {
         try await store.open(.producer)
         let diagnostics = try await store.diagnostics()
         #expect(diagnostics.bootstrappedNow)
-        #expect(diagnostics.schemaVersion == 1)
+        #expect(diagnostics.schemaVersion == 2)
         #expect(await store.liveHandles == 2)
         _ = try await record(EventRow(id: "after-retry", key: "k"), in: store)
         #expect(try await count("SELECT count(*) FROM memory_events", in: store) == 1)

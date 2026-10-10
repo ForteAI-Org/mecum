@@ -361,7 +361,8 @@ let package = Package(
         // and a separate reader, typed errors. Imports Memory and the SDK's SQLite3 only; AutomationRuntime's
         // MemoryService composes it.
         engine("SQLiteMemory", ["Memory"], settings: pure,
-               resources: [.copy("Resources/brain-living-memory-schema.sql")]),
+               resources: [.copy("Resources/brain-living-memory-schema.sql"),
+                           .copy("Resources/brain-living-memory-schema-2.sql")]),
 
         // `SceneProviding` for a window on the real screen: census, capture, pipeline.
         engine("LiveScenes", ["EngineCore", "PerceptionCore", "Perception", "ScreenCapture"], settings: pure),

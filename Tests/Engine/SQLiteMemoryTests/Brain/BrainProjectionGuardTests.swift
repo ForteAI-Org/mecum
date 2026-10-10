@@ -83,7 +83,7 @@ struct BrainProjectionGuardTests {
     @Test("a schema 1 file of the earlier form, without the current group column, is refused by name and left untouched")
     func oldFormRefused() async throws {
         let url = try temporaryDatabase()
-        let ddl = try SQLiteMemorySchema.text()
+        let ddl = try SQLiteMemorySchema.text(of: 1)
         let old = ddl
             .replacingOccurrences(of: "    current_group_id TEXT,\n", with: "")
             .replacingOccurrences(of: "    FOREIGN KEY (app_id, current_group_id) REFERENCES brain_groups(app_id, group_id),\n", with: "")
@@ -107,7 +107,7 @@ struct BrainProjectionGuardTests {
         let fresh = try await SQLiteMemoryStore.open(at: try temporaryDatabase())
         let columns = try await fresh.read { try $0.query("PRAGMA table_info(brain_anchors)") { try $0.text(1) ?? "" } }
         #expect(columns.contains("current_group_id"))
-        #expect(try await fresh.read { try SchemaShape($0) } == SchemaShape(tables: 48, triggers: 48, indexes: 31))
+        #expect(try await fresh.read { try SchemaShape($0) } == SchemaShape.current)
         let foreignKeys = try await fresh.read { snapshot in
             try snapshot.query("PRAGMA foreign_key_list(brain_anchors)") { row in (try row.text(2) ?? "", try row.text(3) ?? "", try row.text(4) ?? "") }
         }

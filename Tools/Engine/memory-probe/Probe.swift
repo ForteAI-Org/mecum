@@ -408,6 +408,7 @@ final class Probe {
         case .missing    : shape = "missing"
         case .empty      : shape = "empty"
         case .current    : shape = "current"
+        case .migratable : shape = "migratable"
         case .refused    : shape = "refused"
         case .unreadable : shape = "unreadable"
         case .unavailable: shape = "unavailable"

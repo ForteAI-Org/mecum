@@ -100,7 +100,7 @@ struct SQLiteRecoveryInterruptionTests {
         helper.send("open-recovering \(fixture.url.path)")
         let recovery = try await helper.expect(prefix: "recovery ")
         #expect(recovery.hasPrefix("recovery resumed aside=") && recovery.hasSuffix("restored=\(fixture.copy)"), "\(recovery)")
-        #expect(try await helper.expect(prefix: "opened ").hasPrefix("opened bootstrapped=0 version=1"))
+        #expect(try await helper.expect(prefix: "opened ").hasPrefix("opened bootstrapped=0 version=2"))
         #expect(try await helper.ask("close") == "closed")
         #expect(!FileManager.default.fileExists(atPath: fixture.record), "the record is gone once complete")
         try preserved(fixture)
@@ -204,7 +204,7 @@ struct SQLiteRecoveryInterruptionTests {
         let fresh  = try temporaryDatabase()
         let helper = try ProbeProcess()
         defer { helper.end() }
-        #expect(try await helper.ask("open-recovering \(fresh.path)").hasPrefix("opened bootstrapped=1 version=1"))
+        #expect(try await helper.ask("open-recovering \(fresh.path)").hasPrefix("opened bootstrapped=1 version=2"))
         #expect(try await helper.ask("close") == "closed")
         #expect(!FileManager.default.fileExists(atPath: fresh.path + ".recovering"))
 

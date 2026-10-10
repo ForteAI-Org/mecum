@@ -62,10 +62,10 @@ struct SchemaResourceTests {
         return store
     }
 
-    @Test("the resource ships 48 tables, 48 triggers and 31 indexes, the four S1 triggers among them, and no JSON column")
+    @Test("the resources ship schema 2: 66 tables, 75 triggers and 41 indexes, the four S1 triggers among them, and no JSON column")
     func shape() async throws {
         let store = try await fixture()
-        #expect(try await store.read { snapshot in try SchemaShape(snapshot) } == SchemaShape(tables: 48, triggers: 48, indexes: 31))
+        #expect(try await store.read { snapshot in try SchemaShape(snapshot) } == SchemaShape.current)
         let triggers = try await store.read { snapshot in
             try snapshot.query("SELECT name FROM sqlite_schema WHERE type = 'trigger' ORDER BY name") { try $0.text(0) ?? "" }
         }

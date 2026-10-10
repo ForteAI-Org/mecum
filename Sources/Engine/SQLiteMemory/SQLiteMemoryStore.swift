@@ -113,8 +113,11 @@ public actor SQLiteMemoryStore {
         public let synchronous       : Int64
         public let foreignKeysEnabled: Bool
 
-        /// Whether this open created schema 1 in an empty file, as opposed to finding it.
+        /// Whether this open created the schema in an empty file, as opposed to finding it.
         public let bootstrappedNow: Bool
+
+        /// The migration this open ran on an archive of an earlier schema, nil when it ran none.
+        public let migration: Migration?
 
         /// Committed write transactions since the open.
         public let commits: Int
@@ -204,6 +207,7 @@ public actor SQLiteMemoryStore {
     private var lifecycle       = Lifecycle.notOpened
     private var opening         : Task<Void, any Error>?
     private var bootstrappedNow = false
+    private var migration       : Migration?
     private var commits         = 0
     private var busyRetries     = 0
     private var waited          = Duration.zero
@@ -215,6 +219,7 @@ public actor SQLiteMemoryStore {
     private var waitObserver    : (@Sendable (WaitEvent) -> Void)?
     private var refusedRollback : SQLiteConnection.Failure?
     private var stepGate        : (@Sendable () async throws -> Void)?
+    private var migrationFault  : (@Sendable () throws -> Void)?
     private var presence        : SQLiteMemoryPresence?
     private let clock           = ContinuousClock()
 
@@ -384,6 +389,7 @@ public actor SQLiteMemoryStore {
                 synchronous         : try Self.integerPragma(reader, "synchronous"),
                 foreignKeysEnabled  : try Self.integerPragma(reader, "foreign_keys") == 1,
                 bootstrappedNow     : bootstrappedNow,
+                migration           : migration,
                 commits             : commits,
                 busyRetries         : busyRetries,
                 waited              : waited,
@@ -647,15 +653,16 @@ public actor SQLiteMemoryStore {
     }
 
     /// Checks the finished copy and answers its page size. Anything short of `ok`, no violation
-    /// and schema 1 with every table is a refusal, and the copy is removed by the caller.
-    private static func verify(copy: SQLiteConnection) throws -> Int {
+    /// and exactly the schema expected (the current one, or the earlier one a migration copies) is a
+    /// refusal, and the copy is removed by the caller.
+    private static func verify(copy: SQLiteConnection, expecting wanted: Inspection = .current) throws -> Int {
         let integrity = try copy.query("PRAGMA integrity_check") { try $0.text(0) ?? "" }
         guard integrity == ["ok"] else { throw MemoryStoreError.snapshot(.copyFailedIntegrityCheck(integrity)) }
         let violations = try copy.query("PRAGMA foreign_key_check") { _ in () }.count
         guard violations == 0 else { throw MemoryStoreError.snapshot(.copyHasForeignKeyViolations(violations)) }
-        let expected = try Expected(ddl: try SQLiteMemorySchema.text())
+        let expected = try Expected()
         do {
-            guard try inspect(copy, expected: expected) == .current else {
+            guard try inspect(copy, expected: expected) == wanted else {
                 throw MemoryStoreError.snapshot(.copySchema(.missingTables(expected.tables)))
             }
         } catch MemoryStoreError.schema(let mismatch) {
@@ -693,11 +700,129 @@ public actor SQLiteMemoryStore {
         url.standardizedFileURL.resolvingSymlinksInPath()
     }
 
+    // MARK: Migrating
+
+    /// Migration is what an open did to an archive of an earlier schema: the version it found, the
+    /// version it left, and the name of the verified copy of the archive it took first, beside it.
+    public struct Migration: Sendable, Equatable {
+        public let fromVersion: Int32
+        public let toVersion  : Int32
+        public let copyName   : String
+    }
+
+    /// Migrates an archive found at an earlier schema to the current one. First a verified copy of the
+    /// archive as it is, beside it (`<name>.schema-<version>-<instant>`), kept: the way back to the
+    /// earlier build. Then, in one write transaction, the archive is inspected again under the lock,
+    /// every migration text from its version up runs, the version is set and recorded with the copy's
+    /// name, and the result must be exactly the current shape: anything else rolls the whole
+    /// migration back and leaves the archive at its earlier schema, with the copy beside it. Answers
+    /// nil when another process migrated it meanwhile; this open's copy is then removed.
+    private func migrate(
+        _ writer    : SQLiteConnection,
+        from version: Int32,
+        expected    : Expected
+    ) async throws -> Migration? {
+        let copyName = "\(url.lastPathComponent).schema-\(version)-\(Self.stamp(Date()))"
+        let copy     = url.deletingLastPathComponent().appendingPathComponent(copyName)
+        try await copyBeforeMigration(to: copy, version: version)
+        try stillOpening()
+        var texts: [String] = []
+        for step in version..<SQLiteMemorySchema.version {
+            texts.append(try SQLiteMemorySchema.migrationText(from: step))
+        }
+        let nowMS = Self.nowMS()
+        let fault = migrationFault
+        migrationFault = nil
+        let migrated = try await transaction(on: writer, begin: "BEGIN IMMEDIATE", phase: .bootstrap) {
+            guard try Self.inspect(writer, expected: expected) == .previous(version) else { return false }
+            for text in texts { try writer.execute(text) }
+            try fault?()
+            // A pragma cannot take a bound value; the version is this module's own constant.
+            try writer.execute("PRAGMA user_version = \(SQLiteMemorySchema.version)")
+            try writer.run(
+                """
+                INSERT INTO memory_schema_migrations (to_version, from_version, migrated_at_ms, copy_name)
+                VALUES (?, ?, ?, ?)
+                """,
+                [.integer(Int64(SQLiteMemorySchema.version)), .integer(Int64(version)), .integer(nowMS),
+                 .text(copyName)]
+            )
+            guard try Self.inspect(writer, expected: expected) == .current else {
+                throw Self.refusal(.bootstrap, "the migration from schema \(version) did not reach the current shape")
+            }
+            return true
+        }
+        guard migrated else {
+            for suffix in ["", "-wal", "-shm", "-journal"] {
+                try? FileManager.default.removeItem(atPath: copy.path + suffix)
+            }
+            return nil
+        }
+        return Migration(fromVersion: version, toVersion: SQLiteMemorySchema.version, copyName: copyName)
+    }
+
+    /// Copies the archive, at its earlier schema, to `target` through the backup API, consistent as of
+    /// one read transaction, verified (integrity, foreign keys, exactly that schema), in rollback
+    /// journal mode and renamed into place without clobbering. Any failure removes what it made.
+    private func copyBeforeMigration(to target: URL, version: Int32) async throws {
+        guard !FileManager.default.fileExists(atPath: target.path) else {
+            throw MemoryStoreError.snapshot(.destinationExists)
+        }
+        let partial = target.deletingLastPathComponent()
+            .appendingPathComponent(".\(target.lastPathComponent).partial-\(UUID().uuidString)")
+        var copying = SnapshotResources(partialPath: partial.path)
+        do {
+            // Read-write, though it only reads: a file the journal was just switched to WAL may have no
+            // shared-memory file yet, which a read-only connection cannot make.
+            let source = try acquire(url.path)
+            copying.source = source
+            try await retrying(phase: .snapshot) { try Self.pin(source) }
+            let copy = try acquire(partial.path)
+            copying.copy = copy
+            let backup = try SQLiteBackup(from: source, to: copy)
+            copying.backup = backup
+            while true {
+                try stillOpening()
+                let pages    = configuration.snapshotPagesPerStep
+                let progress = try await retrying(phase: .snapshot) { try backup.step(pages: pages) }
+                if progress.remaining == 0 { break }
+                await Task.yield()
+            }
+            try backup.finish()
+            copying.backup = nil
+            release(source)
+            copying.source = nil
+            _ = try Self.verify(copy: copy, expecting: .previous(version))
+            try Self.settle(copy: copy)
+            release(copy)
+            copying.copy = nil
+            try Self.move(copying.partialPath, to: target.path)
+            copying.removeJournals()
+        } catch {
+            copying.abandon(releasing: self)
+            throw Self.classified(error, phase: .snapshot)
+        }
+    }
+
+    /// The calendar instant now, in milliseconds since 1970, for the record of a bootstrap or a migration.
+    private static func nowMS() -> Int64 { Int64((Date().timeIntervalSince1970 * 1000).rounded(.down)) }
+
+    /// An instant as a file name's UTC stamp.
+    private static func stamp(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale     = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone   = TimeZone(identifier: "UTC")
+        formatter.dateFormat = "yyyy-MM-dd'T'HHmmss.SSS'Z'"
+        return formatter.string(from: date)
+    }
+
     // MARK: Opening
 
-    /// What the inspection of a file found: nothing yet, or the schema this build knows.
+    /// What the inspection of a file found: nothing yet, the schema this build knows, or an earlier
+    /// schema it migrates from.
     enum Inspection: Equatable {
         case empty, current
+        case previous(Int32)
     }
 
     /// The open in flight. Every step that waited checks that the store is still opening, so a
@@ -716,7 +841,7 @@ public actor SQLiteMemoryStore {
                 throw MemoryStoreError.unavailable(.library(found: SQLiteLibrary.version, required: unmet.minimumVersion))
             }
             ddl      = try SQLiteMemorySchema.text()
-            expected = try Expected(ddl: ddl)
+            expected = try Expected()
             // A reader of a file that is not there makes nothing beside it, not even the lock file.
             if kind == .existingArchive, !FileManager.default.fileExists(atPath: path) {
                 if let pending = SQLiteMemoryRecovery.pending(of: url) {
@@ -751,6 +876,10 @@ public actor SQLiteMemoryStore {
                 let pages = try Self.integerPragma(writer, "page_count")
                 throw MemoryStoreError.schema(.uninitialized(fileIsEmpty: pages == 0))
             }
+            if case .previous(let version) = found, kind == .existingArchive {
+                // A reader never migrates: an archive of an earlier schema is refused as found.
+                throw MemoryStoreError.schema(.migrationRequired(found: version, supported: SQLiteMemorySchema.version))
+            }
             try await retrying(phase: .open) {
                 try Self.setJournal(writer, phase: .open)
             }
@@ -758,13 +887,26 @@ public actor SQLiteMemoryStore {
             var created = false
             if found == .empty {
                 // Another process may have created the schema since the inspection: look again under the lock.
+                let nowMS = Self.nowMS()
                 created = try await transaction(on: writer, begin: "BEGIN IMMEDIATE", phase: .bootstrap) {
                     guard try Self.inspect(writer, expected: expected) == .empty else { return false }
                     try writer.execute(ddl)
                     // A pragma cannot take a bound value; the version is this module's own constant.
                     try writer.execute("PRAGMA user_version = \(SQLiteMemorySchema.version)")
+                    try writer.run(
+                        """
+                        INSERT INTO memory_schema_migrations (to_version, from_version, migrated_at_ms, copy_name)
+                        VALUES (?, 0, ?, NULL)
+                        """,
+                        [.integer(Int64(SQLiteMemorySchema.version)), .integer(nowMS)]
+                    )
                     return true
                 }
+                try stillOpening()
+            }
+            var migration: Migration?
+            if case .previous(let version) = found {
+                migration = try await migrate(writer, from: version, expected: expected)
                 try stillOpening()
             }
             let reader = try acquire(path, mayCreate: kind == .producer)
@@ -777,6 +919,7 @@ public actor SQLiteMemoryStore {
             self.writer          = writer
             self.reader          = reader
             self.bootstrappedNow = created
+            self.migration       = migration
             self.lifecycle       = .open
         } catch {
             release(writer)
@@ -818,6 +961,12 @@ public actor SQLiteMemoryStore {
         guard liveHandles == 0, lifecycle != .open, lifecycle != .opening else { return }
         presence?.release()
         presence = nil
+    }
+
+    /// Runs `fault` inside the next migration's transaction, once its texts ran and before the version is
+    /// set: an error it throws rolls the migration back. For the package's tests only.
+    package func injectMigrationFault(_ fault: (@Sendable () throws -> Void)?) {
+        migrationFault = fault
     }
 
     /// Whether the store holds the archive's presence lock now: for the package's tests.
@@ -904,56 +1053,92 @@ public actor SQLiteMemoryStore {
         }
     }
 
-    /// What an inspection compares a file with: the tables the resource creates, for a refusal that
-    /// names them, and the exact objects a file bootstrapped from it holds.
+    /// What an inspection compares a file with: for the current schema and each earlier one this build
+    /// migrates from, the tables its text creates, for a refusal that names them, and the exact objects
+    /// a file bootstrapped from it holds.
     struct Expected {
-        let tables : [String]
-        let objects: Set<SQLiteMemorySchema.SchemaObject>
 
+        struct Shape {
+            let tables : [String]
+            let objects: Set<SQLiteMemorySchema.SchemaObject>
+
+            init(ddl: String) throws {
+                tables  = SQLiteMemorySchema.tableNames(in: ddl)
+                objects = try SQLiteMemorySchema.objects(of: ddl)
+            }
+        }
+
+        let current : Shape
+        let previous: [Int32: Shape]
+
+        var tables : [String] { current.tables }
+        var objects: Set<SQLiteMemorySchema.SchemaObject> { current.objects }
+
+        /// The shapes of this build: the current schema and every one it migrates from.
+        init() throws {
+            current  = try Shape(ddl: try SQLiteMemorySchema.text())
+            var previous: [Int32: Shape] = [:]
+            for version in SQLiteMemorySchema.migrations.keys {
+                previous[version] = try Shape(ddl: try SQLiteMemorySchema.text(of: version))
+            }
+            self.previous = previous
+        }
+
+        /// A shape of the given text alone, with nothing to migrate from: for a test or a tool comparing
+        /// a file with one text.
         init(ddl: String) throws {
-            tables  = SQLiteMemorySchema.tableNames(in: ddl)
-            objects = try SQLiteMemorySchema.objects(of: ddl)
+            current  = try Shape(ddl: ddl)
+            previous = [:]
         }
     }
 
-    /// Reads the version and the schema under the write lock and says whether the file is empty
-    /// or at the schema this build knows. Every other file is refused, untouched: a future version,
-    /// a version 0 file with tables of its own, a version 1 file with tables missing, a version 1
-    /// file whose tables lack a column this build writes, and a version 1 file whose tables,
-    /// indexes or triggers are not exactly the ones this build creates (an earlier development form
-    /// with other constraints).
+    /// Reads the version and the schema under the write lock and says whether the file is empty, at
+    /// the schema this build knows, or at an earlier schema it migrates from, each at exactly its
+    /// shape. Every other file is refused, untouched: a future version, a version 0 file with tables of
+    /// its own, a file with tables missing, a file whose tables lack a column this build writes, and a
+    /// file whose tables, indexes or triggers are not exactly the ones its version's text creates (an
+    /// earlier development form with other constraints).
     static func inspect(_ connection: SQLiteConnection, expected: Expected) throws -> Inspection {
-        let tables = expected.tables
         let version  = try integerPragma(connection, "user_version")
         let existing = try connection.query(
             "SELECT name FROM sqlite_schema WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
         ) { try $0.text(0) ?? "" }
-        switch version {
-        case 0 where existing.isEmpty:
+        if version == 0 {
+            guard existing.isEmpty else { throw MemoryStoreError.schema(.unknownTables(existing)) }
             return .empty
-        case 0:
-            throw MemoryStoreError.schema(.unknownTables(existing))
-        case Int64(SQLiteMemorySchema.version):
-            let missing = tables.filter { !existing.contains($0) }
-            guard missing.isEmpty else { throw MemoryStoreError.schema(.missingTables(missing)) }
-            var missingColumns: [String] = []
-            for (table, column) in SQLiteMemorySchema.requiredColumns {
-                // Table names are this module's own literals; nothing from a caller is spliced in.
-                let columns = try connection.query("PRAGMA table_info(\(table))") { try $0.text(1) ?? "" }
-                if !columns.contains(column) { missingColumns.append("\(table).\(column)") }
-            }
-            guard missingColumns.isEmpty else { throw MemoryStoreError.schema(.missingColumns(missingColumns)) }
-            let differences = SQLiteMemorySchema.differences(
-                found: try SQLiteMemorySchema.objects(in: connection), expected: expected.objects
-            )
-            guard differences.isEmpty else { throw MemoryStoreError.schema(.differentShape(differences)) }
-            return .current
-        default:
+        }
+        let shape: Expected.Shape
+        let answer: Inspection
+        if version == Int64(SQLiteMemorySchema.version) {
+            (shape, answer) = (expected.current, .current)
+        } else if let earlier = Int32(exactly: version), let known = expected.previous[earlier] {
+            (shape, answer) = (known, .previous(earlier))
+        } else if version > Int64(SQLiteMemorySchema.version) {
             throw MemoryStoreError.schema(.future(
-                found    : Int32(clamping: version),
+                found: Int32(clamping: version),
+                supported: SQLiteMemorySchema.version
+            ))
+        } else {
+            // A version this build neither opens nor migrates from: refused as found, like a newer one.
+            throw MemoryStoreError.schema(.unsupported(
+                found: Int32(clamping: version),
                 supported: SQLiteMemorySchema.version
             ))
         }
+        let missing = shape.tables.filter { !existing.contains($0) }
+        guard missing.isEmpty else { throw MemoryStoreError.schema(.missingTables(missing)) }
+        var missingColumns: [String] = []
+        for (table, column) in SQLiteMemorySchema.requiredColumns {
+            // Table names are this module's own literals; nothing from a caller is spliced in.
+            let columns = try connection.query("PRAGMA table_info(\(table))") { try $0.text(1) ?? "" }
+            if !columns.contains(column) { missingColumns.append("\(table).\(column)") }
+        }
+        guard missingColumns.isEmpty else { throw MemoryStoreError.schema(.missingColumns(missingColumns)) }
+        let differences = SQLiteMemorySchema.differences(
+            found: try SQLiteMemorySchema.objects(in: connection), expected: shape.objects
+        )
+        guard differences.isEmpty else { throw MemoryStoreError.schema(.differentShape(differences)) }
+        return answer
     }
 
     private static func integerPragma(_ connection: SQLiteConnection, _ name: String) throws -> Int64 {

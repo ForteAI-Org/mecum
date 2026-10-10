@@ -5,19 +5,57 @@
 //  Created by Tommaso Mazzarini on 02/10/2026.
 //
 
+import EngineCore
+
 /// VerificationScope is what a verification is about: one agent call's result, one step, or a
 /// whole task. VerificationMethod is how it was judged: text read in a scene, a control's value or
-/// state read back, or a person's answer. Both vocabularies are this contract's proposals: no
-/// verifier in production writes them yet, and a verification is a fact whoever produced it.
+/// state read back, a person's answer, and the engine's own oracles (`OperationCheck.Method`): the
+/// scene difference, the window census and signature, the Driver's menu receipt, or nothing read.
+/// Production writes `call` verifications through `OperationVerification`; the step and task scopes
+/// and `person` stay proposals with no producer, and a verification is a fact whoever produced it.
 public enum VerificationScope: String, Sendable, Equatable, Hashable, CaseIterable {
     case call, step, task
 }
 
 public enum VerificationMethod: String, Sendable, Equatable, Hashable, CaseIterable {
-    case sceneText    = "scene_text"
-    case controlValue = "control_value"
-    case controlState = "control_state"
+    case sceneText       = "scene_text"
+    case controlValue    = "control_value"
+    case controlState    = "control_state"
     case person
+    case sceneDifference = "scene_difference"
+    case windowCensus    = "window_census"
+    case windowSignature = "window_signature"
+    case driverReceipt   = "driver_receipt"
+    case none
+
+    /// The stored method of an engine oracle's method: the same word.
+    public init(_ method: OperationCheck.Method) {
+        switch method {
+            case .sceneDifference: self = .sceneDifference
+            case .controlState   : self = .controlState
+            case .controlValue   : self = .controlValue
+            case .sceneText      : self = .sceneText
+            case .windowCensus   : self = .windowCensus
+            case .windowSignature: self = .windowSignature
+            case .driverReceipt  : self = .driverReceipt
+            case .none           : self = .none
+        }
+    }
+
+    /// The engine oracle's method this stored method is, nil for `person`, which no oracle reports.
+    public var oracleMethod: OperationCheck.Method? {
+        switch self {
+            case .sceneDifference: .sceneDifference
+            case .controlState   : .controlState
+            case .controlValue   : .controlValue
+            case .sceneText      : .sceneText
+            case .windowCensus   : .windowCensus
+            case .windowSignature: .windowSignature
+            case .driverReceipt  : .driverReceipt
+            case .none           : OperationCheck.Method.none
+            case .person         : nil
+        }
+    }
 }
 
 /// VerificationVerdict is the store's vocabulary: `unknown` stays unknown, whatever else happened.

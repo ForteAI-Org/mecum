@@ -64,7 +64,8 @@ struct SQLiteMemoryInspectionTests {
                 case other  : if case .refused(.missingTables(let tables)) = report.shape { #expect(tables.contains("memory_agent_actions")) }
                               else { Issue.record("another shape: \(report.shape)") }
                 case garbage: if case .unreadable = report.shape {} else { Issue.record("no database: \(report.shape)") }
-                default     : #expect(report.shape == .current && report.counts["memory_events"] == 0 && report.schemaVersion == 1)
+                default     : #expect(report.shape == .current && report.counts["memory_events"] == 0
+                                      && report.schemaVersion == 2)
             }
         }
     }
@@ -79,7 +80,7 @@ struct SQLiteMemoryInspectionTests {
         raw.close()
         let before = try listing(url.deletingLastPathComponent())
         let report = SQLiteMemoryInspection.inspect(url)
-        #expect(report.shape == .refused(.future(found: 99, supported: 1)))
+        #expect(report.shape == .refused(.future(found: 99, supported: 2)))
         #expect(report.schemaVersion == 99 && report.counts.isEmpty)
         #expect(try listing(url.deletingLastPathComponent()) == before)
     }

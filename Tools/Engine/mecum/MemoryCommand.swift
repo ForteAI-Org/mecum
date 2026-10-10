@@ -84,6 +84,9 @@ enum MemoryCommand {
             case .empty:                 print("this build: a database with no schema yet; Mecum's memory would create its schema in it, "
                                                + "a reader refuses it")
             case .current:               print("this build: opens it; version \(known) and exactly the shape this build creates")
+            case .migratable(let from):
+                print("this build: migrates it from version \(from) to \(known) on Mecum's next open, "
+                      + "after a verified copy beside it; exactly the shape of version \(from)")
             case .refused(let mismatch): print("this build: refuses it and leaves it as it is; " + describe(mismatch))
             case .unreadable(let why):   print("this build: cannot read it as a database: \(why)")
             case .unavailable(let why):  print("this build: did not read it: \(why)")
@@ -112,6 +115,10 @@ enum MemoryCommand {
             case .missingColumns(let columns):      return "an earlier development form, columns missing: \(listed(columns))"
             case .differentShape(let objects):      return "another shape: \(listed(objects))"
             case .uninitialized:                    return "no schema yet"
+            case .migrationRequired(let found, let supported):
+                return "schema \(found), which Mecum's memory migrates to \(supported) on its next open; a reader does not"
+            case .unsupported(let found, let supported):
+                return "schema \(found), below the \(supported) this build knows, with no migration from it"
         }
     }
 

@@ -53,7 +53,7 @@ struct SQLiteProcessTests {
         let store = try await SQLiteMemoryStore.open(at: url)
         #expect(!(try await store.diagnostics().bootstrappedNow))
         #expect(try await count("SELECT count(*) FROM memory_events", in: store) == 2)
-        #expect(try await store.read { try SchemaShape($0) } == SchemaShape(tables: 48, triggers: 48, indexes: 31))
+        #expect(try await store.read { try SchemaShape($0) } == SchemaShape.current)
         await store.close()
     }
 

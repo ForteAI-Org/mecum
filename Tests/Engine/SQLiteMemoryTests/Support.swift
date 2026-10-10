@@ -52,6 +52,10 @@ struct SchemaShape: Equatable, Sendable {
         let byType = Dictionary(uniqueKeysWithValues: counts)
         self.init(tables: byType["table"] ?? 0, triggers: byType["trigger"] ?? 0, indexes: byType["index"] ?? 0)
     }
+
+    /// Schema 2, the one this build bootstraps and opens: schema 1's 48 tables, 48 triggers and 31
+    /// indexes, and the 18 tables, 27 triggers and 10 indexes schema 2 adds.
+    static let current = SchemaShape(tables: 66, triggers: 75, indexes: 41)
 }
 
 /// One `memory_events` row as the idempotency tests write and read it: the identity is the

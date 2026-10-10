@@ -33,6 +33,9 @@ public enum SQLiteMemoryInspection {
         case empty
         /// The schema this build opens: its version and exactly its shape.
         case current
+        /// Exactly the shape of an earlier schema this build migrates from: Mecum's memory migrates it
+        /// on its next open, after a verified copy, and a reader refuses it until then.
+        case migratable(from: Int32)
         /// A file this build refuses and leaves as it is, and why: a newer version, another shape,
         /// tables of somebody else's.
         case refused(MemorySchemaMismatch)
@@ -52,7 +55,7 @@ public enum SQLiteMemoryInspection {
         /// The file's `user_version`, when it could be read.
         public let schemaVersion: Int64?
         public let shape: Shape
-        /// Row counts, by table, when the shape is current.
+        /// Row counts, by table, when the shape is current or migratable.
         public let counts: [String: Int]
         /// Copies beside the file, newest first.
         public let backups: [String]
@@ -138,7 +141,7 @@ public enum SQLiteMemoryInspection {
     }
 
     /// One read of the file in one read transaction: the version, what the store's open would decide
-    /// (the same inspection), and the counts when the schema is current.
+    /// (the same inspection), and the counts when the schema is current or migratable.
     private static func read(_ url: URL, betweenReads: (() -> Void)?) -> Reading {
         let connection: SQLiteConnection
         do {
@@ -151,19 +154,23 @@ public enum SQLiteMemoryInspection {
         defer { connection.close() }
         var version: Int64?
         do {
-            let expected = try SQLiteMemoryStore.Expected(ddl: try SQLiteMemorySchema.text())
+            let expected = try SQLiteMemoryStore.Expected()
             try connection.execute("BEGIN")
             defer { _ = try? connection.execute("COMMIT") }
             version = try connection.query("PRAGMA user_version") { $0.integer(0) ?? 0 }.first ?? 0
             betweenReads?()
-            switch try SQLiteMemoryStore.inspect(connection, expected: expected) {
+            let inspection = try SQLiteMemoryStore.inspect(connection, expected: expected)
+            switch inspection {
             case .empty:
                 return .read(.empty, version: version, counts: [:])
-            case .current:
+            case .current, .previous:
                 var counts: [String: Int] = [:]
                 for table in countedTables {
                     // Table names are this module's own literals; nothing from a caller is spliced in.
                     counts[table] = Int(try connection.query("SELECT count(*) FROM \(table)") { $0.integer(0) ?? 0 }.first ?? 0)
+                }
+                if case .previous(let earlier) = inspection {
+                    return .read(.migratable(from: earlier), version: version, counts: counts)
                 }
                 return .read(.current, version: version, counts: counts)
             }

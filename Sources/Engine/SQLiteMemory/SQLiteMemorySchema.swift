@@ -8,36 +8,68 @@
 import Foundation
 import Memory
 
-/// SQLiteMemorySchema is the one DDL resource this module ships and what the bootstrap needs to know
-/// about it: the `user_version` a bootstrapped file carries, the tables the text creates, and the
-/// text itself. The text carries no `PRAGMA`, `BEGIN` or `COMMIT` of its own; the store owns those
-/// boundaries. Documentation/Engine/MemorySchema.md says what the resource is and how it differs
-/// from the candidate it was copied from.
+/// SQLiteMemorySchema is the DDL this module ships and what the bootstrap and the migration need to
+/// know about it: the `user_version` the current schema carries, the text that creates it, the text
+/// of each earlier schema it migrates from, and the tables they create. Schema 2 is the schema 1
+/// resource, unchanged, followed by the schema 2 resource, which only adds: a new archive runs both,
+/// and an archive at the exact shape of schema 1 runs the second one in its migration, so both end at
+/// one shape. The texts carry no `PRAGMA`, `BEGIN` or `COMMIT` of their own; the store owns those
+/// boundaries. Documentation/Engine/MemorySchema.md says what the resources are and how they differ
+/// from the candidate they were copied from; Documentation/Engine/MemoryFacts.md what schema 2 adds.
 enum SQLiteMemorySchema {
 
-    /// The schema version this resource produces. A file at version 0 with no tables is empty and
-    /// is bootstrapped; any other version is refused.
-    static let version: Int32 = 1
+    /// The schema version this build bootstraps and opens. A file at version 0 with no tables is empty
+    /// and is bootstrapped; a file at a version of `migrations` is migrated; any other is refused.
+    static let version: Int32 = 2
 
+    /// The resource of schema 1, the base every later schema adds to.
     static let resourceName      = "brain-living-memory-schema"
     static let resourceExtension = "sql"
 
-    /// The DDL text, read from the module's resource bundle. The bootstrap runs it once per open.
+    /// The resources each migration runs, by the version it migrates from: version 1 to 2 adds the
+    /// tables of schema 2.
+    static let migrations: [Int32: String] = [1: "brain-living-memory-schema-2"]
+
+    /// The text that creates the current schema in an empty file: every resource, in order.
     static func text() throws -> String {
-        let name = "\(resourceName).\(resourceExtension)"
-        guard let url = Bundle.module.url(forResource: resourceName, withExtension: resourceExtension) else {
-            throw MemoryStoreError.unavailable(.resourceMissing(name))
+        try text(of: version)
+    }
+
+    /// The text that creates schema `version` in an empty file: the base and every migration below it.
+    static func text(of version: Int32) throws -> String {
+        var parts = [try resource(resourceName)]
+        var from: Int32 = 1
+        while from < version {
+            parts.append(try migrationText(from: from))
+            from += 1
+        }
+        return parts.joined(separator: "\n")
+    }
+
+    /// The text that migrates a file at `version` to the next one.
+    static func migrationText(from version: Int32) throws -> String {
+        guard let name = migrations[version] else {
+            throw MemoryStoreError.unavailable(.resourceMissing("migration from \(version)"))
+        }
+        return try resource(name)
+    }
+
+    /// One resource's text, read from the module's bundle.
+    private static func resource(_ name: String) throws -> String {
+        let file = "\(name).\(resourceExtension)"
+        guard let url = Bundle.module.url(forResource: name, withExtension: resourceExtension) else {
+            throw MemoryStoreError.unavailable(.resourceMissing(file))
         }
         do {
             return try String(contentsOf: url, encoding: .utf8)
         } catch {
-            throw MemoryStoreError.unavailable(.resourceMissing(name))
+            throw MemoryStoreError.unavailable(.resourceMissing(file))
         }
     }
 
     /// Columns this build writes that an earlier development form of schema 1 did not have, as
-    /// `(table, column)`. A file at version 1 with every table but without one of them is that
-    /// earlier form: refused untouched, never migrated. The first distributed database carries them
+    /// `(table, column)`. A file at version 1 or later with every table but without one of them is
+    /// that earlier form: refused untouched, never migrated. The first distributed database carries them
     /// all; the list exists because files bootstrapped during development already exist at the same
     /// `user_version`. Table and column names are this module's own literals.
     static let requiredColumns: [(table: String, column: String)] = [

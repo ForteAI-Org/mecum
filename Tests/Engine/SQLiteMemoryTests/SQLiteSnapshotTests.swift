@@ -51,7 +51,7 @@ struct SQLiteSnapshotTests {
         let check = try SQLiteConnection(path: destination.path)
         #expect(try check.query("PRAGMA journal_mode") { try $0.text(0) }.first == "delete")
         #expect(try check.query("PRAGMA integrity_check") { try $0.text(0) }.first == "ok")
-        #expect(try check.query("PRAGMA user_version") { $0.integer(0) }.first == 1)
+        #expect(try check.query("PRAGMA user_version") { $0.integer(0) }.first == 2)
         check.close()
         #expect(try await store.diagnostics().snapshots == 1)
 
@@ -60,11 +60,11 @@ struct SQLiteSnapshotTests {
         #expect(try await count("SELECT count(*) FROM memory_events", in: store) == 51)
         let reopened = try await SQLiteMemoryStore.open(at: destination)
         let diagnostics = try await reopened.diagnostics()
-        #expect(diagnostics.schemaVersion == 1)
+        #expect(diagnostics.schemaVersion == 2)
         #expect(!diagnostics.bootstrappedNow)
         #expect(diagnostics.journalMode == "wal")
         #expect(try await count("SELECT count(*) FROM memory_events", in: reopened) == 50)
-        #expect(try await reopened.read { try SchemaShape($0) } == SchemaShape(tables: 48, triggers: 48, indexes: 31))
+        #expect(try await reopened.read { try SchemaShape($0) } == SchemaShape.current)
         await reopened.close()
         await store.close()
     }

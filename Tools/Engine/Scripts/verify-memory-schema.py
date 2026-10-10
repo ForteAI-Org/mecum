@@ -1,8 +1,10 @@
 """SQL checks on the living memory's schema resource, the one file SQLiteMemory ships.
 
-They prove the shape of the schema (constraints, triggers, round trips) on the resource included
+They prove the shape of the schema (constraints, triggers, round trips) on the resources included
 in the module, through Python's sqlite3: not the Swift store, not the Brain's retention, not the
-desktop. `make test` runs them; pass another DDL path as the first argument to check a copy.
+desktop. Schema 1's checks run first; schema 2's additions then run on that populated file, as the
+migration does, with checks of their own. `make test` runs them; pass other DDL paths (schema 1, then
+schema 2) as arguments to check copies.
 The library used is Python's, and it says nothing about the one the Swift binary links.
 """
 import sqlite3
@@ -13,6 +15,9 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[3]
 DDL = Path(sys.argv[1]) if len(sys.argv) > 1 else \
     ROOT / "Sources/Engine/SQLiteMemory/Resources/brain-living-memory-schema.sql"
+# Schema 2's additions, run after the schema 1 checks on the same file, as a migration runs them.
+DDL2 = Path(sys.argv[2]) if len(sys.argv) > 2 else \
+    ROOT / "Sources/Engine/SQLiteMemory/Resources/brain-living-memory-schema-2.sql"
 db = sqlite3.connect(":memory:")
 # The resource carries no PRAGMA of its own: foreign keys are enabled per connection, as the store does.
 db.executescript("PRAGMA foreign_keys = ON;\n" + DDL.read_text())
@@ -673,9 +678,187 @@ ok("E: an argument of another application's app breaks the composite key to its 
 assert db.execute("PRAGMA foreign_key_check").fetchall() == []
 assert db.execute("SELECT count(*) FROM memory_operation_arguments WHERE brain_application_id IS NOT NULL").fetchone()[0] == 5
 
+# ================================================================== schema 2 (G76 D1): run on the schema 1 file above
+# Schema 2 adds tables, triggers and indexes only: the migration's text runs on an archive of schema 1 with rows.
+db.executescript(DDL2.read_text())
+assert db.execute("PRAGMA foreign_key_check").fetchall() == []
+ok("schema 2: its text runs on a populated schema 1 file and every foreign key still holds")
+
+event("v2_call")
+insert("memory_agent_actions", event_id="v2_call", app_id=1, tool_kind="act", execution_status="completed",
+       started_at_ms=100, completed_at_ms=101)
+event("v2_open")
+insert("memory_agent_actions", event_id="v2_open", app_id=1, tool_kind="act", execution_status="started", started_at_ms=100)
+insert("memory_tasks", task_id="t1", contract_version=1, source="app", source_stream_id="worker", opened_at_ms=100,
+       status="open", current_revision=1)
+insert("memory_task_revisions", task_id="t1", revision=1, recorded_at_ms=100, change_kind="opened", goal="Export")
+insert("memory_task_constraints", task_id="t1", revision=1, position=0, constraint_text="same folder")
+insert("memory_task_message_refs", task_id="t1", revision=1, position=0, message_ref="m1")
+insert("memory_task_values", task_id="t1", revision=1, position=0, name="file", value_kind="file", content="text",
+       text_value="a.png", sensitivity="ordinary", source="request")
+insert("memory_task_values", task_id="t1", revision=1, position=1, name="password", value_kind="text", content="withheld",
+       sensitivity="secret", source="message", source_ref="m1")
+insert("memory_task_occurrences", task_occurrence_id="o1", started_at_ms=100, status="in_progress")
+insert("memory_task_attempts", task_occurrence_id="o1", task_id="t1", ordinal=1, source="app", source_stream_id="worker",
+       opened_at_ms=100, opened_at_revision=1)
+insert("memory_task_events", task_occurrence_id="o1", event_id="v2_call", position=0, role="action")
+insert("memory_task_call_revisions", event_id="v2_call", task_occurrence_id="o1", task_id="t1", revision=1)
+insert("memory_task_checkpoints", task_occurrence_id="o1", sequence=1, checkpoint_kind="checkpoint", task_id="t1",
+       revision=1, recorded_at_ms=101, note="half")
+insert("memory_task_values", task_id="t1", task_occurrence_id="o1", checkpoint_sequence=1, position=0, name="out",
+       value_kind="file", content="text", text_value="b.jpg", sensitivity="ordinary", source="derived")
+ok("schema 2: a task with its revision, constraint, message reference, inputs (a secret withheld), attempt, attributed call and checkpoint with an output")
+rejects("schema 2: a revision out of order", lambda: insert("memory_task_revisions", task_id="t1", revision=3, recorded_at_ms=1,
+                                                        change_kind="revised", goal="g"))
+rejects("schema 2: a second revision marked opened", lambda: insert("memory_task_revisions", task_id="t1", revision=2,
+                                                                recorded_at_ms=1, change_kind="opened", goal="g"))
+rejects("schema 2: a revision is immutable", lambda: db.execute("UPDATE memory_task_revisions SET goal='x' WHERE task_id='t1'"))
+rejects("schema 2: a message reference twice in a revision", lambda: insert("memory_task_message_refs", task_id="t1", revision=1,
+                                                                        position=1, message_ref="m1"))
+rejects("schema 2: a secret with its text", lambda: insert("memory_task_values", task_id="t1", revision=1, position=2, name="pin",
+                                                       value_kind="text", content="text", text_value="1234",
+                                                       sensitivity="secret", source="request"))
+rejects("schema 2: a missing value with a text", lambda: insert("memory_task_values", task_id="t1", revision=1, position=2,
+                                                            name="fmt", value_kind="missing", content="text", text_value="x",
+                                                            sensitivity="ordinary", source="request"))
+rejects("schema 2: a previous output with no reference", lambda: insert("memory_task_values", task_id="t1", revision=1, position=2,
+                                                                    name="doc", value_kind="file", content="text",
+                                                                    text_value="d", sensitivity="ordinary",
+                                                                    source="previous_output"))
+rejects("schema 2: an input name twice in a revision", lambda: insert("memory_task_values", task_id="t1", revision=1, position=2,
+                                                                  name="file", value_kind="file", content="missing",
+                                                                  sensitivity="ordinary", source="request"))
+rejects("schema 2: a closed task with no close instant", lambda: db.execute("UPDATE memory_tasks SET status='completed' WHERE task_id='t1'"))
+rejects("schema 2: a task's revision moved to one that does not exist", lambda: db.execute("UPDATE memory_tasks SET current_revision=5 WHERE task_id='t1'"))
+rejects("schema 2: a task's identity is immutable", lambda: db.execute("UPDATE memory_tasks SET source_stream_id='other' WHERE task_id='t1'"))
+rejects("schema 2: a second attempt that resumes nothing", lambda: (
+    insert("memory_task_occurrences", task_occurrence_id="o2", started_at_ms=100, status="in_progress"),
+    insert("memory_task_attempts", task_occurrence_id="o2", task_id="t1", ordinal=2, source="app", source_stream_id="worker",
+           opened_at_ms=100, opened_at_revision=1)))
+rejects("schema 2: a checkpoint out of order", lambda: insert("memory_task_checkpoints", task_occurrence_id="o1", sequence=3,
+                                                          checkpoint_kind="checkpoint", task_id="t1", revision=1, recorded_at_ms=1))
+rejects("schema 2: an end with no declared status", lambda: insert("memory_task_checkpoints", task_occurrence_id="o1", sequence=2,
+                                                               checkpoint_kind="end", task_id="t1", revision=1, recorded_at_ms=1))
+insert("memory_task_checkpoints", task_occurrence_id="o1", sequence=2, checkpoint_kind="end", task_id="t1", revision=1,
+       recorded_at_ms=102, declared_status="completed")
+db.execute("UPDATE memory_tasks SET status='completed', closed_at_ms=102 WHERE task_id='t1'")
+rejects("schema 2: nothing follows an end", lambda: insert("memory_task_checkpoints", task_occurrence_id="o1", sequence=3,
+                                                       checkpoint_kind="checkpoint", task_id="t1", revision=1, recorded_at_ms=1))
+rejects("schema 2: a closed task does not move", lambda: db.execute("UPDATE memory_tasks SET status='open', closed_at_ms=NULL WHERE task_id='t1'"))
+ok("schema 2: an end closes the attempt and the task once")
+
+insert("memory_call_effects", event_id="v2_call", performed="substitute", substitute="escape", target_element_id="e",
+       target_label="Export", checked=1)
+rejects("schema 2: an effect of a call not concluded", lambda: insert("memory_call_effects", event_id="v2_open", performed="requested", checked=1))
+rejects("schema 2: a substitute without its name", lambda: (event("v2_x"), insert("memory_agent_actions", event_id="v2_x", app_id=1,
+        tool_kind="act", execution_status="completed", started_at_ms=1, completed_at_ms=2),
+        insert("memory_call_effects", event_id="v2_x", performed="substitute", checked=1)))
+event("v2_y")
+insert("memory_agent_actions", event_id="v2_y", app_id=1, tool_kind="act", execution_status="completed", started_at_ms=1,
+       completed_at_ms=2)
+rejects("schema 2: a reason for a gesture that went out", lambda: insert("memory_call_effects", event_id="v2_y",
+                                                                     performed="requested", not_sent_reason="miss", checked=1))
+insert("memory_call_effects", event_id="v2_y", performed="none", not_sent_reason="honest_miss", checked=1)
+rejects("schema 2: an effect is immutable", lambda: db.execute("UPDATE memory_call_effects SET performed='none', substitute=NULL WHERE event_id='v2_call'"))
+event("v2_check", kind="verification")
+insert("memory_verifications", event_id="v2_check", scope="call", method="scene_difference", verdict="unknown")
+insert("memory_operation_verifications", event_id="v2_check", call_event_id="v2_call", contract_version=1,
+       condition_kind="recovery_instead_of_request", method_version="engine-oracle-1", performed="substitute", substitute="escape")
+insert("memory_operation_verification_limits", event_id="v2_check", position=0, limit_kind="no_expectation")
+capture("v2_call", phase="after")
+after_id = db.execute("SELECT observation_id FROM memory_event_observations WHERE event_id='v2_call' AND phase='after'").fetchone()[0]
+insert("memory_operation_verification_samples", event_id="v2_check", position=0, sample_observation_id=after_id,
+       sample_event_id="v2_call", sample_phase="after", sample_ordinal=0)
+ok("schema 2: a verification of a call with its condition, method version, limit and sample")
+event("v2_step", kind="verification")
+insert("memory_verifications", event_id="v2_step", scope="step", method="none", verdict="unknown")
+rejects("schema 2: an operation verification whose verdict row is not of scope call", lambda: insert(
+    "memory_operation_verifications", event_id="v2_step", call_event_id="v2_call", contract_version=1, condition_kind="none",
+    method_version="v", performed="none"))
+rejects("schema 2: an unknown condition", lambda: (event("v2_bad", kind="verification"),
+        insert("memory_verifications", event_id="v2_bad", scope="call", method="none", verdict="unknown"),
+        insert("memory_operation_verifications", event_id="v2_bad", call_event_id="v2_call", contract_version=1,
+               condition_kind="goal_reached", method_version="v", performed="requested")))
+rejects("schema 2: two verifications of one condition of one call", lambda: (event("v2_twice", kind="verification"),
+        insert("memory_verifications", event_id="v2_twice", scope="call", method="none", verdict="unknown"),
+        insert("memory_operation_verifications", event_id="v2_twice", call_event_id="v2_call", contract_version=1,
+               condition_kind="recovery_instead_of_request", method_version="v", performed="none")))
+rejects("schema 2: an unknown limit", lambda: insert("memory_operation_verification_limits", event_id="v2_check", position=1,
+                                                 limit_kind="trust_me"))
+rejects("schema 2: a verification's sample of another phase", lambda: insert("memory_operation_verification_samples",
+        event_id="v2_check", position=1, sample_observation_id=after_id, sample_event_id="v2_call", sample_phase="before",
+        sample_ordinal=0))
+rejects("schema 2: a verification is immutable", lambda: db.execute("UPDATE memory_operation_verifications SET method_version='w'"))
+
+insert("memory_value_redactions", event_id="v2_call", location_kind="argument", argument_name="text", argument_position=0,
+       reason="secret_target")
+insert("memory_value_redactions", event_id="v2_call", location_kind="sample_title", sample_phase="after", sample_ordinal=0,
+       reason="credential_pattern")
+rejects("schema 2: an argument gap with no argument", lambda: insert("memory_value_redactions", event_id="v2_call",
+                                                                 location_kind="argument", reason="declared_secret"))
+rejects("schema 2: a title gap names no element", lambda: insert("memory_value_redactions", event_id="v2_call",
+        location_kind="sample_title", sample_phase="after", sample_ordinal=1, element_position=0, reason="credential_pattern"))
+rejects("schema 2: the same gap twice", lambda: insert("memory_value_redactions", event_id="v2_call", location_kind="argument",
+                                                   argument_name="text", argument_position=0, reason="declared_secret"))
+rejects("schema 2: a declared gap is kept", lambda: db.execute("DELETE FROM memory_value_redactions"))
+for kind in ["target_section", "target_element", "observed_effect"]:
+    insert("memory_value_redactions", event_id="v2_call", location_kind=kind, reason="declared_secret")
+insert("memory_value_redactions", event_id="v2_call", location_kind="listing_entry", element_position=2, reason="credential_pattern")
+insert("memory_value_redactions", event_id="v2_call", location_kind="sample_container", sample_phase="after", sample_ordinal=0,
+       element_position=0, reason="declared_secret")
+rejects("schema 2: a listing gap names no application", lambda: insert("memory_value_redactions", event_id="v2_call",
+        location_kind="listing_entry", reason="declared_secret"))
+rejects("schema 2: a container gap names no element", lambda: insert("memory_value_redactions", event_id="v2_call",
+        location_kind="sample_container", sample_phase="after", sample_ordinal=1, reason="declared_secret"))
+rejects("schema 2: an effect gap with a sample", lambda: insert("memory_value_redactions", event_id="v2_call",
+        location_kind="observed_effect", sample_phase="after", sample_ordinal=2, reason="declared_secret"))
+insert("memory_call_recording_gaps", event_id="v2_y", part="verification", reason="refused", detail="the contract refused it")
+insert("memory_call_recording_gaps", event_id="v2_y", part="samples", reason="conflict")
+rejects("schema 2: a recording gap of a call not concluded", lambda: insert("memory_call_recording_gaps", event_id="v2_open",
+                                                                       part="effect", reason="refused"))
+rejects("schema 2: the same part unsaved twice", lambda: insert("memory_call_recording_gaps", event_id="v2_y",
+                                                           part="verification", reason="conflict"))
+rejects("schema 2: an unknown unsaved part", lambda: insert("memory_call_recording_gaps", event_id="v2_y", part="result",
+                                                        reason="refused"))
+rejects("schema 2: an empty detail", lambda: insert("memory_call_recording_gaps", event_id="v2_y", part="effect",
+                                                reason="refused", detail=""))
+rejects("schema 2: a recording gap is immutable", lambda: db.execute("UPDATE memory_call_recording_gaps SET reason='conflict'"))
+rejects("schema 2: a recording gap is kept", lambda: db.execute("DELETE FROM memory_call_recording_gaps"))
+insert("memory_archive_origins", origin_id="mcp-profile:A", origin_kind="mcp_profile", location="MCP/Knowledge/A",
+       status="completed", first_seen_at_ms=1, updated_at_ms=1)
+insert("memory_origin_events", origin_id="mcp-profile:A", source_event_id="v2_call", event_id="v2_call", disposition="duplicate")
+rejects("schema 2: a renamed fact under its own identity", lambda: insert("memory_origin_events", origin_id="mcp-profile:A",
+        source_event_id="v2_open", event_id="v2_open", disposition="renamed"))
+rejects("schema 2: the source of a transferred fact is immutable", lambda: db.execute("UPDATE memory_origin_events SET disposition='added'"))
+insert("memory_origin_brain_contributions", origin_id="mcp-profile:A", bundle_id="com.x", element_kind="anchor",
+       element_key="anchor-1", disposition="added")
+insert("memory_origin_brain_contributions", origin_id="mcp-profile:A", bundle_id="com.x", element_kind="group",
+       element_key="group-1", disposition="excluded")
+rejects("schema 2: an element contributed twice", lambda: insert("memory_origin_brain_contributions", origin_id="mcp-profile:A",
+        bundle_id="com.x", element_kind="anchor", element_key="anchor-1", disposition="present"))
+rejects("schema 2: an unknown contribution", lambda: insert("memory_origin_brain_contributions", origin_id="mcp-profile:A",
+        bundle_id="com.x", element_kind="scene", element_key="s", disposition="added"))
+rejects("schema 2: a contribution of an origin never journaled", lambda: insert("memory_origin_brain_contributions",
+        origin_id="mcp-profile:Z", bundle_id="com.x", element_kind="anchor", element_key="a", disposition="added"))
+rejects("schema 2: what an origin contributed is immutable", lambda: db.execute(
+        "UPDATE memory_origin_brain_contributions SET disposition='present'"))
+rejects("schema 2: what an origin contributed is kept", lambda: db.execute("DELETE FROM memory_origin_brain_contributions"))
+insert("memory_origin_brain_contributions", origin_id="mcp-profile:A", bundle_id="com.x", element_kind="application",
+       element_key="e1/record", disposition="excluded", withheld=1)
+rejects("schema 2: withheld is a flag", lambda: insert("memory_origin_brain_contributions", origin_id="mcp-profile:A",
+        bundle_id="com.x", element_kind="anchor", element_key="anchor-2", disposition="added", withheld=2))
+db.execute("UPDATE memory_archive_origins SET status='partial' WHERE origin_id='mcp-profile:A'")
+rejects("schema 2: an unknown origin status", lambda: db.execute(
+        "UPDATE memory_archive_origins SET status='done' WHERE origin_id='mcp-profile:A'"))
+insert("memory_schema_migrations", to_version=2, from_version=1, migrated_at_ms=1, copy_name="memory.sqlite.schema-1-x")
+rejects("schema 2: a migration from schema 1 names its copy", lambda: insert("memory_schema_migrations", to_version=3,
+                                                                         from_version=1, migrated_at_ms=1))
+assert db.execute("PRAGMA foreign_key_check").fetchall() == []
+ok("schema 2: gaps, origins and the migration record keep their shapes")
+
 # ================================================================== integrity, file reopen
 tables = db.execute("SELECT name FROM sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%'").fetchall()
-assert len(tables) == 48, len(tables)
+assert len(tables) == 66, len(tables)
 triggers = db.execute("SELECT count(*) FROM sqlite_schema WHERE type='trigger'").fetchone()[0]
 indexes = db.execute("SELECT count(*) FROM sqlite_schema WHERE type='index' AND sql IS NOT NULL").fetchone()[0]
 for (name,) in tables:
@@ -683,7 +866,7 @@ for (name,) in tables:
     assert all("json" not in column[1].lower() for column in db.execute(f"PRAGMA table_info({name})"))
 assert db.execute("PRAGMA foreign_key_check").fetchall() == []
 assert db.execute("PRAGMA integrity_check").fetchall() == [("ok",)]
-ok(f"48 tables, {triggers} triggers, {indexes} explicit indexes, all foreign keys prepared, no JSON columns, integrity checks")
+ok(f"66 tables, {triggers} triggers, {indexes} explicit indexes, all foreign keys prepared, no JSON columns, integrity checks")
 
 db.commit()
 with tempfile.TemporaryDirectory(prefix="mecum-ddl-v5-") as folder:
@@ -709,6 +892,6 @@ ok("orders, app scope, triggers, retired identities and evidence persist after f
 
 rejected = sum(1 for p in passed if p.startswith("rejects: "))
 print(f"PASS: {len(passed)} DDL checks ({rejected} negative) on SQLite {LIB[0]} [{LIB[1]}] via Python {sys.version.split()[0]} sqlite3 module {sqlite3.sqlite_version}")
-print("48 tables; triggers:", triggers, "; explicit indexes:", indexes)
+print("66 tables (schema 2); triggers:", triggers, "; explicit indexes:", indexes)
 for p in passed:
     print(" -", p)

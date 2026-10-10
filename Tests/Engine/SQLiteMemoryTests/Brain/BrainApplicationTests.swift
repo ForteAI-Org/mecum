@@ -217,7 +217,7 @@ struct BrainApplicationTests {
     func formWithoutApplicationsRefused() async throws {
         let url = try temporaryDatabase()
         let raw = try SQLiteConnection(path: url.path)
-        try raw.execute(try SQLiteMemorySchema.text())
+        try raw.execute(try SQLiteMemorySchema.text(of: 1))
         try raw.execute("DROP TABLE brain_applications")
         try raw.execute("PRAGMA user_version = 1")
         raw.close()

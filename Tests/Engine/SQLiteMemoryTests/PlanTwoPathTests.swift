@@ -132,7 +132,7 @@ struct PlanTwoPathTests {
         let projection = try #require(try await r.brain.brain(of: bundle))
         let evidence = try await r.graph.evidence(ofEvent: "e1")
         let before = try await rows(memory.store)
-        #expect(before.count == 48)
+        #expect(before.count == SchemaShape.current.tables)
 
         // Every fact and attribution again: nothing is written twice, no counter moves.
         #expect(try await r.captures.record(S.event("e1")) == .alreadyApplied)
