@@ -24,10 +24,14 @@ must stay running; the helper never launches it or silently retries an action.
 
 This connection exposes `AutomationTools` from the current engine, through the
 same Seat broker as Mecum's workers. It adds no browser engine or Watcher. Its calls
-are recorded with the `mcp` source and the grant as their stream in a living memory
-of the grant's own, `MCP/Knowledge/<grant>` under the app's support directory, as on
-main: a client learns into its own Brain, apart from the workers' and the other
-clients'. Desktop access allows both reading and acting; macOS permissions still
+are recorded with the `mcp` source and the grant as their stream in the user's one
+living memory, `Knowledge` under the app's support directory, shared with the workers
+and the command line (G76, [MemoryFacts](MemoryFacts.md#one-archive-per-user)): what a
+client learns the workers may reuse and the other way round. A client's earlier private
+archive, `MCP/Knowledge/<grant>`, is unified into it once and kept. The `memory_task`
+tool lets a client declare the task its calls serve; a task stays private to the grant's
+stream. A call that may change an application is refused when the memory cannot confirm
+it first. Desktop access allows both reading and acting; macOS permissions still
 belong to Mecum and are not bypassed by the client grant.
 
 The bundled `mecum-bridge` forwards standard MCP JSON lines to an authenticated

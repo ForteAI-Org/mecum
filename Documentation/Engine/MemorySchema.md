@@ -30,6 +30,17 @@ them. Every step stayed at schema 1. Which tables production writes, and which h
 fixtures, is in [the memory contracts](MemoryContracts.md#what-production-writes-today). The
 contract items listed at the end were carried into S2 as they stand.
 
+## Schema 2 (G76 D1)
+
+Since 2026-10-09 the store bootstraps and opens schema 2: this page's schema 1 resource, unchanged, followed by
+`brain-living-memory-schema-2.sql`, which adds 18 tables, 27 triggers and 10 indexes (66, 75 and 41 in all) for
+tasks, operation effects and verifications, withheld values, the parts of a call's end saved without them
+(`memory_call_recording_gaps`), the unified archives' origins with what their JSON Brains contributed
+(`memory_origin_brain_contributions`), and the migration record. An archive at exactly schema 1 is migrated by a producer's open after a verified copy; a reader refuses
+it (`migrationRequired`). Everything below about schema 1 still holds for its tables. The contracts, the
+migration and the tests are in [MemoryFacts](MemoryFacts.md); `verify-memory-schema.py` runs schema 2's text on
+its populated schema 1 file and checks it (292 checks, 239 negative, on 2026-10-09).
+
 ## The resource
 
 `Sources/Engine/SQLiteMemory/Resources/brain-living-memory-schema.sql`, copied into the module's

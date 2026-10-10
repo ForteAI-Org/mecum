@@ -3,18 +3,24 @@
 The contract the living memory offers to the work that follows it, Action Memory and Action Recall: what the
 store keeps today, through which API, with which guarantees, and what is left to future policies. Details of
 every table and rule are in [MemorySchema.md](MemorySchema.md); this page names the entry points and the
-promises, and links the section that proves each one. Status on 2026-10-07, branch `tommaso/merge-memory`.
+promises, and links the section that proves each one. Status on 2026-10-07, branch `tommaso/merge-memory`,
+updated on 2026-10-09 for G76 plan D1: the task an agent communicates, the essential writes, the typed
+verification of every operation, the withheld values, schema 2 and the one archive per user are described in
+[MemoryFacts](MemoryFacts.md), which prevails where the two differ.
 
-The resource is schema version 1 (`user_version` 1), 48 tables, 48 triggers and 31 explicit indexes, in
-`Sources/Engine/SQLiteMemory/Resources/brain-living-memory-schema.sql`. An archive opens only at that exact
-shape. Old JSON knowledge is never read at run time. Its Brains are imported once, when an open creates the
+The resource is schema version 2 (`user_version` 2): the schema 1 text,
+`Sources/Engine/SQLiteMemory/Resources/brain-living-memory-schema.sql` (48 tables, 48 triggers, 31 explicit
+indexes), followed by `brain-living-memory-schema-2.sql`, which only adds (66 tables, 75 triggers, 41 indexes
+in all). An archive opens only at that exact shape; an archive at exactly schema 1 is migrated by a
+producer's open after a verified copy ([MemoryFacts](MemoryFacts.md#schema-2-and-its-migration)). Old JSON knowledge is never read at run time. Its Brains are imported once, when an open creates the
 archive beside them, before anything is learned into it; `mecum memory --import-json <dir>` imports any other
 directory by hand. Both go through `JSONBrainImport` and fill only Brains the archive does not hold.
 
 ## Entry points
 
 The app, its external MCP clients, the terminal chat and the command line reach the archive through one
-service per Knowledge directory, `MemoryService` (`Sources/Integration/AutomationRuntime/MemoryService.swift`):
+service per Knowledge directory, `MemoryService`, and since D1 they all use the user's one Knowledge directory
+(`KnowledgeLocation`) (`Sources/Integration/AutomationRuntime/MemoryService.swift`):
 one `memory.sqlite` under the directory, opened on first use, shared by every caller of the process through
 `MemoryService.shared(for:)`, never closed by a session; the process closes it once at its end, the app at quit
 and `mecum` after its command, within one bounded close ([Closing](MemorySchema.md#closing)). The repositories are protocols of the `Memory`
@@ -32,8 +38,12 @@ module (`Sources/Engine/Memory/Storage`), all implemented over SQLite by `SQLite
 | `MenuCommandStoring` | menu commands and their paths |
 | `ObservedInputStoring`, `VerificationStoring`, `TaskAttributionStoring` | Watcher inputs and correlations, verifications, task occurrences and memberships |
 | `RouteStoring`, `StepOccurrenceStoring`, `ExperienceStoring` | procedures (Routes), step occurrences, experiences and their uses |
+| `TaskContextStoring` (D1) | tasks, revisions, attempts, checkpoints and outputs ([MemoryFacts](MemoryFacts.md#the-contracts)) |
+| `OperationFactStoring` (D1) | a call's confirmed start and end, its effect, its verifications and the withheld values |
 
-`MemoryService` conforms to `BrainReading` and `BrainApplicationStoring` itself; every other write goes
+`MemoryService` conforms to `BrainReading` and `BrainApplicationStoring` itself. Since D1 the essential facts
+of a call and a task's declarations are confirmed (`confirm`, `perform`): written and answered after their
+commit, or a typed failure. What can be rebuilt from them (scene associations, the Brain's learning) goes
 through its queue (`enqueue`), whose body receives the open archive's repositories (`MemoryRepositories`).
 The one producer over that queue is `CallRecorder`, made per call by `AutomationTools` or by a runtime
 (`EngineRuntime.recorder`); it adds no format of its own. A new producer writes through the same queue and the
@@ -53,9 +63,10 @@ Every row below is written through `MemoryService`'s queue by a `CallRecorder`. 
 workers (`TeamModel`, source `app`, stream `worker-<id>`, the message as the trace), the app's external MCP
 clients (`ExternalMCPSession`, source `mcp`, stream `mcp-<profile>`, no trace), `mecum chat` (`ChatCommand`,
 source `cli`, stream `chat-<conversation>`, the conversation as the trace), and the command line's `scene`
-and `act` (source `cli`, stream `mecum-<pid>`, one trace per process). The app's workers learn into the app's
-Knowledge directory; each external client into a directory of its own, `MCP/Knowledge/<profile>`, as on main, so
-each client has an archive of its own and none reads what the workers or the other clients learned.
+and `act` (source `cli`, stream `mecum-<pid>`, one trace per process). Since D1 every producer of the user
+writes into the one Knowledge directory: what a client learns the workers read and the other way round, each
+call keeping its source and stream, each task private to its producer; the clients' earlier
+`MCP/Knowledge/<profile>` archives are unified into it once ([MemoryFacts](MemoryFacts.md#one-archive-per-user)).
 
 | Producer | Role and call | Tables written | Read back by |
 | --- | --- | --- | --- |
@@ -63,11 +74,13 @@ each client has an archive of its own and none reads what the workers or the oth
 | `CallRecorder`, as the engine's observer and the session's observation | `CaptureStoring.record(sample)` for the `current`, `before`, `menu` and `after` samples; `record(event)` for the event of a call that wrote none (the command line, a session's own call) and for a session's own observation, with `origin_event_id` | `memory_event_observations`; `memory_events` (kinds `action` and `observation`); `brain_apps`, `brain_app_contexts` | tests |
 | `CallRecorder` | `SceneStoring.associate` for every sample but `menu` | `brain_scenes`, `brain_scene_elements`, `brain_scene_roles`, `brain_scene_labels`, `memory_event_scenes` | structure-v3 inside the next association; tests |
 | `CallRecorder` | `BrainApplicationStoring.apply`, once per observed sample and once per action with an effect | `brain_applications` with its arguments, the projection (`brain_app_window_epochs`, `brain_anchors` and its aliases and states, `brain_groups` and members, `brain_transitions` and menu items), `brain_evidence` | `BrainMemory.expectedEffect` and `.enrich` (`BrainReading`) during the next calls; the app's Brain page (`BrainLibrary`, through `overview()` and `brain(of:)`); `mecum memory <app>` |
-| `MemoryService`, once, when its open created the archive beside JSON Brains; `mecum memory --import-json <dir>` by hand (`JSONBrainImport`) | `SQLiteBrainRepository.importProjection` | the projection tables only: no application, no evidence | the same readers |
+| `MemoryService`, once, when its open created the archive beside JSON Brains; `mecum memory --import-json <dir>` by hand (`JSONBrainImport`) | `SQLiteBrainRepository.importAdmitted` (credential shapes withheld first) | the projection tables only: no application, no evidence | the same readers |
+| `MemoryService`'s unification, for an earlier client directory's JSON Brains (`JSONBrainImport.merge`) | `SQLiteBrainRepository.merge` (`BrainMerge`) | the projection tables, by identity, with no evidence; `memory_origin_brain_contributions` | the same readers; [MemoryFacts](MemoryFacts.md#one-archive-per-user) |
 
-No producer in this checkout writes the menu commands, the Watcher's inputs and correlations, verifications,
-task occurrences and labels, Routes, step occurrences, experiences or the general graph's arcs and anchor
-links: their repositories, fixtures and readers exist (`SQLiteMemoryTests`), and `overview()` counts them, but
+Since D1 production also writes the call verifications (scope `call`), the task occurrences as attempts with
+their memberships, and the tables schema 2 adds. No producer in this checkout writes the menu commands, the
+Watcher's inputs and correlations, task labels, Routes, step occurrences, experiences or the general graph's
+arcs and anchor links: their repositories, fixtures and readers exist (`SQLiteMemoryTests`), and `overview()` counts them, but
 production leaves them empty. The ported `Route`, `RouteEarning` and `Recall` types of the `Memory` module work
 over `AppKnowledge` and are called by tests only.
 
@@ -131,10 +144,12 @@ included, is refused untouched, never migrated: see [The resource](MemorySchema.
   with its evidence. A tool call's life is several such writes (`planned` and `started`, then its samples and
   the Brain's learning, then its end), queued in that order: a failure or a process that ends between them
   leaves the call at the last state written.
-- **No action waits.** Producers enqueue and go on. One task of the service runs the writes in order and waits
-  out a busy archive; the queue holds at most 4096 writes, and what arrives beyond them is dropped. The one wait
-  for writes on an action's path is an observation's, at most 50 ms, before it enriches the scene from the
-  Brain.
+- **An action waits for its own facts, and for nothing else** (D1). A call that may change the application is
+  confirmed in the archive before it acts and refused when it is not; its end is confirmed after, and an end
+  that cannot be saved suspends new effects until it is ([MemoryFacts](MemoryFacts.md#essential-writes)). The
+  derived writes are enqueued and never waited for: one task of the service runs them in order and waits out a
+  busy archive; the queue holds at most 4096 writes, and what arrives beyond them is dropped. An observation
+  waits at most 50 ms for its Brain ingest before it enriches the scene.
 - **Idempotency.** The answer is a `MemoryReceipt`:
   - `committed`;
   - or `alreadyApplied` when a fact with the same identity and content is already stored (nothing moves).
@@ -209,21 +224,24 @@ Readers never write: a read leaves the ledger and the commit count unchanged.
 
 ## Known limits
 
-- `select` and `context_menu` record the call and its outcome but no samples: their selectors take their own
-  captures and report none to the recorder. The command line's `select` records nothing at all.
+- Since D1 `select` and `context_menu` report their `before`, `menu` and `after` captures and their target to
+  the call's recorder, and the command line's `act`, `select` and `batch` record calls, under one session per
+  process, a `batch` with its steps as the tools record one.
 - `menu` and `press` act outside the engine: their calls are recorded, with the observation they take after
   acting as the call's `current` sample, but no engine effect.
-- A call whose process ends between its start and its end stays `started`; nothing marks it `interrupted` at
-  the next open. A cancellation ends a call `failed`; a batch cancelled between steps leaves its later steps
-  `planned`. No producer writes `cancelled` or `interrupted`.
-- A request the contract cannot represent is not recorded; its session's observations still teach the Brain,
-  under a `system` event of the session.
-- External clients' calls carry no trace; the command line's carry one trace per process.
+- A call whose process ends between its start and its end stays `started`, incomplete; nothing marks it at the
+  next open and nothing replays it. Since D1 a cancellation ends a call `cancelled`; a batch's unrun steps are
+  `skipped`, and so is a step whose start the memory refused, which stops the batch. An end the archive refuses
+  as offered is saved without the refused parts, each declared in `memory_call_recording_gaps`.
+- Since D1 a request the contract cannot represent is refused before any effect when its tool may change the
+  application; a read-only tool answers, saying it was not recorded.
+- External clients' calls carry no trace; the command line's carry one trace and one session per process.
 - Identifiers (events, traces, sample keys, application keys) are compared as bytes; an unknown application
   version or locale is stored as the empty text.
 - History has no retention or deletion API: decay retires anchors, groups and transitions instead of
   deleting them, events, calls and samples are never removed, and the archive only grows.
 - The queue is in memory: a crash loses what it held, and a failed or dropped write leaves no row saying so.
+  Since D1 it holds only derived writes; a call's facts are confirmed outside it.
 - A store that went `failed` after a rollback it could not complete is not reopened by the service: its writes
   are counted failures until the process ends.
 - Recovery requires an exclusive presence lease and refuses to replace an archive another cooperating
